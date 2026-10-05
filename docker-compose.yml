@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: zetsa_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-dbname}
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-dbname}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: zetsa_backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-dbname}
+      SQL_ECHO: ${SQL_ECHO:-False}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-3001},http://127.0.0.1:${FRONTEND_PORT:-3001},http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "${BACKEND_PORT:-8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8001}
+    container_name: zetsa_frontend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8001}
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
