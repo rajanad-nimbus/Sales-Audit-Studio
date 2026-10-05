@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Sidebar } from "@/components/Sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,19 +18,26 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body>
         <ThemeProvider>
-          <nav className="navbar">
-            <div className="navbar-container">
-              <h1 className="navbar-title">ZeTSA</h1>
-              <div className="navbar-actions">
-                <ThemeToggle />
+          <div className="app-layout">
+            <nav className="navbar">
+              <div className="navbar-container">
+                <h1 className="navbar-title">ZeTSA</h1>
+                <div className="navbar-actions">
+                  <ThemeToggle />
+                </div>
               </div>
+            </nav>
+
+            <div className="layout-wrapper">
+              <Sidebar />
+
+              <main className="main-content">
+                <div className="container">
+                  {children}
+                </div>
+              </main>
             </div>
-          </nav>
-          <main className="main-content">
-            <div className="container">
-              {children}
-            </div>
-          </main>
+          </div>
         </ThemeProvider>
       </body>
     </html>
