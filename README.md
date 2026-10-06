@@ -1,310 +1,77 @@
-# Full Stack Application: FastAPI + PostgreSQL + Next.js
+# Nimbus Sales Audit
 
-A modern full-stack web application with a FastAPI backend, PostgreSQL database, and Next.js frontend.
+Agentic financial exception management for retail commerce. Lifecycle:
+**Case → Evidence → Diagnosis → Policy → Decision → Action → Validation**.
+Design docs: `NIMBUS_OVERVIEW.md`, `NIMBUS_ARCHITECTURE.md`, `NIMBUS_DATA_MODEL.md`, `NIMBUS_AGENTS.md`, `NIMBUS_INTEGRATIONS.md`, `NIMBUS_SCENARIOS.md`.
 
-## Tech Stack
+## Stack
 
-- **Backend**: FastAPI 0.142
-- **Database**: PostgreSQL 18
-- **Frontend**: Next.js 16 with React 19
-- **ORM**: SQLAlchemy with async support
-- **API Client**: Axios
+FastAPI + async SQLAlchemy + PostgreSQL 18 (backend), Next.js 16 / React 19 (frontend, AdminLTE-style theme), Docker Compose.
 
-## Project Structure
-
-```
-.
-├── backend/                 # FastAPI backend application
-│   ├── main.py            # Main FastAPI application
-│   ├── models.py          # SQLAlchemy ORM models
-│   ├── schemas.py         # Pydantic request/response schemas
-│   ├── database.py        # Database connection and session management
-│   └── requirements.txt    # Python dependencies
-├── frontend/              # Next.js frontend application
-│   ├── app/              # Next.js app directory
-│   │   ├── page.tsx      # Home page
-│   │   ├── layout.tsx    # Root layout
-│   │   └── globals.css   # Global styles
-│   ├── package.json      # Node.js dependencies
-│   ├── tsconfig.json     # TypeScript configuration
-│   └── next.config.ts    # Next.js configuration
-├── docker-compose.yml    # Docker services (PostgreSQL, pgAdmin)
-├── .env.example         # Environment variables template
-├── .gitignore          # Git ignore rules
-└── README.md           # This file
-```
-
-## Prerequisites
-
-- Python 3.10+ (3.12+ recommended)
-- Node.js 20+ and npm/yarn
-- Docker and Docker Compose (for PostgreSQL)
-
-## Setup Instructions
-
-### 1. Clone or Initialize the Project
+## Run
 
 ```bash
-cd /path/to/project
+docker compose up -d --build
+curl -X POST http://localhost:8001/api/seed     # load demo cases (or use "Load demo data" on /cases)
 ```
 
-### 2. Set Up Environment Variables
+- Frontend: http://localhost:3001
+- API docs: http://localhost:8001/docs
+
+## What is implemented
+
+- **Data model**: source records, canonical transactions (with lineage to their source record), exceptions, cases, evidence, findings, recommendations, decisions, workflows, validation obligations, policy evaluations, connectors, append-only audit events.
+- **Ingestion** (`backend/ingest.py`): archives every payload with a SHA-256 hash, skips exact duplicates, quarantines malformed or conflicting records with a reason, and normalizes POS and processor records into signed-decimal canonical transactions. A synthetic feed generator injects realistic anomalies.
+- **Reconciliation** (deterministic, idempotent): duplicate sales, unmatched sale, missing refund, amount mismatch, timing difference, orphan payment. Raises one case per store/day/type.
+- **Completeness and balancing controls**: POS control manifests (`POSControl`: declared count and total per store/day) are compared with ingested POS transactions -> `INCOMPLETE_FEED` / `BALANCING_VARIANCE`.
+- **Bank and ERP/GL reconciliation**: bank deposits are compared with matched processor net, and ERP postings with matched POS net, per store/day -> `BANK_VARIANCE`, `MISSING_DEPOSIT`, `GL_VARIANCE`, `MISSING_GL_POSTING`. Feeds are pushed via `POST /api/ingest` (`POS`, `Processor`, `POSControl`, `Bank`, `ERP`); the simulator uses a fresh business day per run.
+- **Ontology service** (`backend/ontology.py`, `GET /api/ontology`): exception families, evidence requirements, known causes and dispositions are read from it by the agents. It is an in-process stand-in, also exposed over MCP (`python backend/mcp_server.py`, stdio; tools `list_exception_types`, `get_exception_type`, `get_evidence_requirements`).
+- **Agents**: rule-based Investigation, Resolution and Validation agents. Investigation optionally drafts finding prose with Claude when `ANTHROPIC_API_KEY` is set (figures and authority stay deterministic; untested without a key).
+- **Policy gate** (deterministic, `policy-v1.0`): Permit / RequireHuman / RequestEvidence.
+- **Workflow**: approve -> policy -> workflow -> Resolution executes -> validation obligation -> Validation verifies -> case closed, every step audited.
+- **Auth**: Ontology Studio is Nimbus's authentication authority. Sign in through Ontology Studio and provide its JWT as the Nimbus bearer token. Nimbus verifies it at Ontology Studio's `/api/v1/auth/me` endpoint for each protected request, then maps Ontology roles to `finance`, `it`, or `admin` through `NIMBUS_ONTOLOGY_ROLE_MAP`. Click the user card in the sidebar to set the token.
+- **Action Center** (`/actions`, built for hundreds of stores and millions of transactions): everything is server-side. Filters (stage, type, store, priority, owner, SLA, amount, dates, search), facets with counts, sortable paginated queue (max 100/page), grouping by type/store/day/priority/assignee, summary tiles, saved views, keyboard shortcuts, CSV export (up to 50k rows), a case preview drawer, and **bulk actions** (assign, investigate, approve, escalate, advance, snooze, unassign) with a confirmation step. Safeguards: 1,000 cases per bulk run, 200 for agent/decision actions, bulk approval skips financial movement above $5,000 or failed policy and reports why. Load-tested at 200,000 cases: every query under 0.3 s.
+- **Daily batch**: transaction logs are synced once a day. `python backend/batch_job.py --date YYYY-MM-DD` (or `POST /api/batch/run`) loads the day's feeds and reconciles; runs are recorded (`/api/batch/runs`), idempotent per business date, and the UI shows "data as of" plus a stale/failed warning (stale after 26h). SLA clocks start when cases are raised (Critical 4h, High 24h, Normal 72h).
+- **Audited record**: every action (system, agent, human, export) is written to an append-only audit trail. The database itself enforces this: each event gets a sequence number and a SHA-256 hash chained to the previous event, and triggers reject any UPDATE, DELETE or TRUNCATE. `GET /api/audit/verify` recomputes the whole chain in SQL and reports the first broken event; the Audit Trail page shows the result, supports search and filters, and exports CSV/JSON that include the hashes and the chain head. A database superuser can still disable triggers, so for stronger guarantees revoke UPDATE/DELETE from the app role and periodically record the head hash in an external system.
+- **Downstream export** (`/exports`): destinations are webhooks (HTTP POST, signed with HMAC-SHA256 in `X-Nimbus-Signature`, with an `X-Nimbus-Idempotency-Key`) or file drops (written to `./exports/<destination>/` with a `.sha256` file). Datasets: `resolutions` (closed, validated cases), `adjustments` (approved financial journal lines), `audit` (events since the last delivery). Exports are incremental and idempotent (no record is ever delivered twice to the same destination), capped at 5,000 records per batch, track Pending/Sent/Acknowledged/Failed with retry and manual acknowledgment, and are themselves audited. A built-in test receiver (`/api/exports/_sink`) verifies signatures. Webhook secrets are stored in the database as plain text in this demo; use a secrets manager in production.
+- **Migrations**: the backend container runs `alembic upgrade head` on start; the app no longer creates tables itself.
+- **Nimbus Assistant** (header > Assistant; modelled on the Ontology Studio assistant): multiple saved conversations with search, history and auto-titles; a context chip (all cases or the selected case) that locks once you send a message; a Finance / IT perspective picker; grounded greeting and capability cards; formatted answers (direct answer, supporting bullets, "Next" step) with source chips linking to cases and the ontology; follow-up suggestions; copy, regenerate and thumbs actions; copy the conversation as Markdown; docked or floating window with a minimize launcher. Cases can be mentioned by number. It asks which case you mean when a question is ambiguous, answers only from live data, and never approves or changes anything. Answers come from rules by default; with `ANTHROPIC_API_KEY` set, Claude drafts them from the same data under the same constraints (untested without a key). Conversations are stored in the browser.
+- **UI**: live Command Center (Finance / IT views, pipeline, decision queue with consequence preview, agent feed, Autopilot, Ask Nimbus), Cases, Data Pipeline, Audit Trail.
+
+## Not yet implemented (needs external systems)
+
+- Pull connectors to real POS, payment processor, bank and ERP endpoints. The ingest API and canonical mapping are the integration surface; adapters need credentials and file/API specs from each system.
+- Production identity (SSO/OIDC). Bearer tokens with roles are in place; an IdP is needed to replace them.
+- Nimbus retains a built-in deterministic exception catalog for availability. To read the approved Nimbus Sales Audit ontology, set `NIMBUS_ONTOLOGY_API_URL` and `NIMBUS_ONTOLOGY_API_KEY` to an Ontology Studio `/api/integration/v1` endpoint and an `ons_...` agent key. Nimbus sends a bearer key and retrieves business rules, entities, relationships, metrics, glossary terms, and workflow metadata from one approved release, following cursor pagination. Incomplete controls, mixed releases, revoked credentials, and failed refreshes invalidate the active context and retain local deterministic controls. Check or refresh the connection with `GET` / `POST /api/ontology/integration/{status|refresh}` (IT/Admin only).
+
+## Migrations
 
 ```bash
-cp .env.example .env
+docker compose run --rm --no-deps -v "$PWD/backend:/app" backend alembic revision --autogenerate -m "change"
+docker compose run --rm --no-deps backend alembic upgrade head
 ```
 
-Edit `.env` with your configuration:
-```env
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/dbname
-SQL_ECHO=False
-ENVIRONMENT=development
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+Revisions: `0001` baseline, `0002` canonical transaction -> source record link. The app still calls `create_all` on startup, which only creates missing tables; run `alembic upgrade head` for column changes.
 
-### 3. Start PostgreSQL with Docker
 
-```bash
-docker-compose up -d
-```
+### Enterprise ontology and agent audit integration
 
-This starts:
-- PostgreSQL on `localhost:5432`
-- 
+The existing Sales Audit ontology in Ontology Studio is the enterprise source. Nimbus does not create or publish another ontology. `GET /api/ontology/integration/context` returns the definitions visible to the configured integration persona, with workspace, approved release, version, and content hash. `POST /api/ontology/integration/refresh` refreshes that view atomically; readiness requires all expected Sales Audit control codes.
 
-Verify PostgreSQL is running:
-```bash
-docker-compose ps
-```
+Investigations refresh the context and pass approved business-rule expressions and workflow metadata to both supported model transports as reference data. Local evidence requirements, tool scopes, deterministic financial controls, and human approval gates still apply. Shared audit events record `after.ontology_context`; model runs retain the exact context identity captured before their invocation. Historical events are unchanged. Provenance uses the existing append-only audit database and its hash chain, with no parallel audit store or migration.
 
-### 4. Set Up Backend
+`GET /api/agent/ontology` compares live agent behavior and all SQLAlchemy database models—including audit events, policy evaluations, workflows, validation obligations and settings—with visible enterprise entity names. It lists foreign keys and missing definitions without returning business records. Name matches are candidate bindings, not approved property mappings. A missing definition may reflect integration-persona restrictions.
 
-```bash
-cd backend
+Ontology Studio's current read-only REST API excludes agent-policy rules and returns workflow metadata without process steps or action contracts. Those capabilities are explicitly reported as gaps; this integration does not interpret prose as executable policy or claim that remote processes are running. The existing local exception catalog remains the operational fallback until equivalent structured exception definitions are exposed by Studio.
 
-# Create virtual environment
-python -m venv venv
 
-# Activate virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
+For the local Docker deployment, Nimbus reaches Ontology Studio at `http://host.docker.internal:8000/api/integration/v1` (the browser UI is `http://localhost:3050`). The Compose default uses that endpoint, and Nimbus refreshes ontology context at startup. The endpoint and credential configuration are reported separately in health status.
 
-# Install dependencies
-pip install -r requirements.txt
-```
+The deployed `Nimbus Sales Audit` workspace (ID 100) was verified on 2026-10-06: 13 entities, 17 controls, and one lifecycle process. It was still draft, with no release, persona, or agent key. Before live consumption, complete the Studio workspace review/release flow, configure an approved persona scoped to Sales Audit and its lifecycle process, and issue its integration key through Access & Governance. Store that key as `NIMBUS_ONTOLOGY_API_KEY` in `.env`, then recreate the Nimbus backend. A reachable server alone does not make an approved context available.
 
-### 5. Set Up Frontend
 
-```bash
-cd frontend
+The Sales Audit draft was subsequently extended in the deployed Studio database on 2026-10-06 using `ontology/extend_sales_audit.py` and `ontology/runtime_schema.json`. It now contains 42 entities, 407 properties, 28 entity relationships, 15 personas, 17 processes, eight agent behavior policies, and nine disabled agent consumers. Six human personas document Finance, Analyst, Auditor, IT, Store Manager and Admin responsibilities; nine system personas cover the six core agents plus ingestion, export and the read-only assistant. Subprocess steps name native persona codes and link to the existing case lifecycle so Studio derives process participation.
 
-# Install dependencies
-npm install
+The extension derives persistence properties and foreign-key relationships from the running Nimbus schema. Studio permissions use its supported `read` action; operational responsibilities are documented separately and remain enforced by Nimbus roles. Processes are responsibility models, not executable action contracts. No user memberships, credentials or approvals were created. Native persona validation, relationship integrity and an idempotent rollback-only rerun passed. Two maintenance audit entries record the update and permission normalization; a pre-change export was preserved at `/private/tmp/nimbus-sales-audit-before-extension.json` on the host.
 
-# Or with yarn
-yarn install
-```
-
-## Running the Application
-
-### Start Backend
-
-```bash
-cd backend
-
-# With virtual environment activated
-python -m uvicorn main:app --reload
-```
-
-Backend API: `http://localhost:8000`
-API Docs: `http://localhost:8000/docs`
-
-### Start Frontend
-
-In a new terminal:
-
-```bash
-cd frontend
-
-npm run dev
-# Or with yarn
-yarn dev
-```
-
-Frontend: `http://localhost:3000`
-
-## API Endpoints
-
-- `GET /` - Welcome message
-- `GET /api/health` - Health check endpoint
-- `GET /docs` - Interactive API documentation (Swagger UI)
-- `GET /redoc` - ReDoc documentation
-
-## Database Management
-
-### Access pgAdmin
-
-1. Open `http://localhost:5050`
-2. Login with:
-   - Email: `admin@example.com`
-   - Password: `admin`
-3. Add a new server:
-   - Hostname: `postgres`
-   - Username: `user`
-   - Password: `password`
-   - Database: `dbname`
-
-### Alembic Migrations (Optional Setup)
-
-To set up database migrations:
-
-```bash
-cd backend
-
-# Install alembic
-pip install alembic
-
-# Initialize migrations
-alembic init migrations
-
-# Create first migration
-alembic revision --autogenerate -m "Initial migration"
-
-# Apply migrations
-alembic upgrade head
-```
-
-## Development Workflow
-
-### Adding Backend Routes
-
-Edit `backend/main.py` to add new routes:
-
-```python
-@app.get("/api/items")
-async def get_items():
-    return {"items": []}
-```
-
-### Adding Database Models
-
-Edit `backend/models.py` to define new tables, then the database will auto-create them on startup.
-
-### Adding Frontend Pages
-
-Create new files in `frontend/app/`:
-
-```bash
-# Create a new route
-touch frontend/app/about/page.tsx
-```
-
-## Troubleshooting
-
-### PostgreSQL Connection Error
-
-Check if PostgreSQL is running:
-```bash
-docker-compose ps
-docker-compose logs postgres
-```
-
-Restart PostgreSQL:
-```bash
-docker-compose down
-docker-compose up -d
-```
-
-### Backend Port Already in Use
-
-Kill the process or use a different port:
-```bash
-python -m uvicorn main:app --reload --port 8001
-```
-
-### Frontend Build Errors
-
-Clear Next.js cache:
-```bash
-cd frontend
-rm -rf .next
-npm run build
-```
-
-### Module Not Found Errors
-
-Reinstall dependencies:
-
-**Backend:**
-```bash
-cd backend
-source venv/bin/activate
-pip install --force-reinstall -r requirements.txt
-```
-
-**Frontend:**
-```bash
-cd frontend
-rm -rf node_modules package-lock.json
-npm install
-```
-
-## Production Deployment
-
-### Backend
-
-Use Gunicorn with Uvicorn workers:
-
-```bash
-pip install gunicorn
-
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8000
-```
-
-### Frontend
-
-Build the production version:
-
-```bash
-cd frontend
-npm run build
-npm start
-```
-
-Or deploy to Vercel:
-```bash
-npm i -g vercel
-vercel
-```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://user:password@localhost:5432/dbname` |
-| `SQL_ECHO` | Log all SQL statements | `False` |
-| `ENVIRONMENT` | Application environment | `development` |
-| `NEXT_PUBLIC_API_URL` | Backend API URL (exposed to client) | `http://localhost:8000` |
-
-## Next Steps
-
-1. Implement API endpoints for your use cases
-2. Add more database models as needed
-3. Create frontend pages and components
-4. Set up authentication (JWT, OAuth, etc.)
-5. Add testing with pytest (backend) and Jest (frontend)
-6. Configure CI/CD pipeline
-
-## License
-
-MIT
-
-## Support
-
-For issues or questions, check the official documentation:
-- [FastAPI Docs](https://fastapi.tiangolo.com/)
-- [SQLAlchemy Docs](https://docs.sqlalchemy.org/)
-- [Next.js Docs](https://nextjs.org/docs)
-- [PostgreSQL Docs](https://www.postgresql.org/docs/)
+For future maintenance, the script defaults to rollback-only preview and requires explicit `--apply` plus a new backup path to commit. It refuses a workspace that is not the existing editable Sales Audit draft. Existing definitions are preserved; the initial permission normalization is narrowly restricted to records generated by this extension. Review/release and agent activation remain separate Studio lifecycle operations.

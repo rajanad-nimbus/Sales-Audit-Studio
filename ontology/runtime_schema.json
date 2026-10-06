@@ -1,0 +1,2883 @@
+[
+  {
+    "model": "AgentSetting",
+    "description": "Admin-controlled agent configuration. Overrides environment defaults; every change is audited.",
+    "table": "agent_settings",
+    "columns": [
+      {
+        "name": "key",
+        "type": "VARCHAR(64)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "value",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "AuditEvent",
+    "description": "Append-only audit trail of all actions",
+    "table": "audit_events",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "event_type",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "actor",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "object_type",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "object_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": true,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "action_description",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "before_state",
+        "type": "JSON",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "after_state",
+        "type": "JSON",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "seq",
+        "type": "INTEGER",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "prev_hash",
+        "type": "VARCHAR(64)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "hash",
+        "type": "VARCHAR(64)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "AuditTotalDefinition",
+    "description": "Retailer-defined total evaluated against immutable canonical transactions.",
+    "table": "audit_total_definitions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "aggregation",
+        "type": "VARCHAR(16)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_system",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "transaction_types",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "tender_type",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "level",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "active",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "AuditTotal",
+    "description": "Versioned declared/calculated total for a Store Day and balancing dimension.",
+    "table": "audit_totals",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "store_day_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "store_days.id"
+        ]
+      },
+      {
+        "name": "audit_version",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "total_name",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "level",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "dimension_key",
+        "type": "VARCHAR(100)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "calculated_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "declared_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "variance_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "currency",
+        "type": "VARCHAR(3)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "BatchRun",
+    "description": "One execution of the daily transaction-log batch (ingest + reconcile)",
+    "table": "batch_runs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "business_date",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "trigger",
+        "type": "VARCHAR(30)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "started_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "finished_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_counts",
+        "type": "JSON",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "transactions_loaded",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "matched_pairs",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "cases_created",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "error",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "CanonicalTransaction",
+    "description": "Normalized business record with complete lineage",
+    "table": "canonical_transactions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "business_date",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "transaction_date",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "event_timestamp",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "processing_timestamp",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "settlement_date",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "transaction_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "transaction_subtype",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_lineage",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "currency",
+        "type": "VARCHAR(3)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "signed_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "quantity",
+        "type": "INTEGER",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "store_id",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "register_id",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "channel_id",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "tender_type",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "payment_reference",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "settlement_reference",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reconciliation_status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_record_id",
+        "type": "VARCHAR(36)",
+        "nullable": true,
+        "primary_key": false,
+        "references": [
+          "source_records.id"
+        ]
+      },
+      {
+        "name": "disposition",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "CaseNote",
+    "description": null,
+    "table": "case_notes",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "author",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "body",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "Case",
+    "description": "Groups related exceptions and orchestrates resolution",
+    "table": "cases",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_number",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "case_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "business_date",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "store_id",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "total_exception_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "total_exposure",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "investigation_status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "evidence_completeness",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "assigned_to",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "priority",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "sla_due_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "snoozed_until",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "CashControl",
+    "description": "Cash-office declaration for one store day, register/cashier and tender.",
+    "table": "cash_controls",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "store_id",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "business_date",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "register_id",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "cashier_id",
+        "type": "VARCHAR(100)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "tender_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "declared_cash",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "paid_out",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "safe_drop",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "expected_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "variance_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "declared_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "CashDeposit",
+    "description": "Banked cash deposit reconciled to declared cash controls.",
+    "table": "cash_deposits",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "store_id",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "business_date",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "deposit_reference",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "bank_account",
+        "type": "VARCHAR(100)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "deposited_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "expected_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "variance_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "recorded_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "ConfiguredAuditRule",
+    "description": "Safe, parameterized audit rule over a named calculated total.",
+    "table": "configured_audit_rules",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR(150)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "total_name",
+        "type": "VARCHAR(150)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "threshold",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "severity",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "owner",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "enabled",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "Connector",
+    "description": "Integration connector health and automation mode",
+    "table": "connectors",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "state",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "mode",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "last_error",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "last_checked_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "EvidenceRequest",
+    "description": null,
+    "table": "evidence_requests",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "requirement",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "requested_from",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "requested_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(32)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "response",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reference",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "fulfilled_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "fulfilled_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "rejection_reason",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "override_reason",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "override_financial_impact",
+        "type": "NUMERIC(15, 2)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "override_requested_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "override_requested_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "override_approved_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "override_approved_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "EvidenceSnapshot",
+    "description": "Evidence data collected during investigation",
+    "table": "evidence_snapshots",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "exception_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "exceptions.id"
+        ]
+      },
+      {
+        "name": "evidence_type",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "evidence_status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_system",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "evidence_data",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "retrieved_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "staleness_threshold",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "Exception",
+    "description": "Detected anomaly or control failure",
+    "table": "exceptions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "exception_type",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "exception_family",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_system",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "detection_origin",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "detection_rule_id",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "exception_amount",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "estimated_exposure",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "severity",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "confidence",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "close_impact",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "close_blocker_reason",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "ExportBatch",
+    "description": "One delivery to a destination, with acknowledgment tracking",
+    "table": "export_batches",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "destination_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "export_destinations.id"
+        ]
+      },
+      {
+        "name": "dataset",
+        "type": "VARCHAR(30)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "record_count",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "payload",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "payload_hash",
+        "type": "VARCHAR(64)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "idempotency_key",
+        "type": "VARCHAR(64)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "audit_head_hash",
+        "type": "VARCHAR(64)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "range_from",
+        "type": "INTEGER",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "range_to",
+        "type": "INTEGER",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "sent_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "acked_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "response_code",
+        "type": "INTEGER",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "response_ref",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "error",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "retries",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "backposted_count",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "ExportDestination",
+    "description": "A downstream system that receives Nimbus outputs (ERP/GL, analytics, inventory)",
+    "table": "export_destinations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "kind",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "config",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "format",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "enabled",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "ExportItem",
+    "description": "Records already delivered to a destination: guarantees no record is exported twice",
+    "table": "export_items",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "batch_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "export_batches.id"
+        ]
+      },
+      {
+        "name": "destination_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "export_destinations.id"
+        ]
+      },
+      {
+        "name": "dataset",
+        "type": "VARCHAR(30)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "object_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "object_version",
+        "type": "VARCHAR(40)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "state",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "record_ref",
+        "type": "VARCHAR(120)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "store_id",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "business_date",
+        "type": "VARCHAR(10)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "backpost",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "delivered_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "Finding",
+    "description": "Supported conclusion backed by evidence",
+    "table": "findings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "investigation_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "conclusion",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "finding_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "confidence",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "supporting_rationale",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "FoundationReference",
+    "description": "Governed retail reference data used by audit controls and integrations.",
+    "table": "foundation_references",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "category",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "code",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "active",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "attributes",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "GLCrossReference",
+    "description": null,
+    "table": "gl_cross_references",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "transaction_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "tender_type",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "debit_account",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "credit_account",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "active",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "HumanDecision",
+    "description": "Finance/IT authorization for a recommendation",
+    "table": "human_decisions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "recommendation_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "recommendations.id"
+        ]
+      },
+      {
+        "name": "decision_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "decision",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "actor",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "override_reason",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "authority_check",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "PolicyEvaluation",
+    "description": "Deterministic policy gate result for a recommendation",
+    "table": "policy_evaluations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "recommendation_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "recommendations.id"
+        ]
+      },
+      {
+        "name": "rule_version",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "outcome",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reasons",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "Recommendation",
+    "description": "Agent-proposed disposition with evidence basis",
+    "table": "recommendations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "investigation_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "disposition_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "action_class",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "expected_workflow",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "financial_impact",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "confidence",
+        "type": "VARCHAR(20)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "ReconciliationMatch",
+    "description": "A proposed or approved manual match; never alters source records.",
+    "table": "reconciliation_matches",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "transaction_ids",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "match_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "rationale",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "proposed_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reviewed_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reviewed_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "ReconciliationPolicy",
+    "description": "Fallback tolerance policy until an approved Ontology policy is available.",
+    "table": "reconciliation_policies",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "amount_tolerance",
+        "type": "NUMERIC(15, 2)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "settlement_day_tolerance",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "active",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "RetentionPolicy",
+    "description": null,
+    "table": "retention_policies",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "dataset",
+        "type": "VARCHAR(64)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "retain_days",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "archive_before_purge",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "RetentionRun",
+    "description": "Immutable record of a retention archive or purge operation.",
+    "table": "retention_runs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "dataset",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "retain_days",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "eligible_records",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "archived_records",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "purged_records",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "archive_location",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "archive_hash",
+        "type": "VARCHAR(64)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "error",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "performed_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "SourceFeedProfile",
+    "description": "Approved read-only source delivery contract and header mapping.",
+    "table": "source_feed_profiles",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_system",
+        "type": "VARCHAR(32)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "schedule",
+        "type": "VARCHAR(128)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "column_mapping",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "enabled",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "SourceRecord",
+    "description": "Preserve original payload before any transformation",
+    "table": "source_records",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "source_system",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_version",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_record_id",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "delivery_id",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "payload",
+        "type": "BLOB",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "payload_hash",
+        "type": "VARCHAR(64)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "received_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "extracted_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "source_event_time",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "quarantine_reason",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "StoreDayClosureRequest",
+    "description": null,
+    "table": "store_day_closure_requests",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "store_day_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "store_days.id"
+        ]
+      },
+      {
+        "name": "requested_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "evidence_basis",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reviewed_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "review_reason",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reviewed_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "StoreDay",
+    "description": "The controlled audit unit: one retail location and one business date.",
+    "table": "store_days",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "store_id",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "business_date",
+        "type": "VARCHAR(10)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(32)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "audit_version",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "closed_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "closed_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reopened_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reopened_reason",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "TransactionAdjustment",
+    "description": "Proposed correction to a source transaction, retained as a separate audit record.",
+    "table": "transaction_adjustments",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "transaction_id",
+        "type": "VARCHAR(36)",
+        "nullable": true,
+        "primary_key": false,
+        "references": [
+          "canonical_transactions.id"
+        ]
+      },
+      {
+        "name": "adjustment_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "proposed_values",
+        "type": "JSON",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "rationale",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(24)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "proposed_by",
+        "type": "VARCHAR(255)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reviewed_by",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "reviewed_at",
+        "type": "DATETIME",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "ValidationObligation",
+    "description": "Post-action validation requirement",
+    "table": "validation_obligations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "workflow_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "workflows.id"
+        ]
+      },
+      {
+        "name": "expected_observation",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "due_window_hours",
+        "type": "INTEGER",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "verification_rule",
+        "type": "TEXT",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "verification_result",
+        "type": "VARCHAR(50)",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  },
+  {
+    "model": "Workflow",
+    "description": "Durable workflow orchestration for case resolution",
+    "table": "workflows",
+    "columns": [
+      {
+        "name": "id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": true,
+        "references": []
+      },
+      {
+        "name": "case_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "cases.id"
+        ]
+      },
+      {
+        "name": "recommendation_id",
+        "type": "VARCHAR(36)",
+        "nullable": false,
+        "primary_key": false,
+        "references": [
+          "recommendations.id"
+        ]
+      },
+      {
+        "name": "workflow_type",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "state",
+        "type": "VARCHAR(50)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "definition_version",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "current_step",
+        "type": "VARCHAR(100)",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "error_message",
+        "type": "TEXT",
+        "nullable": true,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "created_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      },
+      {
+        "name": "updated_at",
+        "type": "DATETIME",
+        "nullable": false,
+        "primary_key": false,
+        "references": []
+      }
+    ]
+  }
+]

@@ -63,3 +63,8 @@ yarn-error.log*
 *.db
 *.sqlite
 *.sqlite3
+
+exports/
+
+# TypeScript incremental build cache
+*.tsbuildinfo

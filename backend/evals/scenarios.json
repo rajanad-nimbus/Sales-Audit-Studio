@@ -1,0 +1,15 @@
+[
+  {"id": "unmatched-capture-missing", "exception_type": "UNMATCHED_SALE", "amount": "84.50",
+   "records": [{"source": "POS", "type": "Sale", "amount": "84.50", "ref": "PAY-1", "payload": {"auth": "A1", "tender": "Visa"}}],
+   "expected_supported": ["Capture not submitted"], "expected_not_supported": ["Processor file missing"]},
+  {"id": "missing-refund-rejected", "exception_type": "MISSING_REFUND", "amount": "40.00",
+   "records": [{"source": "POS", "type": "Refund", "amount": "-40.00", "ref": "PAY-2", "payload": {"return": true}},
+               {"source": "Processor", "type": "Refund", "amount": "0", "ref": "PAY-2", "payload": {"status": "REJECTED"}}],
+   "expected_supported": ["Refund rejected by processor"], "expected_not_supported": ["Refund not submitted"]},
+  {"id": "duplicate-retransmit", "exception_type": "DUPLICATE_SALES", "amount": "19.99",
+   "records": [{"source": "POS", "type": "Sale", "amount": "19.99", "ref": "PAY-3", "payload": {"txn": "T9", "retransmit": true}},
+               {"source": "POS", "type": "Sale", "amount": "19.99", "ref": "PAY-3", "payload": {"txn": "T9", "retransmit": true}}],
+   "expected_supported": ["POS retransmission"], "expected_not_supported": ["Operator double-entry"]},
+  {"id": "no-evidence-no-claim", "exception_type": "ORPHAN_PAYMENT", "amount": "120.00",
+   "records": [], "expected_supported": [], "expected_not_supported": ["POS record not delivered", "Wrong merchant account"]}
+]

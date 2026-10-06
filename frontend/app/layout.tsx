@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/lib/ThemeContext";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { Sidebar } from "@/components/Sidebar";
+import { ChatPanel, ChatProvider } from "@/components/Chat";
+import { ToastProvider } from "@/components/Feedback";
+import { AccessGuard, MeProvider } from "@/components/MeProvider";
+import { TopBar } from "@/components/TopBar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ZeTSA - FastAPI + Next.js",
-  description: "Modern full-stack application with FastAPI backend and Next.js frontend",
+  title: "Nimbus Sales Audit",
+  description: "Agentic financial exception management for retail commerce",
 };
 
 export default function RootLayout({
@@ -18,26 +21,24 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body>
         <ThemeProvider>
+          <ToastProvider>
+          <MeProvider>
+          <ChatProvider>
           <div className="app-layout">
-            <nav className="navbar">
-              <div className="navbar-container">
-                <h1 className="navbar-title">ZeTSA</h1>
-                <div className="navbar-actions">
-                  <ThemeToggle />
-                </div>
-              </div>
-            </nav>
-
-            <div className="layout-wrapper">
-              <Sidebar />
-
+            <Sidebar />
+            <div className="app-body">
+              <TopBar />
               <main className="main-content">
                 <div className="container">
-                  {children}
+                  <AccessGuard>{children}</AccessGuard>
                 </div>
               </main>
             </div>
+            <ChatPanel />
           </div>
+          </ChatProvider>
+          </MeProvider>
+          </ToastProvider>
         </ThemeProvider>
       </body>
     </html>

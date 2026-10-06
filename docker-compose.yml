@@ -25,7 +25,32 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-dbname}
       SQL_ECHO: ${SQL_ECHO:-False}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      NIMBUS_ONTOLOGY_AUTH_URL: ${NIMBUS_ONTOLOGY_AUTH_URL:-http://host.docker.internal:8000/api/v1/auth/me}
+      NIMBUS_ONTOLOGY_ROLE_MAP: ${NIMBUS_ONTOLOGY_ROLE_MAP:-admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,auditor:auditor,store_manager:store_manager}
+      NIMBUS_ONTOLOGY_STORE_CLAIM: ${NIMBUS_ONTOLOGY_STORE_CLAIM:-stores}
+      NIMBUS_EXPORT_DIR: /app/exports
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NIMBUS_LLM_MODEL: ${NIMBUS_LLM_MODEL:-claude-haiku-4-5-20251001}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      NIMBUS_AGENT_INVESTIGATOR: ${NIMBUS_AGENT_INVESTIGATOR:-1}
+      NIMBUS_AGENT_BATCH_LIMIT: ${NIMBUS_AGENT_BATCH_LIMIT:-25}
+      NIMBUS_AGENT_MAX_COST_USD: ${NIMBUS_AGENT_MAX_COST_USD:-0.50}
+      NIMBUS_AUTO_INVESTIGATE: ${NIMBUS_AUTO_INVESTIGATE:-1}
+      NIMBUS_ONTOLOGY_API_URL: ${NIMBUS_ONTOLOGY_API_URL:-http://host.docker.internal:8000/api/integration/v1}
+      NIMBUS_ONTOLOGY_API_KEY: ${NIMBUS_ONTOLOGY_API_KEY:-}
+      NIMBUS_SINK_SECRET: ${NIMBUS_SINK_SECRET:-demo-secret}
+      SHOPIFY_STORE_URL: ${SHOPIFY_STORE_URL:-}
+      SHOPIFY_ACCESS_TOKEN: ${SHOPIFY_ACCESS_TOKEN:-}
+      SHOPIFY_API_KEY: ${SHOPIFY_API_KEY:-}
+      SHOPIFY_API_PASSWORD: ${SHOPIFY_API_PASSWORD:-}
+      SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2024-01}
+      SHOPIFY_STORE_ID: ${SHOPIFY_STORE_ID:-SHOPIFY-MAIN}
+      SHOPIFY_WEBHOOK_SECRET: ${SHOPIFY_WEBHOOK_SECRET:-}
+      SHOPIFY_FETCH_LIMIT: ${SHOPIFY_FETCH_LIMIT:-250}
+      SHOPIFY_SYNC_LOOKBACK_DAYS: ${SHOPIFY_SYNC_LOOKBACK_DAYS:-3}
       CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-3001},http://127.0.0.1:${FRONTEND_PORT:-3001},http://localhost:3000,http://127.0.0.1:3000
+    volumes:
+      - ./exports:/app/exports
     ports:
       - "${BACKEND_PORT:-8001}:8000"
     depends_on:
@@ -43,12 +68,14 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8001}
+        NEXT_PUBLIC_ONTOLOGY_STUDIO_URL: ${NEXT_PUBLIC_ONTOLOGY_STUDIO_URL:-http://localhost:3050}
     container_name: zetsa_frontend
     environment:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: "0.0.0.0"
       NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8001}
+      NEXT_PUBLIC_ONTOLOGY_STUDIO_URL: ${NEXT_PUBLIC_ONTOLOGY_STUDIO_URL:-http://localhost:3050}
     ports:
       - "${FRONTEND_PORT:-3001}:3000"
     depends_on:
