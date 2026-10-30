@@ -3,9 +3,9 @@ frontend/node_modules/.bin/lint-staged
 frontend/node_modules/.bin/tsc --project frontend/tsconfig.json --noEmit
 # SDK and socket-backed Shopify tests require optional deployment dependencies or
 # localhost binding; deterministic tests still run independently to avoid state leakage.
-for test_file in backend/tests/test_*.py backend/apps/*/tests/test_*.py; do
+for test_file in $(find backend/apps backend/integrations -path '*/tests/test_*.py' -type f | sort); do
   case "$test_file" in
-    backend/tests/test_shopify_mock_api.py) continue ;;
+    */apps/ingest/tests/test_shopify_mock_api.py) continue ;;
   esac
   PYTHONPATH=backend PYTHONDONTWRITEBYTECODE=1 backend/.venv/bin/python -m pytest "$test_file" -q -k 'not sdk'
 done
