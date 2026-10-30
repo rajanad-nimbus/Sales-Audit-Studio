@@ -41,7 +41,8 @@ export const colors = {
 
 export const typography = {
   fontFamily: {
-    primary: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", sans-serif',
+    primary:
+      '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", sans-serif',
     mono: '"Monaco", "Menlo", "Ubuntu Mono", monospace',
   },
   fontSize: {

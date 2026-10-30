@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
@@ -25,5 +26,7 @@ async def create_rule(body: RuleBody, db: AsyncSession = Depends(get_db), user: 
     row = ConfiguredAuditRule(id=str(uuid.uuid4()), **body.model_dump(), updated_by=user["user"] or "ontology.user")
     db.add(row)
     try: await db.commit()
-    except Exception: await db.rollback(); raise HTTPException(status_code=409, detail="Rule name already exists")
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Rule name already exists") from exc
     return view(row)

@@ -1,4 +1,3 @@
-
 # Nimbus Sales Audit — Solution Design
 
 **Product:** Nimbus Zero Touch Sales Audit
@@ -287,15 +286,15 @@ KPIs are calculated using ontology metric definitions and current runtime record
 
 For the illustrative $550 case, assume a signed reconciliation bridge has first established a genuine timing difference; the unresolved source-amount semantics noted in Section 12.1 must be settled before building the fixture.
 
-| Stage           | Component interaction                                           | Result                                                                    |
-| --------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Stage           | Component interaction                                         | Result                                                                    |
+| --------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Detect          | Source feeds → normalization → reconciliation engine          | A $550 variance produces a case                                           |
-| Understand      | Investigation Agent → ontology via MCP/REST                    | Retrieves timing-difference evidence requirements and process             |
-| Establish facts | Evidence store / read-only tools → Investigation Agent         | Obtains the applicable refund, payment, bank, and accounting evidence     |
-| Recommend       | Investigation Agent → policy engine                            | Proposes a timing disposition with no financial write                     |
-| Authorize       | Policy engine → Finance                                        | Illustrative ST-004 requires approval above $250                          |
+| Understand      | Investigation Agent → ontology via MCP/REST                   | Retrieves timing-difference evidence requirements and process             |
+| Establish facts | Evidence store / read-only tools → Investigation Agent        | Obtains the applicable refund, payment, bank, and accounting evidence     |
+| Recommend       | Investigation Agent → policy engine                           | Proposes a timing disposition with no financial write                     |
+| Authorize       | Policy engine → Finance                                       | Illustrative ST-004 requires approval above $250                          |
 | Execute         | Finance decision → workflow → controlled action gateway       | Applies the disposition and records the decision/evidence package         |
-| Wait            | Workflow → validation obligation                               | Case remains Executed — Validation Pending                               |
+| Wait            | Workflow → validation obligation                              | Case remains Executed — Validation Pending                                |
 | Verify          | Next-cycle evidence → Validation Agent → deterministic checks | Confirms the expected movement, waits for evidence, or identifies failure |
 | Finish          | Verification → workflow → shared case/history                 | Closes on verified success or reopens/escalates under policy              |
 
@@ -371,12 +370,12 @@ Use approved, versioned definition caches with explicit freshness and invalidati
 
 ### 5.6 Error lineage model
 
-| Lineage   | Required trace                                                                           |
-| --------- | ---------------------------------------------------------------------------------------- |
-| Data      | Original record → transformation/mapping version → normalized record                   |
-| Detection | Inputs → audit or source rule → generated exception                                    |
-| Diagnosis | Evidence references → supported findings; unresolved hypotheses remain labeled          |
-| Decision  | Recommendation → policy evaluation → delegated or human authority                      |
+| Lineage   | Required trace                                                                        |
+| --------- | ------------------------------------------------------------------------------------- |
+| Data      | Original record → transformation/mapping version → normalized record                  |
+| Detection | Inputs → audit or source rule → generated exception                                   |
+| Diagnosis | Evidence references → supported findings; unresolved hypotheses remain labeled        |
+| Decision  | Recommendation → policy evaluation → delegated or human authority                     |
 | Execution | Workflow → tool call → connector attempt → acknowledgment                             |
 | Outcome   | Validation obligation → retrieved evidence → deterministic result → final disposition |
 

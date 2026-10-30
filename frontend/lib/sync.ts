@@ -29,11 +29,17 @@ export function useLive(cb: () => void, intervalMs: number) {
   const ref = useRef(cb);
   ref.current = cb;
   useEffect(() => {
-    const run = () => { if (!document.hidden) ref.current(); };
+    const run = () => {
+      if (!document.hidden) ref.current();
+    };
     ref.current();
     const t = setInterval(run, intervalMs);
     document.addEventListener('visibilitychange', run);
     window.addEventListener(EVENT, run);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', run); window.removeEventListener(EVENT, run); };
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', run);
+      window.removeEventListener(EVENT, run);
+    };
   }, [intervalMs]);
 }

@@ -43,31 +43,31 @@ Transactions arrive **once a day**. The four counters at the top of the Pipeline
 
 Accepted `source_system` values and their record types (`VALID_TYPES` in `ingest.py`):
 
-| Source     | Record types                              | Lineage tag          | Amount sign          |
-| ---------- | ----------------------------------------- | -------------------- | -------------------- |
+| Source     | Record types                              | Lineage tag        | Amount sign         |
+| ---------- | ----------------------------------------- | ------------------ | ------------------- |
 | POS        | Sale, Return                              | `pos-map-v1`       | Sale +, Return −    |
 | Processor  | Capture, Refund                           | `processor-map-v1` | Capture +, Refund − |
-| Bank       | Deposit                                   | `bank-map-v1`      | +                    |
-| ERP        | Posting                                   | `erp-map-v1`       | +                    |
+| Bank       | Deposit                                   | `bank-map-v1`      | +                   |
+| ERP        | Posting                                   | `erp-map-v1`       | +                   |
 | Shopify    | Order, Refund                             | `shopify-map-v1`   | Order +, Refund −   |
-| POSControl | Control manifest (no transaction records) | none                 | n/a                  |
+| POSControl | Control manifest (no transaction records) | none               | n/a                 |
 
 Source amounts are always sent **positive**. Nimbus applies the sign from the record type, so `signed_amount` is negative for returns and refunds.
 
 **Transaction columns**
 
-| Column                                           | Required        | Notes                                                                                |
-| ------------------------------------------------ | --------------- | ------------------------------------------------------------------------------------ |
-| `source_record_id`                             | Yes             | Unique per source. Drives duplicate detection                                        |
-| `event_time`                                   | Yes             | ISO-8601. A missing timezone is treated as UTC. The business date is taken from this |
-| `record_type`                                  | Yes             | Must be valid for the source (table above)                                           |
-| `amount`                                       | Yes             | Positive decimal, rounded to 2 places                                                |
-| `store_id`                                     | Yes             | Canonical store ID                                                                   |
-| `currency`                                     | No              | Defaults to`USD`                                                                   |
-| `payment_reference`                            | Needed to match | The key that joins POS to Processor and Shopify refunds to orders                    |
-| `register_id`, `tender_type`, `channel_id` | No              | `channel_id` defaults to `store`                                                 |
-| `settled_on`                                   | No              | Settlement date. Defaults to the business date                                       |
-| `settlement_reference`                         | No              | Groups processor and bank records into a settlement batch                            |
+| Column                                     | Required        | Notes                                                                                |
+| ------------------------------------------ | --------------- | ------------------------------------------------------------------------------------ |
+| `source_record_id`                         | Yes             | Unique per source. Drives duplicate detection                                        |
+| `event_time`                               | Yes             | ISO-8601. A missing timezone is treated as UTC. The business date is taken from this |
+| `record_type`                              | Yes             | Must be valid for the source (table above)                                           |
+| `amount`                                   | Yes             | Positive decimal, rounded to 2 places                                                |
+| `store_id`                                 | Yes             | Canonical store ID                                                                   |
+| `currency`                                 | No              | Defaults to`USD`                                                                     |
+| `payment_reference`                        | Needed to match | The key that joins POS to Processor and Shopify refunds to orders                    |
+| `register_id`, `tender_type`, `channel_id` | No              | `channel_id` defaults to `store`                                                     |
+| `settled_on`                               | No              | Settlement date. Defaults to the business date                                       |
+| `settlement_reference`                     | No              | Groups processor and bank records into a settlement batch                            |
 
 **POS control columns:** `source_record_id`, `business_date`, `store_id`, `declared_count`, `declared_total`. A manifest declares how many POS transactions and what total a store reported for the day.
 
@@ -93,29 +93,29 @@ Each delivery returns: `received`, `archived`, `duplicates_skipped`, `quarantine
 
 **Validation failures that cause quarantine**
 
-| Check                                        | Reason shown                       |
-| -------------------------------------------- | ---------------------------------- |
+| Check                                        | Reason shown                    |
+| -------------------------------------------- | ------------------------------- |
 | Unknown source system                        | `unknown source_system …`       |
 | Missing required fields                      | `missing fields: …`             |
-| `record_type` not valid for that source    | `invalid record_type … for …`  |
-| Amount not a number                          | `amount is not a decimal`        |
-| Amount zero or negative                      | `amount must be positive`        |
-| Bad timestamp                                | `event_time is not ISO-8601`     |
+| `record_type` not valid for that source      | `invalid record_type … for …`   |
+| Amount not a number                          | `amount is not a decimal`       |
+| Amount zero or negative                      | `amount must be positive`       |
+| Bad timestamp                                | `event_time is not ISO-8601`    |
 | Line, tax, discount or tender detail invalid | `invalid transaction detail: …` |
-| Bad manifest values                          | `invalid manifest values`        |
+| Bad manifest values                          | `invalid manifest values`       |
 
 **Quarantine** holds records instead of loading them. Nothing is deleted. Fix the source and re-deliver under a new record id, or re-deliver once the source is corrected. Quarantined records appear in the Quarantine tab, in the delivery table's Quarantined column, and as a chip in the health banner.
 
 **Ways data can arrive**
 
-| Method          | Endpoint                                    | Role                  | Notes                                                            |
-| --------------- | ------------------------------------------- | --------------------- | ---------------------------------------------------------------- |
-| JSON records    | `POST /api/ingest`                        | IT                    | `source_system`, `delivery_id`, `records`                  |
-| CSV             | `POST /api/ingest/csv`                    | IT                    | Max 50,000 rows. Optional`profile_id` applies a column mapping |
-| Nightly batch   | `POST /api/batch/run` or `batch_job.py` | IT                    | Loads feeds and reconciles                                       |
-| Shopify sync    | `POST /api/ingest/shopify/sync`           | Finance, IT           | Date-range pull from the Shopify API                             |
-| Shopify webhook | `POST /api/ingest/shopify/webhook`        | Shopify (HMAC-signed) | Real-time orders and refunds                                     |
-| Synthetic day   | `POST /api/ingest/simulate`               | IT                    | Demo only                                                        |
+| Method          | Endpoint                                | Role                  | Notes                                                          |
+| --------------- | --------------------------------------- | --------------------- | -------------------------------------------------------------- |
+| JSON records    | `POST /api/ingest`                      | IT                    | `source_system`, `delivery_id`, `records`                      |
+| CSV             | `POST /api/ingest/csv`                  | IT                    | Max 50,000 rows. Optional`profile_id` applies a column mapping |
+| Nightly batch   | `POST /api/batch/run` or `batch_job.py` | IT                    | Loads feeds and reconciles                                     |
+| Shopify sync    | `POST /api/ingest/shopify/sync`         | Finance, IT           | Date-range pull from the Shopify API                           |
+| Shopify webhook | `POST /api/ingest/shopify/webhook`      | Shopify (HMAC-signed) | Real-time orders and refunds                                   |
+| Synthetic day   | `POST /api/ingest/simulate`             | IT                    | Demo only                                                      |
 
 ### 3. Reconcile
 
@@ -155,8 +155,8 @@ Matched records are set to `Matched / Closed`. Records in a break are set to `Ex
 
 **All break types**
 
-| Type                         | Meaning                                                   |
-| ---------------------------- | --------------------------------------------------------- |
+| Type                       | Meaning                                                   |
+| -------------------------- | --------------------------------------------------------- |
 | `UNMATCHED_SALE`           | POS sale with no single processor capture                 |
 | `MISSING_REFUND`           | POS return with no single processor refund                |
 | `DUPLICATE_SALES`          | Same sale appears twice at a register                     |
@@ -188,10 +188,10 @@ Matched records are set to `Matched / Closed`. Records in a break are set to `Ex
 
 **Triggering**
 
-| Way       | Command                                                                                                              |
-| --------- | -------------------------------------------------------------------------------------------------------------------- |
-| UI        | "Run nightly batch" on the Pipeline page (IT)                                                                        |
-| API       | `POST /api/batch/run` with optional `business_date`, `rerun`, `feeds`                                        |
+| Way       | Command                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------ |
+| UI        | "Run nightly batch" on the Pipeline page (IT)                                                                      |
+| API       | `POST /api/batch/run` with optional `business_date`, `rerun`, `feeds`                                              |
 | Scheduler | `python batch_job.py --date YYYY-MM-DD [--rerun]`. It exits 0 on success and 1 on failure, so cron can alert on it |
 
 If no date is given, the API uses the day before the earliest loaded business date (or yesterday if nothing is loaded). `batch_job.py` defaults to yesterday in UTC.
@@ -211,14 +211,14 @@ If no date is given, the API uses the day before the earliest loaded business da
 
 **Per-feed freshness** (`GET /api/ingest/feed-health`) compares the newest archived or processed delivery for the profile's source with the schedule text.
 
-| Schedule text               | Expected within                       |
-| --------------------------- | ------------------------------------- |
-| Contains "daily"            | 26 hours                              |
-| Contains "weekly" or "week" | 8 days                                |
+| Schedule text               | Expected within                     |
+| --------------------------- | ----------------------------------- |
+| Contains "daily"            | 26 hours                            |
+| Contains "weekly" or "week" | 8 days                              |
 | Anything else or empty      | No window, so the state is`unknown` |
 
-| Feed state   | Meaning                              |
-| ------------ | ------------------------------------ |
+| Feed state | Meaning                              |
+| ---------- | ------------------------------------ |
 | `fresh`    | Received within its window           |
 | `overdue`  | Older than its window                |
 | `never`    | Nothing received yet                 |
@@ -227,10 +227,10 @@ If no date is given, the API uses the day before the earliest loaded business da
 
 ### 6. Pipeline page
 
-| Area                       | Shows                                                                                           |
-| -------------------------- | ----------------------------------------------------------------------------------------------- |
-| Health banner              | One-line answer to "is my data OK?", with chips for overdue feeds and quarantined records       |
-| Stage counters             | Source records, normalized, matched, exceptions                                                 |
+| Area                 | Shows                                                                                           |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| Health banner        | One-line answer to "is my data OK?", with chips for overdue feeds and quarantined records       |
+| Stage counters       | Source records, normalized, matched, exceptions                                                 |
 | **Batch runs** tab   | Last 10 runs: business date, status, started, loaded, matched, cases, trigger, error            |
 | **Source feeds** tab | Freshness per profile, and recent deliveries with records, processed, quarantined, latest error |
 | **Quarantine** tab   | Up to 10 most recent held records with source, record id and reason                             |
@@ -244,8 +244,8 @@ Access: Analyst, IT and Auditor can open the page. Running ingest, batch or simu
 
 Everything that sets how Nimbus behaves lives under `/settings`. The left menu shows only sections the signed-in role may open. Administrators can open all of them.
 
-| Section                   | Path                       | Controls                                                     | Roles                         |
-| ------------------------- | -------------------------- | ------------------------------------------------------------ | ----------------------------- |
+| Section                   | Path                     | Controls                                                     | Roles                         |
+| ------------------------- | ------------------------ | ------------------------------------------------------------ | ----------------------------- |
 | General                   | `/settings`              | Theme and account                                            | Everyone                      |
 | Integrations & readiness  | `/settings/integrations` | Source feeds, Shopify, Ontology policy, tolerance, readiness | Analyst, Finance, IT, Auditor |
 | Controls & reference data | `/settings/controls`     | Stores, tenders, totals, audit rules, GL mapping             | Analyst, Finance, Auditor     |
@@ -269,11 +269,11 @@ This page has five tabs: source feeds and integrations, reconciliation tolerance
 
 A profile is a read-only description of one expected feed.
 
-| Field          | Purpose                                                                |
-| -------------- | ---------------------------------------------------------------------- |
-| Name           | Unique. Creating a duplicate returns 409                               |
-| Source system  | One of POS, POSControl, Processor, Bank, ERP, Shopify                  |
-| Schedule       | Free text such as`daily` or `weekly`. Drives freshness checks      |
+| Field          | Purpose                                                              |
+| -------------- | -------------------------------------------------------------------- |
+| Name           | Unique. Creating a duplicate returns 409                             |
+| Source system  | One of POS, POSControl, Processor, Bank, ERP, Shopify                |
+| Schedule       | Free text such as`daily` or `weekly`. Drives freshness checks        |
 | Column mapping | JSON of`{canonical column: source column}`. Used for CSV deliveries  |
 | Enabled        | Disabled profiles show as`disabled` and can't be used for CSV ingest |
 
@@ -316,7 +316,7 @@ A local fallback, used until Nimbus receives approved tolerance bands from Ontol
 | Setting                  | Valid range  | Effect                                                                                                         |
 | ------------------------ | ------------ | -------------------------------------------------------------------------------------------------------------- |
 | Amount tolerance         | 0 or more    | Largest POS-versus-processor difference still treated as a match. Also applied to bank and ERP variance checks |
-| Settlement-day tolerance | 0 to 31 days | How many days later than the business date a settlement may land before it is a`TIMING_DIFFERENCE`           |
+| Settlement-day tolerance | 0 to 31 days | How many days later than the business date a settlement may land before it is a`TIMING_DIFFERENCE`             |
 
 With no policy saved, both are 0, meaning exact match and same-day settlement. The saved policy records who changed it and when. Changes take effect on the next reconcile and do not re-evaluate records already matched.
 
@@ -334,8 +334,8 @@ It also lists the latest delivery per required feed, and the inputs still needed
 
 Three tabs, all feeding the audit controls. Viewing needs Finance or IT at the API level.
 
-| Tab                       | What it holds                                                                                                                                                                             |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tab                 | What it holds                                                                                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Foundation data** | Reference lists by category: Store, Register, Cashier, Tender, Item, BankAccount, GLAccount, TaxCode, BusinessCalendar. Each entry has a code, name, active flag and free-form attributes |
 | **Totals & rules**  | Total definitions (name, aggregation, source system, transaction types, tender, level), with a preview, and the audit rules                                                               |
 | **GL mapping**      | General-ledger cross-references and a journal preview                                                                                                                                     |
@@ -344,8 +344,8 @@ Three tabs, all feeding the audit controls. Viewing needs Finance or IT at the A
 
 How long each dataset is kept. Policies are previewed safely, and purging is a separate supervised step.
 
-| Dataset                    | Table                                         |
-| -------------------------- | --------------------------------------------- |
+| Dataset                  | Table                                         |
+| ------------------------ | --------------------------------------------- |
 | `source_records`         | Archived source deliveries (by received date) |
 | `canonical_transactions` | Normalized transactions (by created date)     |
 | `audit_events`           | Audit trail (by created date)                 |
@@ -357,11 +357,11 @@ How long each dataset is kept. Policies are previewed safely, and purging is a s
 
 **Actions**
 
-| Action           | What happens                                                                                                                                                       | Role |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- |
-| Preview          | Counts records older than the cutoff. Changes nothing                                                                                                              | IT   |
+| Action           | What happens                                                                                                                                             | Role |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| Preview          | Counts records older than the cutoff. Changes nothing                                                                                                    | IT   |
 | Archive eligible | Writes up to 5,000 eligible records to a`.jsonl` file under `NIMBUS_ARCHIVE_DIR/<dataset>/`, with a SHA-256 hash, and records a run. **Does not delete** | IT   |
-| Purge            | Only through the API with`confirm_purge: true`. The UI never purges                                                                                              | IT   |
+| Purge            | Only through the API with`confirm_purge: true`. The UI never purges                                                                                      | IT   |
 
 The History table lists each run with eligible, archived and purged counts. Setting a policy needs IT. Viewing needs IT or Finance.
 
@@ -369,20 +369,20 @@ The History table lists each run with eligible, archived and purged counts. Sett
 
 Runtime settings, changeable by **admin only**. Environment variables are the defaults, and stored values override them. Each change is written to the audit trail as `AGENT_SETTING_CHANGED` with the before and after values.
 
-| Setting                      | Default               | Environment variable                               | Allowed values                                                                                  |
-| ---------------------------- | --------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Investigator enabled         | On                    | `NIMBUS_AGENT_INVESTIGATOR` (`0` turns it off) | true or false                                                                                   |
-| Auto-investigate after batch | On                    | `NIMBUS_AUTO_INVESTIGATE` (`1` is on)          | true or false                                                                                   |
-| Model                        | `claude-sonnet-5-5` | `NIMBUS_LLM_MODEL`                               | `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`, `claude-haiku-4-5-20251001` |
-| Tools                        | All                   | none                                               | Non-empty subset of the investigator's tools                                                    |
+| Setting                      | Default             | Environment variable                           | Allowed values                                                                          |
+| ---------------------------- | ------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Investigator enabled         | On                  | `NIMBUS_AGENT_INVESTIGATOR` (`0` turns it off) | true or false                                                                           |
+| Auto-investigate after batch | On                  | `NIMBUS_AUTO_INVESTIGATE` (`1` is on)          | true or false                                                                           |
+| Model                        | `claude-sonnet-5-5` | `NIMBUS_LLM_MODEL`                             | `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`, `claude-haiku-4-5-20251001` |
+| Tools                        | All                 | none                                           | Non-empty subset of the investigator's tools                                            |
 
 **Fixed limits for each investigation** (code, not editable in the UI)
 
-| Limit             | Value                                       |
-| ----------------- | ------------------------------------------- |
-| Max turns         | 6                                           |
-| Max output tokens | 1,200                                       |
-| Timeout           | 90 seconds                                  |
+| Limit             | Value                                     |
+| ----------------- | ----------------------------------------- |
+| Max turns         | 6                                         |
+| Max output tokens | 1,200                                     |
+| Timeout           | 90 seconds                                |
 | Spend cap         | `NIMBUS_AGENT_MAX_COST_USD`, default 0.50 |
 | Cases per batch   | `NIMBUS_AGENT_BATCH_LIMIT`, default 25    |
 
@@ -394,15 +394,15 @@ Runtime settings, changeable by **admin only**. Environment variables are the de
 
 Where approved results are sent downstream (for example to an ERP or GL).
 
-| Destination kind | Formats     | Notes                                                           |
-| ---------------- | ----------- | --------------------------------------------------------------- |
-| `webhook`      | JSON or CSV | Needs an`http(s)` URL. An optional secret signs each delivery |
-| `file`         | JSON or CSV | Written to`NIMBUS_EXPORT_DIR`                                 |
+| Destination kind | Formats     | Notes                                                         |
+| ---------------- | ----------- | ------------------------------------------------------------- |
+| `webhook`        | JSON or CSV | Needs an`http(s)` URL. An optional secret signs each delivery |
+| `file`           | JSON or CSV | Written to`NIMBUS_EXPORT_DIR`                                 |
 
 Two defaults are created on first use: a test webhook receiver and an "ERP/GL file drop".
 
-| Dataset         | Content                                                                        |
-| --------------- | ------------------------------------------------------------------------------ |
+| Dataset       | Content                                                                        |
+| ------------- | ------------------------------------------------------------------------------ |
 | `resolutions` | Closed, validated cases with decision, disposition and validation result       |
 | `adjustments` | Approved financial adjustments from validated cases (journal lines for ERP/GL) |
 | `audit`       | Audit events since the last delivery, with hashes                              |
@@ -413,8 +413,8 @@ Exports are incremental and idempotent, with signed delivery and acknowledgment 
 
 Screens and the API paths each one needs are defined in `backend/access.py`. A role can open a screen only if it is listed, and the API enforces the same map. This page shows the matrix.
 
-| Role              | Label                               |
-| ----------------- | ----------------------------------- |
+| Role            | Label                               |
+| --------------- | ----------------------------------- |
 | `admin`         | Administrator (can open everything) |
 | `finance`       | Finance Approver                    |
 | `it`            | IT Support Admin                    |
@@ -444,27 +444,27 @@ Administrators pass any check that lists a role.
 
 ## Environment variables
 
-| Variable                                             | Used for                                                                                 | Default                           |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------- |
-| `NIMBUS_ONTOLOGY_AUTH_URL` / `ONTOLOGY_AUTH_URL` | Authentication through Ontology Studio                                                   | none                              |
-| `NIMBUS_ONTOLOGY_ROLE_MAP`                         | Remap Ontology roles to Nimbus roles                                                     | none                              |
-| `NIMBUS_ONTOLOGY_STORE_CLAIM`                      | Claim that scopes a user to stores                                                       | none                              |
-| `NIMBUS_AGENT_INVESTIGATOR`                        | `0` turns the LLM investigator off                                                     | on                                |
-| `NIMBUS_AUTO_INVESTIGATE`                          | `1` investigates new cases after each batch                                            | on                                |
-| `NIMBUS_LLM_MODEL`                                 | Investigator model                                                                       | `claude-sonnet-5-5`             |
-| `NIMBUS_CHAT_MODEL`                                | Chat model                                                                               | falls back to`NIMBUS_LLM_MODEL` |
-| `NIMBUS_AGENT_BATCH_LIMIT`                         | Cases the LLM handles per batch                                                          | 25                                |
-| `NIMBUS_AGENT_MAX_COST_USD`                        | Spend cap per investigation                                                              | 0.50                              |
-| `NIMBUS_ARCHIVE_DIR`                               | Retention archive location                                                               | `/app/archives`                 |
-| `NIMBUS_EXPORT_DIR`                                | File-drop export location                                                                | set in`exports.py`              |
-| `NIMBUS_SINK_SECRET`                               | Signing secret for the test webhook receiver                                             | `demo-secret`                   |
-| `SHOPIFY_STORE_URL`                                | Enables Shopify in the batch and sync                                                    | none                              |
-| `SHOPIFY_ACCESS_TOKEN`                             | Shopify Admin API token (preferred). Or`SHOPIFY_API_KEY` plus `SHOPIFY_API_PASSWORD` | none                              |
-| `SHOPIFY_STORE_ID`                                 | `store_id` stamped on Shopify records                                                  | `SHOPIFY-MAIN`                  |
-| `SHOPIFY_API_VERSION`                              | Shopify API version                                                                      | `2024-01`                       |
-| `SHOPIFY_WEBHOOK_SECRET`                           | Verifies webhook signatures                                                              | none                              |
-| `SHOPIFY_FETCH_LIMIT`                              | Page size for Shopify fetches                                                            | 250                               |
-| `SHOPIFY_SYNC_LOOKBACK_DAYS`                       | Lookback for syncs                                                                       | 3                                 |
+| Variable                                         | Used for                                                                             | Default                         |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------- |
+| `NIMBUS_ONTOLOGY_AUTH_URL` / `ONTOLOGY_AUTH_URL` | Authentication through Ontology Studio                                               | none                            |
+| `NIMBUS_ONTOLOGY_ROLE_MAP`                       | Remap Ontology roles to Nimbus roles                                                 | none                            |
+| `NIMBUS_ONTOLOGY_STORE_CLAIM`                    | Claim that scopes a user to stores                                                   | none                            |
+| `NIMBUS_AGENT_INVESTIGATOR`                      | `0` turns the LLM investigator off                                                   | on                              |
+| `NIMBUS_AUTO_INVESTIGATE`                        | `1` investigates new cases after each batch                                          | on                              |
+| `NIMBUS_LLM_MODEL`                               | Investigator model                                                                   | `claude-sonnet-5-5`             |
+| `NIMBUS_CHAT_MODEL`                              | Chat model                                                                           | falls back to`NIMBUS_LLM_MODEL` |
+| `NIMBUS_AGENT_BATCH_LIMIT`                       | Cases the LLM handles per batch                                                      | 25                              |
+| `NIMBUS_AGENT_MAX_COST_USD`                      | Spend cap per investigation                                                          | 0.50                            |
+| `NIMBUS_ARCHIVE_DIR`                             | Retention archive location                                                           | `/app/archives`                 |
+| `NIMBUS_EXPORT_DIR`                              | File-drop export location                                                            | set in`exports.py`              |
+| `NIMBUS_SINK_SECRET`                             | Signing secret for the test webhook receiver                                         | `demo-secret`                   |
+| `SHOPIFY_STORE_URL`                              | Enables Shopify in the batch and sync                                                | none                            |
+| `SHOPIFY_ACCESS_TOKEN`                           | Shopify Admin API token (preferred). Or`SHOPIFY_API_KEY` plus `SHOPIFY_API_PASSWORD` | none                            |
+| `SHOPIFY_STORE_ID`                               | `store_id` stamped on Shopify records                                                | `SHOPIFY-MAIN`                  |
+| `SHOPIFY_API_VERSION`                            | Shopify API version                                                                  | `2024-01`                       |
+| `SHOPIFY_WEBHOOK_SECRET`                         | Verifies webhook signatures                                                          | none                            |
+| `SHOPIFY_FETCH_LIMIT`                            | Page size for Shopify fetches                                                        | 250                             |
+| `SHOPIFY_SYNC_LOOKBACK_DAYS`                     | Lookback for syncs                                                                   | 3                               |
 
 Do not commit real credentials. Keep them in `.env`.
 
@@ -472,57 +472,57 @@ Do not commit real credentials. Keep them in `.env`.
 
 ## API quick reference
 
-| Method and path                                               | Purpose                        | Role                               |
-| ------------------------------------------------------------- | ------------------------------ | ---------------------------------- |
-| `GET /api/batch/status`                                     | Freshness for the banner       | Any signed-in                      |
-| `GET /api/batch/runs`                                       | Recent runs                    | Finance, IT                        |
-| `POST /api/batch/run`                                       | Run a batch                    | IT                                 |
-| `GET /api/ingest/stats`                                     | Counters and recent quarantine |                                    |
-| `GET /api/ingest/deliveries`                                | Deliveries grouped by id       | IT, Finance                        |
-| `GET /api/ingest/feed-health`                               | Per-feed freshness             | IT, Finance                        |
-| `GET /api/ingest/contracts`                                 | Published input contract       | IT, Finance                        |
+| Method and path                                          | Purpose                        | Role                               |
+| -------------------------------------------------------- | ------------------------------ | ---------------------------------- |
+| `GET /api/batch/status`                                  | Freshness for the banner       | Any signed-in                      |
+| `GET /api/batch/runs`                                    | Recent runs                    | Finance, IT                        |
+| `POST /api/batch/run`                                    | Run a batch                    | IT                                 |
+| `GET /api/ingest/stats`                                  | Counters and recent quarantine |                                    |
+| `GET /api/ingest/deliveries`                             | Deliveries grouped by id       | IT, Finance                        |
+| `GET /api/ingest/feed-health`                            | Per-feed freshness             | IT, Finance                        |
+| `GET /api/ingest/contracts`                              | Published input contract       | IT, Finance                        |
 | `GET/POST /api/ingest/profiles`, `PATCH …/{id}`          | Source-feed profiles           | View: IT, Finance. Change: IT      |
-| `POST /api/ingest`, `/api/ingest/csv`                     | Load records                   | IT                                 |
-| `POST /api/reconcile`                                       | Reconcile now                  | IT, Finance                        |
-| `GET/PUT /api/reconciliation/policy`                        | Tolerances                     | View: Finance, IT. Change: Finance |
-| `GET /api/production-readiness`                             | Cutover checklist              |                                    |
+| `POST /api/ingest`, `/api/ingest/csv`                    | Load records                   | IT                                 |
+| `POST /api/reconcile`                                    | Reconcile now                  | IT, Finance                        |
+| `GET/PUT /api/reconciliation/policy`                     | Tolerances                     | View: Finance, IT. Change: Finance |
+| `GET /api/production-readiness`                          | Cutover checklist              |                                    |
 | `GET /api/ontology/integration/status`, `POST …/refresh` | Ontology policy                |                                    |
-| `GET/PUT /api/operations/retention…`                       | Retention                      | IT                                 |
-| `GET/POST /api/exports/destinations`                        | Export destinations            | View: Finance, IT. Change: IT      |
-| `GET /api/agent/config`, `PUT /api/agent/settings`        | Agents                         | View: Finance, IT. Change: Admin   |
-| `GET/POST /api/foundation`                                  | Reference data                 | Finance, IT                        |
+| `GET/PUT /api/operations/retention…`                     | Retention                      | IT                                 |
+| `GET/POST /api/exports/destinations`                     | Export destinations            | View: Finance, IT. Change: IT      |
+| `GET /api/agent/config`, `PUT /api/agent/settings`       | Agents                         | View: Finance, IT. Change: Admin   |
+| `GET/POST /api/foundation`                               | Reference data                 | Finance, IT                        |
 
 ---
 
 ## Common tasks
 
-| I want to…                                          | Do this                                                                                                                |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Check whether my data is current                     | Open Data Pipeline and read the health banner                                                                          |
-| Load a day's data                                    | Run nightly batch (IT), or schedule`python batch_job.py --date YYYY-MM-DD`                                           |
-| Re-run a day that already succeeded                  | `POST /api/batch/run` with `rerun=true`, or `batch_job.py --rerun`                                               |
-| Find out why a record didn't load                    | Pipeline → Quarantine tab                                                                                             |
+| I want to…                                           | Do this                                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Check whether my data is current                     | Open Data Pipeline and read the health banner                                                                      |
+| Load a day's data                                    | Run nightly batch (IT), or schedule`python batch_job.py --date YYYY-MM-DD`                                         |
+| Re-run a day that already succeeded                  | `POST /api/batch/run` with `rerun=true`, or `batch_job.py --rerun`                                                 |
+| Find out why a record didn't load                    | Pipeline → Quarantine tab                                                                                          |
 | Add a feed with different column names               | Settings → Integrations → Add source-feed profile with a column mapping (IT), then ingest CSV with its`profile_id` |
 | Fix a feed showing "overdue"                         | Check the source delivery. Confirm the schedule text contains`daily` or `weekly`                                   |
-| Ignore small rounding or late-settlement differences | Settings → Integrations → Reconciliation tolerance (Finance)                                                         |
-| Turn off the LLM investigator                        | Settings → Agents (admin), or set`NIMBUS_AGENT_INVESTIGATOR=0`                                                      |
-| See how much data would be removed                   | Settings → Retention → Preview                                                                                       |
-| Send results to the ERP                              | Settings → Export destinations, then run an export (IT)                                                               |
+| Ignore small rounding or late-settlement differences | Settings → Integrations → Reconciliation tolerance (Finance)                                                       |
+| Turn off the LLM investigator                        | Settings → Agents (admin), or set`NIMBUS_AGENT_INVESTIGATOR=0`                                                     |
+| See how much data would be removed                   | Settings → Retention → Preview                                                                                     |
+| Send results to the ERP                              | Settings → Export destinations, then run an export (IT)                                                            |
 
 ## Troubleshooting
 
-| Symptom                                                   | Likely cause and fix                                                                                                  |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Symptom                                                   | Likely cause and fix                                                                                                |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Batch returns 409                                         | That date already succeeded. Use`rerun=true`                                                                        |
-| Banner says "Data is stale"                               | No successful batch in 26 hours. Check Batch runs for a failure or a missed schedule                                  |
-| Batch fails and Shopify is configured                     | A Shopify fetch error fails the whole batch by design. Check credentials and API version, then rerun                  |
-| Feed shows`unknown`                                     | The profile's schedule has no`daily` or `weekly`. Edit the schedule                                               |
-| Feed shows`never`                                       | No delivery received for that source system yet                                                                       |
-| Many`UNMATCHED_SALE` cases                              | Check that`payment_reference` is populated in both POS and processor feeds, and that store ids and currencies agree |
-| Many`TIMING_DIFFERENCE` cases                           | The processor settles later than the tolerance. Raise the settlement-day tolerance                                    |
-| Rounding differences become`AMOUNT_MISMATCH`            | Raise the amount tolerance (default is zero)                                                                          |
-| `INCOMPLETE_FEED` on a store                            | The POS file had fewer transactions than the control manifest declared. Re-send the missing records                   |
-| Records stuck as`Quarantined`                           | Read the reason in the Quarantine tab. A conflicting resubmission needs a new record id                               |
-| Can't see a settings section                              | Your role isn't listed for it. See Roles & access                                                                     |
-| Retention Preview says "Configure retention policy first" | No policy for that dataset yet. Set retention days                                                                    |
-| Agents page shows "LLM agent off"                         | Investigator disabled or no LLM credentials. Rules check evidence instead                                             |
+| Banner says "Data is stale"                               | No successful batch in 26 hours. Check Batch runs for a failure or a missed schedule                                |
+| Batch fails and Shopify is configured                     | A Shopify fetch error fails the whole batch by design. Check credentials and API version, then rerun                |
+| Feed shows`unknown`                                       | The profile's schedule has no`daily` or `weekly`. Edit the schedule                                                 |
+| Feed shows`never`                                         | No delivery received for that source system yet                                                                     |
+| Many`UNMATCHED_SALE` cases                                | Check that`payment_reference` is populated in both POS and processor feeds, and that store ids and currencies agree |
+| Many`TIMING_DIFFERENCE` cases                             | The processor settles later than the tolerance. Raise the settlement-day tolerance                                  |
+| Rounding differences become`AMOUNT_MISMATCH`              | Raise the amount tolerance (default is zero)                                                                        |
+| `INCOMPLETE_FEED` on a store                              | The POS file had fewer transactions than the control manifest declared. Re-send the missing records                 |
+| Records stuck as`Quarantined`                             | Read the reason in the Quarantine tab. A conflicting resubmission needs a new record id                             |
+| Can't see a settings section                              | Your role isn't listed for it. See Roles & access                                                                   |
+| Retention Preview says "Configure retention policy first" | No policy for that dataset yet. Set retention days                                                                  |
+| Agents page shows "LLM agent off"                         | Investigator disabled or no LLM credentials. Rules check evidence instead                                           |

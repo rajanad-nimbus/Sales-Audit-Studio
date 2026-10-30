@@ -15,12 +15,14 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 **Purpose:** Gather evidence and diagnose exceptions
 
 **When Invoked:**
+
 - New case created with exception
 - Human requests "More Evidence"
 - Evidence becomes stale (> 4 hours)
 - Policy gate requires reassessment
 
 **Input:**
+
 ```json
 {
   "case_id": "ZA-20261006-0147",
@@ -71,6 +73,7 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
    - Identify evidence sufficiency
 
 **Output:**
+
 ```json
 {
   "investigation_id": "INV-20261006-0147-001",
@@ -102,6 +105,7 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 ```
 
 **Constraints:**
+
 - Cannot declare authority or override policy
 - Cannot fabricate evidence or invent data
 - Must explicitly document evidence gaps
@@ -116,11 +120,13 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 **Purpose:** Execute approved resolutions and coordinate subsequent work
 
 **When Invoked:**
+
 - Policy gate approves autonomous action
 - Human decision approves recommendation
 - Workflow step requires action coordination
 
 **Input:**
+
 ```json
 {
   "workflow_id": "WF-20261006-0147-001",
@@ -183,6 +189,7 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
    - Expected validation window provided
 
 **Output:**
+
 ```json
 {
   "workflow_execution_id": "WFX-20261006-0147-001",
@@ -218,6 +225,7 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 ```
 
 **Constraints:**
+
 - Can only execute within approved scope
 - Every mutation through action gateway
 - Preconditions rechecked before execution
@@ -232,11 +240,13 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 **Purpose:** Obtain evidence of actual outcome and verify success
 
 **When Invoked:**
+
 - Validation obligation due window reached
 - Trigger event detected (e.g., settlement batch arrived)
 - Manual validation requested
 
 **Input:**
+
 ```json
 {
   "validation_obligation_id": "VAL-20261006-0147-001",
@@ -283,6 +293,7 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
    - Inconclusive → Escalate or wait
 
 **Output:**
+
 ```json
 {
   "validation_execution_id": "VALX-20261006-0147-001",
@@ -316,6 +327,7 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 ```
 
 **Constraints:**
+
 - Uses only deterministic verification rules (no LLM judgment)
 - Cannot override policy or create financial records
 - Must wait for evidence if not yet available
@@ -385,30 +397,32 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 ### Evidence Tool Gateway (Read-Only)
 
 **Queries Agents Can Make:**
+
 ```
 1. retrieve_transaction(source_system, transaction_id)
    Returns: Complete transaction record with timestamps
-   
+
 2. retrieve_payment_confirmation(processor_ref, amount)
    Returns: Authorization/capture status and proof
-   
+
 3. retrieve_refund_status(processor_ref, refund_id)
    Returns: Refund confirmation and posting status
-   
+
 4. query_settlement_batch(processor, business_date)
    Returns: Batch detail with transaction/refund records
-   
+
 5. retrieve_bank_deposit(bank_ref, amount)
    Returns: Deposit confirmation and posting status
-   
+
 6. query_rule_definition(rule_id, version)
    Returns: Rule logic and applicability conditions
-   
+
 7. query_ontology(entity_type, entity_id, version)
    Returns: Definition, relationships, effective dates
 ```
 
 **Security Enforcement:**
+
 - Authenticate every query with service credentials
 - Apply field-level masking before returning data
   - Full card numbers → Masked (****1234)
@@ -427,25 +441,26 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 1. apply_disposition(case_id, disposition_type, reason)
    Authority: Autonomous if policy permits
    Effect: Updates exception status and workflow state
-   
+
 2. create_validation_obligation(case_id, expected_observation, due_window, rule)
    Authority: Autonomous (workflow step)
    Effect: Creates obligation record and schedules check
-   
+
 3. escalate_to_analyst(case_id, reason, priority)
    Authority: Autonomous (bounded action)
    Effect: Creates case assignment for manual review
-   
+
 4. request_tool_retry(connector_name, request_id)
    Authority: IT autonomous within scope
    Effect: Retries failed connector call
-   
+
 5. change_case_status(case_id, new_status)
    Authority: Autonomous or approved (depends on status)
    Effect: Transitions case through lifecycle
 ```
 
 **Security Enforcement:**
+
 - Verify authorization immediately before execution
   - Agent credentials vs. action permissions
   - Scope limits (what entities can be modified)
@@ -456,6 +471,7 @@ Agents in Nimbus are bounded AI systems that investigate exceptions, propose res
 - Transaction semantics: all-or-nothing per workflow step
 
 **Actions Agents CANNOT Make:**
+
 - Direct SQL writes to database
 - Direct connector calls with raw credentials
 - Financial postings (GL entries)
@@ -584,6 +600,7 @@ GUARDRAILS:
 ## Model Gateway (Orchestration Layer)
 
 **Responsibilities:**
+
 - Authenticate agent invocation
 - Validate input structure and required fields
 - Load system prompt and case context
@@ -596,31 +613,35 @@ GUARDRAILS:
 - Logging and telemetry
 
 **Rate Limits (per agent type, per hour):**
+
 - Investigation Agent: 1,000 runs
 - Resolution Agent: 500 runs
 - Validation Agent: 2,000 runs
 
 **Token Budgets (per run):**
+
 - Investigation: 4,000 input, 2,000 output
 - Resolution: 3,000 input, 1,000 output
 - Validation: 2,000 input, 1,000 output
 
 **Timeout Enforcement:**
+
 ```
 Investigation Agent:
   Total timeout: 60 seconds
   Per evidence query: 10 seconds
-  
+
 Resolution Agent:
   Per action: 10 seconds
   Total workflow: 5 minutes
-  
+
 Validation Agent:
   Per evidence retrieval: 10 seconds
   Total: 30 seconds
 ```
 
 **Retry Logic:**
+
 - Transient API failures: 3 retries with exponential backoff
 - Model timeout: 1 retry (then escalate)
 - Input validation failure: 0 retries (report error)
@@ -632,6 +653,7 @@ Validation Agent:
 ### Telemetry Collection
 
 **For each agent invocation, record:**
+
 ```json
 {
   "agent_run_id": "unique-uuid",
@@ -661,23 +683,25 @@ Validation Agent:
 
 ### SLOs (Service Level Objectives)
 
-| Metric | Target | Alert Threshold |
-|--------|--------|-----------------|
-| Investigation success rate | 98% | < 95% |
-| Average investigation time | < 20s | > 30s |
-| Evidence retrieval success | 99% | < 97% |
-| Policy violation detection | 100% | Any miss |
-| Validation accuracy | 99% | < 98% |
+| Metric                     | Target | Alert Threshold |
+| -------------------------- | ------ | --------------- |
+| Investigation success rate | 98%    | < 95%           |
+| Average investigation time | < 20s  | > 30s           |
+| Evidence retrieval success | 99%    | < 97%           |
+| Policy violation detection | 100%   | Any miss        |
+| Validation accuracy        | 99%    | < 98%           |
 
 ### Logging Requirements
 
 **Log Levels:**
+
 - INFO: Agent invoked, tool called, result produced
 - WARNING: Timeout approaching, rate limit approaching, evidence gap
 - ERROR: Failed invocation, tool failure, output validation failed
 - CRITICAL: Policy violation detected, unauthorized action attempted
 
 **Retention:**
+
 - Successful runs: 90 days
 - Failed runs: 1 year (for debugging)
 - Audit-relevant events: 7 years (compliance)
@@ -716,6 +740,7 @@ Validation Agent:
    - Missing pieces explicitly documented
 
 **On Policy Violation:**
+
 - Reject output and escalate
 - Log violation with agent run details
 - Alert security team
@@ -729,25 +754,24 @@ Validation Agent:
 ### Investigation Agent Interaction
 
 **Workflow → Investigation Agent:**
+
 ```json
 {
   "case_id": "ZA-20261006-0147",
   "exception_type": "TIMING_DIFFERENCE",
   "amount": 550,
-  "evidence_required": [
-    "Refund confirmation",
-    "Refund timestamp",
-    "Settlement batch status"
-  ]
+  "evidence_required": ["Refund confirmation", "Refund timestamp", "Settlement batch status"]
 }
 ```
 
 **Investigation Agent Queries:**
+
 1. `retrieve_transaction(POS, TX-12345)` → Full sale record
 2. `retrieve_refund_status(Processor, REF-54321)` → Refund confirmation + timestamp
 3. `query_settlement_batch(Processor, 2026-10-06)` → Batch includes refund
 
 **Investigation Agent Response:**
+
 ```json
 {
   "findings": [
@@ -780,13 +804,13 @@ Execute approved resolution
 
 ## Summary Table
 
-| Aspect | Investigation | Resolution | Validation |
-|--------|---|---|---|
-| **Purpose** | Gather evidence & diagnose | Execute approved actions | Verify outcomes |
-| **Invoked When** | New exception, more evidence needed | Approval granted | Due window reached |
-| **Timeout** | 60 seconds | 30 sec/action (5 min total) | 30 seconds |
-| **Tool Access** | Read-only evidence queries | Governed action gateway | Read-only evidence |
-| **Authority** | None (recommends only) | Within approved scope | None |
-| **Output** | Findings + recommendation | Workflow progress | Verification result |
-| **Key Constraint** | Evidence-backed conclusions | Policy-authorized execution | Deterministic rules only |
-| **Escalation** | Evidence gaps | Failed preconditions | Missing evidence at deadline |
+| Aspect             | Investigation                       | Resolution                  | Validation                   |
+| ------------------ | ----------------------------------- | --------------------------- | ---------------------------- |
+| **Purpose**        | Gather evidence & diagnose          | Execute approved actions    | Verify outcomes              |
+| **Invoked When**   | New exception, more evidence needed | Approval granted            | Due window reached           |
+| **Timeout**        | 60 seconds                          | 30 sec/action (5 min total) | 30 seconds                   |
+| **Tool Access**    | Read-only evidence queries          | Governed action gateway     | Read-only evidence           |
+| **Authority**      | None (recommends only)              | Within approved scope       | None                         |
+| **Output**         | Findings + recommendation           | Workflow progress           | Verification result          |
+| **Key Constraint** | Evidence-backed conclusions         | Policy-authorized execution | Deterministic rules only     |
+| **Escalation**     | Evidence gaps                       | Failed preconditions        | Missing evidence at deadline |

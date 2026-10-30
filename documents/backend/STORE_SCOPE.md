@@ -9,7 +9,14 @@ Nimbus authenticates by calling Ontology Studio's auth endpoint (`NIMBUS_ONTOLOG
 reads the `user` object it returns. Add the user's stores to that object:
 
 ```json
-{ "user": { "email": "a@store.example", "role": "store_manager", "stores": ["STORE-007", "STORE-014"] }, "is_admin": false }
+{
+  "user": {
+    "email": "a@store.example",
+    "role": "store_manager",
+    "stores": ["STORE-007", "STORE-014"]
+  },
+  "is_admin": false
+}
 ```
 
 - `stores` is a list of store codes, the same codes Nimbus uses for `store_id` (the `Store` entries in foundation data).

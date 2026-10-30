@@ -1,3 +1,5 @@
 import { redirect } from 'next/navigation';
 
-export default function ControlsMoved() { redirect('/settings/controls'); }
+export default function ControlsMoved() {
+  redirect('/settings/controls');
+}

@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import scope
@@ -76,5 +77,7 @@ async def record_deposit(body: CashDepositBody, db: AsyncSession = Depends(get_d
     row = CashDeposit(id=str(uuid.uuid4()), **body.model_dump(), expected_amount=expected, variance_amount=variance, status="Balanced" if variance == 0 else "Over/Short", recorded_by=user["user"] or "ontology.user")
     db.add(row)
     try: await db.commit()
-    except Exception: await db.rollback(); raise HTTPException(status_code=409, detail="Deposit reference already exists")
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Deposit reference already exists") from exc
     await db.refresh(row); return deposit_view(row)

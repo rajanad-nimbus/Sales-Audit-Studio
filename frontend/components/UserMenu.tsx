@@ -5,8 +5,21 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useMe } from './MeProvider';
 
-const PERSONAS = [['analyst', 'Sales Auditor'], ['finance', 'Finance Approver'], ['store_manager', 'Store Manager'], ['it', 'IT Support Admin'], ['auditor', 'Internal Audit']] as const;
-const ROLE_LABEL: Record<string, string> = { analyst: 'Sales Auditor', finance: 'Finance Approver', store_manager: 'Store Manager', it: 'IT Support Admin', auditor: 'Internal Audit', admin: 'Administrator' };
+const PERSONAS = [
+  ['analyst', 'Sales Auditor'],
+  ['finance', 'Finance Approver'],
+  ['store_manager', 'Store Manager'],
+  ['it', 'IT Support Admin'],
+  ['auditor', 'Internal Audit'],
+] as const;
+const ROLE_LABEL: Record<string, string> = {
+  analyst: 'Sales Auditor',
+  finance: 'Finance Approver',
+  store_manager: 'Store Manager',
+  it: 'IT Support Admin',
+  auditor: 'Internal Audit',
+  admin: 'Administrator',
+};
 
 export { useMe } from './MeProvider';
 
@@ -14,42 +27,100 @@ export function UserMenu() {
   const { me } = useMe();
   const [open, setOpen] = useState(false);
   const [pickStores, setPickStores] = useState(false);
-  const [storesText, setStoresText] = useState(() => { try { return localStorage.getItem('nimbus_impersonate_stores') ?? ''; } catch { return ''; } });
+  const [storesText, setStoresText] = useState(() => {
+    try {
+      return localStorage.getItem('nimbus_impersonate_stores') ?? '';
+    } catch {
+      return '';
+    }
+  });
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const close = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
+    const close = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
   const signedOut = me === null;
-  const name = me === undefined ? '…' : signedOut ? 'Signed out' : (me!.name || me!.user || 'Unknown user');
-  const sub = me === undefined ? '' : signedOut ? 'Ontology Studio sign-in required' : me!.impersonating ? `Acting as ${ROLE_LABEL[me!.role]}` : (ROLE_LABEL[me!.role] ?? me!.role) + (me!.store_scoped ? (me!.stores?.length ? ` · ${me!.stores.join(', ')}` : ' · no stores assigned') : '');
+  const name =
+    me === undefined ? '…' : signedOut ? 'Signed out' : me!.name || me!.user || 'Unknown user';
+  const sub =
+    me === undefined
+      ? ''
+      : signedOut
+        ? 'Ontology Studio sign-in required'
+        : me!.impersonating
+          ? `Acting as ${ROLE_LABEL[me!.role]}`
+          : (ROLE_LABEL[me!.role] ?? me!.role) +
+            (me!.store_scoped
+              ? me!.stores?.length
+                ? ` · ${me!.stores.join(', ')}`
+                : ' · no stores assigned'
+              : '');
   const canImpersonate = !signedOut && me !== undefined && me!.real_role === 'admin';
   const impersonate = (role: string | null, stores?: string) => {
     try {
-      role ? localStorage.setItem('nimbus_impersonate', role) : localStorage.removeItem('nimbus_impersonate');
-      role === 'store_manager' && stores ? localStorage.setItem('nimbus_impersonate_stores', stores) : localStorage.removeItem('nimbus_impersonate_stores');
-    } catch { /* ignore */ }
+      role
+        ? localStorage.setItem('nimbus_impersonate', role)
+        : localStorage.removeItem('nimbus_impersonate');
+      role === 'store_manager' && stores
+        ? localStorage.setItem('nimbus_impersonate_stores', stores)
+        : localStorage.removeItem('nimbus_impersonate_stores');
+    } catch {
+      /* ignore */
+    }
     window.location.reload();
   };
-  const initials = signedOut || me === undefined ? '?' : (name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('') || name.slice(0, 1)).toUpperCase();
+  const initials =
+    signedOut || me === undefined
+      ? '?'
+      : (
+          name
+            .split(/[\s._-]+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((w) => w[0])
+            .join('') || name.slice(0, 1)
+        ).toUpperCase();
 
   const [signingOut, setSigningOut] = useState(false);
   const signOut = async () => {
     setSigningOut(true);
     // Ends the Ontology Studio session cookie (shared by both apps), then clears what this browser remembers.
-    try { await api.post('/api/auth/logout'); } catch { /* already signed out, or the service is down: still leave */ }
-    try { ['nimbus_impersonate', 'nimbus_impersonate_stores', 'nimbus_next', 'nimbus_token'].forEach((k) => { localStorage.removeItem(k); sessionStorage.removeItem(k); }); } catch { /* ignore */ }
+    try {
+      await api.post('/api/auth/logout');
+    } catch {
+      /* already signed out, or the service is down: still leave */
+    }
+    try {
+      ['nimbus_impersonate', 'nimbus_impersonate_stores', 'nimbus_next', 'nimbus_token'].forEach(
+        (k) => {
+          localStorage.removeItem(k);
+          sessionStorage.removeItem(k);
+        }
+      );
+    } catch {
+      /* ignore */
+    }
     window.location.assign('/login?signedout=1');
   };
 
   return (
     <div className="user-menu" ref={box}>
-      <button className="user-chip" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open}>
+      <button
+        className="user-chip"
+        onClick={() => setOpen(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
         <span className="user-avatar">{initials}</span>
-        <span className="user-chip-text"><b>{name}</b><small>{sub}</small></span>
+        <span className="user-chip-text">
+          <b>{name}</b>
+          <small>{sub}</small>
+        </span>
       </button>
       {open && (
         <div className="user-pop" role="menu">
@@ -57,30 +128,74 @@ export function UserMenu() {
             <span className="user-avatar">{initials}</span>
             <div>
               <b>{name}</b>
-              <small>{signedOut ? 'Sign in through Ontology Studio' : `${me!.user ?? ''}${me!.user ? ' · ' : ''}${ROLE_LABEL[me!.role] ?? me!.role}`}</small>
+              <small>
+                {signedOut
+                  ? 'Sign in through Ontology Studio'
+                  : `${me!.user ?? ''}${me!.user ? ' · ' : ''}${ROLE_LABEL[me!.role] ?? me!.role}`}
+              </small>
             </div>
           </div>
           {canImpersonate && (
             <div className="user-pop-imp">
               <small>Impersonate</small>
               {PERSONAS.map(([key, label]) => (
-                <button key={key} className={me!.role === key ? 'on' : ''} onClick={() => (key === 'store_manager' ? setPickStores((v) => !v) : impersonate(key))}>{label}</button>
+                <button
+                  key={key}
+                  className={me!.role === key ? 'on' : ''}
+                  onClick={() =>
+                    key === 'store_manager' ? setPickStores((v) => !v) : impersonate(key)
+                  }
+                >
+                  {label}
+                </button>
               ))}
               {pickStores && (
                 <div className="user-pop-form">
                   <label htmlFor="imp-stores">Which stores? (comma separated)</label>
-                  <input id="imp-stores" value={storesText} onChange={(e) => setStoresText(e.target.value)} placeholder="STORE-007, STORE-014" />
-                  <small className="hint">A real store manager gets these from Ontology Studio. With none, the store manager sees nothing.</small>
-                  <button className="btn-primary btn-small" onClick={() => impersonate('store_manager', storesText.split(',').map((x) => x.trim()).filter(Boolean).join(','))}>Act as Store Manager</button>
+                  <input
+                    id="imp-stores"
+                    value={storesText}
+                    onChange={(e) => setStoresText(e.target.value)}
+                    placeholder="STORE-007, STORE-014"
+                  />
+                  <small className="hint">
+                    A real store manager gets these from Ontology Studio. With none, the store
+                    manager sees nothing.
+                  </small>
+                  <button
+                    className="btn-primary btn-small"
+                    onClick={() =>
+                      impersonate(
+                        'store_manager',
+                        storesText
+                          .split(',')
+                          .map((x) => x.trim())
+                          .filter(Boolean)
+                          .join(',')
+                      )
+                    }
+                  >
+                    Act as Store Manager
+                  </button>
                 </div>
               )}
-              {me!.impersonating && <button onClick={() => impersonate(null)}>Stop impersonating</button>}
+              {me!.impersonating && (
+                <button onClick={() => impersonate(null)}>Stop impersonating</button>
+              )}
             </div>
           )}
-          <Link href="/settings" className="user-pop-link" onClick={() => setOpen(false)}>Configuration</Link>
-          {signedOut
-            ? <Link href="/login" className="user-pop-link" onClick={() => setOpen(false)}>Sign in</Link>
-            : <button className="user-pop-out" onClick={signOut} disabled={signingOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button>}
+          <Link href="/settings" className="user-pop-link" onClick={() => setOpen(false)}>
+            Configuration
+          </Link>
+          {signedOut ? (
+            <Link href="/login" className="user-pop-link" onClick={() => setOpen(false)}>
+              Sign in
+            </Link>
+          ) : (
+            <button className="user-pop-out" onClick={signOut} disabled={signingOut}>
+              {signingOut ? 'Signing out…' : 'Sign out'}
+            </button>
+          )}
         </div>
       )}
     </div>

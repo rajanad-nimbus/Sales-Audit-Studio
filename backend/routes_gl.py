@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
@@ -23,7 +24,9 @@ async def create_map(body: GLMapBody, db: AsyncSession = Depends(get_db), user: 
     row = GLCrossReference(id=str(uuid.uuid4()), **body.model_dump(), updated_by=user["user"] or "ontology.user")
     db.add(row)
     try: await db.commit()
-    except Exception: await db.rollback(); raise HTTPException(status_code=409, detail="Cross-reference already exists for this transaction and tender")
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Cross-reference already exists for this transaction and tender") from exc
     return view(row)
 @router.get("/journal-preview")
 async def journal_preview(store_id: str, business_date: str, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):

@@ -34,10 +34,10 @@ Nimbus collects facts, establishes why an exception exists, recommends a resolut
 
 ### Supported Deployment Modes
 
-| Mode | Nimbus Responsibility |
-|---|---|
-| Standalone sales audit | Ingestion, validation, totals, reconciliation, exception detection, case resolution, release eligibility, export orchestration, validation |
-| Coexistence with audit application | Consume source exceptions, collect cross-system evidence, investigate, enforce decision authority, orchestrate actions, validate results |
+| Mode                               | Nimbus Responsibility                                                                                                                      |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Standalone sales audit             | Ingestion, validation, totals, reconciliation, exception detection, case resolution, release eligibility, export orchestration, validation |
+| Coexistence with audit application | Consume source exceptions, collect cross-system evidence, investigate, enforce decision authority, orchestrate actions, validate results   |
 
 ### In Scope
 
@@ -142,40 +142,41 @@ Evidence requirements are defined in the ontology. Completeness is calculated fr
 
 ## Runtime Data Model (Simplified)
 
-| Object | Purpose |
-|---|---|
-| SourceRecord | Preserve original payload with metadata |
-| CanonicalTransaction | Normalized business record with lineage to source |
-| Exception | Detected through source error or failed control |
-| Case | Groups related exceptions and orchestrates resolution |
-| EvidenceSnapshot | Required evidence type, record references, status |
-| Finding | Supported conclusion backed by evidence references |
-| Recommendation | Proposed disposition with evidence version and expected impact |
-| PolicyEvaluation | Policy rule versions, resolved variables, decision |
-| HumanDecision | Actor, scope, choice, override reason, timestamp |
-| Workflow/Step | Definition version, state, gates, next action, dependencies |
-| ActionAttempt | Tool call with idempotency key, correlation ID, response |
-| ValidationObligation | Expected observation, due window, verification rule |
-| ExportRecord | Destination, transaction version, acknowledgment status |
-| AuditEvent | Event identity, actor, object references, causation links |
+| Object               | Purpose                                                        |
+| -------------------- | -------------------------------------------------------------- |
+| SourceRecord         | Preserve original payload with metadata                        |
+| CanonicalTransaction | Normalized business record with lineage to source              |
+| Exception            | Detected through source error or failed control                |
+| Case                 | Groups related exceptions and orchestrates resolution          |
+| EvidenceSnapshot     | Required evidence type, record references, status              |
+| Finding              | Supported conclusion backed by evidence references             |
+| Recommendation       | Proposed disposition with evidence version and expected impact |
+| PolicyEvaluation     | Policy rule versions, resolved variables, decision             |
+| HumanDecision        | Actor, scope, choice, override reason, timestamp               |
+| Workflow/Step        | Definition version, state, gates, next action, dependencies    |
+| ActionAttempt        | Tool call with idempotency key, correlation ID, response       |
+| ValidationObligation | Expected observation, due window, verification rule            |
+| ExportRecord         | Destination, transaction version, acknowledgment status        |
+| AuditEvent           | Event identity, actor, object references, causation links      |
 
 ## Integration Contract Requirements
 
 ### Required Inputs
 
-| Integration | Data | Purpose |
-|---|---|---|
-| POS/Sales channels | Headers, lines, quantities, prices, taxes, tenders, voids, returns, IDs | Transaction audit and balancing |
-| POS controls | Registers, sequences, manifests, declared totals, completion markers | Independent completeness checks |
-| Payment processor | Authorizations, captures, reversals, voids, refunds, statuses, references | Payment confirmation |
-| Bank feeds | Deposits, withdrawals, posting/value dates, processor references | Cash movement confirmation |
-| Reference systems | Products, promotions, prices, stores, tenders, calendars | Validation context |
-| ERP/GL | Period status, mappings, posting references, acknowledgments | Downstream validation |
-| Existing audit tool | Errors, transactions, matches, rule versions, export status | Source-generated cases |
+| Integration         | Data                                                                      | Purpose                         |
+| ------------------- | ------------------------------------------------------------------------- | ------------------------------- |
+| POS/Sales channels  | Headers, lines, quantities, prices, taxes, tenders, voids, returns, IDs   | Transaction audit and balancing |
+| POS controls        | Registers, sequences, manifests, declared totals, completion markers      | Independent completeness checks |
+| Payment processor   | Authorizations, captures, reversals, voids, refunds, statuses, references | Payment confirmation            |
+| Bank feeds          | Deposits, withdrawals, posting/value dates, processor references          | Cash movement confirmation      |
+| Reference systems   | Products, promotions, prices, stores, tenders, calendars                  | Validation context              |
+| ERP/GL              | Period status, mappings, posting references, acknowledgments              | Downstream validation           |
+| Existing audit tool | Errors, transactions, matches, rule versions, export status               | Source-generated cases          |
 
 ### Supported Recovery Actions
 
 Per-connector basis:
+
 - Retrieve file or transaction
 - Replay verified source record
 - Reprocess rejected record
@@ -185,6 +186,7 @@ Per-connector basis:
 ## Next Steps
 
 See detailed documentation:
+
 - [Architecture Design](NIMBUS_ARCHITECTURE.md)
 - [Data Model](NIMBUS_DATA_MODEL.md)
 - [Integration Guide](NIMBUS_INTEGRATIONS.md)

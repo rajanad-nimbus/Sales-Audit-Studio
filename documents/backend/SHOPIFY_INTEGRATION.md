@@ -5,6 +5,7 @@ This document describes the Shopify integration for the ZeTSA (Nimbus Sales Audi
 ## Overview
 
 The Shopify integration allows ZeTSA to:
+
 - Ingest orders and refunds from Shopify as a transaction source
 - Reconcile Shopify orders with their refunds
 - Detect payment and fulfillment exceptions
@@ -33,6 +34,7 @@ Shopify API → shopify_adapter → shopify_ingest → ingest.py → CanonicalTr
 ### 1. Shopify API Credentials
 
 Create a Shopify private app or custom app to get:
+
 - Admin API access token (custom app, preferred), or API key + password (legacy private app)
 - Store URL (e.g., `https://my-store.myshopify.com`)
 - Webhook signing secret (if using webhooks)
@@ -77,6 +79,7 @@ curl -X POST http://localhost:8001/api/ingest/shopify/sync \
 ```
 
 Response:
+
 ```json
 {
   "status": "success",
@@ -123,6 +126,7 @@ curl http://localhost:8001/api/ingest/shopify/status \
 ```
 
 Response:
+
 ```json
 {
   "connector": "shopify",
@@ -138,34 +142,35 @@ Response:
 
 ### Orders
 
-| Shopify Field | Canonical Field | Notes |
-|---|---|---|
-| order.id | payment_reference | Key for reconciliation |
-| order.created_at | event_timestamp | Order creation time |
-| order.total_price | signed_amount | Positive amount |
-| order.currency | currency | 3-letter code |
+| Shopify Field          | Canonical Field       | Notes                         |
+| ---------------------- | --------------------- | ----------------------------- |
+| order.id               | payment_reference     | Key for reconciliation        |
+| order.created_at       | event_timestamp       | Order creation time           |
+| order.total_price      | signed_amount         | Positive amount               |
+| order.currency         | currency              | 3-letter code                 |
 | order.financial_status | (used for validation) | pending, paid, refunded, etc. |
-| "Shopify" | source_system | Source identifier |
-| "ecommerce" | channel_id | Sales channel |
-| store_id | store_id | Mapped from config |
+| "Shopify"              | source_system         | Source identifier             |
+| "ecommerce"            | channel_id            | Sales channel                 |
+| store_id               | store_id              | Mapped from config            |
 
 ### Refunds
 
-| Shopify Field | Canonical Field | Notes |
-|---|---|---|
-| refund.id | settlement_reference | Unique refund ID |
-| order.id | payment_reference | Links refund to order |
-| sum of successful refund transactions (fallback: line-item subtotals) | signed_amount | Negative amount |
-| refund.created_at | event_timestamp | Refund creation time |
-| order.currency | currency | From parent order |
-| "Shopify" | source_system | Source identifier |
-| "ecommerce" | channel_id | Sales channel |
+| Shopify Field                                                         | Canonical Field      | Notes                 |
+| --------------------------------------------------------------------- | -------------------- | --------------------- |
+| refund.id                                                             | settlement_reference | Unique refund ID      |
+| order.id                                                              | payment_reference    | Links refund to order |
+| sum of successful refund transactions (fallback: line-item subtotals) | signed_amount        | Negative amount       |
+| refund.created_at                                                     | event_timestamp      | Refund creation time  |
+| order.currency                                                        | currency             | From parent order     |
+| "Shopify"                                                             | source_system        | Source identifier     |
+| "ecommerce"                                                           | channel_id           | Sales channel         |
 
 ## Reconciliation Rules
 
 ### Order ↔ Refund Matching
 
 Orders are matched to refunds using:
+
 - `store_id` (must be identical; the order may be from an earlier business date)
 - `payment_reference` (order ID)
 - `currency` (must match)
@@ -175,6 +180,7 @@ Orders with `financial_status = paid` and no refund on file are closed as Matche
 ### Exception Types
 
 #### SHOPIFY_UNMATCHED_REFUND
+
 - **Trigger**: Refund exists but no corresponding order found
 - **Exposure**: Full refund amount
 - **Severity**: High
@@ -182,6 +188,7 @@ Orders with `financial_status = paid` and no refund on file are closed as Matche
 - **Example**: Order deleted after refund was processed
 
 #### SHOPIFY_PARTIAL_REFUND
+
 - **Trigger**: Total refunded for an order (all refunds summed) < order amount
 - **Exposure**: Zero (partial refunds are normal)
 - **Severity**: Medium
@@ -189,6 +196,7 @@ Orders with `financial_status = paid` and no refund on file are closed as Matche
 - **Example**: Customer returns 2 of 5 items
 
 #### SHOPIFY_OVERAGE_REFUND
+
 - **Trigger**: Total refunded for an order > order amount
 - **Exposure**: Difference amount
 - **Severity**: High
@@ -216,24 +224,26 @@ Orders with `financial_status = paid` and no refund on file are closed as Matche
 
 Records are quarantined (not processed) if:
 
-| Reason | Condition | Resolution |
-|---|---|---|
-| missing fields | Required field is null/empty | Review source data |
-| amount is not a valid decimal | Amount cannot be parsed | Check Shopify API response |
-| amount must be non-negative | Negative amount | Check Shopify order/refund details |
-| event_time is not ISO-8601 | Timestamp format invalid | Verify timestamp parsing |
-| invalid financial_status | Status not in approved list | Update validation rules |
-| invalid record_type | Type is not "Order" or "Refund" | Check data mapping |
-| missing required field: order_id | Refund without order reference | Contact Shopify support |
+| Reason                           | Condition                       | Resolution                         |
+| -------------------------------- | ------------------------------- | ---------------------------------- |
+| missing fields                   | Required field is null/empty    | Review source data                 |
+| amount is not a valid decimal    | Amount cannot be parsed         | Check Shopify API response         |
+| amount must be non-negative      | Negative amount                 | Check Shopify order/refund details |
+| event_time is not ISO-8601       | Timestamp format invalid        | Verify timestamp parsing           |
+| invalid financial_status         | Status not in approved list     | Update validation rules            |
+| invalid record_type              | Type is not "Order" or "Refund" | Check data mapping                 |
+| missing required field: order_id | Refund without order reference  | Contact Shopify support            |
 
 Quarantined records are visible in audit logs and can be reviewed/reprocessed.
 
 ## Rate Limiting
 
 The Shopify API enforces rate limits:
+
 - Standard REST: ~2 requests per second (leaky bucket)
 
 The adapter includes automatic retry logic:
+
 - 3 attempts per request on 429, 5xx, timeouts and connection errors
 - Exponential backoff from 1 second; respects `Retry-After`
 
@@ -247,6 +257,7 @@ The adapter includes automatic retry logic:
 ### Optimization
 
 To reduce API calls:
+
 - Filter by `created_at` range (use `created_at_min`, `created_at_max`)
 - Increase lookback window only if needed
 - Consider webhook integration for real-time updates instead of polling
@@ -283,7 +294,8 @@ Invalid webhook signature
 Shopify sync completed: 0 canonical_created
 ```
 
-**Solution**: 
+**Solution**:
+
 1. Check `created_at_min` / `created_at_max` dates
 2. Verify orders exist in Shopify admin for the date range
 3. Check API credentials have read access to orders
@@ -291,6 +303,7 @@ Shopify sync completed: 0 canonical_created
 ## Example: Complete Flow
 
 1. **Configuration**
+
    ```env
    SHOPIFY_STORE_URL=https://demo.myshopify.com
    SHOPIFY_API_KEY=my-api-key
@@ -298,6 +311,7 @@ Shopify sync completed: 0 canonical_created
    ```
 
 2. **Fetch Data**
+
    ```
    POST /api/ingest/shopify/sync with store_id and date range
    ```

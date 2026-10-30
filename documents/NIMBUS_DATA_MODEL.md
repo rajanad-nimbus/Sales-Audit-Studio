@@ -49,6 +49,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Preserve original payload before any transformation
 
 **Attributes:**
+
 - `id` (UUID) — unique within source system
 - `source_system` — system name (e.g., "POS", "Processor", "Bank")
 - `source_version` — source system version/schema version
@@ -68,6 +69,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `created_at` — Nimbus ingestion timestamp
 
 **Indexes:**
+
 - (source_system, source_record_id)
 - (delivery_id, source_system)
 - (source_event_time, source_system)
@@ -78,6 +80,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Normalized business record with complete lineage
 
 **Attributes:**
+
 - `id` (UUID) — canonical transaction identity
 - `tenant_id` — multi-tenant isolation
 - `legal_entity` — associated legal entity
@@ -119,6 +122,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `version` — data version number (for concurrency control)
 
 **Indexes:**
+
 - (business_date, store_id)
 - (transaction_type, business_date)
 - (parent_transaction_id) — for returns/reversals
@@ -131,6 +135,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Detected anomaly or control failure
 
 **Attributes:**
+
 - `id` (UUID) — exception identity
 - `case_id` (UUID) — associated case (created on first exception)
 - `exception_type` — e.g., DUPLICATE_SALES, TIMING_DIFFERENCE, MISSING_REFUND
@@ -160,6 +165,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `updated_at` — last change timestamp
 
 **Indexes:**
+
 - (case_id)
 - (business_date, source_system)
 - (status, current_owner)
@@ -171,6 +177,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Groups related exceptions and orchestrates resolution
 
 **Attributes:**
+
 - `id` (UUID) — case identity
 - `case_number` — human-readable identifier (e.g., "ZA-20261006-0147")
 - `related_exceptions` — array of exception IDs
@@ -200,6 +207,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `updated_at` — last state change
 
 **Indexes:**
+
 - (case_number)
 - (related_exceptions)
 - (current_lifecycle_state)
@@ -212,6 +220,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Record retrieved evidence with metadata
 
 **Attributes:**
+
 - `id` (UUID) — evidence identity
 - `case_id` — associated case
 - `exception_id` — associated exception
@@ -238,6 +247,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `updated_at` — last change
 
 **Indexes:**
+
 - (case_id)
 - (evidence_type, status)
 - (source_system, retrieved_at)
@@ -248,6 +258,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Supported conclusion backed by evidence
 
 **Attributes:**
+
 - `id` (UUID) — finding identity
 - `case_id` — associated case
 - `conclusion` — statement of finding
@@ -266,6 +277,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `verified_at` — when human verified
 
 **Indexes:**
+
 - (case_id)
 - (conclusion_type)
 - (confidence_category)
@@ -275,6 +287,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Proposed resolution with evidence and expected workflow
 
 **Attributes:**
+
 - `id` (UUID) — recommendation identity
 - `case_id` — associated case
 - `based_on_findings_ids` — which findings informed this
@@ -303,6 +316,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `investigation_run_id` — which investigation produced this
 
 **Indexes:**
+
 - (case_id)
 - (disposition)
 - (requires_human_approval, approval_status)
@@ -313,6 +327,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Record policy decision logic and result
 
 **Attributes:**
+
 - `id` (UUID) — evaluation identity
 - `case_id` — associated case
 - `recommendation_id` — what was evaluated
@@ -340,6 +355,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `created_at` — timestamp
 
 **Indexes:**
+
 - (case_id)
 - (final_decision)
 - (approval_deadline)
@@ -349,6 +365,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Record human approval or escalation
 
 **Attributes:**
+
 - `id` (UUID) — decision identity
 - `case_id` — associated case
 - `recommendation_id` — what was approved/rejected
@@ -370,6 +387,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `created_at` — timestamp
 
 **Indexes:**
+
 - (case_id)
 - (decision_actor_id, decision_timestamp)
 - (decision_type)
@@ -379,6 +397,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Durable orchestration of resolution process
 
 **Attributes:**
+
 - `id` (UUID) — workflow identity
 - `case_id` — associated case
 - `workflow_type` — Investigation, Resolution, Validation, Settlement
@@ -407,6 +426,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `completed_at` — when workflow finished
 
 **Indexes:**
+
 - (case_id)
 - (current_state)
 - (current_step_id)
@@ -416,6 +436,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Individual step within a workflow
 
 **Attributes:**
+
 - `id` (UUID) — step identity
 - `workflow_id` — parent workflow
 - `step_sequence` — execution order
@@ -440,6 +461,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `version` — concurrency control version
 
 **Indexes:**
+
 - (workflow_id, step_sequence)
 - (step_status)
 
@@ -448,6 +470,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Record an attempt to execute a tool or action
 
 **Attributes:**
+
 - `id` (UUID) — attempt identity
 - `workflow_step_id` — which step triggered this
 - `case_id` — associated case
@@ -477,6 +500,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `audit_events` — related audit event IDs
 
 **Indexes:**
+
 - (workflow_step_id)
 - (idempotency_key) — for deduplication
 - (correlation_id) — for tracing
@@ -487,6 +511,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Record what must be verified after execution
 
 **Attributes:**
+
 - `id` (UUID) — obligation identity
 - `case_id` — associated case
 - `workflow_step_id` — which action created obligation
@@ -509,6 +534,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `audit_event_ids` — related audit events
 
 **Indexes:**
+
 - (case_id)
 - (due_window_end) — for deadline management
 - (check_result)
@@ -518,6 +544,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Track delivery to downstream destinations
 
 **Attributes:**
+
 - `id` (UUID) — export identity
 - `case_id` — associated case
 - `transaction_ids` — which transactions exported
@@ -542,6 +569,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `related_audit_events` — audit trail
 
 **Indexes:**
+
 - (case_id)
 - (destination_system, acceptance_status)
 - (export_timestamp)
@@ -551,6 +579,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Purpose:** Immutable record of all material changes
 
 **Attributes:**
+
 - `id` (UUID) — event identity
 - `event_type` — Case Created, Exception Detected, Evidence Retrieved, Decision Made, Action Attempted, Validation Completed, etc.
 - `event_timestamp` — when event occurred
@@ -575,6 +604,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `created_at` — timestamp (with microsecond precision)
 
 **Indexes:**
+
 - (event_timestamp DESC) — for chronological queries
 - (subject_entity_ids) — for case history
 - (actor_id, event_timestamp) — for user activity

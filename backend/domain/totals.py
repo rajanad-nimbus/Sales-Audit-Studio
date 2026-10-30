@@ -4,7 +4,25 @@ This module deliberately has no database or web dependencies.  The route layer
 adapts HTTP payloads and persistence to these rules, so the business invariants
 can be tested without starting FastAPI or a database.
 """
-from typing import Any
+from typing import Protocol
+
+
+class TotalDefinitionLike(Protocol):
+    aggregation: str
+    level: str
+    status: str
+    calculation_basis: str
+    category: str
+    over_short_group: str | None
+    over_short_operator: str | None
+    combined_total_ids: list[str]
+
+
+class PersistedDefinitionLike(TotalDefinitionLike, Protocol):
+    class _Table:
+        columns: list[object]
+
+    __table__: _Table
 
 
 VALID_AGGREGATIONS = frozenset({"Sum", "Count"})
@@ -15,7 +33,7 @@ VALID_OVER_SHORT_GROUPS = frozenset({"Accounted For", "Accountable For"})
 VALID_OPERATORS = frozenset({"+", "-"})
 
 
-def validate_definition(definition: Any) -> None:
+def validate_definition(definition: TotalDefinitionLike) -> None:
     """Raise ValueError when a total definition violates domain invariants."""
     if definition.aggregation not in VALID_AGGREGATIONS:
         raise ValueError("Aggregation must be Sum or Count")
@@ -34,6 +52,6 @@ def validate_definition(definition: Any) -> None:
         raise ValueError("Combined totals require at least one existing total")
 
 
-def serialize_definition(row: Any) -> dict[str, Any]:
+def serialize_definition(row: PersistedDefinitionLike) -> dict[str, object]:
     """Return the stable external representation of a persisted definition."""
     return {column.name: getattr(row, column.name) for column in row.__table__.columns}

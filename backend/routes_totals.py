@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
@@ -11,6 +12,8 @@ from models import AuditTotalDefinition, CanonicalTransaction, SalesAuditErrorDe
 from domain.totals import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
+
+
 class TotalDefinitionBody(BaseModel):
     name: str
     aggregation: str = "Sum"
@@ -33,16 +36,17 @@ class TotalDefinitionBody(BaseModel):
     created_with_wizard: bool = True
     required_by_system: bool = False
     display_group: int = 0
-    realms: list = []
-    joins: list = []
-    parameters: list = []
-    rollups: list = []
-    restrictions: list = []
-    combined_total_ids: list = []
-    location_traits: list = []
-    usages: list = []
+    realms: list[dict] = []
+    joins: list[dict] = []
+    parameters: list[dict] = []
+    rollups: list[dict] = []
+    restrictions: list[dict] = []
+    combined_total_ids: list[str] = []
+    location_traits: list[str] = []
+    usages: list[dict] = []
     sql_statement: str | None = None
-def view(row: AuditTotalDefinition): return serialize_definition(row)
+def view(row: AuditTotalDefinition) -> dict[str, object]:
+    return serialize_definition(row)
 @router.get("")
 async def list_definitions(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))): return [view(row) for row in (await db.execute(select(AuditTotalDefinition).order_by(AuditTotalDefinition.name))).scalars().all()]
 @router.post("")
@@ -52,8 +56,11 @@ async def create_definition(body: TotalDefinitionBody, db: AsyncSession = Depend
     latest = (await db.execute(select(func.max(AuditTotalDefinition.revision)).where(AuditTotalDefinition.name == body.name))).scalar() or 0
     row = AuditTotalDefinition(id=str(uuid.uuid4()), revision=int(latest) + 1, **body.model_dump(exclude={"revision"}), updated_by=user["user"] or "ontology.user")
     db.add(row)
-    try: await db.commit()
-    except Exception: await db.rollback(); raise HTTPException(status_code=409, detail="A total definition with this name already exists")
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A total definition revision already exists") from exc
     return view(row)
 
 @router.get("/{definition_id}/revisions")

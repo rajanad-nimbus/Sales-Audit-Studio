@@ -53,7 +53,6 @@ docker compose run --rm --no-deps backend alembic upgrade head
 
 Revisions: `0001` baseline, `0002` canonical transaction -> source record link. The app still calls `create_all` on startup, which only creates missing tables; run `alembic upgrade head` for column changes.
 
-
 ### Enterprise ontology and agent audit integration
 
 The existing Sales Audit ontology in Ontology Studio is the enterprise source. Nimbus does not create or publish another ontology. `GET /api/ontology/integration/context` returns the definitions visible to the configured integration persona, with workspace, approved release, version, and content hash. `POST /api/ontology/integration/refresh` refreshes that view atomically; readiness requires all expected Sales Audit control codes.
@@ -64,11 +63,9 @@ Investigations refresh the context and pass approved business-rule expressions a
 
 Ontology Studio's current read-only REST API excludes agent-policy rules and returns workflow metadata without process steps or action contracts. Those capabilities are explicitly reported as gaps; this integration does not interpret prose as executable policy or claim that remote processes are running. The existing local exception catalog remains the operational fallback until equivalent structured exception definitions are exposed by Studio.
 
-
 For the local Docker deployment, Nimbus reaches Ontology Studio at `http://host.docker.internal:8000/api/integration/v1` (the browser UI is `http://localhost:3050`). The Compose default uses that endpoint, and Nimbus refreshes ontology context at startup. The endpoint and credential configuration are reported separately in health status.
 
 The deployed `Nimbus Sales Audit` workspace (ID 100) was verified on 2026-10-06: 13 entities, 17 controls, and one lifecycle process. It was still draft, with no release, persona, or agent key. Before live consumption, complete the Studio workspace review/release flow, configure an approved persona scoped to Sales Audit and its lifecycle process, and issue its integration key through Access & Governance. Store that key as `NIMBUS_ONTOLOGY_API_KEY` in `.env`, then recreate the Nimbus backend. A reachable server alone does not make an approved context available.
-
 
 The Sales Audit draft was subsequently extended in the deployed Studio database on 2026-10-06 using `ontology/extend_sales_audit.py` and `ontology/runtime_schema.json`. It now contains 42 entities, 407 properties, 28 entity relationships, 15 personas, 17 processes, eight agent behavior policies, and nine disabled agent consumers. Six human personas document Finance, Analyst, Auditor, IT, Store Manager and Admin responsibilities; nine system personas cover the six core agents plus ingestion, export and the read-only assistant. Subprocess steps name native persona codes and link to the existing case lifecycle so Studio derives process participation.
 

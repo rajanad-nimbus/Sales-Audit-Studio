@@ -8,9 +8,5 @@ export function Badge({ children, variant = 'primary', size = 'md' }: BadgeProps
   const variantClass = `badge-${variant}`;
   const sizeClass = `badge-${size}`;
 
-  return (
-    <span className={`badge ${variantClass} ${sizeClass}`}>
-      {children}
-    </span>
-  );
+  return <span className={`badge ${variantClass} ${sizeClass}`}>{children}</span>;
 }

@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
@@ -35,8 +36,9 @@ async def create_reference(body: ReferenceBody, db: AsyncSession = Depends(get_d
     row = FoundationReference(id=str(uuid.uuid4()), category=body.category, code=body.code.strip(), name=body.name.strip(), active=body.active, attributes=body.attributes, updated_by=user["user"] or "ontology.user")
     db.add(row)
     try: await db.commit()
-    except Exception:
-        await db.rollback(); raise HTTPException(status_code=409, detail="Reference code already exists in this category")
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Reference code already exists in this category") from exc
     await db.refresh(row); return view(row)
 
 @router.put("/{reference_id}")

@@ -14,22 +14,36 @@ export default function LoginPage() {
   const [signedOut, setSignedOut] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
 
-  useEffect(() => { setSignedOut(new URLSearchParams(window.location.search).get('signedout') === '1'); }, []);
+  useEffect(() => {
+    setSignedOut(new URLSearchParams(window.location.search).get('signedout') === '1');
+  }, []);
 
   // Once a session exists (signed in here earlier, or in another tab), continue to where the person was headed.
   useEffect(() => {
     if (!me) return;
     let next = '/';
-    try { next = sessionStorage.getItem('nimbus_next') || '/'; sessionStorage.removeItem('nimbus_next'); } catch { /* ignore */ }
-    router.replace(next.startsWith('/') && !next.startsWith('//') && next !== '/login' ? next : '/');
+    try {
+      next = sessionStorage.getItem('nimbus_next') || '/';
+      sessionStorage.removeItem('nimbus_next');
+    } catch {
+      /* ignore */
+    }
+    router.replace(
+      next.startsWith('/') && !next.startsWith('//') && next !== '/login' ? next : '/'
+    );
   }, [me, router]);
 
   // Ontology Studio and Nimbus share the browser session, so notice a sign-in finished in another tab.
   useEffect(() => {
-    const check = () => { if (!document.hidden) reload(); };
+    const check = () => {
+      if (!document.hidden) reload();
+    };
     const t = setInterval(check, 4000);
     window.addEventListener('focus', check);
-    return () => { clearInterval(t); window.removeEventListener('focus', check); };
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', check);
+    };
   }, [reload]);
 
   const signIn = () => {
@@ -42,15 +56,36 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <main className="login-card" aria-labelledby="login-h">
-        <div className="login-mark"><Logo size={40} title="Sales Audit Studio" /></div>
+        <div className="login-mark">
+          <Logo size={40} title="Sales Audit Studio" />
+        </div>
         <h1 id="login-h">Sales Audit Studio</h1>
         <p className="login-sub">Agentic financial exception management for retail commerce</p>
-        {loading ? <p className="login-note" role="status">{me ? 'Signed in. Opening Sales Audit Studio…' : 'Checking your session…'}</p> : (
+        {loading ? (
+          <p className="login-note" role="status">
+            {me ? 'Signed in. Opening Sales Audit Studio…' : 'Checking your session…'}
+          </p>
+        ) : (
           <>
-            {signedOut && <div className="alert alert-info" role="status">You have been signed out.</div>}
-            <button className="btn-primary btn-lg login-btn" onClick={signIn} disabled={redirecting}>{redirecting ? 'Opening Ontology Studio…' : 'Sign in with Ontology Studio'}</button>
-            <p className="login-note">Your account, role and stores are managed in Ontology Studio. After signing in there, come back to Sales Audit Studio and you will be taken straight in.</p>
-            <button className="login-link" onClick={reload}>I have already signed in</button>
+            {signedOut && (
+              <div className="alert alert-info" role="status">
+                You have been signed out.
+              </div>
+            )}
+            <button
+              className="btn-primary btn-lg login-btn"
+              onClick={signIn}
+              disabled={redirecting}
+            >
+              {redirecting ? 'Opening Ontology Studio…' : 'Sign in with Ontology Studio'}
+            </button>
+            <p className="login-note">
+              Your account, role and stores are managed in Ontology Studio. After signing in there,
+              come back to Sales Audit Studio and you will be taken straight in.
+            </p>
+            <button className="login-link" onClick={reload}>
+              I have already signed in
+            </button>
           </>
         )}
       </main>

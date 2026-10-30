@@ -68,13 +68,7 @@ export function Logo({
           <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.12" />
           <stop offset="100%" stopColor="#1e3a8a" stopOpacity="0.28" />
         </linearGradient>
-        <radialGradient
-          id={`sas-glow-${id}`}
-          cx="16"
-          cy="16"
-          r="11"
-          gradientUnits="userSpaceOnUse"
-        >
+        <radialGradient id={`sas-glow-${id}`} cx="16" cy="16" r="11" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.22" />
           <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
         </radialGradient>

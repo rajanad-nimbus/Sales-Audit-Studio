@@ -7,6 +7,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### First Production Integration Scope
 
 **Phase 1 — Minimum Viable Integration:**
+
 1. One POS system with control feed
 2. One payment processor
 3. One bank feed
@@ -14,6 +15,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 5. One downstream destination (ERP/GL)
 
 **Expand after end-to-end correctness is demonstrated:**
+
 - Additional sales channels
 - Additional financial scenarios
 - Additional downstream destinations
@@ -26,6 +28,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 1. POS / Sales Channels
 
 **Data to Provide:**
+
 - Transaction headers (ID, timestamp, register, terminal, operator)
 - Transaction lines (item, quantity, price, tax, discount amount)
 - Tender records (payment method, amount, authorization)
@@ -33,6 +36,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Return records (original sale reference, returned items, refund amount)
 
 **Control Data:**
+
 - Session/register opening/closing markers
 - Daily totals declared by register
 - Sequence/batch markers for completeness checking
@@ -40,6 +44,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Reconciliation declarations
 
 **Required Identifiers:**
+
 - Store ID (canonical across all systems)
 - Terminal/register ID (within store)
 - Transaction ID (unique within business day/store)
@@ -47,12 +52,14 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Customer reference (masked if PII)
 
 **Timestamps:**
+
 - Transaction timestamp (when sale occurred)
 - Business date (store business day, may differ from calendar date)
 - Processing timestamp (when recorded in system)
 - Event timestamp for voids/returns (when reversal occurred)
 
 **Delivery Options:**
+
 - File batch (TLog daily file)
 - Real-time API events
 - Database query interface (read-only)
@@ -60,6 +67,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 2. POS Control Feeds
 
 **What to Provide:**
+
 - Register opening/closing records with declared totals
 - Sequence information (transaction ID ranges)
 - End-of-day manifests with expected counts and amounts
@@ -68,6 +76,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Completeness markers (store certifies day closed)
 
 **Purpose:**
+
 - Independent verification of completeness
 - Duplicate detection (retried deliveries)
 - Reconciliation of source-declared totals vs. Nimbus calculations
@@ -76,6 +85,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 3. E-Commerce / OMS
 
 **Data to Provide:**
+
 - Order headers (ID, timestamp, customer, channel)
 - Order lines (SKU, quantity, price)
 - Fulfillment status (picked, shipped, delivered)
@@ -84,6 +94,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Refund status updates
 
 **Delivery:**
+
 - Event stream (order created, captured, refunded)
 - Daily order export
 - API query interface
@@ -91,6 +102,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 4. Returns / Refund Systems
 
 **Data to Provide:**
+
 - Return authorization (return ID, original sale reference)
 - Returned items (SKU, quantity, condition)
 - Refund amount
@@ -99,6 +111,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Refund reference/confirmation number
 
 **Critical:**
+
 - Link return to original sale transaction
 - Provide refund confirmation (not assumed)
 - Timestamp when refund was authorized and when processed
@@ -107,6 +120,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 5. Payment Processor
 
 **Transaction Records:**
+
 - Authorization records (card reference, amount, timestamp, auth code)
 - Capture records (transaction ID, amount, final status)
 - Void/reversal records (original auth ID, reversal timestamp)
@@ -114,6 +128,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Chargeback records (transaction ID, amount, chargeback reason)
 
 **Settlement Records:**
+
 - Batch header (batch ID, date, total count, total amount)
 - Transaction details (merchant ref, amount, status, adjustment)
 - Fee records (processing fees, chargeback fees, etc.)
@@ -121,11 +136,13 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Batch footer (total batched transactions)
 
 **Required Identifiers:**
+
 - Merchant reference (maps to POS transaction ID)
 - Processor reference (for tracing at processor)
 - Payment method (card type, partial card number — masked)
 
 **Delivery:**
+
 - Daily settlement files (SFTP, API download)
 - Real-time transaction events (optional)
 - Status query API (for validation checks)
@@ -133,6 +150,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 6. Bank Feeds
 
 **Data to Provide:**
+
 - Deposit records (date posted, amount, reference)
 - Withdrawal records (date posted, amount, reference)
 - Value date (when funds available)
@@ -142,12 +160,14 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Currency
 
 **Purpose:**
+
 - Confirm cash movements actually occurred
 - Reconcile processor settlement to bank deposits
 - Detect timing differences (settlement vs. posting)
 - Identify missing or delayed deposits
 
 **Delivery:**
+
 - Daily bank feed file (BAI2, MT940, or CSV)
 - Real-time API (optional)
 - Dashboard query interface
@@ -155,6 +175,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 7. Reference Data Systems
 
 **What to Provide:**
+
 - Product master (SKU, description, category)
 - Promotion/discount rules (ID, applicable items, discount amount, validity window)
 - Price records (effective-dated pricing)
@@ -165,6 +186,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Calendar (business days, holidays, fiscal periods)
 
 **Delivery:**
+
 - Initial load + daily/weekly updates
 - API query interface
 - Master data management system interface
@@ -172,6 +194,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 8. ERP / GL
 
 **Data Needed from System:**
+
 - Accounting period status (open, closed, locked)
 - GL account master (account code, description, class)
 - Posting rules / mapping configurations
@@ -180,6 +203,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Period cutoff times
 
 **Data to Send to ERP:**
+
 - Daily sales and refund totals
 - Tender type totals
 - Tax totals (if applicable)
@@ -187,6 +211,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Versioned exports (to avoid duplicates)
 
 **Delivery:**
+
 - Daily batch export (file, API, database insert)
 - Acknowledgment/receipt (required)
 - GL posting reference (required for tracking)
@@ -194,22 +219,26 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 ### 9. Inventory System
 
 **Data to Send:**
+
 - Inventory movement records (if applicable)
 - Returns reconciliation
 
 **Delivery:**
+
 - Daily inventory adjustment export
 - Optional for initial Phase 1
 
 ### 10. Analytics / Reporting
 
 **Data to Send:**
+
 - Summarized sales data
 - Exception statistics
 - KPI calculations
 - Case status reports
 
 **Delivery:**
+
 - Daily/hourly refresh
 - Optional for Phase 1
 
@@ -219,31 +248,31 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 
 **For each connector, document:**
 
-| Field | Value | Example |
-|-------|-------|---------|
-| **Ownership** | System owner | "Payments Team" |
-| **Purpose** | Why this data | "Confirm payment captures" |
-| **Direction** | Read, Write, or Both | Read |
-| **Data Model** | What gets exchanged | "Settlement transaction detail" |
-| **Cadence** | Frequency | "Daily at 06:00 UTC" |
-| **Expected Latency** | How fresh is data | "Within 4 hours of close" |
-| **Late Arrival Window** | How long to wait | "24 hours, then escalate" |
-| **Authentication** | How to connect | "OAuth2 with cert" |
-| **Credentials Management** | Where to store | "Vault, rotated quarterly" |
-| **Schema Version** | Data contract version | "v2.1" |
-| **Pagination** | For large results | "Cursor-based, 1000 rows" |
-| **Rate Limits** | Throttling | "100 req/min" |
-| **Timeout** | How long to wait | "30 seconds" |
-| **Retry Policy** | On failure | "3 retries, exponential backoff" |
-| **Idempotency** | Duplicate handling | "Idempotency key in request" |
-| **Completeness Checks** | How to verify full delivery | "Control total match" |
-| **Completion Indicators** | How to know it's done | "Manifest record received" |
-| **Error Handling** | What to do on failure | "Log and alert" |
-| **Fallback / Manual Process** | If connector down | "Query via web dashboard" |
-| **Data Retention** | How long to keep | "1 year" |
-| **PII Handling** | Masking rules | "Mask full card numbers" |
-| **Audit Trail** | What to log | "Request/response + timestamp" |
-| **Compliance** | Any regulatory needs | "SOC2 required" |
+| Field                         | Value                       | Example                          |
+| ----------------------------- | --------------------------- | -------------------------------- |
+| **Ownership**                 | System owner                | "Payments Team"                  |
+| **Purpose**                   | Why this data               | "Confirm payment captures"       |
+| **Direction**                 | Read, Write, or Both        | Read                             |
+| **Data Model**                | What gets exchanged         | "Settlement transaction detail"  |
+| **Cadence**                   | Frequency                   | "Daily at 06:00 UTC"             |
+| **Expected Latency**          | How fresh is data           | "Within 4 hours of close"        |
+| **Late Arrival Window**       | How long to wait            | "24 hours, then escalate"        |
+| **Authentication**            | How to connect              | "OAuth2 with cert"               |
+| **Credentials Management**    | Where to store              | "Vault, rotated quarterly"       |
+| **Schema Version**            | Data contract version       | "v2.1"                           |
+| **Pagination**                | For large results           | "Cursor-based, 1000 rows"        |
+| **Rate Limits**               | Throttling                  | "100 req/min"                    |
+| **Timeout**                   | How long to wait            | "30 seconds"                     |
+| **Retry Policy**              | On failure                  | "3 retries, exponential backoff" |
+| **Idempotency**               | Duplicate handling          | "Idempotency key in request"     |
+| **Completeness Checks**       | How to verify full delivery | "Control total match"            |
+| **Completion Indicators**     | How to know it's done       | "Manifest record received"       |
+| **Error Handling**            | What to do on failure       | "Log and alert"                  |
+| **Fallback / Manual Process** | If connector down           | "Query via web dashboard"        |
+| **Data Retention**            | How long to keep            | "1 year"                         |
+| **PII Handling**              | Masking rules               | "Mask full card numbers"         |
+| **Audit Trail**               | What to log                 | "Request/response + timestamp"   |
+| **Compliance**                | Any regulatory needs        | "SOC2 required"                  |
 
 ---
 
@@ -364,6 +393,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 **Scenario:** Processor API timeout during investigation
 
 **Response:**
+
 1. Retry after backoff (3 attempts total)
 2. If successful: proceed normally
 3. If failed: record evidence gap
@@ -378,6 +408,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 **Scenario:** Settlement connector down during resolution
 
 **Response:**
+
 1. Log failed action attempt
 2. Record idempotency key and correlation ID
 3. Retry after connector recovery
@@ -389,6 +420,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 **Scenario:** Settlement batch arrives after expected cutoff
 
 **Response:**
+
 1. Ingest with late-arrival timestamp
 2. Re-run reconciliation if exception affected
 3. Revalidate any validation obligations
@@ -399,6 +431,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 **Scenario:** Store EOD marker never arrives
 
 **Response:**
+
 1. Hold transaction batch (do not discard)
 2. Wait for explicit deadline (typically 24 hours)
 3. After deadline: escalate for manual investigation
@@ -451,12 +484,12 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 
 ### Monitoring and Alerting
 
-| Alert | Threshold | Action |
-|-------|-----------|--------|
-| Connector Latency High | > 30 sec average | Notify ops |
-| Connector Errors | > 5% failure rate | Page on-call engineer |
-| Evidence Request Timeout | Any occurrence | Log and retry |
-| Duplicate Evidence | Multiple sources conflict | Escalate to analyst |
+| Alert                    | Threshold                 | Action                |
+| ------------------------ | ------------------------- | --------------------- |
+| Connector Latency High   | > 30 sec average          | Notify ops            |
+| Connector Errors         | > 5% failure rate         | Page on-call engineer |
+| Evidence Request Timeout | Any occurrence            | Log and retry         |
+| Duplicate Evidence       | Multiple sources conflict | Escalate to analyst   |
 
 ---
 
@@ -492,6 +525,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
    - Cached with 1-hour TTL
 
 **Supported First-Pass Scenarios:**
+
 - Settlement reconciliation (sales vs. processor)
 - Timing differences (cutoff variances)
 - Duplicate detection (POS/processor discrepancies)
@@ -499,6 +533,7 @@ Nimbus acts as an orchestration layer coordinating evidence from multiple system
 - Tolerance exceptions (within policy)
 
 **Not Yet Supported:**
+
 - Multi-store orchestration
 - Omnichannel reconciliation
 - Gift card settlement
