@@ -5,7 +5,7 @@ from decimal import Decimal
 from integrations.ontology import ontology
 
 from models import (
-    AuditEvent, Case, EvidenceSnapshot, Finding, Recommendation,
+    AuditEvent, EvidenceSnapshot, Finding, Recommendation,
     PolicyEvaluation, Workflow, ValidationObligation, utcnow,
 )
 

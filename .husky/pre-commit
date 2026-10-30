@@ -1,6 +1,7 @@
 #!/bin/sh
 frontend/node_modules/.bin/lint-staged
 frontend/node_modules/.bin/tsc --project frontend/tsconfig.json --noEmit
+backend/.venv/bin/ruff check backend
 # SDK and socket-backed Shopify tests require optional deployment dependencies or
 # localhost binding; deterministic tests still run independently to avoid state leakage.
 for test_file in $(find backend/apps backend/integrations -path '*/tests/test_*.py' -type f | sort); do

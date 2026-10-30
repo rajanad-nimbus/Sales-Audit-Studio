@@ -13,7 +13,6 @@ from sqlalchemy.pool import StaticPool
 
 from apps.ingest import service as ingest
 from apps.ingest import shopify_routes as routes_shopify
-from auth import require_role
 from database import get_db
 from models import Base, Case, SourceRecord
 

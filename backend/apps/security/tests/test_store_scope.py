@@ -1,7 +1,6 @@
 """Row-level security by store: assignments come from Ontology Studio, Nimbus enforces them and fails closed."""
 import asyncio
 import json
-from datetime import date
 from decimal import Decimal
 
 import pytest

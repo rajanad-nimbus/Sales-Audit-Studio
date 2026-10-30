@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
-from models import CanonicalTransaction, GLCrossReference, utcnow
+from models import CanonicalTransaction, GLCrossReference
 
 router = APIRouter(prefix="/api/gl", tags=["General ledger"])
 class GLMapBody(BaseModel):

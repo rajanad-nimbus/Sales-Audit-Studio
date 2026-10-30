@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
 from database import get_db
-from apps.agents import agent_settings, agent_tools, investigator, llm
+from apps.agents import agent_settings, investigator, llm
 from integrations.ontology import nimbus
 from models import AuditEvent, Case, Exception as DBException, HumanDecision, Recommendation
 
@@ -90,7 +90,6 @@ AGENT_ACTORS = ["reconciliation-engine", "investigation-agent", "policy-engine",
 
 def agent_registry(cfg: dict) -> list[dict]:
     """What each agent is and is allowed to do, derived from live configuration (no secrets)."""
-    import os
 
     from integrations.ontology import ontology
     llm_on = llm.credentials() is not None
@@ -139,7 +138,6 @@ def agent_registry(cfg: dict) -> list[dict]:
 @router.get("/config")
 async def agent_config(request: Request, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
     """Agents as configured, with live activity from the audit trail."""
-    import os
     from datetime import datetime, timedelta, timezone
 
     from sqlalchemy import func

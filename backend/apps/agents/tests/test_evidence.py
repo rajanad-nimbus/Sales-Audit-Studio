@@ -113,8 +113,6 @@ def test_provided_evidence_closes_a_gap_and_supersedes_the_old_recommendation():
 
 def test_closed_case_rejects_new_evidence_and_collaboration_exposes_override_details():
     import asyncio
-    import uuid
-    from datetime import datetime, timezone
     from decimal import Decimal
 
     import pytest

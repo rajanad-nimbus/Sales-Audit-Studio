@@ -6,7 +6,7 @@ from database import async_session
 from apps.ingest import service as ingest
 from apps.agents import investigation_service
 from models import (AuditTotalDefinition, CanonicalTransaction, CashControl, CashDeposit, Case,
-    ConfiguredAuditRule, FoundationReference, GLCrossReference, ReconciliationPolicy, StoreDay)
+    ConfiguredAuditRule, FoundationReference, GLCrossReference, ReconciliationPolicy)
 from fastapi import HTTPException
 from apps.store_days.routes import open_store_day_record, retotal_store_day
 

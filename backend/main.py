@@ -2,18 +2,17 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import access
 import scope
 from database import engine, get_db
-from apps.agents import investigation_service, llm
+from apps.agents import investigation_service
 from integrations.ontology import nimbus, ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import AUTH_ENABLED, current_user, require_role
@@ -33,7 +32,7 @@ from apps.controls.rules_routes import router as rules_router
 from apps.operations.routes import router as operations_router
 from apps.ingest.shopify_routes import router as shopify_router
 from apps.agents.routes import router as agent_router
-from models import (Base, Case, Connector, PolicyEvaluation, Workflow, ValidationObligation,
+from models import (Case, Connector, PolicyEvaluation, Workflow, ValidationObligation,
                     Exception as DBException, Finding, Recommendation, HumanDecision, AuditEvent,
                     CanonicalTransaction, SourceRecord, EvidenceSnapshot, CaseNote, EvidenceRequest, utcnow)
 from schemas import (
@@ -461,7 +460,7 @@ async def update_case(case_id: str, case_update: CaseUpdate, db: AsyncSession = 
         object_type="Case",
         object_id=case_id,
         case_id=case_id,
-        action_description=f"Case updated",
+        action_description="Case updated",
         before_state=old_state,
         after_state=case_update.model_dump(exclude_unset=True)
     )
