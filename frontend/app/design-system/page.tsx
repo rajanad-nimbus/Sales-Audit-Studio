@@ -75,7 +75,10 @@ export default function DesignSystemPage() {
         <div className="stack stack-sm">
           {SIZES.map((s) => (
             <div key={s} style={{ fontSize: `var(--text-${s})` }}>
-              <span className="mono text-faint">--text-{s}</span> Sales audit exceptions
+              <span className="mono text-faint" style={{ fontSize: 'var(--text-sm)' }}>
+                --text-{s}
+              </span>{' '}
+              Sales audit exceptions
             </div>
           ))}
         </div>

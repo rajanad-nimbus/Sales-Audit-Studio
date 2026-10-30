@@ -4150,6 +4150,9 @@ button.ac-tile[aria-pressed='true'] {
   font-size: var(--text-base);
   margin-bottom: var(--space-sm);
 }
+.card-flush .card-title {
+  padding: var(--space-md) var(--space-lg) 0;
+}
 .card-title {
   font-size: var(--text-base);
   margin-bottom: var(--space-sm);
