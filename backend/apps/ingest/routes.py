@@ -16,9 +16,9 @@ import auth
 from apps.assistant import chat
 from apps.ingest import service as ingest
 from apps.agents import llm
-import ontology
-from nimbus import audit
-from ontology_integration import integration as ontology_integration
+from integrations.ontology import ontology
+from integrations.ontology.nimbus import audit
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import current_user, require_role
 from database import get_db
 from models import CanonicalTransaction, ReconciliationMatch, ReconciliationPolicy, SourceFeedProfile, SourceRecord, utcnow

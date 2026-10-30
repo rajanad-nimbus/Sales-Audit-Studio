@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
 from models import AuditEvent, CanonicalTransaction, RetentionPolicy, SourceRecord, utcnow
-from nimbus import audit
+from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/operations", tags=["Production operations"])
 DATASETS = {"source_records": (SourceRecord, SourceRecord.received_at), "canonical_transactions": (CanonicalTransaction, CanonicalTransaction.created_at), "audit_events": (AuditEvent, AuditEvent.created_at)}

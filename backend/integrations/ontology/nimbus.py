@@ -2,7 +2,7 @@
 import uuid
 from decimal import Decimal
 
-import ontology
+from integrations.ontology import ontology
 
 from models import (
     AuditEvent, Case, EvidenceSnapshot, Finding, Recommendation,
@@ -22,7 +22,7 @@ def sla_due(priority: str):
 
 
 def audit(db, event_type, case_id, object_type, object_id, description, actor="system", after=None):
-    from ontology_integration import integration
+    from integrations.ontology.ontology_integration import integration
     after = {"ontology_context": integration.provenance(), **(after or {})}
     db.add(AuditEvent(id=str(uuid.uuid4()), event_type=event_type, actor=actor, object_type=object_type,
                       object_id=object_id, case_id=case_id, action_description=description, after_state=after))

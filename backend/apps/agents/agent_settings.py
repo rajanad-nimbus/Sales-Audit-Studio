@@ -7,7 +7,7 @@ import os
 from fastapi import HTTPException
 from sqlalchemy import select
 
-import nimbus
+from integrations.ontology import nimbus
 from apps.agents.agent_tools import TOOL_SPECS
 from models import AgentSetting
 

@@ -11,8 +11,8 @@ from sqlalchemy import and_, case as sql_case, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import investigation_service
-import nimbus
-from ontology_integration import integration as ontology_integration
+from integrations.ontology import nimbus
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import require_role
 from database import get_db
 from models import Case, Exception as DBException, HumanDecision, Recommendation, Workflow, ValidationObligation

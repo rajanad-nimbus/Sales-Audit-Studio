@@ -4,7 +4,7 @@ import asyncio
 import httpx
 import pytest
 
-from ontology_integration import OntologyIntegration, RULE_CODES
+from integrations.ontology.ontology_integration import OntologyIntegration, RULE_CODES
 
 
 META = {"workspaceId": 7, "releaseId": 12, "approved": True, "version": "1.0",
@@ -88,7 +88,7 @@ def test_unconfigured_is_explicit_fallback(monkeypatch):
 
 
 def test_database_bindings_cover_audit_and_case_relationships():
-    from ontology_bindings import database_bindings
+    from integrations.ontology.ontology_bindings import database_bindings
     context = {"definitions": {"entities": [{"id": 2, "name": "SalesAuditCase"}]}}
     bindings = {b["model"]: b for b in database_bindings(context)}
     assert bindings["Case"]["ontology_entity_id"] == 2
@@ -99,7 +99,7 @@ def test_database_bindings_cover_audit_and_case_relationships():
 
 
 def test_audit_preserves_pinned_run_context():
-    import nimbus
+    from integrations.ontology import nimbus
     from types import SimpleNamespace
     events = []
     context = {"source": "ontology-integration", "ontology": META}

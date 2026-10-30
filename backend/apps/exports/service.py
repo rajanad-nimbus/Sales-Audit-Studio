@@ -21,7 +21,7 @@ from auth import require_role
 from database import get_db
 from models import (AuditEvent, Case, ExportBatch, ExportDestination, ExportItem, HumanDecision, Recommendation,
                     ValidationObligation, utcnow)
-from nimbus import audit
+from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/exports")
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))

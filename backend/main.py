@@ -14,9 +14,8 @@ import access
 import scope
 from database import engine, get_db
 from apps.agents import investigation_service, llm
-import nimbus
-import ontology
-from ontology_integration import integration as ontology_integration
+from integrations.ontology import nimbus, ontology
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import AUTH_ENABLED, current_user, require_role
 from apps.ingest.routes import router as ingest_router
 from apps.agents.action_center import router as action_router

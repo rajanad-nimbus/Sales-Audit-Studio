@@ -5,8 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import agent_settings, investigator, llm
-import nimbus
-import ontology
+from integrations.ontology import nimbus, ontology
 from models import AuditTotal, Case, CanonicalTransaction, EvidenceRequest, Recommendation, SourceRecord, StoreDay
 
 
@@ -70,7 +69,7 @@ async def provided_evidence(db: AsyncSession, case: Case) -> dict[str, list[dict
 
 
 async def run_investigation(db: AsyncSession, case: Case, exceptions, use_agent: bool = True) -> object:
-    from ontology_integration import integration
+    from integrations.ontology.ontology_integration import integration
     await integration.refresh()
     context = integration.context()
     od = ontology.get(exceptions[0].exception_type)

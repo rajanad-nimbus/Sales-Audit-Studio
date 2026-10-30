@@ -14,7 +14,7 @@ import scope
 from auth import require_role
 from database import get_db
 from models import AuditEvent, AuditTotal, AuditTotalDefinition, CanonicalTransaction, Case, ConfiguredAuditRule, EvidenceRequest, Exception as DBException, FoundationReference, SourceRecord, StoreDay, StoreDayClosureRequest, TransactionAdjustment, utcnow
-from nimbus import audit, sla_due
+from integrations.ontology.nimbus import audit, sla_due
 
 router = APIRouter(prefix="/api/store-days", tags=["Store days"])
 

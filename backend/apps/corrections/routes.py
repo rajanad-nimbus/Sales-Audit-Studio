@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
 from models import CanonicalTransaction, FoundationReference, SourceRecord, TransactionAdjustment, utcnow
-from nimbus import audit
+from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/transaction-adjustments", tags=["Transaction corrections"])
 ALLOWED = {"Amount", "Tender", "Tax", "Reference", "Item", "MissingTransaction"}

@@ -1,7 +1,7 @@
 """MCP server exposing the Nimbus ontology to agents. Run: python mcp_server.py (stdio)."""
 from mcp.server.mcpserver import MCPServer
 
-import ontology
+from integrations.ontology import ontology
 
 mcp = MCPServer("nimbus-ontology")
 

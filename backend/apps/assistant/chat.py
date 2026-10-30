@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
-import ontology
+from integrations.ontology import ontology
 from models import (AuditEvent, BatchRun, Case, Connector, Exception as DBException, Finding, PolicyEvaluation,
                     Recommendation, ValidationObligation, Workflow)
 

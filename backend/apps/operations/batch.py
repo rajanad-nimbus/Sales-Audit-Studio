@@ -14,7 +14,7 @@ from apps.ingest import shopify_adapter
 from auth import require_role
 from database import get_db
 from models import BatchRun, CanonicalTransaction, utcnow
-from nimbus import audit
+from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/batch")
 STALE_AFTER_HOURS = 26

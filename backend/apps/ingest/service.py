@@ -9,12 +9,12 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 
-import ontology
+from integrations.ontology import ontology
 from apps.ingest import shopify_ingest
 from apps.transactions import detail as transaction_detail
 from models import (Case, CanonicalTransaction, Exception as DBException, ReconciliationPolicy, SourceRecord, TransactionDiscount,
                     TransactionLine, TransactionTax, TransactionTender, utcnow)
-from nimbus import audit, sla_due
+from integrations.ontology.nimbus import audit, sla_due
 
 REQUIRED = ["source_record_id", "event_time", "record_type", "amount", "store_id"]
 SIGN = {"Sale": 1, "Capture": 1, "Return": -1, "Refund": -1, "Deposit": 1, "Posting": 1, "Order": 1}

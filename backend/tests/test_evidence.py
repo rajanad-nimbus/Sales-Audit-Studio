@@ -1,7 +1,7 @@
 """Evidence retrieval uses each requirement's declared source, never a guess from its wording."""
 from types import SimpleNamespace as NS
 
-import ontology
+from integrations.ontology import ontology
 from apps.agents.investigation_service import evidence_for_requirement
 
 
