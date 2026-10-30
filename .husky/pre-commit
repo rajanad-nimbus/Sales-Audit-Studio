@@ -1,0 +1,4 @@
+#!/bin/sh
+frontend/node_modules/.bin/lint-staged
+frontend/node_modules/.bin/tsc --project frontend/tsconfig.json --noEmit
+PYTHONDONTWRITEBYTECODE=1 python3 -m pytest backend/tests -q
