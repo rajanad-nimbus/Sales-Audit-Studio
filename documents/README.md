@@ -1,8 +1,8 @@
-# Nimbus Sales Audit
+# Sales Audit Studio
 
 Agentic financial exception management for retail commerce. Lifecycle:
 **Case → Evidence → Diagnosis → Policy → Decision → Action → Validation**.
-Design docs: `NIMBUS_OVERVIEW.md`, `NIMBUS_ARCHITECTURE.md`, `NIMBUS_DATA_MODEL.md`, `NIMBUS_AGENTS.md`, `NIMBUS_INTEGRATIONS.md`, `NIMBUS_SCENARIOS.md`.
+Design docs: [`NIMBUS_OVERVIEW.md`](NIMBUS_OVERVIEW.md), [`NIMBUS_ARCHITECTURE.md`](NIMBUS_ARCHITECTURE.md), [`NIMBUS_DATA_MODEL.md`](NIMBUS_DATA_MODEL.md), [`NIMBUS_AGENTS.md`](NIMBUS_AGENTS.md), [`NIMBUS_INTEGRATIONS.md`](NIMBUS_INTEGRATIONS.md), [`NIMBUS_SCENARIOS.md`](NIMBUS_SCENARIOS.md).
 
 ## Stack
 
