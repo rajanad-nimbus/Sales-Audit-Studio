@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
+import ControlsTable from '@/components/settings/ControlsTable';
 type Ref = { id: string; category: string; code: string; name: string; active: boolean };
 type Total = {
   id: string;
@@ -234,7 +235,7 @@ export default function ControlsPage() {
               Add reference
             </button>
           </div>
-          <Table
+          <ControlsTable
             headers={['Category', 'Code', 'Name', 'Status']}
             rows={refs.map((x) => [x.category, x.code, x.name, x.active ? 'Active' : 'Inactive'])}
           />
@@ -292,7 +293,7 @@ export default function ControlsPage() {
                 Add total
               </button>
             </div>
-            <Table
+            <ControlsTable
               headers={['Name', 'Aggregation', 'Source', 'Level', 'Filter']}
               rows={totals.map((x) => [
                 x.name,
@@ -354,7 +355,7 @@ export default function ControlsPage() {
                 Add rule
               </button>
             </div>
-            <Table
+            <ControlsTable
               headers={['Rule', 'Target', 'Threshold', 'Severity', 'Owner']}
               rows={rules.map((x) => [
                 x.name,
@@ -403,7 +404,7 @@ export default function ControlsPage() {
               Add mapping
             </button>
           </div>
-          <Table
+          <ControlsTable
             headers={['Transaction', 'Tender', 'Debit', 'Credit', 'Status']}
             rows={maps.map((x) => [
               x.transaction_type,
@@ -451,7 +452,7 @@ export default function ControlsPage() {
                 {journal.lines.length} mapped entries · {journal.unmapped_transaction_ids.length}{' '}
                 transactions still need a GL mapping.
               </p>
-              <Table
+              <ControlsTable
                 headers={['Transaction', 'Debit', 'Credit', 'Amount']}
                 rows={journal.lines.map((x) => [
                   x.transaction_id,
@@ -469,38 +470,6 @@ export default function ControlsPage() {
           )}
         </section>
       )}
-    </div>
-  );
-}
-function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
-  return (
-    <div className="table-container" style={{ marginTop: '1rem' }}>
-      <table className="data-table">
-        <thead>
-          <tr>
-            {headers.map((x) => (
-              <th key={x}>{x}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length ? (
-            rows.map((row, i) => (
-              <tr key={i}>
-                {row.map((cell, j) => (
-                  <td key={j}>{cell}</td>
-                ))}
-              </tr>
-            ))
-          ) : (
-            <tr>
-              <td colSpan={headers.length} className="cc-empty">
-                No records configured.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
     </div>
   );
 }

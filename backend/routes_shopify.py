@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import ingest
@@ -50,7 +51,7 @@ async def sync_shopify(
             created_at_min=req.created_at_min,
             created_at_max=req.created_at_max,
         )
-    except Exception as e:
+    except shopify_adapter.ShopifyAPIError as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch from Shopify: {str(e)}")
 
     delivery_id = f"SHOPIFY-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
@@ -61,7 +62,7 @@ async def sync_shopify(
               f"Shopify sync for store {store_id}: {stats['canonical_created']} transactions created",
               actor="shopify-connector")
         await db.commit()
-    except Exception as e:
+    except (shopify_adapter.ShopifyAPIError, IntegrityError) as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
 
@@ -112,7 +113,7 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
               f"Webhook {topic} for {record['source_record_id']}: {stats['canonical_created']} created, "
               f"{stats['quarantined']} quarantined", actor="shopify-webhook")
         await db.commit()
-    except Exception as e:
+    except (shopify_adapter.ShopifyAPIError, IntegrityError) as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
 

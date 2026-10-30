@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import access
@@ -199,9 +200,9 @@ async def create_source_profile(body: SourceFeedProfileRequest, db: AsyncSession
     db.add(profile)
     try:
         await db.commit()
-    except Exception:
+    except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="A source-feed profile with this name already exists")
+        raise HTTPException(status_code=409, detail="A source-feed profile with this name already exists") from exc
     await db.refresh(profile)
     return profile_view(profile)
 
