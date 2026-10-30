@@ -15,7 +15,7 @@ from database import engine, get_db
 from apps.agents import investigation_service
 from integrations.ontology import nimbus, ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
-from auth import AUTH_ENABLED, current_user, require_role
+from auth import current_user, require_role
 from apps.ingest.routes import router as ingest_router
 from apps.agents.action_center import router as action_router
 from apps.operations.batch import router as batch_router
@@ -32,6 +32,7 @@ from apps.controls.rules.routes import router as rules_router
 from apps.operations.routes import router as operations_router
 from apps.ingest.shopify.routes import router as shopify_router
 from apps.agents.routes import router as agent_router
+from apps.system.routes import router as system_router
 from models import (Case, Connector, PolicyEvaluation, Workflow, ValidationObligation,
                     Exception as DBException, Finding, Recommendation, HumanDecision, AuditEvent,
                     CanonicalTransaction, SourceRecord, EvidenceSnapshot, CaseNote, EvidenceRequest, utcnow)
@@ -79,6 +80,7 @@ app.include_router(rules_router)
 app.include_router(operations_router)
 app.include_router(shopify_router)
 app.include_router(agent_router)
+app.include_router(system_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -109,43 +111,6 @@ async def ontology_authentication(request: Request, call_next):
     if store is not None and not scope.store_allowed(request.state.user, store):
         return JSONResponse(status_code=403, content={"detail": f"You are not assigned to store {store}."})
     return await call_next(request)
-
-
-@app.get("/")
-async def root():
-    return {
-        "message": "Sales Audit Studio API",
-        "version": "1.0.0",
-        "description": "Agentic Financial Exception Management for Retail Commerce"
-    }
-
-
-@app.get("/api/health")
-async def health_check():
-    return {"status": "healthy", "auth_enabled": AUTH_ENABLED, "ontology": ontology.ONTOLOGY_VERSION,
-            "ontology_integration": ontology_integration.status()}
-
-
-@app.get("/api/production-readiness")
-async def production_readiness(db: AsyncSession = Depends(get_db)):
-    """Show the concrete prerequisites before a sales-audit cutover."""
-    rows = (await db.execute(select(SourceRecord.source_system, func.max(SourceRecord.received_at)).group_by(
-        SourceRecord.source_system))).all()
-    received = {source: timestamp for source, timestamp in rows}
-    sources = [{"source_system": source, "received_at": received.get(source), "ready": source in received}
-               for source in ("POS", "POSControl", "Processor", "Bank", "ERP", "Shopify")]
-    integration = ontology_integration.status()
-    checks = [
-        {"name": "Ontology user authentication", "ready": AUTH_ENABLED,
-         "detail": "Nimbus delegates user authentication to Ontology Studio."},
-        {"name": "Approved Sales Audit ontology", "ready": integration["ready"],
-         "detail": "Approve and release the rules, then configure an ons_ integration key."},
-        {"name": "Required source feeds", "ready": all(item["ready"] for item in sources),
-         "detail": "Configure scheduled read-only POS, control, processor, bank, and ERP deliveries."},
-    ]
-    return {"ready": all(check["ready"] for check in checks), "checks": checks, "sources": sources,
-            "next_inputs": ["source schemas and read-only endpoints", "matching keys and control totals",
-                            "cutoff calendar and tolerance policy", "approval matrix and escalation owners"]}
 
 
 # ============= CASES ENDPOINTS =============
