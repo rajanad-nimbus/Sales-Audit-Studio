@@ -14,6 +14,15 @@ STORE_MANAGER_PREFIXES = ("/api/cash", "/api/store-days")
 STORE_CLAIM = os.getenv("NIMBUS_ONTOLOGY_STORE_CLAIM", "stores")
 
 
+def display_name(identity: dict, fallback: str | None = None) -> str | None:
+    """What to call this person on screen: their name, else their username, else the part of the email before the @."""
+    for key in ("name", "full_name", "username"):
+        value = str(identity.get(key) or "").strip()
+        if value:
+            return value
+    return fallback.split("@")[0] if fallback and "@" in fallback else fallback
+
+
 def stores_from_identity(identity: dict, claim: str | None = None) -> list[str]:
     """The stores Ontology Studio assigns to this user. Missing, malformed or empty means none, which is fail-closed."""
     value = identity
@@ -77,7 +86,9 @@ async def current_user(request: Request, authorization: str | None = Header(defa
                 stores = [s.strip() for s in (request.headers.get("x-impersonate-stores") or "").split(",") if s.strip()]
             else:
                 stores = stores_from_identity(identity)
-        return {"user": identity.get("email") or identity.get("username") or identity.get("open_id"),
+        email = identity.get("email") or identity.get("username") or identity.get("open_id")
+        return {"user": email,   # the stable identifier recorded in audit trails; never the display name
+                "name": display_name(identity, email),
                 "role": role, "real_role": real_role, "impersonating": role != real_role,
                 "ontology_role": ontology_role, "ontology_user_id": identity.get("id"),
                 "store_scoped": role == "store_manager", "stores": stores}

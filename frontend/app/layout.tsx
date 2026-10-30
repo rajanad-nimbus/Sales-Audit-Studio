@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/lib/ThemeContext";
-import { Sidebar } from "@/components/Sidebar";
-import { ChatPanel, ChatProvider } from "@/components/Chat";
+import { AppShell } from "@/components/AppShell";
 import { ToastProvider } from "@/components/Feedback";
-import { AccessGuard, MeProvider } from "@/components/MeProvider";
-import { TopBar } from "@/components/TopBar";
+import { MeProvider } from "@/components/MeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nimbus Sales Audit",
+  title: "Sales Audit Studio",
   description: "Agentic financial exception management for retail commerce",
 };
 
@@ -23,20 +21,7 @@ export default function RootLayout({
         <ThemeProvider>
           <ToastProvider>
           <MeProvider>
-          <ChatProvider>
-          <div className="app-layout">
-            <Sidebar />
-            <div className="app-body">
-              <TopBar />
-              <main className="main-content">
-                <div className="container">
-                  <AccessGuard>{children}</AccessGuard>
-                </div>
-              </main>
-            </div>
-            <ChatPanel />
-          </div>
-          </ChatProvider>
+          <AppShell>{children}</AppShell>
           </MeProvider>
           </ToastProvider>
         </ThemeProvider>

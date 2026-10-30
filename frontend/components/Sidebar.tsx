@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useLive } from '@/lib/sync';
+import { Logo } from '@/components/Logo';
 import { useMe } from './UserMenu';
 
 const icons: Record<string, React.ReactNode> = {
@@ -90,13 +91,11 @@ export function Sidebar() {
       {mobileOpen && <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />}
 
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' open' : ''}`}>
-        <Link href="/" className="sidebar-brand" title="Nimbus home">
+        <Link href="/" className="sidebar-brand" title="Sales Audit Studio">
           <div className="brand-mark">
-            <svg width="20" height="20" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M16 3 27 9.500v13L16 29 5 22.500v-13L16 3Z" /><path d="M16 11v10M11 13.500 16 16l5-2.500" />
-            </svg>
+            <Logo size={22} />
           </div>
-          <div className="brand-text"><b>Nimbus</b><span>Sales Audit</span></div>
+          <div className="brand-text"><b>Sales Audit</b><span>Studio</span></div>
         </Link>
 
         <div className="nav-search">

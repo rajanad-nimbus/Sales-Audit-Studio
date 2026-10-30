@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Nimbus Sales Audit API",
+    title="Sales Audit Studio API",
     version="1.0.0",
     description="Agentic Financial Exception Management for Retail Commerce",
     lifespan=lifespan
@@ -117,7 +117,7 @@ async def ontology_authentication(request: Request, call_next):
 @app.get("/")
 async def root():
     return {
-        "message": "Nimbus Sales Audit API",
+        "message": "Sales Audit Studio API",
         "version": "1.0.0",
         "description": "Agentic Financial Exception Management for Retail Commerce"
     }

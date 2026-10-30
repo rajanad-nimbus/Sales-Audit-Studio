@@ -5,8 +5,6 @@ export const api = axios.create({ baseURL: process.env.NEXT_PUBLIC_API_URL, with
 
 api.interceptors.request.use((config) => {
   try {
-    const token = localStorage.getItem('nimbus_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
     const as = localStorage.getItem('nimbus_impersonate');
     if (as) config.headers['X-Impersonate-Role'] = as;
     // An admin acting as a store manager chooses which stores to simulate; a real store manager's stores come from Ontology Studio.
@@ -21,6 +19,15 @@ api.interceptors.response.use((res) => {
   const m = (res.config.method ?? 'get').toLowerCase();
   if (m !== 'get' && !(res.config.url ?? '').includes('/api/chat')) notifyDataChanged();
   return res;
+}, (error) => {
+  // The session ended while using the app: go back to sign in. (/api/me answering 401 is handled by the access guard.)
+  const url: string = error?.config?.url ?? '';
+  if (error?.response?.status === 401 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')
+      && !url.includes('/api/me') && !url.includes('/api/auth/logout')) {
+    try { sessionStorage.setItem('nimbus_next', window.location.pathname + window.location.search); } catch { /* ignore */ }
+    window.location.assign('/login');
+  }
+  return Promise.reject(error);
 });
 
 export interface Case {

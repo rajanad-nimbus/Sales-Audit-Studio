@@ -180,3 +180,57 @@ def test_middleware_blocks_a_store_manager_from_other_stores_paths(monkeypatch):
     assert _call(monkeypatch, m, "/api/store-days/stores")[:2] == (200, True)                         # the selector filters itself
     f = {"user": "f", "role": "finance", "real_role": "finance", "store_scoped": False, "stores": None}
     assert _call(monkeypatch, f, "/api/store-days/S2/2026-10-01")[:2] == (200, True)
+
+
+# ---- display name -------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("identity,expected", [
+    ({"name": "Rajan Adhikari", "email": "rajan@x.com", "username": "rajan"}, "Rajan Adhikari"),
+    ({"name": "  ", "username": "radhikari", "email": "r@x.com"}, "radhikari"),                 # blank name falls back to the username
+    ({"email": "rajan.adhikari@x.com"}, "rajan.adhikari"),                                       # last resort: the part before the @
+    ({}, None),
+])
+def test_display_name_prefers_the_persons_name_and_never_replaces_the_audit_identifier(identity, expected):
+    assert auth.display_name(identity, identity.get("email")) == expected
+
+
+def test_me_carries_both_the_name_and_the_email(monkeypatch):
+    u = _identity(monkeypatch, {"email": "rajan@x.com", "name": "Rajan Adhikari", "role": "finance"})
+    assert u["name"] == "Rajan Adhikari" and u["user"] == "rajan@x.com"      # actions are still recorded against the email
+
+
+# ---- sign out -----------------------------------------------------------------------------------------------------
+def _logout(monkeypatch, cookie="abc", upstream_ok=True):
+    import routes_ingest as ri
+    from starlette.requests import Request
+    calls = []
+
+    class Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None):
+            calls.append((url, headers))
+            if not upstream_ok:
+                raise ri.httpx.ConnectError("down")
+            return type("R", (), {"status_code": 200})()
+    monkeypatch.setattr(auth, "ONTOLOGY_AUTH_URL", "http://ontology:8000/api/v1/auth/me")
+    monkeypatch.setattr(ri.httpx, "AsyncClient", Client)
+    raw = [(b"cookie", f"app_session_id={cookie}".encode())] if cookie else []
+    request = Request({"type": "http", "method": "POST", "path": "/api/auth/logout", "headers": raw, "query_string": b""})
+    response = asyncio.run(ri.logout(request, {"user": "a@x", "role": "finance"}))
+    return response, calls
+
+
+def test_logout_ends_the_ontology_session_and_clears_the_shared_cookie(monkeypatch):
+    response, calls = _logout(monkeypatch)
+    assert json.loads(response.body) == {"success": True, "ontology_session_ended": True}
+    assert calls == [("http://ontology:8000/api/v1/auth/logout", {"Cookie": "app_session_id=abc"})]
+    cookie = response.headers["set-cookie"]
+    assert cookie.startswith("app_session_id=") and "Max-Age=0" in cookie and "Path=/" in cookie     # the browser deletes it
+
+
+def test_logout_still_signs_the_browser_out_when_ontology_is_down(monkeypatch):
+    response, _ = _logout(monkeypatch, upstream_ok=False)
+    assert json.loads(response.body)["ontology_session_ended"] is False and "Max-Age=0" in response.headers["set-cookie"]
+    response, calls = _logout(monkeypatch, cookie=None)          # no session cookie (for example a bearer-token client): nothing to forward
+    assert calls == [] and json.loads(response.body)["success"] is True

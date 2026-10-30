@@ -104,7 +104,7 @@ input:focus, textarea:focus, select:focus, button:focus-visible { outline: 2px s
 .sidebar-brand { height: 56px; flex-shrink: 0; display: flex; align-items: center; gap: .65rem; padding: 0 var(--space-md); border-bottom: 1px solid var(--border); }
 .brand-mark { width: 32px; height: 32px; border-radius: .5rem; background: var(--navy); color: #fff; font-weight: 700; font-size: .9rem;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid color-mix(in oklab, var(--primary) 40%, transparent); }
-.brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; white-space: nowrap; }
 .brand-text b { font-size: 0.9rem; letter-spacing: -0.01em; } .brand-text span { font-size: 0.875rem; color: var(--fg-secondary); font-weight: 500; }
 .sidebar-nav { flex: 1; overflow-y: auto; padding: var(--space-md) var(--space-sm); display: flex; flex-direction: column; gap: var(--space-md); }
 .nav-section-title { padding: 0 .65rem .35rem; font-size: 0.875rem; font-weight: 600; letter-spacing: .02em; color: var(--fg-tertiary); }
@@ -487,7 +487,7 @@ div.ac-tile { display: flex; }
 .sidebar-brand { text-decoration: none; color: var(--fg); background: color-mix(in oklab, var(--sidebar) 90%, transparent); border-bottom: 1px solid color-mix(in oklab, var(--border) 80%, transparent); }
 .sidebar-brand:hover { text-decoration: none; }
 .brand-mark { background: var(--bg-secondary); color: var(--primary-text); border: 1px solid var(--primary-light); box-shadow: 0 1px 2px rgba(15,35,71,.08); }
-.brand-text b { color: var(--fg); font-weight: 700; font-size: 1.5rem; } .brand-text span { color: var(--fg-secondary); font-size: 1rem; font-weight: 500; }
+.brand-text b { color: var(--fg); font-weight: 700; font-size: 1.25rem; letter-spacing: -0.01em; } .brand-text span { color: var(--fg-secondary); font-size: 0.95rem; font-weight: 500; }
 .nav-search { position: relative; margin: .75rem .75rem .25rem; display: flex; align-items: center; }
 .nav-search svg { position: absolute; left: .65rem; color: var(--fg-tertiary); }
 .nav-search input { width: 100%; padding: .65rem .75rem .65rem 2.25rem; border-radius: .6rem; background: var(--bg-secondary); font-size: 1rem; }
@@ -729,3 +729,15 @@ button.ac-tile[aria-pressed="true"] { border-color: var(--primary); background: 
 .access-matrix .ok { color: var(--success); font-size: 1.1rem; } .access-matrix .no { color: var(--fg-tertiary); }
 .access-matrix th.you, .access-matrix td.you { background: var(--primary-light); }
 .access-matrix tr.grp td { background: var(--bg-tertiary); font-weight: 600; color: var(--fg-secondary); font-size: .85rem; letter-spacing: .02em; }
+
+/* ===== Sign-in screen ===== */
+.login-page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-lg); padding: var(--space-lg); background: var(--bg); }
+.login-card { width: min(440px, 100%); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 1rem; padding: 2.25rem 2rem; display: flex; flex-direction: column; align-items: center; gap: var(--space-md); text-align: center; box-shadow: 0 10px 30px rgba(15, 35, 71, .08); }
+.login-card h1 { margin: 0; font-size: 1.6rem; }
+.login-mark { width: 64px; height: 64px; border-radius: 1rem; display: grid; place-items: center; background: var(--navy); color: var(--sb-mark); border: 1px solid color-mix(in oklab, var(--primary) 40%, transparent); }
+.login-sub { margin: 0; color: var(--fg-secondary); }
+.login-btn { width: 100%; justify-content: center; }
+.login-note { margin: 0; color: var(--fg-secondary); font-size: .95rem; }
+.login-link { background: transparent; color: var(--primary-text); padding: 0; font-size: .95rem; }
+.login-link:hover { text-decoration: underline; }
+.login-foot { margin: 0; color: var(--fg-tertiary); font-size: .85rem; }

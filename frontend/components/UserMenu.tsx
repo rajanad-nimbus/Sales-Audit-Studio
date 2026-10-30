@@ -13,10 +13,8 @@ export { useMe } from './MeProvider';
 export function UserMenu() {
   const { me } = useMe();
   const [open, setOpen] = useState(false);
-  const [token, setToken] = useState('');
   const [pickStores, setPickStores] = useState(false);
   const [storesText, setStoresText] = useState(() => { try { return localStorage.getItem('nimbus_impersonate_stores') ?? ''; } catch { return ''; } });
-  const ontologyStudioUrl = process.env.NEXT_PUBLIC_ONTOLOGY_STUDIO_URL || 'http://localhost:3050';
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,9 +23,8 @@ export function UserMenu() {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  const hasToken = (() => { try { return !!localStorage.getItem('nimbus_token'); } catch { return false; } })();
   const signedOut = me === null;
-  const name = me === undefined ? '…' : signedOut ? 'Signed out' : me!.user!;
+  const name = me === undefined ? '…' : signedOut ? 'Signed out' : (me!.name || me!.user || 'Unknown user');
   const sub = me === undefined ? '' : signedOut ? 'Ontology Studio sign-in required' : me!.impersonating ? `Acting as ${ROLE_LABEL[me!.role]}` : (ROLE_LABEL[me!.role] ?? me!.role) + (me!.store_scoped ? (me!.stores?.length ? ` · ${me!.stores.join(', ')}` : ' · no stores assigned') : '');
   const canImpersonate = !signedOut && me !== undefined && me!.real_role === 'admin';
   const impersonate = (role: string | null, stores?: string) => {
@@ -37,17 +34,15 @@ export function UserMenu() {
     } catch { /* ignore */ }
     window.location.reload();
   };
-  const initials = signedOut || me === undefined ? '?' : name.slice(0, 2).toUpperCase();
+  const initials = signedOut || me === undefined ? '?' : (name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('') || name.slice(0, 1)).toUpperCase();
 
-  const signIn = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token.trim()) return;
-    try { localStorage.setItem('nimbus_token', token.trim()); } catch { /* ignore */ }
-    window.location.reload();
-  };
-  const signOut = () => {
-    try { localStorage.removeItem('nimbus_token'); } catch { /* ignore */ }
-    window.location.reload();
+  const [signingOut, setSigningOut] = useState(false);
+  const signOut = async () => {
+    setSigningOut(true);
+    // Ends the Ontology Studio session cookie (shared by both apps), then clears what this browser remembers.
+    try { await api.post('/api/auth/logout'); } catch { /* already signed out, or the service is down: still leave */ }
+    try { ['nimbus_impersonate', 'nimbus_impersonate_stores', 'nimbus_next', 'nimbus_token'].forEach((k) => { localStorage.removeItem(k); sessionStorage.removeItem(k); }); } catch { /* ignore */ }
+    window.location.assign('/login?signedout=1');
   };
 
   return (
@@ -62,7 +57,7 @@ export function UserMenu() {
             <span className="user-avatar">{initials}</span>
             <div>
               <b>{name}</b>
-              <small>{signedOut ? 'Sign in through Ontology Studio' : `Ontology role: ${me!.role}`}</small>
+              <small>{signedOut ? 'Sign in through Ontology Studio' : `${me!.user ?? ''}${me!.user ? ' · ' : ''}${ROLE_LABEL[me!.role] ?? me!.role}`}</small>
             </div>
           </div>
           {canImpersonate && (
@@ -83,15 +78,9 @@ export function UserMenu() {
             </div>
           )}
           <Link href="/settings" className="user-pop-link" onClick={() => setOpen(false)}>Configuration</Link>
-          {signedOut && <a className="user-pop-link" href={ontologyStudioUrl}>Open Ontology Studio sign-in</a>}
-          {(signedOut || !hasToken) && (
-            <form onSubmit={signIn} className="user-pop-form">
-              <label htmlFor="tok">Ontology Studio bearer token</label>
-              <input id="tok" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Paste a JWT for API access" autoComplete="off" />
-              <button type="submit" className="btn-primary btn-small" disabled={!token.trim()}>Sign in</button>
-            </form>
-          )}
-          {hasToken && <button className="user-pop-out" onClick={signOut}>Sign out</button>}
+          {signedOut
+            ? <Link href="/login" className="user-pop-link" onClick={() => setOpen(false)}>Sign in</Link>
+            : <button className="user-pop-out" onClick={signOut} disabled={signingOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button>}
         </div>
       )}
     </div>

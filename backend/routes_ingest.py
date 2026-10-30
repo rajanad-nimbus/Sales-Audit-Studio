@@ -3,12 +3,15 @@ import io
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import access
+import auth
 import chat
 import ingest
 import llm
@@ -337,6 +340,23 @@ async def ontology_exception_type(exception_type: str):
 async def me(user: dict = Depends(current_user)):
     """Who you are and which screens your role may open. The UI builds its navigation and route guard from this."""
     return {**user, "role_label": access.ROLE_LABELS.get(user["role"], user["role"]), "screens": access.screens_for(user["role"])}
+
+
+@router.post("/api/auth/logout")
+async def logout(request: Request, user: dict = Depends(current_user)):
+    """Sign out. Asks Ontology Studio to end its session and clears the session cookie that both apps share."""
+    ended = False
+    cookie = request.cookies.get("app_session_id")
+    base = auth.ONTOLOGY_AUTH_URL.rsplit("/auth/", 1)[0] if auth.ONTOLOGY_AUTH_URL else ""
+    if base and cookie:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                ended = (await client.post(f"{base}/auth/logout", headers={"Cookie": f"app_session_id={cookie}"})).status_code < 400
+        except httpx.HTTPError:
+            pass   # Ontology Studio is unreachable: the cookie is still cleared here, so this browser is signed out
+    response = JSONResponse({"success": True, "ontology_session_ended": ended})
+    response.delete_cookie("app_session_id", path="/")
+    return response
 
 
 @router.get("/api/access/matrix")

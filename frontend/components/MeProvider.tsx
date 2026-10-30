@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 
 export interface Screen { key: string; path: string; label: string; group: string; allowed: boolean; roles: string[] }
-export interface Me { user: string | null; role: string; role_label?: string; real_role?: string; impersonating?: boolean; screens: Screen[];
+export interface Me { user: string | null; name?: string | null; role: string; role_label?: string; real_role?: string; impersonating?: boolean; screens: Screen[];
   store_scoped?: boolean; stores?: string[] | null }   // stores: null = every store; a list (maybe empty) = only those
 
 
@@ -54,15 +54,15 @@ export function AccessGuard({ children }: { children: React.ReactNode }) {
   const blocked = !!me && !!screen && !screen.allowed;
 
   useEffect(() => { if (blocked && pathname === '/' && firstAllowed) router.replace(firstAllowed.path); }, [blocked, pathname, firstAllowed, router]);
+  // Not signed in: remember where the person was going and send them to the sign-in screen.
+  useEffect(() => {
+    if (me !== null) return;
+    try { sessionStorage.setItem('nimbus_next', window.location.pathname + window.location.search); } catch { /* ignore */ }
+    router.replace('/login');
+  }, [me, router]);
 
   if (me === undefined) return <div className="loading" role="status">Checking your access</div>;
-  if (me === null) {
-    return (
-      <div className="empty-state" role="alert"><b>You are not signed in</b>
-        <p>Sign in through Ontology Studio, then reload. If you are signed in, the service may be unreachable.</p>
-        <button className="btn-secondary btn-sm" onClick={reload}>Try again</button></div>
-    );
-  }
+  if (me === null) return <div className="loading" role="status">Taking you to sign in…</div>;
   if (blocked) {
     return (
       <div className="empty-state" role="alert">

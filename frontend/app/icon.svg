@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="sas-p" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="55%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="sas-chk" x1="8" y1="18" x2="25" y2="9" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="45%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="sas-fill" x1="16" y1="2" x2="16" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0.35"/>
+    </linearGradient>
+    <radialGradient id="sas-glow" cx="16" cy="16" r="11" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#0f2347"/>
+  <circle cx="16" cy="16" r="10" fill="url(#sas-glow)"/>
+  <path d="M16 4.5L25.5 9.5V20.5L16 27.5L6.5 20.5V9.5L16 4.5Z" 
+        fill="url(#sas-fill)" 
+        stroke="url(#sas-p)" 
+        stroke-width="1.6" 
+        stroke-linejoin="round"/>
+  <path d="M11.5 10.5H20.5" stroke="#93c5fd" stroke-opacity="0.75" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M11 14H16.5" stroke="#93c5fd" stroke-opacity="0.5" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M10.5 17.5L14.5 21.5L22.5 11" 
+        stroke="url(#sas-chk)" 
+        stroke-width="2.3" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"/>
+  <circle cx="16" cy="4.5" r="1.3" fill="#38bdf8"/>
+  <circle cx="22.5" cy="11" r="1.5" fill="#34d399"/>
+</svg>
