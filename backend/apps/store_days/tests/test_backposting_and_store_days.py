@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.exports import service as exports
+from apps.exports import routes as exports
 from apps.store_days import routes as sd
 from models import Base, Case, ExportBatch, ExportDestination, ExportItem, FoundationReference
 

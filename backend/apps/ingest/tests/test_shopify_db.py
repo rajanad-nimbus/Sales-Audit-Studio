@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.ingest import service as ingest
-from apps.ingest import shopify_routes as routes_shopify
+from apps.ingest.shopify import routes as routes_shopify
 from database import get_db
 from models import Base, Case, SourceRecord
 
