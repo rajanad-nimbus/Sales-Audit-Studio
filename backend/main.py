@@ -13,24 +13,7 @@ from apps.agents import investigation_service
 from integrations.ontology import nimbus, ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import require_role
-from apps.security.middleware import ontology_authentication
-from apps.ingest.routes import router as ingest_router
-from apps.agents.action_center import router as action_router
-from apps.operations.batch import router as batch_router
-from apps.audit.routes import router as audit_router
-from apps.exports.routes import router as exports_router
-from apps.store_days.routes import router as store_day_router
-from apps.controls.foundation.routes import router as foundation_router
-from apps.cash.routes import router as cash_router
-from apps.corrections.routes import router as corrections_router
-from apps.transactions.routes import router as transactions_router
-from apps.gl.routes import router as gl_router
-from apps.totals.routes import router as totals_router
-from apps.controls.rules.routes import router as rules_router
-from apps.operations.routes import router as operations_router
-from apps.ingest.shopify.routes import router as shopify_router
-from apps.agents.routes import router as agent_router
-from apps.system.routes import router as system_router
+from apps.router_registry import register_routes
 from models import (Case, Connector, PolicyEvaluation, Workflow, ValidationObligation,
                     Exception as DBException, Finding, Recommendation, HumanDecision, AuditEvent,
                     CanonicalTransaction, SourceRecord, EvidenceSnapshot, CaseNote, EvidenceRequest, utcnow)
@@ -62,23 +45,7 @@ cors_origins_env = os.getenv(
 )
 cors_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
 
-app.include_router(ingest_router)
-app.include_router(action_router)
-app.include_router(batch_router)
-app.include_router(audit_router)
-app.include_router(exports_router)
-app.include_router(store_day_router)
-app.include_router(foundation_router)
-app.include_router(cash_router)
-app.include_router(corrections_router)
-app.include_router(transactions_router)
-app.include_router(gl_router)
-app.include_router(totals_router)
-app.include_router(rules_router)
-app.include_router(operations_router)
-app.include_router(shopify_router)
-app.include_router(agent_router)
-app.include_router(system_router)
+register_routes(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -87,9 +54,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-app.middleware("http")(ontology_authentication)
 
 
 # ============= CASES ENDPOINTS =============
