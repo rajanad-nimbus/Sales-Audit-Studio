@@ -156,18 +156,18 @@ def _call(monkeypatch, user, path, method="GET"):
     from starlette.requests import Request
     from starlette.responses import PlainTextResponse
 
-    import main
+    from apps.security import middleware
 
     async def fake_user(request, authorization=None):
         return user
-    monkeypatch.setattr(main, "current_user", fake_user)
+    monkeypatch.setattr(middleware, "current_user", fake_user)
     request = Request({"type": "http", "method": method, "path": path, "headers": [], "query_string": b"", "scheme": "http", "server": ("t", 80), "client": ("c", 1)})
     reached = []
 
     async def call_next(_):
         reached.append(1)
         return PlainTextResponse("ok")
-    r = asyncio.run(main.ontology_authentication(request, call_next))
+    r = asyncio.run(middleware.ontology_authentication(request, call_next))
     return r.status_code, bool(reached), (json.loads(r.body)["detail"] if r.status_code != 200 else None)
 
 

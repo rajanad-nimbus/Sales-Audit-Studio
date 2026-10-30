@@ -3,19 +3,17 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import access
-import scope
 from database import engine, get_db
 from apps.agents import investigation_service
 from integrations.ontology import nimbus, ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
-from auth import current_user, require_role
+from auth import require_role
+from apps.security.middleware import ontology_authentication
 from apps.ingest.routes import router as ingest_router
 from apps.agents.action_center import router as action_router
 from apps.operations.batch import router as batch_router
@@ -91,26 +89,7 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def ontology_authentication(request: Request, call_next):
-    """Require an Ontology Studio identity for every Nimbus API operation."""
-    if (not request.url.path.startswith("/api/") or request.url.path in {"/api/health", "/api/exports/_sink"}
-            or request.method == "OPTIONS"):
-        return await call_next(request)
-    try:
-        request.state.user = await current_user(request, request.headers.get("authorization"))
-    except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers or {})
-    # Signed in is not enough: the role must be allowed the screen this API belongs to.
-    allowed, screens = access.api_allowed(request.state.user["role"], request.url.path)
-    if not allowed:
-        return JSONResponse(status_code=403, content={"detail": f"Your role ({access.ROLE_LABELS.get(request.state.user['role'], request.state.user['role'])}) "
-                                                               f"cannot use {' or '.join(screens)}."})
-    # Row-level security: a scoped user (a store manager) may only address their assigned stores.
-    store = scope.path_store(request.url.path)
-    if store is not None and not scope.store_allowed(request.state.user, store):
-        return JSONResponse(status_code=403, content={"detail": f"You are not assigned to store {store}."})
-    return await call_next(request)
+app.middleware("http")(ontology_authentication)
 
 
 # ============= CASES ENDPOINTS =============

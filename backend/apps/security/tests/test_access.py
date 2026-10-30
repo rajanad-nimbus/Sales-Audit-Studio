@@ -100,13 +100,13 @@ def _call(monkeypatch, role, path, method="GET"):
     from starlette.requests import Request
     from starlette.responses import PlainTextResponse
 
-    import main
+    from apps.security import middleware
 
     async def fake_user(request, authorization=None):
         if role is None:
             raise HTTPException(status_code=401, detail="Sign in")
         return {"user": "t@x", "role": role, "real_role": role}
-    monkeypatch.setattr(main, "current_user", fake_user)
+    monkeypatch.setattr(middleware, "current_user", fake_user)
     request = Request({"type": "http", "method": method, "path": path, "headers": [], "query_string": b"", "scheme": "http",
                        "server": ("t", 80), "client": ("c", 1)})
     reached = []
@@ -114,7 +114,7 @@ def _call(monkeypatch, role, path, method="GET"):
     async def call_next(_):
         reached.append(True)
         return PlainTextResponse("ok")
-    response = asyncio.run(main.ontology_authentication(request, call_next))
+    response = asyncio.run(middleware.ontology_authentication(request, call_next))
     return response.status_code, bool(reached), (json.loads(response.body)["detail"] if response.status_code != 200 else None)
 
 
