@@ -7,7 +7,7 @@ import ingest, investigation_service
 from models import (AuditTotalDefinition, CanonicalTransaction, CashControl, CashDeposit, Case,
     ConfiguredAuditRule, FoundationReference, GLCrossReference, ReconciliationPolicy, StoreDay)
 from fastapi import HTTPException
-from routes_store_days import open_store_day_record, retotal_store_day
+from apps.store_days.routes import open_store_day_record, retotal_store_day
 
 DAY = "2026-10-06"
 USER = {"user": "demo.finance", "role": "finance"}

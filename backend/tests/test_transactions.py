@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-import routes_transactions as rt
+from apps.transactions import routes as rt
 from models import AuditEvent, Base, CanonicalTransaction, Case, SourceRecord, TransactionAdjustment
 
 NOW = datetime.now(timezone.utc)

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from models import Base, CanonicalTransaction, SourceRecord, TransactionAdjustment
-from routes_corrections import approve_adjustment
+from apps.corrections.routes import approve_adjustment
 
 
 def test_approved_missing_transaction_creates_immutable_lineage():

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from models import Base, CanonicalTransaction, RetentionPolicy, RetentionRun, utcnow
-from routes_operations import RetentionRunBody, execute_retention
+from apps.operations.routes import RetentionRunBody, execute_retention
 
 
 def test_retention_archives_without_purging_until_confirmed():

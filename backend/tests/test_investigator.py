@@ -121,7 +121,7 @@ def test_auto_investigate_processes_new_cases_and_isolates_scope():
 
 
 def test_shadow_report_classifies_agreement():
-    from routes_agent import shadow_report
+    from apps.agents.routes import shadow_report
     sup = {"hypotheses": [{"verdict": "supported", "cited_ids": ["x"]}]}
     unsup = {"hypotheses": [{"verdict": "supported", "cited_ids": []}]}  # ungrounded does not count
     rep = shadow_report(
@@ -133,7 +133,7 @@ def test_shadow_report_classifies_agreement():
 
 def test_eligibility_requires_all_permit_conditions_and_grounded_finding():
     from decimal import Decimal as D
-    from routes_agent import eligible
+    from apps.agents.routes import eligible
     sup = {"hypotheses": [{"verdict": "supported", "cited_ids": ["x"]}]}
     case = NS(status="In Review", evidence_completeness=100, total_exception_amount=D("100"))
     rec = NS(status="Proposed", disposition_type="Timing", financial_impact=D("0"))

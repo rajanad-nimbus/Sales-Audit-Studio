@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import ingest
-import routes_transactions as rt
+from apps.transactions import routes as rt
 import transaction_detail as td
 from models import (Base, CanonicalTransaction, SourceRecord, TransactionDiscount, TransactionLine, TransactionTender)
 

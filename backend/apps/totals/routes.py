@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
 from models import AuditTotalDefinition, CanonicalTransaction, SalesAuditErrorDefinition
-from domain.totals import serialize_definition, validate_definition
+from .domain import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
 

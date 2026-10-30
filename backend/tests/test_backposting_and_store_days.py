@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import exports
-import routes_store_days as sd
+from apps.store_days import routes as sd
 from models import Base, Case, ExportBatch, ExportDestination, ExportItem, FoundationReference
 
 

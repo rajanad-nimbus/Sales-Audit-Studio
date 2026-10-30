@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import auth
-import routes_cash as cash
-import routes_store_days as sd
+from apps.cash import routes as cash
+from apps.store_days import routes as sd
 import scope
 from models import Base, CashControl, CashDeposit, StoreDay
 
@@ -200,7 +200,7 @@ def test_me_carries_both_the_name_and_the_email(monkeypatch):
 
 # ---- sign out -----------------------------------------------------------------------------------------------------
 def _logout(monkeypatch, cookie="abc", upstream_ok=True):
-    import routes_ingest as ri
+    from apps.ingest import routes as ri
     from starlette.requests import Request
     calls = []
 

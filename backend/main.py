@@ -19,22 +19,22 @@ import nimbus
 import ontology
 from ontology_integration import integration as ontology_integration
 from auth import AUTH_ENABLED, current_user, require_role
-from routes_ingest import router as ingest_router
-from action_center import router as action_router
+from apps.ingest.routes import router as ingest_router
+from apps.agents.action_center import router as action_router
 from batch import router as batch_router
 from audit_api import router as audit_router
 from exports import router as exports_router
-from routes_store_days import router as store_day_router
-from routes_foundation import router as foundation_router
-from routes_cash import router as cash_router
-from routes_corrections import router as corrections_router
-from routes_transactions import router as transactions_router
-from routes_gl import router as gl_router
-from routes_totals import router as totals_router
-from routes_rules import router as rules_router
-from routes_operations import router as operations_router
-from routes_shopify import router as shopify_router
-from routes_agent import router as agent_router
+from apps.store_days.routes import router as store_day_router
+from apps.controls.foundation_routes import router as foundation_router
+from apps.cash.routes import router as cash_router
+from apps.corrections.routes import router as corrections_router
+from apps.transactions.routes import router as transactions_router
+from apps.gl.routes import router as gl_router
+from apps.totals.routes import router as totals_router
+from apps.controls.rules_routes import router as rules_router
+from apps.operations.routes import router as operations_router
+from apps.ingest.shopify_routes import router as shopify_router
+from apps.agents.routes import router as agent_router
 from models import (Base, Case, Connector, PolicyEvaluation, Workflow, ValidationObligation,
                     Exception as DBException, Finding, Recommendation, HumanDecision, AuditEvent,
                     CanonicalTransaction, SourceRecord, EvidenceSnapshot, CaseNote, EvidenceRequest, utcnow)
