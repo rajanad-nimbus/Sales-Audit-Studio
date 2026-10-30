@@ -41,8 +41,8 @@ export function Logo({
           y2="30"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0%" stopColor="#38bdf8" />
-          <stop offset="55%" stopColor="#3b82f6" />
+          <stop offset="0%" stopColor="#8fb4ff" />
+          <stop offset="55%" stopColor="#3f6cc4" />
           <stop offset="100%" stopColor="#1d4ed8" />
         </linearGradient>
         <linearGradient
@@ -53,9 +53,9 @@ export function Logo({
           y2="9"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0%" stopColor="#38bdf8" />
-          <stop offset="45%" stopColor="#22d3ee" />
-          <stop offset="100%" stopColor="#34d399" />
+          <stop offset="0%" stopColor="#8fb4ff" />
+          <stop offset="45%" stopColor="#6f9bea" />
+          <stop offset="100%" stopColor="#9bbcf5" />
         </linearGradient>
         <linearGradient
           id={`sas-fill-${id}`}
@@ -65,12 +65,12 @@ export function Logo({
           y2="30"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.12" />
+          <stop offset="0%" stopColor="#8fb4ff" stopOpacity="0.12" />
           <stop offset="100%" stopColor="#1e3a8a" stopOpacity="0.28" />
         </linearGradient>
         <radialGradient id={`sas-glow-${id}`} cx="16" cy="16" r="11" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
+          <stop offset="0%" stopColor="#8fb4ff" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="#8fb4ff" stopOpacity="0" />
         </radialGradient>
       </defs>
       <circle cx="16" cy="16" r="11" fill={`url(#sas-glow-${id})`} />
@@ -102,11 +102,11 @@ export function Logo({
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="16" cy="2.5" r="1.5" fill="#38bdf8" />
-      <circle cx="27.5" cy="8.2" r="1.3" fill="#60a5fa" />
-      <circle cx="24" cy="10" r="1.75" fill="#34d399" />
-      <circle cx="16" cy="29.5" r="1.4" fill="#38bdf8" />
-      <circle cx="4.5" cy="8.2" r="1.3" fill="#60a5fa" />
+      <circle cx="16" cy="2.5" r="1.5" fill="#8fb4ff" />
+      <circle cx="27.5" cy="8.2" r="1.3" fill="#6f9bea" />
+      <circle cx="24" cy="10" r="1.75" fill="#9bbcf5" />
+      <circle cx="16" cy="29.5" r="1.4" fill="#8fb4ff" />
+      <circle cx="4.5" cy="8.2" r="1.3" fill="#6f9bea" />
     </svg>
   );
 }

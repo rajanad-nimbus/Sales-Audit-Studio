@@ -1,0 +1,156 @@
+/*
+ * Design tokens: the single source of truth for the Sales Audit Studio look.
+ * Navy is the brand and accent color. No other accent hues. Components and pages
+ * must consume these variables (or the primitives in components/ui) and never hard-code values.
+ * TypeScript mirror: lib/theme.ts. Reference: DESIGN_SYSTEM.md and /design-system.
+ */
+
+:root {
+  --bg: oklch(0.99 0.005 255);
+  --bg-secondary: #ffffff;
+  --bg-tertiary: oklch(0.96 0.02 255);
+  --fg: oklch(0.235 0.015 65);
+  --fg-secondary: oklch(0.48 0.05 255);
+  --fg-tertiary: oklch(0.62 0.04 255);
+  --border: oklch(0.88 0.03 255);
+  --border-light: oklch(0.93 0.02 255);
+  --sidebar: oklch(0.97 0.015 255);
+  --sidebar-accent: oklch(0.93 0.03 255);
+  --navy: #0f2347;
+  --primary: #17336b;
+  --primary-hover: #0f2550;
+  --primary-light: #e3e9f6;
+  --primary-text: var(--primary);
+  --accent: #1d4f9e;
+  /* sidebar is navy in every theme */
+  --sb-bg: #0f2347;
+  --sb-fg: #c3d1ea;
+  --sb-muted: #8ea3c9;
+  --sb-hover: rgba(255, 255, 255, 0.08);
+  --sb-active: rgba(255, 255, 255, 0.14);
+  --sb-line: rgba(255, 255, 255, 0.1);
+  --sb-mark: #8fb4ff;
+  --success: #059669;
+  --warning: #d97706;
+  --error: oklch(0.577 0.245 27.325);
+  --info: #2f5fb3;
+  --radius: 0.65rem;
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 2.5rem;
+  --space-3xl: 3rem;
+  --on-primary: #ffffff;
+  --navy-active: #0f2454;
+  --scrim: rgba(0, 0, 0, 0.45);
+  --focus-ring: color-mix(in oklab, var(--primary) 45%, transparent);
+
+  /* type */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 0.9375rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.75rem;
+  --text-display: 2rem;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --leading-tight: 1.3;
+  --leading-normal: 1.55;
+
+  /* shape */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-pill: 999px;
+  --control-h: 2.25rem;
+
+  /* elevation */
+  --shadow-sm: 0 1px 2px rgba(15, 35, 71, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 35, 71, 0.1);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.28);
+
+  /* motion and layering */
+  --duration-fast: 0.15s;
+  --duration-base: 0.2s;
+  --ease: ease;
+  --z-sticky: 10;
+  --z-sidebar: 20;
+  --z-popover: 40;
+  --z-toast: 60;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: oklch(0.12 0.04 258);
+    --bg-secondary: oklch(0.145 0.058 255);
+    --bg-tertiary: oklch(0.185 0.065 255);
+    --fg: oklch(0.93 0.015 250);
+    --fg-secondary: oklch(0.72 0.04 250);
+    --fg-tertiary: oklch(0.66 0.04 250);
+    --border: oklch(0.34 0.06 255);
+    --border-light: oklch(0.26 0.05 255);
+    --sidebar: oklch(0.1 0.04 258);
+    --sidebar-accent: oklch(0.19 0.06 255);
+    --primary: #3f6cc4;
+    --primary-text: #9bbcf5;
+    --primary-hover: #5481d6;
+    --primary-light: oklch(0.23 0.075 255);
+    --navy: #16306a;
+    --accent: #6f9bea;
+    --sb-bg: #091428;
+    --sb-fg: #c3d1ea;
+    --sb-muted: #8ea3c9;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --error: oklch(0.704 0.191 22.216);
+    --info: #6f9bea;
+    color-scheme: dark;
+    --scrim: rgba(0, 0, 0, 0.6);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+  }
+}
+:root[data-theme='dark'] {
+  --bg: oklch(0.12 0.04 258);
+  --bg-secondary: oklch(0.145 0.058 255);
+  --bg-tertiary: oklch(0.185 0.065 255);
+  --fg: oklch(0.93 0.015 250);
+  --fg-secondary: oklch(0.72 0.04 250);
+  --fg-tertiary: oklch(0.66 0.04 250);
+  --border: oklch(0.34 0.06 255);
+  --border-light: oklch(0.26 0.05 255);
+  --sidebar: oklch(0.1 0.04 258);
+  --sidebar-accent: oklch(0.19 0.06 255);
+  --primary: #3f6cc4;
+  --primary-text: #9bbcf5;
+  --primary-hover: #5481d6;
+  --primary-light: oklch(0.23 0.075 255);
+  --navy: #16306a;
+  --accent: #6f9bea;
+  --sb-bg: #091428;
+  --sb-fg: #c3d1ea;
+  --sb-muted: #8ea3c9;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --error: oklch(0.704 0.191 22.216);
+  --info: #6f9bea;
+  color-scheme: dark;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+}

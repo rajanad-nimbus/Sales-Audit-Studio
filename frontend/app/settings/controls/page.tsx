@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
 import ControlsTable from '@/components/settings/ControlsTable';
+import { Alert, PageHeader, Segmented } from '@/components/ui';
 type Ref = { id: string; category: string; code: string; name: string; active: boolean };
 type Total = {
   id: string;
@@ -171,36 +172,26 @@ export default function ControlsPage() {
     ).then(() => setGl({ ...gl, tender_type: '', debit_account: '', credit_account: '' }));
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h2>Controls &amp; reference data</h2>
-          <p className="page-sub">
-            Retail reference data and governed controls used when Store Days are recalculated.
-          </p>
-        </div>
-      </div>
-      <div className="cc-seg" role="tablist" style={{ alignSelf: 'flex-start', flexWrap: 'wrap' }}>
-        {tabs.map((t) => (
-          <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
-            {t}
-          </button>
-        ))}
+      <PageHeader
+        title="Controls & reference data"
+        subtitle="Retail reference data and governed controls used when Store Days are recalculated."
+      />
+      <div style={{ alignSelf: 'flex-start' }}>
+        <Segmented
+          value={tab}
+          onChange={setTab}
+          options={tabs.map((t) => ({ value: t, label: t }))}
+        />
       </div>
       {error && (
-        <div className="alert alert-error">
+        <Alert tone="error" onDismiss={() => setError(null)}>
           {error}
-          <button className="btn-secondary btn-sm alert-close" onClick={() => setError(null)}>
-            ×
-          </button>
-        </div>
+        </Alert>
       )}
       {notice && (
-        <div className="alert alert-info">
+        <Alert tone="info" onDismiss={() => setNotice(null)}>
           {notice}
-          <button className="btn-secondary btn-sm alert-close" onClick={() => setNotice(null)}>
-            ×
-          </button>
-        </div>
+        </Alert>
       )}
       {tab === 'Foundation data' && (
         <section className="info-card">
@@ -462,9 +453,9 @@ export default function ControlsPage() {
                 ])}
               />
               {journal.unmapped_transaction_ids.length > 0 && (
-                <p className="alert alert-warning">
+                <Alert tone="warning">
                   Unmapped transaction IDs: {journal.unmapped_transaction_ids.join(', ')}
-                </p>
+                </Alert>
               )}
             </>
           )}

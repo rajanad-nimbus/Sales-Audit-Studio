@@ -4,6 +4,7 @@ import { Fragment, use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SkeletonRows, useToast } from '@/components/Feedback';
+import { Alert, Button, DataTable } from '@/components/ui';
 import { PriorityBadge, StatusBadge } from '@/components/CaseTable';
 import { AgentModeNotice, useAgentMode } from '@/components/AgentMode';
 import { useMe } from '@/components/UserMenu';
@@ -416,16 +417,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         ) : proposed.length > 0 ? (
           <>
             {c.investigation_status === 'Awaiting Evidence' && (
-              <div className="alert alert-warning" role="status">
+              <Alert
+                tone="warning"
+                action={
+                  <Button size="sm" className="alert-close" onClick={() => pickTab('records')}>
+                    Go to evidence
+                  </Button>
+                }
+              >
                 Evidence is missing, so this case cannot be approved on its merits yet. Provide it
                 under Records &amp; evidence and the case re-evaluates automatically.
-                <button
-                  className="btn-secondary btn-sm alert-close"
-                  onClick={() => pickTab('records')}
-                >
-                  Go to evidence
-                </button>
-              </div>
+              </Alert>
             )}
             <p>Review the recommendation, explain your decision, then approve or escalate.</p>
             {proposed.map((r) => (
@@ -561,35 +563,41 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             {exceptions.length === 0 ? (
               <p className="cc-empty">No exceptions recorded.</p>
             ) : (
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Exception</th>
-                      <th>Source</th>
-                      <th className="num">Amount</th>
-                      <th>Severity</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {exceptions.map((x) => (
-                      <tr key={x.id}>
-                        <td className="font-medium">
-                          {pretty(x.exception_type)}
-                          <small className="act-sub"> {pretty(x.exception_family)}</small>
-                        </td>
-                        <td>{x.source_system}</td>
-                        <td className="num">{money(x.exception_amount)}</td>
-                        <td>
-                          <span className={`badge badge-sm ${sevTone(x.severity)}`}>
-                            {x.severity}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={[
+                  {
+                    key: 'c0',
+                    header: 'Exception',
+                    primary: true,
+                    render: (x) => (
+                      <>
+                        {pretty(x.exception_type)}
+                        <small className="act-sub"> {pretty(x.exception_family)}</small>
+                      </>
+                    ),
+                  },
+                  { key: 'c1', header: 'Source', render: (x) => x.source_system },
+                  {
+                    key: 'c2',
+                    header: 'Amount',
+                    numeric: true,
+                    render: (x) => money(x.exception_amount),
+                  },
+                  {
+                    key: 'c3',
+                    header: 'Severity',
+                    render: (x) => (
+                      <>
+                        <span className={`badge badge-sm ${sevTone(x.severity)}`}>
+                          {x.severity}
+                        </span>
+                      </>
+                    ),
+                  },
+                ]}
+                rows={exceptions}
+                rowKey={(x) => String(x.id)}
+              />
             )}
           </section>
 

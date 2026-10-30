@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
+import { Alert, PageHeader } from '@/components/ui';
 
 type Adjustment = {
   id: string;
@@ -192,22 +193,14 @@ export default function CorrectionsPage() {
   const active = kinds.find((x) => x.key === kind)!;
   return (
     <div className="page-container" style={{ maxWidth: 1280, marginLeft: 0 }}>
-      <div className="page-header">
-        <div>
-          <h1>Transaction Corrections</h1>
-          <p className="page-sub">
-            Correct the audited view without changing the original source. Every proposal is
-            attributable, reviewed, and retained.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Transaction Corrections"
+        subtitle="Correct the audited view without changing the original source. Every proposal is attributable, reviewed, and retained."
+      />
       {error && (
-        <div className="alert alert-error">
+        <Alert tone="error" onDismiss={() => setError(null)}>
           {error}
-          <button className="btn-secondary btn-sm alert-close" onClick={() => setError(null)}>
-            ×
-          </button>
-        </div>
+        </Alert>
       )}
       <section className="info-card">
         <div className="cc-head">
@@ -238,9 +231,9 @@ export default function CorrectionsPage() {
             </button>
           ))}
         </div>
-        <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
+        <Alert tone="info" className="mb-md">
           <b>{active.title}.</b> {active.help}
-        </div>
+        </Alert>
         <div className="case-panel case-two">
           <div>
             {kind !== 'MissingTransaction' && (

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { useMe } from '@/components/MeProvider';
+import { Alert } from '@/components/ui';
 
 const STUDIO = process.env.NEXT_PUBLIC_ONTOLOGY_STUDIO_URL || 'http://localhost:3050';
 
@@ -67,11 +68,7 @@ export default function LoginPage() {
           </p>
         ) : (
           <>
-            {signedOut && (
-              <div className="alert alert-info" role="status">
-                You have been signed out.
-              </div>
-            )}
+            {signedOut && <Alert tone="info">You have been signed out.</Alert>}
             <button
               className="btn-primary btn-lg login-btn"
               onClick={signIn}

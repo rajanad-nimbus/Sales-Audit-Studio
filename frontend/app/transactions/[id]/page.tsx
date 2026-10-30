@@ -7,6 +7,7 @@ import { api, money } from '@/lib/api';
 import { CopyButton, SkeletonRows } from '@/components/Feedback';
 import { StatusBadge } from '@/components/CaseTable';
 import { CaseLink } from '@/components/MeProvider';
+import { Alert, DataTable } from '@/components/ui';
 
 interface Linked {
   id: string;
@@ -244,53 +245,63 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         ) : det.lines.length === 0 ? (
           <p className="cc-empty">No item lines were sent.</p>
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Item</th>
-                  <th className="num">Qty</th>
-                  <th className="num">Unit price</th>
-                  <th className="num">Amount</th>
-                  <th className="num">Discount</th>
-                  <th className="num">VAT</th>
-                  <th className="num">Line total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {det.lines.map((l) => (
-                  <tr key={l.line_no}>
-                    <td>{l.line_no}</td>
-                    <td className="font-medium">
-                      {l.item_code}
+          <DataTable
+            columns={[
+              { key: 'c0', header: '#', render: (l) => l.line_no },
+              {
+                key: 'c1',
+                header: 'Item',
+                primary: true,
+                render: (l) => (
+                  <>
+                    {l.item_code}
+                    <small className="act-sub" style={{ display: 'block' }}>
+                      {l.description}
+                      {l.return_reason ? ` · ${l.return_reason}` : ''}
+                    </small>
+                  </>
+                ),
+              },
+              { key: 'c2', header: 'Qty', numeric: true, render: (l) => Math.abs(l.quantity) },
+              {
+                key: 'c3',
+                header: 'Unit price',
+                numeric: true,
+                render: (l) => money(l.unit_price),
+              },
+              { key: 'c4', header: 'Amount', numeric: true, render: (l) => money(l.gross_amount) },
+              {
+                key: 'c5',
+                header: 'Discount',
+                numeric: true,
+                render: (l) => (num(l.discount_amount) ? money(l.discount_amount) : '—'),
+              },
+              {
+                key: 'c6',
+                header: 'VAT',
+                numeric: true,
+                render: (l) => (
+                  <>
+                    {money(l.tax_amount)}
+                    {l.tax_code && (
                       <small className="act-sub" style={{ display: 'block' }}>
-                        {l.description}
-                        {l.return_reason ? ` · ${l.return_reason}` : ''}
+                        {l.tax_code} {(num(l.tax_rate) * 100).toFixed(0)}%
                       </small>
-                    </td>
-                    <td className="num">{Math.abs(l.quantity)}</td>
-                    <td className="num">{money(l.unit_price)}</td>
-                    <td className="num">{money(l.gross_amount)}</td>
-                    <td className="num">
-                      {num(l.discount_amount) ? money(l.discount_amount) : '—'}
-                    </td>
-                    <td className="num">
-                      {money(l.tax_amount)}
-                      {l.tax_code && (
-                        <small className="act-sub" style={{ display: 'block' }}>
-                          {l.tax_code} {(num(l.tax_rate) * 100).toFixed(0)}%
-                        </small>
-                      )}
-                    </td>
-                    <td className="num">
-                      {money(num(l.gross_amount) - num(l.discount_amount) + num(l.tax_amount))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    )}
+                  </>
+                ),
+              },
+              {
+                key: 'c7',
+                header: 'Line total',
+                numeric: true,
+                render: (l) =>
+                  money(num(l.gross_amount) - num(l.discount_amount) + num(l.tax_amount)),
+              },
+            ]}
+            rows={det.lines}
+            rowKey={(l) => String(l.line_no)}
+          />
         )}
       </section>
 
@@ -410,28 +421,26 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               {det.taxes.length === 0 ? (
                 <p className="cc-empty">No tax was charged.</p>
               ) : (
-                <div className="table-scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Tax</th>
-                        <th className="num">Rate</th>
-                        <th className="num">Taxable amount</th>
-                        <th className="num">Tax</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {det.taxes.map((x) => (
-                        <tr key={x.tax_code}>
-                          <td className="font-medium">{x.tax_name}</td>
-                          <td className="num">{(num(x.rate) * 100).toFixed(0)}%</td>
-                          <td className="num">{money(x.taxable_amount)}</td>
-                          <td className="num">{money(x.tax_amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTable
+                  columns={[
+                    { key: 'c0', header: 'Tax', primary: true, render: (x) => x.tax_name },
+                    {
+                      key: 'c1',
+                      header: 'Rate',
+                      numeric: true,
+                      render: (x) => <>{(num(x.rate) * 100).toFixed(0)}%</>,
+                    },
+                    {
+                      key: 'c2',
+                      header: 'Taxable amount',
+                      numeric: true,
+                      render: (x) => money(x.taxable_amount),
+                    },
+                    { key: 'c3', header: 'Tax', numeric: true, render: (x) => money(x.tax_amount) },
+                  ]}
+                  rows={det.taxes}
+                  rowKey={(x) => String(x.tax_code)}
+                />
               )}
             </section>
           </div>
@@ -458,87 +467,91 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               {d.returns.reason ? ` Reason: ${d.returns.reason}.` : ''}
             </p>
           ) : d.returns.original_reference ? (
-            <div className="alert alert-warning">
+            <Alert tone="warning">
               The original sale <b>{d.returns.original_reference}</b> was not found in Nimbus. This
               return cannot be checked against a sale.
-            </div>
+            </Alert>
           ) : (
-            <div className="alert alert-warning">
+            <Alert tone="warning">
               No original sale was referenced. This is a return without a receipt.
-            </div>
+            </Alert>
           )}
           {d.returns.items && d.returns.items.length > 0 && (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th className="num">Returned now</th>
-                    <th className="num">Sold</th>
-                    <th className="num">Returned before</th>
-                    <th>Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.returns.items.map((i) => (
-                    <tr key={i.item_code}>
-                      <td className="font-medium">
-                        {i.item_code}
-                        <small className="act-sub" style={{ display: 'block' }}>
-                          {i.description}
-                        </small>
-                      </td>
-                      <td className="num">{i.returned_qty}</td>
-                      <td className="num">{i.sold_qty ?? '—'}</td>
-                      <td className="num">{i.already_returned_qty}</td>
-                      <td>
-                        {i.reason ?? '—'}
-                        {i.over_returned && (
-                          <span
-                            className="badge badge-sm badge-error"
-                            style={{ marginLeft: '.4rem' }}
-                          >
-                            {i.sold_qty === null ? 'Not on the original sale' : 'Over-returned'}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={[
+                {
+                  key: 'c0',
+                  header: 'Item',
+                  primary: true,
+                  render: (i) => (
+                    <>
+                      {i.item_code}
+                      <small className="act-sub" style={{ display: 'block' }}>
+                        {i.description}
+                      </small>
+                    </>
+                  ),
+                },
+                { key: 'c1', header: 'Returned now', numeric: true, render: (i) => i.returned_qty },
+                { key: 'c2', header: 'Sold', numeric: true, render: (i) => i.sold_qty ?? '—' },
+                {
+                  key: 'c3',
+                  header: 'Returned before',
+                  numeric: true,
+                  render: (i) => i.already_returned_qty,
+                },
+                {
+                  key: 'c4',
+                  header: 'Reason',
+                  render: (i) => (
+                    <>
+                      {i.reason ?? '—'}
+                      {i.over_returned && (
+                        <span
+                          className="badge badge-sm badge-error"
+                          style={{ marginLeft: '.4rem' }}
+                        >
+                          {i.sold_qty === null ? 'Not on the original sale' : 'Over-returned'}
+                        </span>
+                      )}
+                    </>
+                  ),
+                },
+              ]}
+              rows={d.returns.items}
+              rowKey={(i) => String(i.item_code)}
+            />
           )}
         </section>
       )}
       {d.returns && !d.returns.is_return && d.returns.returns && d.returns.returns.length > 0 && (
         <section className="info-card case-section">
           <h2>Returns against this sale</h2>
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Return</th>
-                  <th>Date</th>
-                  <th>Items</th>
-                  <th>Reason</th>
-                  <th className="num">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.returns.returns.map((x) => (
-                  <tr key={x.id}>
-                    <td>
-                      <Link href={`/transactions/${x.id}`}>Open return</Link>
-                    </td>
-                    <td>{x.business_date}</td>
-                    <td>{x.items.map((i) => `${i.quantity} × ${i.item_code}`).join(', ')}</td>
-                    <td>{x.reason ?? '—'}</td>
-                    <td className="num">{money(x.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              {
+                key: 'c0',
+                header: 'Return',
+                render: (x) => (
+                  <>
+                    <Link href={`/transactions/${x.id}`}>Open return</Link>
+                  </>
+                ),
+              },
+              { key: 'c1', header: 'Date', render: (x) => x.business_date },
+              {
+                key: 'c2',
+                header: 'Items',
+                render: (x) => (
+                  <>{x.items.map((i) => `${i.quantity} × ${i.item_code}`).join(', ')}</>
+                ),
+              },
+              { key: 'c3', header: 'Reason', render: (x) => x.reason ?? '—' },
+              { key: 'c4', header: 'Amount', numeric: true, render: (x) => money(x.amount) },
+            ]}
+            rows={d.returns.returns}
+            rowKey={(x) => String(x.id)}
+          />
         </section>
       )}
 
@@ -586,34 +599,34 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 No other transaction shares this payment or settlement reference.
               </p>
             ) : (
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Source</th>
-                      <th>Type</th>
-                      <th className="num">Amount</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.linked_transactions.map((t) => (
-                      <tr key={t.id}>
-                        <td>
-                          <Link href={`/transactions/${t.id}`}>{t.source_system}</Link>
-                        </td>
-                        <td>{t.transaction_type}</td>
-                        <td className="num">{money(t.amount)}</td>
-                        <td>
-                          <span className={`badge badge-sm ${tone(t.reconciliation_status)}`}>
-                            {t.reconciliation_status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={[
+                  {
+                    key: 'c0',
+                    header: 'Source',
+                    render: (t) => (
+                      <>
+                        <Link href={`/transactions/${t.id}`}>{t.source_system}</Link>
+                      </>
+                    ),
+                  },
+                  { key: 'c1', header: 'Type', render: (t) => t.transaction_type },
+                  { key: 'c2', header: 'Amount', numeric: true, render: (t) => money(t.amount) },
+                  {
+                    key: 'c3',
+                    header: 'Status',
+                    render: (t) => (
+                      <>
+                        <span className={`badge badge-sm ${tone(t.reconciliation_status)}`}>
+                          {t.reconciliation_status}
+                        </span>
+                      </>
+                    ),
+                  },
+                ]}
+                rows={d.linked_transactions}
+                rowKey={(t) => String(t.id)}
+              />
             )}
           </section>
           {d.adjustments.length > 0 && (
@@ -670,9 +683,9 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               ))}
             </dl>
             {src.quarantine_reason && (
-              <div className="alert alert-warning" style={{ marginTop: '.6rem' }}>
+              <Alert tone="warning" className="mt-sm">
                 Quarantined: {src.quarantine_reason}
-              </div>
+              </Alert>
             )}
             <div className="sd-section">
               <h3>

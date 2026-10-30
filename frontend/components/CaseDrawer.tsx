@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, CaseDetail, Validation, Workflow, money } from '@/lib/api';
+import { Alert } from '@/components/ui';
 
 export function CaseDrawer({
   id,
@@ -100,7 +101,7 @@ export function CaseDrawer({
               <b style={{ fontSize: '.95rem' }}>{c.assigned_to ?? 'Unassigned'}</b>
             </div>
           </div>
-          {msg && <div className="alert alert-warning">{msg}</div>}
+          {msg && <Alert tone="warning">{msg}</Alert>}
           {d.findings[0] && <p className="cc-find">{d.findings[0].conclusion}</p>}
           {d.exceptions.length === 0 && (
             <p className="cc-empty">No exception records are attached to this case.</p>

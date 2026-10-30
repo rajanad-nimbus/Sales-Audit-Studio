@@ -1,8 +1,9 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, AuditEvent } from '@/lib/api';
+import { Alert, Button, DataTable, PageHeader } from '@/components/ui';
 
 interface Evt extends AuditEvent {
   after?: any;
@@ -162,37 +163,31 @@ export default function ActivityPage() {
   const last = events[0];
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Agent Activity</h1>
-          <p className="page-sub">
-            Everything agents, connectors and people did, newest first. Read-only audit trail.
-          </p>
-        </div>
-        <div className="cc-controls">
-          <span className="cc-live">
-            <i className={`dot ${live ? 'on' : ''}`} />
-            {live ? 'Live' : 'Paused'}
-            {last ? ` · last event ${ago(last.created_at)}` : ''}
-          </span>
-          {canOpen('/settings/agents') && (
-            <Link className="btn-secondary btn-sm" href="/settings/agents">
-              Agent settings
-            </Link>
-          )}
-          <button className="btn-secondary btn-sm" onClick={() => setLive((v) => !v)}>
-            {live ? 'Pause' : 'Resume'}
-          </button>
-          <button className="btn-secondary btn-sm" onClick={load}>
-            Refresh
-          </button>
-        </div>
-      </div>
-      {error && (
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
-      )}
+      <PageHeader
+        title="Agent Activity"
+        subtitle="Everything agents, connectors and people did, newest first. Read-only audit trail."
+        actions={
+          <>
+            <span className="cc-live">
+              <i className={`dot ${live ? 'on' : ''}`} />
+              {live ? 'Live' : 'Paused'}
+              {last ? ` · last event ${ago(last.created_at)}` : ''}
+            </span>
+            {canOpen('/settings/agents') && (
+              <Link className="btn-secondary btn-sm" href="/settings/agents">
+                Agent settings
+              </Link>
+            )}
+            <Button size="sm" onClick={() => setLive((v) => !v)}>
+              {live ? 'Pause' : 'Resume'}
+            </Button>
+            <Button size="sm" onClick={load}>
+              Refresh
+            </Button>
+          </>
+        }
+      />
+      {error && <Alert tone="error">{error}</Alert>}
       <AgentModeNotice mode={agentMode} />
 
       {loaded && (
@@ -315,123 +310,121 @@ export default function ActivityPage() {
                 {g.day}
                 <span className="cc-count">{g.items.length}</span>
               </h3>
-              <div className="table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: '7rem' }}>When</th>
-                      <th style={{ width: '14rem' }}>Actor</th>
-                      <th>What happened</th>
-                      <th style={{ width: '5rem' }}>Case</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.items.map((e) => (
-                      <Fragment key={e.id}>
-                        <tr
-                          className={`ac-row ${open === e.id ? 'open' : ''} ${fresh.has(e.id) ? 'act-new' : ''}`}
-                          tabIndex={0}
-                          aria-expanded={open === e.id}
-                          onClick={() => setOpen(open === e.id ? null : e.id)}
-                          onKeyDown={(k) => {
-                            if (k.key === 'Enter') setOpen(open === e.id ? null : e.id);
-                          }}
+              <DataTable
+                columns={[
+                  {
+                    key: 'when',
+                    header: 'When',
+                    width: '7rem',
+                    render: (e) => (
+                      <span
+                        className="text-sm nowrap"
+                        title={new Date(e.created_at).toLocaleString()}
+                      >
+                        {ago(e.created_at)}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'actor',
+                    header: 'Actor',
+                    width: '14rem',
+                    render: (e) => (
+                      <span className="act-actor">
+                        <i
+                          className={`act-av ${groupOf(e.actor) === 'people' ? 'person' : ''}`}
+                          aria-hidden
                         >
-                          <td
-                            className="text-sm nowrap"
-                            title={new Date(e.created_at).toLocaleString()}
-                          >
-                            {ago(e.created_at)}
-                          </td>
-                          <td>
-                            <span className="act-actor">
-                              <i
-                                className={`act-av ${groupOf(e.actor) === 'people' ? 'person' : ''}`}
-                                aria-hidden
-                              >
-                                {initials(e.actor)}
-                              </i>
-                              <span>
-                                <span className="font-medium">{pretty(e.actor)}</span>
-                                <small className="act-sub" style={{ display: 'block' }}>
-                                  {groupLabel(e.actor)}
-                                </small>
-                              </span>
-                            </span>
-                          </td>
-                          <td>
-                            <span className={`badge badge-sm ${tone(e.event_type)}`}>
-                              {pretty(e.event_type)}
-                            </span>{' '}
-                            <span className="act-desc">{e.action_description}</span>
-                          </td>
-                          <td onClick={(x) => x.stopPropagation()}>
-                            {e.case_id ? (
-                              <CaseLink id={e.case_id}>Open</CaseLink>
-                            ) : (
-                              <span className="act-sub">-</span>
-                            )}
-                          </td>
-                        </tr>
-                        {open === e.id && (
-                          <tr>
-                            <td colSpan={4}>
-                              <div className="act-detail">
-                                {e.after?.result ? (
-                                  <>
-                                    <b>{e.after.result.summary}</b>
-                                    <ul>
-                                      {e.after.result.hypotheses?.map((h: any, i: number) => (
-                                        <li key={i}>
-                                          <b>{h.cause}</b>: {h.verdict} ({h.cited_ids?.length ?? 0}{' '}
-                                          cited). {h.reasoning}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                    <small>
-                                      Model {e.after.model}
-                                      {e.after.via ? ` via ${e.after.via}` : ''} ·{' '}
-                                      {e.after.tool_calls?.length ?? 0} tool calls ·{' '}
-                                      {(
-                                        e.after.input_tokens + e.after.output_tokens
-                                      ).toLocaleString()}{' '}
-                                      tokens
-                                      {typeof e.after.cost_usd === 'number'
-                                        ? ` · $${e.after.cost_usd.toFixed(3)}`
-                                        : ''}
-                                      {e.after.result.rejected_citations?.length
-                                        ? ` · ${e.after.result.rejected_citations.length} citations rejected`
-                                        : ''}
-                                    </small>
-                                  </>
-                                ) : e.after ? (
-                                  <pre>{JSON.stringify(e.after, null, 2)}</pre>
-                                ) : (
-                                  <small>No further detail recorded.</small>
-                                )}
-                                <small>
-                                  Audit event #{(e as any).seq} ·{' '}
-                                  {new Date(e.created_at).toLocaleString()}
-                                  {e.after && (
-                                    <>
-                                      {' '}
-                                      ·{' '}
-                                      <CopyButton
-                                        value={JSON.stringify(e.after, null, 2)}
-                                        label="Copy detail"
-                                      />
-                                    </>
-                                  )}
-                                </small>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                          {initials(e.actor)}
+                        </i>
+                        <span>
+                          <span className="font-medium">{pretty(e.actor)}</span>
+                          <small className="act-sub" style={{ display: 'block' }}>
+                            {groupLabel(e.actor)}
+                          </small>
+                        </span>
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'what',
+                    header: 'What happened',
+                    render: (e) => (
+                      <>
+                        <span className={`badge badge-sm ${tone(e.event_type)}`}>
+                          {pretty(e.event_type)}
+                        </span>{' '}
+                        <span className="act-desc">{e.action_description}</span>
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'case',
+                    header: 'Case',
+                    width: '5rem',
+                    stopRowClick: true,
+                    render: (e) =>
+                      e.case_id ? (
+                        <CaseLink id={e.case_id}>Open</CaseLink>
+                      ) : (
+                        <span className="act-sub">-</span>
+                      ),
+                  },
+                ]}
+                rows={g.items}
+                rowKey={(e) => String(e.id)}
+                onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
+                rowClassName={(e) =>
+                  `ac-row ${open === e.id ? 'open' : ''} ${fresh.has(e.id) ? 'act-new' : ''}`
+                }
+                expandedKey={open === null ? null : String(open)}
+                renderDetail={(e) => (
+                  <div className="act-detail">
+                    {e.after?.result ? (
+                      <>
+                        <b>{e.after.result.summary}</b>
+                        <ul>
+                          {e.after.result.hypotheses?.map((h: any, i: number) => (
+                            <li key={i}>
+                              <b>{h.cause}</b>: {h.verdict} ({h.cited_ids?.length ?? 0} cited).{' '}
+                              {h.reasoning}
+                            </li>
+                          ))}
+                        </ul>
+                        <small>
+                          Model {e.after.model}
+                          {e.after.via ? ` via ${e.after.via}` : ''} ·{' '}
+                          {e.after.tool_calls?.length ?? 0} tool calls ·{' '}
+                          {(e.after.input_tokens + e.after.output_tokens).toLocaleString()} tokens
+                          {typeof e.after.cost_usd === 'number'
+                            ? ` · $${e.after.cost_usd.toFixed(3)}`
+                            : ''}
+                          {e.after.result.rejected_citations?.length
+                            ? ` · ${e.after.result.rejected_citations.length} citations rejected`
+                            : ''}
+                        </small>
+                      </>
+                    ) : e.after ? (
+                      <pre>{JSON.stringify(e.after, null, 2)}</pre>
+                    ) : (
+                      <small>No further detail recorded.</small>
+                    )}
+                    <small>
+                      Audit event #{(e as any).seq} · {new Date(e.created_at).toLocaleString()}
+                      {e.after && (
+                        <>
+                          {' '}
+                          ·{' '}
+                          <CopyButton
+                            value={JSON.stringify(e.after, null, 2)}
+                            label="Copy detail"
+                          />
+                        </>
+                      )}
+                    </small>
+                  </div>
+                )}
+              />
             </section>
           ))
         )}

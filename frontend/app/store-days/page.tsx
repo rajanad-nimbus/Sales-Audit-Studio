@@ -6,6 +6,7 @@ import { api, money } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { CaseLink, useMe } from '@/components/MeProvider';
+import { Alert, Button, PageHeader } from '@/components/ui';
 
 interface StoreDay {
   store_id: string;
@@ -193,22 +194,22 @@ export default function StoreDaysPage() {
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Store Days &amp; Totals</h1>
-          <p className="page-sub">
-            Versioned balancing totals for the controlled store-day audit lifecycle.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Store Days &amp; Totals"
+        subtitle="Versioned balancing totals for the controlled store-day audit lifecycle."
+      />
       <StoreScopeNote />
       {error && (
-        <div className="alert alert-error" role="alert">
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" className="alert-close" onClick={() => load()}>
+              Retry
+            </Button>
+          }
+        >
           {error}
-          <button className="btn-secondary btn-sm alert-close" onClick={() => load()}>
-            Retry
-          </button>
-        </div>
+        </Alert>
       )}
 
       <div className="cc-card">
@@ -363,35 +364,32 @@ export default function StoreDaysPage() {
               ) : (
                 <>
                   {blockers.length > 0 && (
-                    <div className="alert alert-error sd-section">
-                      <span>
-                        <b>Closure blockers:</b> {blockers.join(' · ')}
-                      </span>
-                    </div>
+                    <Alert tone="error" className="sd-section">
+                      <b>Closure blockers:</b> {blockers.join(' · ')}
+                    </Alert>
                   )}
                   {overrides.length > 0 && (
-                    <div
-                      className="alert alert-warning sd-section"
-                      style={{ flexDirection: 'column', alignItems: 'flex-start' }}
-                    >
-                      <b>
-                        {overrides.length} evidence gap{overrides.length > 1 ? 's' : ''}{' '}
-                        {overrides.some((o) => o.status === 'Override Pending')
-                          ? 'overridden or awaiting approval'
-                          : 'overridden'}{' '}
-                        on this day
-                      </b>
-                      {overrides.map((o) => (
-                        <span key={`${o.case_id}-${o.requirement}`}>
-                          <CaseLink id={o.case_id}>{o.case_number}</CaseLink> · {o.requirement} ·{' '}
-                          {o.status === 'Override Pending'
-                            ? `awaiting a second approver (requested by ${o.requested_by})`
-                            : `approved by ${o.approved_by}`}{' '}
-                          · impact {money(o.financial_impact)}
-                          {o.reason ? ` · ${o.reason}` : ''}
-                        </span>
-                      ))}
-                    </div>
+                    <Alert tone="warning" className="sd-section">
+                      <div className="stack stack-sm">
+                        <b>
+                          {overrides.length} evidence gap{overrides.length > 1 ? 's' : ''}{' '}
+                          {overrides.some((o) => o.status === 'Override Pending')
+                            ? 'overridden or awaiting approval'
+                            : 'overridden'}{' '}
+                          on this day
+                        </b>
+                        {overrides.map((o) => (
+                          <span key={`${o.case_id}-${o.requirement}`}>
+                            <CaseLink id={o.case_id}>{o.case_number}</CaseLink> · {o.requirement} ·{' '}
+                            {o.status === 'Override Pending'
+                              ? `awaiting a second approver (requested by ${o.requested_by})`
+                              : `approved by ${o.approved_by}`}{' '}
+                            · impact {money(o.financial_impact)}
+                            {o.reason ? ` · ${o.reason}` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    </Alert>
                   )}
 
                   <div className="sd-bar sd-section">

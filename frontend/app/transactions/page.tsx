@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { api, money } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
+import { Alert, Button, DataTable, PageHeader, Pager } from '@/components/ui';
+import type { Column } from '@/components/ui';
 
 interface Row {
   id: string;
@@ -65,17 +67,70 @@ const EMPTY: F = {
   date_from: '',
   date_to: '',
 };
-const SORTABLE: [string, string, boolean?][] = [
-  ['business_date', 'Business date'],
-  ['store', 'Store'],
-  ['source', 'Source'],
-  ['type', 'Type'],
-  ['tender', 'Tender'],
-  ['amount', 'Amount', true],
-  ['status', 'Status'],
-];
 export const statusTone = (s: string) =>
   s === 'Matched' ? 'badge-success' : s === 'Exception' ? 'badge-error' : 'badge-warning';
+
+const COLUMNS: Column<Row>[] = [
+  {
+    key: 'date',
+    header: 'Business date',
+    sortKey: 'business_date',
+    nowrap: true,
+    render: (r) => r.business_date,
+  },
+  { key: 'store', header: 'Store', sortKey: 'store', render: (r) => r.store_id },
+  { key: 'source', header: 'Source', sortKey: 'source', render: (r) => r.source_system },
+  { key: 'type', header: 'Type', sortKey: 'type', render: (r) => r.transaction_type },
+  { key: 'tender', header: 'Tender', sortKey: 'tender', render: (r) => r.tender_type ?? '—' },
+  {
+    key: 'amount',
+    header: 'Amount',
+    sortKey: 'amount',
+    numeric: true,
+    render: (r) => money(r.amount),
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    sortKey: 'status',
+    render: (r) => (
+      <span className={`badge badge-sm ${statusTone(r.reconciliation_status)}`}>
+        {r.reconciliation_status}
+      </span>
+    ),
+  },
+  {
+    key: 'items',
+    header: 'Items',
+    render: (r) =>
+      r.detail_status === 'No detail' ? (
+        <span className="act-sub">No detail</span>
+      ) : (
+        <>
+          {r.item_count ?? 0}
+          {r.detail_status === 'Unbalanced' && (
+            <span
+              className="badge badge-sm badge-warning"
+              style={{ marginLeft: '.35rem' }}
+              title="Lines, tax and discounts do not add up to the amount, or the tenders do not cover it"
+            >
+              Unbalanced
+            </span>
+          )}
+        </>
+      ),
+  },
+  {
+    key: 'ref',
+    header: 'Reference',
+    stopRowClick: true,
+    render: (r) => (
+      <Link href={`/transactions/${r.id}`}>
+        {r.payment_reference ?? r.source_record_id ?? 'Open'}
+      </Link>
+    ),
+  },
+];
 
 export default function TransactionsPage() {
   const router = useRouter();
@@ -178,22 +233,21 @@ export default function TransactionsPage() {
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Transactions</h1>
-          <p className="page-sub">
-            Every normalized transaction from POS, processor, bank, ERP and Shopify feeds. Open one
-            to see its raw source record and the cases it relates to.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Transactions"
+        subtitle="Every normalized transaction from POS, processor, bank, ERP and Shopify feeds. Open one to see its raw source record and the cases it relates to."
+      />
       {error && (
-        <div className="alert alert-error" role="alert">
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" className="alert-close" onClick={load}>
+              Retry
+            </Button>
+          }
+        >
           {error}
-          <button className="btn-secondary btn-sm alert-close" onClick={load}>
-            Retry
-          </button>
-        </div>
+        </Alert>
       )}
 
       <div className="ac-tiles">
@@ -340,114 +394,25 @@ export default function TransactionsPage() {
           )}
         </div>
       ) : (
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                {SORTABLE.map(([k, label, num]) => (
-                  <th
-                    key={k}
-                    className={num ? 'num' : ''}
-                    aria-sort={
-                      sort.sort === k ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-                    }
-                  >
-                    <button className="ac-th" onClick={() => toggleSort(k)}>
-                      {label}
-                      {sort.sort === k ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                    </button>
-                  </th>
-                ))}
-                <th>Items</th>
-                <th>Reference</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((r) => (
-                <tr
-                  key={r.id}
-                  className="row-link"
-                  tabIndex={0}
-                  onClick={() => router.push(`/transactions/${r.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') router.push(`/transactions/${r.id}`);
-                  }}
-                >
-                  <td className="nowrap">{r.business_date}</td>
-                  <td>{r.store_id}</td>
-                  <td>{r.source_system}</td>
-                  <td>{r.transaction_type}</td>
-                  <td>{r.tender_type ?? '—'}</td>
-                  <td className="num">{money(r.amount)}</td>
-                  <td>
-                    <span className={`badge badge-sm ${statusTone(r.reconciliation_status)}`}>
-                      {r.reconciliation_status}
-                    </span>
-                  </td>
-                  <td>
-                    {r.detail_status === 'No detail' ? (
-                      <span className="act-sub">No detail</span>
-                    ) : (
-                      <>
-                        {r.item_count ?? 0}
-                        {r.detail_status === 'Unbalanced' && (
-                          <span
-                            className="badge badge-sm badge-warning"
-                            style={{ marginLeft: '.35rem' }}
-                            title="Lines, tax and discounts do not add up to the amount, or the tenders do not cover it"
-                          >
-                            Unbalanced
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <Link href={`/transactions/${r.id}`}>
-                      {r.payment_reference ?? r.source_record_id ?? 'Open'}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="ac-pager">
-            <span>
-              {((data.page - 1) * pageSize + 1).toLocaleString()}–
-              {Math.min(data.page * pageSize, data.total).toLocaleString()} of{' '}
-              {data.total.toLocaleString()}
-            </span>
-            <span className="ac-spacer" />
-            <select
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              aria-label="Rows per page"
-            >
-              {[25, 50, 100, 200].map((n) => (
-                <option key={n} value={n}>
-                  {n} / page
-                </option>
-              ))}
-            </select>
-            <button
-              className="btn-secondary btn-small"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              Previous
-            </button>
-            <span>
-              Page {data.page} of {data.pages.toLocaleString()}
-            </span>
-            <button
-              className="btn-secondary btn-small"
-              disabled={page >= data.pages}
-              onClick={() => setPage(page + 1)}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <DataTable
+          columns={COLUMNS}
+          rows={data.items}
+          rowKey={(r) => r.id}
+          onRowClick={(r) => router.push(`/transactions/${r.id}`)}
+          sort={{ key: sort.sort, dir: sort.dir as 'asc' | 'desc' }}
+          onSort={toggleSort}
+          footer={
+            <Pager
+              page={data.page}
+              pages={data.pages}
+              total={data.total}
+              pageSize={pageSize}
+              pageSizes={[25, 50, 100, 200]}
+              onPage={setPage}
+              onPageSize={setPageSize}
+            />
+          }
+        />
       )}
     </div>
   );

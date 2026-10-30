@@ -3,6 +3,7 @@ import { ThemeProvider } from '@/lib/ThemeContext';
 import { AppShell } from '@/components/AppShell';
 import { ToastProvider } from '@/components/Feedback';
 import { MeProvider } from '@/components/MeProvider';
+import './styles/tokens.css';
 import './globals.css';
 
 export const metadata: Metadata = {

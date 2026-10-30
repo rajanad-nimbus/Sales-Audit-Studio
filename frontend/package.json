@@ -8,6 +8,7 @@
     "start": "next start",
     "prepare": "husky",
     "typecheck": "tsc --noEmit",
+    "check:design": "node scripts/check-design-system.mjs",
     "test": "npm run typecheck"
   },
   "dependencies": {

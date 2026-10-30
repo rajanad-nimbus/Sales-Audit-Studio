@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { useMe } from '@/components/MeProvider';
+import { Alert, DataTable } from '@/components/ui';
 type Cash = {
   id: string;
   store_id: string;
@@ -107,7 +108,7 @@ export default function CashOfficePage() {
         </div>
       </div>
       <StoreScopeNote />
-      {notice && <div className="alert">{notice}</div>}
+      {notice && <Alert tone="info">{notice}</Alert>}
       <div className="cc-card">
         <h3>Declare cash</h3>
         <div className="profile-form">
@@ -239,28 +240,12 @@ export default function CashOfficePage() {
   );
 }
 function Data({ headers, rows }: { headers: string[]; rows: string[][] }) {
-  return rows.length ? (
-    <div className="table-container">
-      <table className="data-table">
-        <thead>
-          <tr>
-            {headers.map((x) => (
-              <th key={x}>{x}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              {r.map((x, j) => (
-                <td key={j}>{x}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  ) : (
-    <p className="cc-empty">No records yet.</p>
+  return (
+    <DataTable
+      columns={headers.map((header, i) => ({ key: header, header, render: (r: string[]) => r[i] }))}
+      rows={rows}
+      rowKey={(r) => r.join('|')}
+      emptyTitle="No records yet."
+    />
   );
 }

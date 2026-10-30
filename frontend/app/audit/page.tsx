@@ -1,10 +1,11 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, AuditRow } from '@/lib/api';
 import { CopyButton, SkeletonRows, useToast } from '@/components/Feedback';
 import { CaseLink } from '@/components/MeProvider';
+import { Alert, Button, DataTable, PageHeader } from '@/components/ui';
 
 interface Verify {
   checked: number;
@@ -104,21 +105,21 @@ export default function AuditPage() {
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Audit Trail</h1>
-          <span className="cc-live">Append-only. Each event is chained to the one before it.</span>
-        </div>
-        <div className="cc-controls">
-          <button className="btn-secondary btn-small" onClick={() => download('csv')}>
-            Export CSV
-          </button>
-          <button className="btn-secondary btn-small" onClick={() => download('json')}>
-            Export JSON
-          </button>
-        </div>
-      </div>
-      {error && <div className="alert alert-error">{error}</div>}
+      <PageHeader
+        title="Audit Trail"
+        subtitle="Append-only. Each event is chained to the one before it."
+        actions={
+          <>
+            <Button size="sm" onClick={() => download('csv')}>
+              Export CSV
+            </Button>
+            <Button size="sm" onClick={() => download('json')}>
+              Export JSON
+            </Button>
+          </>
+        }
+      />
+      {error && <Alert tone="error">{error}</Alert>}
 
       <div className={`ex-integrity ${v ? (v.intact ? 'ok' : 'bad') : ''}`}>
         {!v ? (
@@ -213,97 +214,81 @@ export default function AuditPage() {
       {!loaded ? (
         <SkeletonRows rows={8} label="Loading audit trail" />
       ) : (
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Time</th>
-                <th>Event</th>
-                <th>Actor</th>
-                <th>What happened</th>
-                <th>Case</th>
-                <th>Hash</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((e) => (
-                <Fragment key={e.id}>
-                  <tr
-                    className={`ac-row ${open === e.id ? 'open' : ''}`}
-                    tabIndex={0}
-                    aria-expanded={open === e.id}
-                    onKeyDown={(k) => {
-                      if (k.key === 'Enter') setOpen(open === e.id ? null : e.id);
-                    }}
-                    onClick={() => setOpen(open === e.id ? null : e.id)}
-                  >
-                    <td className="text-sm">{e.seq}</td>
-                    <td className="text-sm nowrap">{new Date(e.created_at).toLocaleString()}</td>
-                    <td>
-                      <span
-                        className={`badge badge-sm ${/FAIL|ERROR|REJECT|BREACH|QUARANTIN/i.test(e.event_type) ? 'badge-error' : /APPROV|CLOSED|COMPLETE|VALIDAT|RESOLV/i.test(e.event_type) ? 'badge-success' : /CREATED|RAISED|RECEIVED|EXPORT/i.test(e.event_type) ? 'badge-info' : 'badge-secondary'}`}
-                      >
-                        {e.event_type.replace(/_/g, ' ').toLowerCase()}
-                      </span>
-                    </td>
-                    <td>{e.actor}</td>
-                    <td>{e.description}</td>
-                    <td onClick={(x) => x.stopPropagation()}>
-                      {e.case_id ? <CaseLink id={e.case_id}>Open</CaseLink> : '-'}
-                    </td>
-                    <td>
-                      <code>{e.hash?.slice(0, 8)}</code>
-                    </td>
-                  </tr>
-                  {open === e.id && (
-                    <tr>
-                      <td colSpan={7} className="ex-detail">
-                        <div>
-                          Hash <code>{e.hash}</code> <CopyButton value={e.hash ?? ''} />
-                        </div>
-                        <div>
-                          Previous <code>{e.prev_hash ?? 'None (first entry)'}</code>
-                        </div>
-                        <div>
-                          Object {e.object_type} <code>{e.object_id}</code>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="cc-empty empty-row">
-                    No events match.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          <div className="ac-pager pager-sticky">
-            <span>{total.toLocaleString()} event(s)</span>
-            <span className="ac-spacer" />
-            <button
-              className="btn-secondary btn-small"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              Previous
-            </button>
-            <span>
-              Page {page} of {pages.toLocaleString()}
-            </span>
-            <button
-              className="btn-secondary btn-small"
-              disabled={page >= pages}
-              onClick={() => setPage(page + 1)}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <DataTable
+          columns={[
+            { key: 'seq', header: '#', render: (e) => <span className="text-sm">{e.seq}</span> },
+            {
+              key: 'time',
+              header: 'Time',
+              render: (e) => (
+                <span className="text-sm nowrap">{new Date(e.created_at).toLocaleString()}</span>
+              ),
+            },
+            {
+              key: 'event',
+              header: 'Event',
+              render: (e) => (
+                <span
+                  className={`badge badge-sm ${/FAIL|ERROR|REJECT|BREACH|QUARANTIN/i.test(e.event_type) ? 'badge-error' : /APPROV|CLOSED|COMPLETE|VALIDAT|RESOLV/i.test(e.event_type) ? 'badge-success' : /CREATED|RAISED|RECEIVED|EXPORT/i.test(e.event_type) ? 'badge-info' : 'badge-secondary'}`}
+                >
+                  {e.event_type.replace(/_/g, ' ').toLowerCase()}
+                </span>
+              ),
+            },
+            { key: 'actor', header: 'Actor', render: (e) => e.actor },
+            { key: 'what', header: 'What happened', render: (e) => e.description },
+            {
+              key: 'case',
+              header: 'Case',
+              stopRowClick: true,
+              render: (e) => (e.case_id ? <CaseLink id={e.case_id}>Open</CaseLink> : '-'),
+            },
+            { key: 'hash', header: 'Hash', render: (e) => <code>{e.hash?.slice(0, 8)}</code> },
+          ]}
+          rows={rows}
+          rowKey={(e) => String(e.id)}
+          onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
+          rowClassName={(e) => `ac-row ${open === e.id ? 'open' : ''}`}
+          expandedKey={open === null ? null : String(open)}
+          detailClassName="ex-detail"
+          renderDetail={(e) => (
+            <>
+              <div>
+                Hash <code>{e.hash}</code> <CopyButton value={e.hash ?? ''} />
+              </div>
+              <div>
+                Previous <code>{e.prev_hash ?? 'None (first entry)'}</code>
+              </div>
+              <div>
+                Object {e.object_type} <code>{e.object_id}</code>
+              </div>
+            </>
+          )}
+          emptyTitle="No events match."
+          footer={
+            <div className="ac-pager pager-sticky">
+              <span>{total.toLocaleString()} event(s)</span>
+              <span className="ac-spacer" />
+              <button
+                className="btn-secondary btn-small"
+                disabled={page <= 1}
+                onClick={() => setPage(page - 1)}
+              >
+                Previous
+              </button>
+              <span>
+                Page {page} of {pages.toLocaleString()}
+              </span>
+              <button
+                className="btn-secondary btn-small"
+                disabled={page >= pages}
+                onClick={() => setPage(page + 1)}
+              >
+                Next
+              </button>
+            </div>
+          }
+        />
       )}
     </div>
   );

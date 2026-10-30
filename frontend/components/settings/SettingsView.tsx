@@ -5,6 +5,7 @@ import { useTheme } from '@/lib/ThemeContext';
 import { useMe } from '@/components/MeProvider';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
+import { Alert, DataTable } from '@/components/ui';
 
 const ALL_TABS = [
   ['appearance', 'Appearance'],
@@ -207,16 +208,9 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
         ))}
       </div>
       {integrationError && (
-        <div className="alert alert-error" role="alert">
+        <Alert tone="error" onDismiss={() => setIntegrationError(null)}>
           {integrationError}
-          <button
-            className="btn-secondary btn-sm alert-close"
-            onClick={() => setIntegrationError(null)}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
+        </Alert>
       )}
 
       {tab === 'appearance' && (
@@ -262,36 +256,34 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                   </li>
                 ))}
               </ul>
-              <div className="table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Required feed</th>
-                      <th>Latest immutable delivery</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {readiness.sources.map((source) => (
-                      <tr key={source.source_system}>
-                        <td>{source.source_system}</td>
-                        <td>
-                          {source.received_at
-                            ? new Date(source.received_at).toLocaleString()
-                            : 'Not received'}
-                        </td>
-                        <td>
-                          <span
-                            className={`badge badge-sm ${source.ready ? 'badge-success' : 'badge-warning'}`}
-                          >
-                            {source.ready ? 'Received' : 'Pending'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={[
+                  { key: 'c0', header: 'Required feed', render: (source) => source.source_system },
+                  {
+                    key: 'c1',
+                    header: 'Latest immutable delivery',
+                    render: (source) =>
+                      source.received_at
+                        ? new Date(source.received_at).toLocaleString()
+                        : 'Not received',
+                  },
+                  {
+                    key: 'c2',
+                    header: 'Status',
+                    render: (source) => (
+                      <>
+                        <span
+                          className={`badge badge-sm ${source.ready ? 'badge-success' : 'badge-warning'}`}
+                        >
+                          {source.ready ? 'Received' : 'Pending'}
+                        </span>
+                      </>
+                    ),
+                  },
+                ]}
+                rows={readiness.sources}
+                rowKey={(source) => String(source.source_system)}
+              />
               <h3 style={{ marginTop: '1rem' }}>Inputs still needed</h3>
               <ul className="summary-list">
                 {readiness.next_inputs.map((input) => (
@@ -428,7 +420,7 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                     </li>
                   )}
                 </ul>
-                {shopifyError && <p className="alert alert-error">{shopifyError}</p>}
+                {shopifyError && <Alert tone="error">{shopifyError}</Alert>}
                 <button
                   className="btn-secondary btn-small"
                   onClick={syncShopify}
@@ -438,10 +430,10 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                 </button>
               </>
             ) : (
-              <p className="alert alert-warning">
+              <Alert tone="warning">
                 Shopify status is unavailable. Check that the backend has SHOPIFY_STORE_URL and
                 credentials set, and that you have the Finance or IT role.
-              </p>
+              </Alert>
             )}
           </section>
 

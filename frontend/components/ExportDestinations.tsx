@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ExportDest } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
+import { Alert, Button } from '@/components/ui';
 
 const apiError = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback;
@@ -57,12 +58,16 @@ export function ExportDestinations() {
 
   if (error)
     return (
-      <div className="alert alert-error" role="alert">
+      <Alert
+        tone="error"
+        action={
+          <Button size="sm" className="alert-close" onClick={load}>
+            Retry
+          </Button>
+        }
+      >
         {error}
-        <button className="btn-secondary btn-sm alert-close" onClick={load}>
-          Retry
-        </button>
-      </div>
+      </Alert>
     );
   if (!dests) return <SkeletonRows rows={4} label="Loading destinations" />;
   return (

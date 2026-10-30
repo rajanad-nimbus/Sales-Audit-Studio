@@ -5,6 +5,7 @@ import { api, ACRow, Case } from '@/lib/api';
 import { CaseTable, SortKey, SortState } from '@/components/CaseTable';
 import { SkeletonRows } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
+import { Alert, Button, EmptyState, PageHeader, Pager, Toolbar } from '@/components/ui';
 
 // Server-side sort keys (Case.* columns) for each table column.
 const SORT_PARAM: Record<SortKey, string> = {
@@ -131,35 +132,38 @@ export default function CasesPage() {
   const filtered = !!(debouncedQ || status || priority);
   const allCount = statuses.reduce((a, s) => a + s.count, 0);
   const noData = !loading && !error && !filtered && total === 0;
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Cases</h1>
-          <p className="page-sub">
-            {sort
-              ? 'Sorted by your chosen column. Click it again to reverse, then to reset.'
-              : 'Sorted by exposure, highest first. Click a column to sort.'}
-          </p>
-        </div>
-        {noData && (
-          <button className="btn-primary" onClick={seed}>
-            Load demo data
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Cases"
+        subtitle={
+          sort
+            ? 'Sorted by your chosen column. Click it again to reverse, then to reset.'
+            : 'Sorted by exposure, highest first. Click a column to sort.'
+        }
+        actions={
+          noData && (
+            <Button variant="primary" onClick={seed}>
+              Load demo data
+            </Button>
+          )
+        }
+      />
       {error && (
-        <div className="alert alert-error" role="alert">
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" className="alert-close" onClick={load}>
+              Retry
+            </Button>
+          }
+        >
           {error}
-          <button className="btn-secondary btn-sm alert-close" onClick={load}>
-            Retry
-          </button>
-        </div>
+        </Alert>
       )}
       {!noData && ready && (!loading || filtered || total > 0) && (
-        <div className="toolbar">
+        <Toolbar count={`${total.toLocaleString()} ${filtered ? 'matching' : 'total'}`}>
           <input
             className="grow"
             type="search"
@@ -187,8 +191,8 @@ export default function CasesPage() {
             <option>Normal</option>
           </select>
           {filtered && (
-            <button
-              className="btn-secondary btn-sm"
+            <Button
+              size="sm"
               onClick={() => {
                 setQ('');
                 setDebouncedQ('');
@@ -197,61 +201,34 @@ export default function CasesPage() {
               }}
             >
               Clear
-            </button>
+            </Button>
           )}
-          <span className="toolbar-count">
-            {total.toLocaleString()} {filtered ? 'matching' : 'total'}
-          </span>
-        </div>
+        </Toolbar>
       )}
       {loading ? (
         <SkeletonRows rows={8} label="Loading cases" />
       ) : noData ? (
-        <div className="empty-state">
-          <b>No cases yet</b>
+        <EmptyState title="No cases yet">
           <p>Cases appear after the daily batch runs reconciliation.</p>
-        </div>
+        </EmptyState>
       ) : (
-        <div>
-          <CaseTable cases={rows} sort={sort ?? undefined} onSort={onSort} />
-          {total > 0 && (
-            <div className="ac-pager">
-              <span>
-                {from.toLocaleString()}–{Math.min(page * pageSize, total).toLocaleString()} of{' '}
-                {total.toLocaleString()}
-              </span>
-              <span className="ac-spacer" />
-              <select
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                aria-label="Rows per page"
-              >
-                {[25, 50, 100].map((n) => (
-                  <option key={n} value={n}>
-                    {n} / page
-                  </option>
-                ))}
-              </select>
-              <button
-                className="btn-secondary btn-small"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                Previous
-              </button>
-              <span>
-                Page {page} of {pages.toLocaleString()}
-              </span>
-              <button
-                className="btn-secondary btn-small"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </div>
+        <CaseTable
+          cases={rows}
+          sort={sort ?? undefined}
+          onSort={onSort}
+          footer={
+            total > 0 && (
+              <Pager
+                page={page}
+                pages={pages}
+                total={total}
+                pageSize={pageSize}
+                onPage={setPage}
+                onPageSize={setPageSize}
+              />
+            )
+          }
+        />
       )}
     </div>
   );

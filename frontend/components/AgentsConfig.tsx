@@ -7,6 +7,7 @@ import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import { AgentModeNotice, useAgentMode } from '@/components/AgentMode';
 import { ago, groupOf, pretty } from '@/lib/activityUtil';
+import { Alert, Button } from '@/components/ui';
 
 interface AgentCfg {
   actor: string;
@@ -79,12 +80,16 @@ export function AgentsConfig() {
 
   if (error)
     return (
-      <div className="alert alert-error" role="alert">
+      <Alert
+        tone="error"
+        action={
+          <Button size="sm" className="alert-close" onClick={load}>
+            Retry
+          </Button>
+        }
+      >
         {error}
-        <button className="btn-secondary btn-sm alert-close" onClick={load}>
-          Retry
-        </button>
-      </div>
+      </Alert>
     );
   if (!cfg) return <SkeletonRows rows={6} label="Loading agent configuration" />;
   return (

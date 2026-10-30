@@ -9,6 +9,7 @@ import { useCanOpen, useMe } from '@/components/MeProvider';
 import { useChat } from '@/components/Chat';
 import { PriorityBadge, StatusBadge, Evidence } from '@/components/CaseTable';
 import { api, ACRow, Case, CaseDetail, Connector, Validation, Workflow, money } from '@/lib/api';
+import { Alert, Button } from '@/components/ui';
 
 type Persona = 'finance' | 'it';
 
@@ -276,20 +277,21 @@ export function CommandCenter() {
       </div>
 
       {error && (
-        <div className="alert alert-error" role="alert">
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" className="alert-close" onClick={refresh}>
+              Retry now
+            </Button>
+          }
+        >
           {error}
-          <button className="btn-secondary btn-sm alert-close" onClick={refresh}>
-            Retry now
-          </button>
-        </div>
+        </Alert>
       )}
       {notice && (
-        <div className="alert alert-warning" role="alert">
+        <Alert tone="warning" onDismiss={() => setNotice(null)}>
           {notice}
-          <button className="alert-close" aria-label="Dismiss" onClick={() => setNotice(null)}>
-            ×
-          </button>
-        </div>
+        </Alert>
       )}
 
       <section className="cc-card" style={{ marginBottom: '1rem' }}>

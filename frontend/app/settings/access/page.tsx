@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
+import { Alert } from '@/components/ui';
 
 interface Matrix {
   roles: { key: string; label: string }[];
@@ -19,12 +20,7 @@ export default function AccessPage() {
       .then((r) => setM(r.data))
       .catch(() => setError('Could not load the access map.'));
   }, []);
-  if (error)
-    return (
-      <div className="alert alert-error" role="alert">
-        {error}
-      </div>
-    );
+  if (error) return <Alert tone="error">{error}</Alert>;
   if (!m) return <SkeletonRows rows={8} label="Loading access map" />;
   const groups = Array.from(new Set(m.screens.map((s) => s.group)));
   return (
@@ -35,11 +31,11 @@ export default function AccessPage() {
         call its data either. Administrators can open everything and can act as another role from
         the user menu. Your role is highlighted.
       </p>
-      <div className="alert alert-info" style={{ marginBottom: '.75rem' }}>
+      <Alert tone="info" className="mb-sm">
         <b>Store managers are also limited to their own stores.</b> Which stores a person manages is
         maintained in Ontology Studio, and Nimbus applies it to every store-level screen and API
         call. With no store assigned, a store manager sees nothing.
-      </div>
+      </Alert>
       <div className="table-scroll">
         <table className="data-table access-matrix">
           <thead>

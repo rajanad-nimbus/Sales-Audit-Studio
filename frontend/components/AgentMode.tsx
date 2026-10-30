@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useDataChanged } from '@/lib/sync';
+import { Alert } from '@/components/ui';
 
 export type AgentMode =
   { state: 'llm'; model: string } | { state: 'off' } | { state: 'no_key' } | { state: 'unknown' };
@@ -47,9 +48,5 @@ export function AgentModeNotice({ mode, compact = false }: { mode: AgentMode; co
           : 'No Claude credentials · deterministic checks'}
       </span>
     );
-  return (
-    <div className="alert alert-warning" role="status">
-      {text}
-    </div>
-  );
+  return <Alert tone="warning">{text}</Alert>;
 }

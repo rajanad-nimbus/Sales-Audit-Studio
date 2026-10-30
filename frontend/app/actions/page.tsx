@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ACRow, BatchStatus, compact, money } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useDataChanged } from '@/lib/sync';
+import { Alert } from '@/components/ui';
 
 interface F {
   q: string;
@@ -382,18 +383,18 @@ export default function ActionCenter() {
         </div>
 
         {batch && batch.freshness !== 'fresh' && (
-          <div className="alert alert-warning">
+          <Alert tone="warning">
             {batch.freshness === 'never'
               ? 'The daily transaction batch has not run yet. Run it from Data Pipeline.'
               : `The last successful batch finished ${Math.round(batch.hours_since_success ?? 0)}h ago. Cases may be out of date.`}
-          </div>
+          </Alert>
         )}
         {batch?.last_failed && (
-          <div className="alert alert-error">
+          <Alert tone="error">
             The most recent batch run failed. Check Data Pipeline for details.
-          </div>
+          </Alert>
         )}
-        {error && <div className="alert alert-error">{error}</div>}
+        {error && <Alert tone="error">{error}</Alert>}
 
         {summary && (
           <div className="ac-tiles">

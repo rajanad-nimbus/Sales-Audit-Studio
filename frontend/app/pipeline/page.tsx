@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, BatchStatus } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
+import { Alert, Button, DataTable, PageHeader } from '@/components/ui';
 
 interface Stats {
   source_records: Record<string, number>;
@@ -196,29 +197,31 @@ export default function PipelinePage() {
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Data Pipeline</h1>
-          <p className="page-sub">
-            Ingest, archive, normalize, reconcile, then cases. Transactions arrive once a day.
-          </p>
-        </div>
-        <div className="cc-controls">
-          <button className="btn-secondary" onClick={load} disabled={!!busy}>
-            Refresh
-          </button>
-          <button className="btn-primary" disabled={!!busy} onClick={runBatch}>
-            {busy === 'batch' ? 'Running batch…' : 'Run nightly batch'}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Data Pipeline"
+        subtitle="Ingest, archive, normalize, reconcile, then cases. Transactions arrive once a day."
+        actions={
+          <>
+            <Button onClick={load} disabled={!!busy}>
+              Refresh
+            </Button>
+            <Button variant="primary" disabled={!!busy} onClick={runBatch}>
+              {busy === 'batch' ? 'Running batch…' : 'Run nightly batch'}
+            </Button>
+          </>
+        }
+      />
       {error && (
-        <div className="alert alert-error" role="alert">
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" className="alert-close" onClick={load}>
+              Retry
+            </Button>
+          }
+        >
           {error}
-          <button className="btn-secondary btn-sm alert-close" onClick={load}>
-            Retry
-          </button>
-        </div>
+        </Alert>
       )}
 
       {!loaded ? (
@@ -285,8 +288,10 @@ export default function PipelinePage() {
             <section className="cc-card">
               <p className="hint" style={{ marginBottom: '.75rem' }}>
                 Cases appear when a batch finishes. In production a schedule runs{' '}
-                <code>PYTHONPATH=backend python -m apps.operations.batch_job --date YYYY-MM-DD</code> (or{' '}
-                <code>POST /api/batch/run</code>) after the extract lands.
+                <code>
+                  PYTHONPATH=backend python -m apps.operations.batch_job --date YYYY-MM-DD
+                </code>{' '}
+                (or <code>POST /api/batch/run</code>) after the extract lands.
               </p>
               {runs.length === 0 ? (
                 <div className="empty-state">
@@ -294,39 +299,53 @@ export default function PipelinePage() {
                   <p>Use “Run nightly batch” above to load the demo feed.</p>
                 </div>
               ) : (
-                <div className="table-scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Business date</th>
-                        <th>Status</th>
-                        <th>Started</th>
-                        <th className="num">Loaded</th>
-                        <th className="num">Matched</th>
-                        <th className="num">Cases</th>
-                        <th>Trigger</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {runs.map((r) => (
-                        <tr key={r.id}>
-                          <td className="font-medium">{r.business_date}</td>
-                          <td>
-                            <span className={`badge badge-sm ${runTone(r.status)}`}>
-                              {r.status}
-                            </span>
-                            {r.error && <small className="pl-err">{r.error}</small>}
-                          </td>
-                          <td className="nowrap">{when(r.started_at)}</td>
-                          <td className="num">{n(r.transactions_loaded)}</td>
-                          <td className="num">{n(r.matched_pairs)}</td>
-                          <td className="num">{n(r.cases_created)}</td>
-                          <td>{r.trigger}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTable
+                  columns={[
+                    {
+                      key: 'c0',
+                      header: 'Business date',
+                      primary: true,
+                      render: (r) => r.business_date,
+                    },
+                    {
+                      key: 'c1',
+                      header: 'Status',
+                      render: (r) => (
+                        <>
+                          <span className={`badge badge-sm ${runTone(r.status)}`}>{r.status}</span>
+                          {r.error && <small className="pl-err">{r.error}</small>}
+                        </>
+                      ),
+                    },
+                    {
+                      key: 'c2',
+                      header: 'Started',
+                      nowrap: true,
+                      render: (r) => when(r.started_at),
+                    },
+                    {
+                      key: 'c3',
+                      header: 'Loaded',
+                      numeric: true,
+                      render: (r) => n(r.transactions_loaded),
+                    },
+                    {
+                      key: 'c4',
+                      header: 'Matched',
+                      numeric: true,
+                      render: (r) => n(r.matched_pairs),
+                    },
+                    {
+                      key: 'c5',
+                      header: 'Cases',
+                      numeric: true,
+                      render: (r) => n(r.cases_created),
+                    },
+                    { key: 'c6', header: 'Trigger', render: (r) => r.trigger },
+                  ]}
+                  rows={runs}
+                  rowKey={(r) => String(r.id)}
+                />
               )}
             </section>
           )}
@@ -342,44 +361,49 @@ export default function PipelinePage() {
                 {feedHealth.length === 0 ? (
                   <p className="cc-empty">No source-feed profiles are configured.</p>
                 ) : (
-                  <div className="table-scroll">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Profile</th>
-                          <th>Schedule</th>
-                          <th>Last receipt</th>
-                          <th>Freshness</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {feedHealth.map((f) => (
-                          <tr key={f.profile_id}>
-                            <td className="font-medium">
-                              {f.name}
-                              <small className="act-sub"> {f.source_system}</small>
-                            </td>
-                            <td>{f.schedule || 'Not set'}</td>
-                            <td>
-                              {f.last_received_at ? (
-                                <>
-                                  {when(f.last_received_at)}
-                                  <small className="act-sub"> {ago(f.age_hours)}</small>
-                                </>
-                              ) : (
-                                '—'
-                              )}
-                            </td>
-                            <td>
-                              <span className={`badge badge-sm ${feedTone(f.state)}`}>
-                                {f.state}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTable
+                    columns={[
+                      {
+                        key: 'c0',
+                        header: 'Profile',
+                        primary: true,
+                        render: (f) => (
+                          <>
+                            {f.name}
+                            <small className="act-sub"> {f.source_system}</small>
+                          </>
+                        ),
+                      },
+                      { key: 'c1', header: 'Schedule', render: (f) => f.schedule || 'Not set' },
+                      {
+                        key: 'c2',
+                        header: 'Last receipt',
+                        render: (f) => (
+                          <>
+                            {f.last_received_at ? (
+                              <>
+                                {when(f.last_received_at)}
+                                <small className="act-sub"> {ago(f.age_hours)}</small>
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </>
+                        ),
+                      },
+                      {
+                        key: 'c3',
+                        header: 'Freshness',
+                        render: (f) => (
+                          <>
+                            <span className={`badge badge-sm ${feedTone(f.state)}`}>{f.state}</span>
+                          </>
+                        ),
+                      },
+                    ]}
+                    rows={feedHealth}
+                    rowKey={(f) => String(f.profile_id)}
+                  />
                 )}
               </section>
               <section className="cc-card">
@@ -443,36 +467,25 @@ export default function PipelinePage() {
                   <p>Every received record passed validation.</p>
                 </div>
               ) : (
-                <div className="table-scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Source</th>
-                        <th>Record</th>
-                        <th>Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {quarantined.map((q) => (
-                        <tr key={q.id}>
-                          <td className="font-medium">{q.source_system}</td>
-                          <td>{q.source_record_id}</td>
-                          <td>{q.reason}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTable
+                  columns={[
+                    { key: 'c0', header: 'Source', primary: true, render: (q) => q.source_system },
+                    { key: 'c1', header: 'Record', render: (q) => q.source_record_id },
+                    { key: 'c2', header: 'Reason', render: (q) => q.reason },
+                  ]}
+                  rows={quarantined}
+                  rowKey={(q) => String(q.id)}
+                />
               )}
             </section>
           )}
 
           {tab === 'demo' && (
             <div className="case-panel">
-              <div className="alert alert-warning">
+              <Alert tone="warning">
                 Demo tools create or delete sample data. They are for testing and do not run in
                 production.
-              </div>
+              </Alert>
               <div className="case-panel case-two">
                 <section className="cc-card">
                   <h3>Step by step</h3>

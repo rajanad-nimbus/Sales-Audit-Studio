@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Case, money } from '@/lib/api';
+import { DataTable } from '@/components/ui';
+import type { Column } from '@/components/ui';
 
 const STATUS_TONE: Record<string, string> = {
   Open: 'badge-secondary',
@@ -48,92 +50,75 @@ export interface SortState {
   dir: 'asc' | 'desc';
 }
 
+const COLUMNS: Column<Case>[] = [
+  {
+    key: 'case_number',
+    header: 'Case',
+    sortKey: 'case_number',
+    primary: true,
+    stopRowClick: true,
+    render: (c) => <Link href={`/cases/${c.id}`}>{c.case_number}</Link>,
+  },
+  { key: 'case_type', header: 'Type', sortKey: 'case_type', render: (c) => c.case_type },
+  { key: 'store_id', header: 'Store', sortKey: 'store_id', render: (c) => c.store_id },
+  {
+    key: 'total_exception_amount',
+    header: 'Exception',
+    sortKey: 'total_exception_amount',
+    numeric: true,
+    render: (c) => money(c.total_exception_amount),
+  },
+  {
+    key: 'total_exposure',
+    header: 'Exposure',
+    sortKey: 'total_exposure',
+    numeric: true,
+    render: (c) => money(c.total_exposure),
+  },
+  {
+    key: 'evidence_completeness',
+    header: 'Evidence',
+    sortKey: 'evidence_completeness',
+    numeric: true,
+    render: (c) => <Evidence pct={c.evidence_completeness} />,
+  },
+  {
+    key: 'priority',
+    header: 'Priority',
+    sortKey: 'priority',
+    render: (c) => <PriorityBadge p={c.priority} />,
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    sortKey: 'status',
+    render: (c) => <StatusBadge s={c.status} />,
+  },
+];
+
 export function CaseTable({
   cases,
   sort,
   onSort,
+  footer,
 }: {
   cases: Case[];
   sort?: SortState;
   onSort?: (k: SortKey) => void;
+  footer?: React.ReactNode;
 }) {
   const router = useRouter();
-  if (cases.length === 0)
-    return (
-      <div className="empty-state">
-        <b>No cases found</b>
-        <p>Nothing matches this view.</p>
-      </div>
-    );
   return (
-    <div className="table-container">
-      <table className="data-table">
-        <thead>
-          <tr>
-            {(
-              [
-                ['case_number', 'Case'],
-                ['case_type', 'Type'],
-                ['store_id', 'Store'],
-                ['total_exception_amount', 'Exception', 1],
-                ['total_exposure', 'Exposure', 1],
-                ['evidence_completeness', 'Evidence', 1],
-                ['priority', 'Priority'],
-                ['status', 'Status'],
-              ] as [SortKey, string, number?][]
-            ).map(([k, label, num]) => (
-              <th
-                key={k}
-                className={num ? 'num' : ''}
-                aria-sort={
-                  sort?.key === k ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-                }
-              >
-                {onSort ? (
-                  <button className="ac-th" onClick={() => onSort(k)}>
-                    {label}
-                    {sort?.key === k ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                ) : (
-                  label
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {cases.map((c) => (
-            <tr
-              key={c.id}
-              className="row-link"
-              tabIndex={0}
-              onClick={() => router.push(`/cases/${c.id}`)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') router.push(`/cases/${c.id}`);
-              }}
-            >
-              <td className="font-medium">
-                <Link href={`/cases/${c.id}`} onClick={(e) => e.stopPropagation()}>
-                  {c.case_number}
-                </Link>
-              </td>
-              <td>{c.case_type}</td>
-              <td>{c.store_id}</td>
-              <td className="num">{money(c.total_exception_amount)}</td>
-              <td className="num">{money(c.total_exposure)}</td>
-              <td className="num">
-                <Evidence pct={c.evidence_completeness} />
-              </td>
-              <td>
-                <PriorityBadge p={c.priority} />
-              </td>
-              <td>
-                <StatusBadge s={c.status} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={COLUMNS}
+      rows={cases}
+      rowKey={(c) => c.id}
+      onRowClick={(c) => router.push(`/cases/${c.id}`)}
+      sort={sort}
+      onSort={onSort && ((k) => onSort(k as SortKey))}
+      emptyTitle="No cases found"
+      emptyHint={<p>Nothing matches this view.</p>}
+      footer={footer}
+    />
   );
 }

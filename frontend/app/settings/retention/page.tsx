@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
+import { Alert, Button, DataTable } from '@/components/ui';
 
 interface Policy {
   id: string;
@@ -96,28 +97,14 @@ export default function RetentionPage() {
         supervised step.
       </p>
       {error && (
-        <div className="alert alert-error" role="alert">
+        <Alert tone="error" onDismiss={() => setError(null)}>
           {error}
-          <button
-            className="btn-secondary btn-sm alert-close"
-            onClick={() => setError(null)}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
+        </Alert>
       )}
       {note && (
-        <div className="alert alert-info" role="status">
+        <Alert tone="info" onDismiss={() => setNote(null)}>
           {note}
-          <button
-            className="btn-secondary btn-sm alert-close"
-            onClick={() => setNote(null)}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
+        </Alert>
       )}
       {!policies ? (
         <SkeletonRows rows={3} label="Loading retention policies" />
@@ -126,82 +113,81 @@ export default function RetentionPage() {
           No retention policies are configured. IT can add policies through the operations API.
         </p>
       ) : (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Dataset</th>
-                <th className="num">Retain (days)</th>
-                <th>Archive first</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {policies.map((p) => (
-                <tr key={p.id}>
-                  <td className="font-medium">{p.dataset}</td>
-                  <td className="num">
-                    <input
-                      aria-label={`${p.dataset} retention days`}
-                      type="number"
-                      min={30}
-                      defaultValue={p.retain_days}
-                      style={{ width: '6rem' }}
-                      onBlur={(e) => {
-                        const d = Number(e.target.value);
-                        if (d >= 30 && d !== p.retain_days) save(p, d);
-                      }}
-                    />
-                  </td>
-                  <td>{p.archive_before_purge ? 'Yes' : 'No'}</td>
-                  <td>
-                    <div className="action-buttons">
-                      <button className="btn-secondary btn-sm" onClick={() => preview(p.dataset)}>
-                        Preview
-                      </button>
-                      <button
-                        className="btn-secondary btn-sm"
-                        disabled={busy}
-                        onClick={() => archive(p)}
-                      >
-                        Archive eligible
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={[
+            { key: 'dataset', header: 'Dataset', primary: true, render: (p) => p.dataset },
+            {
+              key: 'days',
+              header: 'Retain (days)',
+              numeric: true,
+              render: (p) => (
+                <input
+                  aria-label={`${p.dataset} retention days`}
+                  type="number"
+                  min={30}
+                  defaultValue={p.retain_days}
+                  style={{ width: '6rem' }}
+                  onBlur={(e) => {
+                    const d = Number(e.target.value);
+                    if (d >= 30 && d !== p.retain_days) save(p, d);
+                  }}
+                />
+              ),
+            },
+            {
+              key: 'archive',
+              header: 'Archive first',
+              render: (p) => (p.archive_before_purge ? 'Yes' : 'No'),
+            },
+            {
+              key: 'actions',
+              header: '',
+              render: (p) => (
+                <div className="action-buttons">
+                  <Button size="sm" onClick={() => preview(p.dataset)}>
+                    Preview
+                  </Button>
+                  <Button size="sm" disabled={busy} onClick={() => archive(p)}>
+                    Archive eligible
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+          rows={policies}
+          rowKey={(p) => p.id}
+        />
       )}
       <h3 className="sd-section">History</h3>
       {runs.length === 0 ? (
         <p className="cc-empty">No retention runs yet.</p>
       ) : (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Dataset</th>
-                <th className="num">Eligible</th>
-                <th className="num">Archived</th>
-                <th className="num">Purged</th>
-                <th>When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.dataset}</td>
-                  <td className="num">{r.eligible_records}</td>
-                  <td className="num">{r.archived_records}</td>
-                  <td className="num">{r.purged_records}</td>
-                  <td className="nowrap">{new Date(r.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={[
+            { key: 'dataset', header: 'Dataset', render: (r) => r.dataset },
+            {
+              key: 'eligible',
+              header: 'Eligible',
+              numeric: true,
+              render: (r) => r.eligible_records,
+            },
+            {
+              key: 'archived',
+              header: 'Archived',
+              numeric: true,
+              render: (r) => r.archived_records,
+            },
+            { key: 'purged', header: 'Purged', numeric: true, render: (r) => r.purged_records },
+            {
+              key: 'when',
+              header: 'When',
+              nowrap: true,
+              render: (r) => new Date(r.created_at).toLocaleString(),
+            },
+          ]}
+          rows={runs}
+          rowKey={(r) => String(r.id)}
+        />
       )}
     </section>
   );
