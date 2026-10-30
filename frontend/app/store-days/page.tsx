@@ -6,7 +6,7 @@ import { api, money } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { CaseLink, useMe } from '@/components/MeProvider';
-import { Alert, Button, PageHeader } from '@/components/ui';
+import { Alert, Button, EmptyState, Field, PageHeader, Segmented } from '@/components/ui';
 
 interface StoreDay {
   store_id: string;
@@ -221,31 +221,30 @@ export default function StoreDaysPage() {
               Re-total it once its data has loaded.
             </p>
             <div className="form-row">
-              <label className="field">
-                Store
+              <Field label="Store">
                 <select value={openStore} onChange={(e) => setOpenStore(e.target.value)}>
                   <option value="">Select a store</option>
                   {stores.map((s) => (
                     <option key={s}>{s}</option>
                   ))}
                 </select>
-              </label>
-              <label className="field">
-                Business date
+              </Field>
+              <Field label="Business date">
                 <input
                   type="date"
                   value={openDate}
                   max={today}
                   onChange={(e) => setOpenDate(e.target.value)}
                 />
-              </label>
-              <button
-                className="btn-primary"
+              </Field>
+              <Button
+                variant="primary"
+
                 disabled={busy || !openStore || !openDate}
                 onClick={openDay}
               >
                 {busy ? 'Opening…' : 'Open Store Day'}
-              </button>
+              </Button>
             </div>
           </>
         ) : (
@@ -271,33 +270,29 @@ export default function StoreDaysPage() {
                 placeholder="Search store or date"
                 aria-label="Search Store Days"
               />
-              <div className="cc-seg" style={{ flexWrap: 'wrap' }}>
-                <button className={!statusFilter ? 'on' : ''} onClick={() => setStatusFilter('')}>
-                  All {days.length}
-                </button>
-                {statuses.map((s) => (
-                  <button
-                    key={s}
-                    className={statusFilter === s ? 'on' : ''}
-                    onClick={() => setStatusFilter(s)}
-                  >
-                    {s} {days.filter((d) => d.status === s).length}
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: '', label: `All ${days.length}` },
+                  ...statuses.map((s) => ({
+                    value: s,
+                    label: `${s} ${days.filter((d) => d.status === s).length}`,
+                  })),
+                ]}
+              />
             </div>
           )}
           {loading ? (
             <SkeletonRows rows={5} />
           ) : days.length === 0 ? (
-            <div className="empty-state">
-              <b>No Store Days yet</b>
+            <EmptyState title="No Store Days yet">
               <p>
                 {canOpen
                   ? 'Pick a store and date above and open a Store Day.'
                   : 'An IT administrator needs to open one.'}
               </p>
-            </div>
+            </EmptyState>
           ) : shownDays.length === 0 ? (
             <p className="cc-empty">No Store Days match this filter.</p>
           ) : (
@@ -410,13 +405,14 @@ export default function StoreDaysPage() {
                         ))}
                       </select>
                     </label>
-                    <button
-                      className="btn-secondary btn-sm"
+                    <Button
+                      size="sm"
+
                       disabled={busy || closed}
                       onClick={() => act(`${base(selected)}/retotal`)}
                     >
                       Re-total
-                    </button>
+                    </Button>
                     {closed ? (
                       <div className="form-row">
                         <input
@@ -425,19 +421,22 @@ export default function StoreDaysPage() {
                           placeholder="Reopen rationale (required)"
                           aria-label="Reopen rationale"
                         />
-                        <button
-                          className="btn-secondary btn-sm"
+                        <Button
+                          size="sm"
+
                           disabled={busy || !rationale.trim()}
                           onClick={() =>
                             act(`${base(selected)}/reopen`, { rationale }, () => setRationale(''))
                           }
                         >
                           Reopen
-                        </button>
+                        </Button>
                       </div>
                     ) : (
-                      <button
-                        className="btn-primary btn-sm"
+                      <Button
+                        variant="primary"
+                        size="sm"
+
                         disabled={busy || blockers.length > 0 || !pending}
                         title={
                           !pending
@@ -449,7 +448,7 @@ export default function StoreDaysPage() {
                         onClick={() => act(`${base(selected)}/close`)}
                       >
                         Approve &amp; close
-                      </button>
+                      </Button>
                     )}
                   </div>
 
@@ -461,8 +460,9 @@ export default function StoreDaysPage() {
                         placeholder="Closure evidence basis"
                         aria-label="Closure evidence basis"
                       />
-                      <button
-                        className="btn-secondary btn-sm"
+                      <Button
+                        size="sm"
+
                         disabled={busy || blockers.length > 0 || !evidenceBasis.trim()}
                         onClick={() =>
                           act(
@@ -473,7 +473,7 @@ export default function StoreDaysPage() {
                         }
                       >
                         Request closure
-                      </button>
+                      </Button>
                     </div>
                   )}
 
@@ -540,8 +540,9 @@ export default function StoreDaysPage() {
                                 placeholder="Rejection rationale (required)"
                                 aria-label="Rejection rationale"
                               />
-                              <button
-                                className="btn-secondary btn-sm"
+                              <Button
+                                size="sm"
+
                                 disabled={busy || !reviewRationale.trim()}
                                 onClick={() =>
                                   act(
@@ -552,7 +553,7 @@ export default function StoreDaysPage() {
                                 }
                               >
                                 Reject request
-                              </button>
+                              </Button>
                             </div>
                           )}
                         </div>

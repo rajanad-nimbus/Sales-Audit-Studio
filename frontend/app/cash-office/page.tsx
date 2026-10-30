@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { useMe } from '@/components/MeProvider';
-import { Alert, DataTable } from '@/components/ui';
+import { Alert, Button, DataTable } from '@/components/ui';
 type Cash = {
   id: string;
   store_id: string;
@@ -157,9 +157,9 @@ export default function CashOfficePage() {
             onChange={(e) => setSafeDrop(e.target.value)}
             placeholder="Safe drop"
           />
-          <button disabled={!store} className="btn-primary btn-small" onClick={submit}>
+          <Button variant="primary" size="sm" disabled={!store} onClick={submit}>
             Calculate control
-          </button>
+          </Button>
         </div>
       </div>
       <div className="cc-card">
@@ -183,13 +183,15 @@ export default function CashOfficePage() {
             onChange={(e) => setBankAccount(e.target.value)}
             placeholder="Bank account (optional)"
           />
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             disabled={!store || !depositRef}
-            className="btn-primary btn-small"
+
             onClick={recordDeposit}
           >
             Record deposit
-          </button>
+          </Button>
         </div>
       </div>
       <div className="cc-card">

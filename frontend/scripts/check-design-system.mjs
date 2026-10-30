@@ -1,4 +1,4 @@
-// Guards the design system: no raw colors outside the token file, no hand-built alerts.
+// Guards the design system: no raw colors outside the token file, no hand-built alerts, buttons or cards.
 // Run with `npm run check:design`. Logo.tsx is the brand mark and is exempt.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -8,6 +8,8 @@ const EXEMPT = ['app/styles/tokens.css', 'components/Logo.tsx', 'app/icon.svg'];
 const SKIP_DIRS = new Set(['node_modules', '.next', 'scripts']);
 const RAW_COLOR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
 const HAND_ALERT = /className="alert[ "]/;
+const HAND_BUTTON = /<button[^>]*className=("|\{`)btn-/;
+const HAND_CARD = /className="info-card/;
 
 const files = [];
 const walk = (dir) => {
@@ -27,7 +29,12 @@ for (const file of files) {
   readFileSync(file, 'utf8')
     .split('\n')
     .forEach((line, i) => {
-      if (RAW_COLOR.test(line)) problems.push(`${rel}:${i + 1} raw color, use a token from app/styles/tokens.css`);
+      if (RAW_COLOR.test(line))
+        problems.push(`${rel}:${i + 1} raw color, use a token from app/styles/tokens.css`);
+      if (rel.endsWith('.tsx') && HAND_BUTTON.test(line))
+        problems.push(`${rel}:${i + 1} hand-built button, use <Button> from components/ui`);
+      if (rel.endsWith('.tsx') && HAND_CARD.test(line))
+        problems.push(`${rel}:${i + 1} hand-built card, use <Card> from components/ui`);
       if (rel.endsWith('.tsx') && HAND_ALERT.test(line))
         problems.push(`${rel}:${i + 1} hand-built alert, use <Alert> from components/ui`);
     });

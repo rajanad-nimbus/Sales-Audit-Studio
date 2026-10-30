@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
 import ControlsTable from '@/components/settings/ControlsTable';
-import { Alert, PageHeader, Segmented } from '@/components/ui';
+import { Alert, Button, Card, PageHeader, Segmented } from '@/components/ui';
 type Ref = { id: string; category: string; code: string; name: string; active: boolean };
 type Total = {
   id: string;
@@ -194,7 +194,7 @@ export default function ControlsPage() {
         </Alert>
       )}
       {tab === 'Foundation data' && (
-        <section className="info-card">
+        <Card>
           <h2>Retail foundation data</h2>
           <p>
             Maintain the stores, tenders, accounts, and controlled values used by audit workflows.
@@ -218,23 +218,25 @@ export default function ControlsPage() {
               onChange={(e) => setRef({ ...ref, name: e.target.value })}
               placeholder="Name"
             />
-            <button
-              className="btn-primary btn-small"
+            <Button
+              variant="primary"
+              size="sm"
+
               disabled={!ref.code || !ref.name}
               onClick={addRef}
             >
               Add reference
-            </button>
+            </Button>
           </div>
           <ControlsTable
             headers={['Category', 'Code', 'Name', 'Status']}
             rows={refs.map((x) => [x.category, x.code, x.name, x.active ? 'Active' : 'Inactive'])}
           />
-        </section>
+        </Card>
       )}
       {tab === 'Totals & rules' && (
         <>
-          <section className="info-card">
+          <Card>
             <h2>Audit total definitions</h2>
             <p>
               Active definitions are calculated and versioned during Store Day re-totaling. Rules
@@ -280,9 +282,9 @@ export default function ControlsPage() {
                   <option key={x}>{x}</option>
                 ))}
               </select>
-              <button className="btn-primary btn-small" disabled={!total.name} onClick={addTotal}>
+              <Button variant="primary" size="sm" disabled={!total.name} onClick={addTotal}>
                 Add total
-              </button>
+              </Button>
             </div>
             <ControlsTable
               headers={['Name', 'Aggregation', 'Source', 'Level', 'Filter']}
@@ -294,8 +296,8 @@ export default function ControlsPage() {
                 [...x.transaction_types, x.tender_type].filter(Boolean).join(', ') || 'All records',
               ])}
             />
-          </section>
-          <section className="info-card">
+          </Card>
+          <Card>
             <h2>Threshold rules</h2>
             <p>
               A rule creates an investigation when the absolute target total exceeds the threshold
@@ -338,13 +340,15 @@ export default function ControlsPage() {
                 onChange={(e) => setRule({ ...rule, owner: e.target.value })}
                 placeholder="Owner (optional)"
               />
-              <button
-                className="btn-primary btn-small"
+              <Button
+                variant="primary"
+                size="sm"
+
                 disabled={!rule.name || !rule.total_name}
                 onClick={addRule}
               >
                 Add rule
-              </button>
+              </Button>
             </div>
             <ControlsTable
               headers={['Rule', 'Target', 'Threshold', 'Severity', 'Owner']}
@@ -356,11 +360,11 @@ export default function ControlsPage() {
                 x.owner || 'Unassigned',
               ])}
             />
-          </section>
+          </Card>
         </>
       )}
       {tab === 'GL mapping' && (
-        <section className="info-card">
+        <Card>
           <h2>GL cross-references</h2>
           <p>
             Use these mappings to generate a read-only journal preview. Unmapped transactions remain
@@ -387,13 +391,15 @@ export default function ControlsPage() {
               onChange={(e) => setGl({ ...gl, credit_account: e.target.value })}
               placeholder="Credit GL account"
             />
-            <button
-              className="btn-primary btn-small"
+            <Button
+              variant="primary"
+              size="sm"
+
               disabled={!gl.transaction_type || !gl.debit_account || !gl.credit_account}
               onClick={addGL}
             >
               Add mapping
-            </button>
+            </Button>
           </div>
           <ControlsTable
             headers={['Transaction', 'Tender', 'Debit', 'Credit', 'Status']}
@@ -420,8 +426,9 @@ export default function ControlsPage() {
               value={journalDate}
               onChange={(e) => setJournalDate(e.target.value)}
             />
-            <button
-              className="btn-secondary btn-small"
+            <Button
+              size="sm"
+
               disabled={!journalStore}
               onClick={async () => {
                 try {
@@ -435,7 +442,7 @@ export default function ControlsPage() {
               }}
             >
               Preview journal
-            </button>
+            </Button>
           </div>
           {journal && (
             <>
@@ -459,7 +466,7 @@ export default function ControlsPage() {
               )}
             </>
           )}
-        </section>
+        </Card>
       )}
     </div>
   );

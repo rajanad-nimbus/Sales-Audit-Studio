@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, AuditEvent } from '@/lib/api';
-import { Alert, Button, DataTable, PageHeader } from '@/components/ui';
+import { Alert, Button, DataTable, EmptyState, PageHeader, Segmented } from '@/components/ui';
 
 interface Evt extends AuditEvent {
   after?: any;
@@ -226,17 +226,14 @@ export default function ActivityPage() {
 
       <>
         <div className="toolbar">
-          <div className="cc-seg" style={{ flexWrap: 'wrap' }}>
-            {FILTERS.map((a) => (
-              <button
-                key={a.key}
-                className={agent === a.key ? 'on' : ''}
-                onClick={() => setAgent(a.key)}
-              >
-                {a.label} {counts[a.key] ?? 0}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            value={agent}
+            onChange={setAgent}
+            options={FILTERS.map((a) => ({
+              value: a.key,
+              label: `${a.label} ${counts[a.key] ?? 0}`,
+            }))}
+          />
           <input
             className="grow"
             type="search"
@@ -245,16 +242,18 @@ export default function ActivityPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <button
-            className={`btn-secondary btn-sm ${onlyAlerts ? 'act-on' : ''}`}
+          <Button
+            size="sm"
+            className={onlyAlerts ? 'act-on' : ''}
             aria-pressed={onlyAlerts}
             onClick={() => setOnlyAlerts((v) => !v)}
           >
             Needs attention{alertCount ? ` ${alertCount}` : ''}
-          </button>
+          </Button>
           {filtered && (
-            <button
-              className="btn-secondary btn-sm"
+            <Button
+              size="sm"
+
               onClick={() => {
                 setAgent('all');
                 setQ('');
@@ -262,7 +261,7 @@ export default function ActivityPage() {
               }}
             >
               Clear filters
-            </button>
+            </Button>
           )}
           <span className="toolbar-count">
             {shown.length.toLocaleString()} of {total.toLocaleString()} events
@@ -273,16 +272,16 @@ export default function ActivityPage() {
         {!loaded ? (
           <SkeletonRows rows={8} label="Loading activity" />
         ) : shown.length === 0 ? (
-          <div className="empty-state">
-            <b>No activity</b>
+          <EmptyState title="No activity">
             <p>
               {events.length
                 ? 'Nothing matches these filters in the loaded events.'
                 : 'Activity appears once the daily batch or an agent runs.'}
             </p>
             {events.length > 0 && filtered && (
-              <button
-                className="btn-secondary btn-sm"
+              <Button
+                size="sm"
+
                 onClick={() => {
                   setAgent('all');
                   setQ('');
@@ -290,19 +289,20 @@ export default function ActivityPage() {
                 }}
               >
                 Clear filters
-              </button>
+              </Button>
             )}
             {events.length > 0 && filtered && events.length < total && (
-              <button
-                className="btn-secondary btn-sm"
+              <Button
+                size="sm"
+
                 disabled={loadingMore}
                 onClick={loadOlder}
                 style={{ marginLeft: '.5rem' }}
               >
                 Search older events
-              </button>
+              </Button>
             )}
-          </div>
+          </EmptyState>
         ) : (
           groups.map((g) => (
             <section key={g.day}>
@@ -435,9 +435,9 @@ export default function ActivityPage() {
               Showing the newest {events.length.toLocaleString()} of {total.toLocaleString()}{' '}
               events.
             </span>
-            <button className="btn-secondary" disabled={loadingMore} onClick={loadOlder}>
+            <Button disabled={loadingMore} onClick={loadOlder}>
               {loadingMore ? 'Loading…' : 'Load older events'}
-            </button>
+            </Button>
           </div>
         )}
       </>

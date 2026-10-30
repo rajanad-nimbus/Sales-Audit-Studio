@@ -5,7 +5,7 @@ import { useTheme } from '@/lib/ThemeContext';
 import { useMe } from '@/components/MeProvider';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
-import { Alert, DataTable } from '@/components/ui';
+import { Alert, Button, Card, DataTable } from '@/components/ui';
 
 const ALL_TABS = [
   ['appearance', 'Appearance'],
@@ -214,7 +214,7 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
       )}
 
       {tab === 'appearance' && (
-        <section className="info-card">
+        <Card>
           <h2>Appearance</h2>
           <p>Choose how Nimbus looks. Your choice is saved in this browser.</p>
           <div className="theme-options" role="radiogroup" aria-label="Theme">
@@ -231,11 +231,11 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
               </button>
             ))}
           </div>
-        </section>
+        </Card>
       )}
 
       {tab === 'readiness' && (
-        <section className="info-card">
+        <Card>
           <h2>Production readiness</h2>
           <p>
             {readiness?.ready
@@ -292,12 +292,12 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
               </ul>
             </>
           )}
-        </section>
+        </Card>
       )}
 
       {tab === 'integrations' && (
         <>
-          <section className="info-card">
+          <Card>
             <h2>Source-feed profiles</h2>
             <p>
               Profiles define the read-only source mapping and expected delivery schedule.
@@ -333,12 +333,13 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                         </td>
                         <td>{new Date(profile.updated_at).toLocaleString()}</td>
                         <td>
-                          <button
-                            className="btn-secondary btn-small"
+                          <Button
+                            size="sm"
+
                             onClick={() => toggleProfile(profile.id, profile.enabled)}
                           >
                             {profile.enabled ? 'Disable' : 'Enable'}
-                          </button>
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -372,17 +373,19 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                 title={mappingError ?? 'Column mapping JSON'}
                 style={mappingError ? { borderColor: 'var(--error)' } : undefined}
               />
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 disabled={!profileName.trim() || !!mappingError}
-                className="btn-primary btn-small"
+
                 onClick={createProfile}
               >
                 Save profile
-              </button>
+              </Button>
             </div>
-          </section>
+          </Card>
 
-          <section className="info-card">
+          <Card>
             <h2>Shopify integration</h2>
             <p>
               Sync orders and refunds from your Shopify store for unified financial reconciliation.
@@ -421,13 +424,14 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                   )}
                 </ul>
                 {shopifyError && <Alert tone="error">{shopifyError}</Alert>}
-                <button
-                  className="btn-secondary btn-small"
+                <Button
+                  size="sm"
+
                   onClick={syncShopify}
                   disabled={shopifySyncing}
                 >
                   {shopifySyncing ? 'Syncing…' : 'Sync now'}
-                </button>
+                </Button>
               </>
             ) : (
               <Alert tone="warning">
@@ -435,9 +439,9 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                 credentials set, and that you have the Finance or IT role.
               </Alert>
             )}
-          </section>
+          </Card>
 
-          <section className="info-card">
+          <Card>
             <h2>Ontology policy integration</h2>
             <p>
               Nimbus reads approved Sales Audit rules only; it never edits or promotes Ontology
@@ -460,15 +464,15 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                 {ontology.last_error && <li>Last result: {ontology.last_error}</li>}
               </ul>
             )}
-            <button className="btn-secondary btn-small" onClick={refreshOntology}>
+            <Button size="sm" onClick={refreshOntology}>
               Refresh approved policy
-            </button>
-          </section>
+            </Button>
+          </Card>
         </>
       )}
 
       {tab === 'reconciliation' && (
-        <section className="info-card">
+        <Card>
           <h2>Reconciliation tolerance</h2>
           <p>
             Fallback controls used until Nimbus receives approved tolerance bands from Ontology.
@@ -507,16 +511,16 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
               </label>
               <span />
               <span />
-              <button className="btn-secondary btn-small" onClick={savePolicy}>
+              <Button size="sm" onClick={savePolicy}>
                 Save tolerance
-              </button>
+              </Button>
             </div>
           )}
-        </section>
+        </Card>
       )}
 
       {tab === 'account' && (
-        <section className="info-card">
+        <Card>
           <h2>Account</h2>
           <ul className="summary-list">
             <li>
@@ -530,7 +534,7 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
               in the top-right corner.
             </li>
           </ul>
-        </section>
+        </Card>
       )}
     </div>
   );

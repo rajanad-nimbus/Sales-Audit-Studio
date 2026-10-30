@@ -7,7 +7,7 @@ import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import { AgentModeNotice, useAgentMode } from '@/components/AgentMode';
 import { ago, groupOf, pretty } from '@/lib/activityUtil';
-import { Alert, Button } from '@/components/ui';
+import { Alert, Badge, Button } from '@/components/ui';
 
 interface AgentCfg {
   actor: string;
@@ -122,9 +122,9 @@ export function AgentsConfig() {
           <section className="agent-card" style={{ gridColumn: '1 / -1' }}>
             <header>
               <h3>Agent settings</h3>
-              <span className="badge badge-sm badge-secondary">
+              <Badge variant="secondary" size="sm">
                 {isAdmin ? 'Admin: editable' : 'View only'}
-              </span>
+              </Badge>
             </header>
             <p>
               {isAdmin
@@ -194,20 +194,23 @@ export function AgentsConfig() {
             </fieldset>
             {isAdmin && (
               <div className="cc-actions">
-                <button
-                  className="btn-primary btn-small"
+                <Button
+                  variant="primary"
+                  size="sm"
+
                   disabled={!dirty || draft.tools.length === 0}
                   onClick={save}
                 >
                   Save changes
-                </button>
-                <button
-                  className="btn-secondary btn-small"
+                </Button>
+                <Button
+                  size="sm"
+
                   disabled={!dirty}
                   onClick={() => setDraft(cfg.settings)}
                 >
                   Reset
-                </button>
+                </Button>
               </div>
             )}
             {cfg.settings_history.length > 0 && (

@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
-import { Alert } from '@/components/ui';
+import { Alert, Card } from '@/components/ui';
 
 interface Matrix {
   roles: { key: string; label: string }[];
@@ -24,7 +24,7 @@ export default function AccessPage() {
   if (!m) return <SkeletonRows rows={8} label="Loading access map" />;
   const groups = Array.from(new Set(m.screens.map((s) => s.group)));
   return (
-    <section className="info-card">
+    <Card>
       <h2>Roles &amp; access</h2>
       <p className="hint" style={{ marginBottom: '.75rem' }}>
         Who can open each screen. The API enforces the same map, so a role without a screen cannot
@@ -88,6 +88,6 @@ export default function AccessPage() {
           </tbody>
         </table>
       </div>
-    </section>
+    </Card>
   );
 }

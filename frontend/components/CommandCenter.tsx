@@ -9,7 +9,7 @@ import { useCanOpen, useMe } from '@/components/MeProvider';
 import { useChat } from '@/components/Chat';
 import { PriorityBadge, StatusBadge, Evidence } from '@/components/CaseTable';
 import { api, ACRow, Case, CaseDetail, Connector, Validation, Workflow, money } from '@/lib/api';
-import { Alert, Button } from '@/components/ui';
+import { Alert, Button, MetricGrid, MetricTile, Tabs } from '@/components/ui';
 
 type Persona = 'finance' | 'it';
 
@@ -339,24 +339,24 @@ export function CommandCenter() {
         </p>
       </section>
 
-      <div className="cc-kpis">
-        <div className="cc-kpi">
-          <span>Open exception amount</span>
-          <b>{loaded ? money(amount) : <i className="skeleton" />}</b>
-        </div>
-        <div className="cc-kpi">
-          <span>Estimated loss exposure</span>
-          <b>{loaded ? money(exposure) : <i className="skeleton" />}</b>
-        </div>
-        <div className="cc-kpi">
-          <span>Awaiting your decision</span>
-          <b>{loaded ? kpi.decision.toLocaleString() : <i className="skeleton" />}</b>
-        </div>
-        <div className="cc-kpi">
-          <span>Closed</span>
-          <b>{loaded ? kpi.closed.toLocaleString() : <i className="skeleton" />}</b>
-        </div>
-      </div>
+      <MetricGrid>
+        <MetricTile
+          label="Open exception amount"
+          value={loaded ? money(amount) : <i className="skeleton" />}
+        />
+        <MetricTile
+          label="Estimated loss exposure"
+          value={loaded ? money(exposure) : <i className="skeleton" />}
+        />
+        <MetricTile
+          label="Awaiting your decision"
+          value={loaded ? kpi.decision.toLocaleString() : <i className="skeleton" />}
+        />
+        <MetricTile
+          label="Closed"
+          value={loaded ? kpi.closed.toLocaleString() : <i className="skeleton" />}
+        />
+      </MetricGrid>
 
       <div className="cc-pipeline">
         {STAGES.map((s) => (
@@ -374,9 +374,9 @@ export function CommandCenter() {
       {stageFilter && (
         <div className="cc-filter-note">
           Showing stage: <b>{STAGES.find((x) => x.key === stageFilter)?.label}</b>
-          <button className="btn-secondary btn-sm" onClick={() => setStageFilter(null)}>
+          <Button size="sm" onClick={() => setStageFilter(null)}>
             Clear filter
-          </button>
+          </Button>
         </div>
       )}
 
@@ -418,20 +418,15 @@ export function CommandCenter() {
           const total = totals[q.key] ?? q.items.length;
           return (
             <div className="cc-queue-table">
-              <div className="cc-tabs" role="tablist">
-                {queues.map((x, n) => (
-                  <button
-                    key={x.key}
-                    role="tab"
-                    aria-selected={x === q}
-                    className={x === q ? 'on' : ''}
-                    onClick={() => setTab(n)}
-                  >
-                    {x.title}
-                    <span>{(totals[x.key] ?? x.items.length).toLocaleString()}</span>
-                  </button>
-                ))}
-              </div>
+              <Tabs
+                value={q.key}
+                onChange={(key) => setTab(queues.findIndex((x) => x.key === key))}
+                items={queues.map((x) => ({
+                  id: x.key,
+                  label: x.title,
+                  count: totals[x.key] ?? x.items.length,
+                }))}
+              />
               {q.items.length === 0 &&
                 (loaded ? (
                   <div className="empty-state">

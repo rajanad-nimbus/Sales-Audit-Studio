@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, CaseDetail, Validation, Workflow, money } from '@/lib/api';
-import { Alert } from '@/components/ui';
+import { Alert, Button } from '@/components/ui';
 
 export function CaseDrawer({
   id,
@@ -108,13 +108,14 @@ export function CaseDrawer({
           )}
 
           {c.status === 'Open' && d.exceptions.length > 0 && (
-            <button
-              className="btn-primary"
+            <Button
+              variant="primary"
+
               disabled={busy}
               onClick={() => run(() => api.post(`/api/cases/${id}/investigate`))}
             >
               Run investigation
-            </button>
+            </Button>
           )}
           {c.status === 'In Review' && rec && (
             <>
@@ -137,16 +138,12 @@ export function CaseDrawer({
                 </div>
               </div>
               <div className="cc-actions">
-                <button className="btn-primary" disabled={busy} onClick={() => decide('Approved')}>
+                <Button variant="primary" disabled={busy} onClick={() => decide('Approved')}>
                   Approve
-                </button>
-                <button
-                  className="btn-secondary"
-                  disabled={busy}
-                  onClick={() => decide('Escalated')}
-                >
+                </Button>
+                <Button disabled={busy} onClick={() => decide('Escalated')}>
                   Escalate
-                </button>
+                </Button>
               </div>
             </>
           )}
@@ -154,14 +151,14 @@ export function CaseDrawer({
             <p className="cc-empty">Awaiting a recommendation.</p>
           )}
           {c.status === 'Resolving' && (
-            <button className="btn-primary" disabled={busy} onClick={execute}>
+            <Button variant="primary" disabled={busy} onClick={execute}>
               Carry out action
-            </button>
+            </Button>
           )}
           {c.status === 'Pending Validation' && (
-            <button className="btn-primary" disabled={busy} onClick={verify}>
+            <Button variant="primary" disabled={busy} onClick={verify}>
               Verify result
-            </button>
+            </Button>
           )}
           <Link href={`/cases/${id}`} className="ac-open">
             Open full case

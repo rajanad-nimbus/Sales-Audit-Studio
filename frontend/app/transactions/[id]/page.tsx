@@ -7,7 +7,7 @@ import { api, money } from '@/lib/api';
 import { CopyButton, SkeletonRows } from '@/components/Feedback';
 import { StatusBadge } from '@/components/CaseTable';
 import { CaseLink } from '@/components/MeProvider';
-import { Alert, DataTable } from '@/components/ui';
+import { Alert, Badge, Card, DataTable } from '@/components/ui';
 
 interface Linked {
   id: string;
@@ -225,7 +225,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         </div>
       </div>
 
-      <section className="info-card case-section">
+      <Card className="case-section">
         <h2>
           {isReturn ? 'Items returned' : 'Items'}{' '}
           {det.status !== 'No detail' && (
@@ -303,11 +303,11 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             rowKey={(l) => String(l.line_no)}
           />
         )}
-      </section>
+      </Card>
 
       {det.status !== 'No detail' && (
         <div className="case-panel case-two">
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>Does it add up?</h2>
             {det.totals && det.lines.length > 0 && (
               <dl className="kv">
@@ -373,10 +373,10 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 )}
               </>
             )}
-          </section>
+          </Card>
 
           <div className="case-stack">
-            <section className="info-card case-section">
+            <Card className="case-section">
               <h2>Discounts, coupons and vouchers</h2>
               {det.discounts.length === 0 ? (
                 <p className="cc-empty">No discounts were applied.</p>
@@ -415,8 +415,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   </table>
                 </div>
               )}
-            </section>
-            <section className="info-card case-section">
+            </Card>
+            <Card className="case-section">
               <h2>VAT</h2>
               {det.taxes.length === 0 ? (
                 <p className="cc-empty">No tax was charged.</p>
@@ -442,13 +442,13 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   rowKey={(x) => String(x.tax_code)}
                 />
               )}
-            </section>
+            </Card>
           </div>
         </div>
       )}
 
       {d.returns?.is_return && (
-        <section className="info-card case-section">
+        <Card className="case-section">
           <h2>
             Return{' '}
             {d.returns.over_returned && (
@@ -522,10 +522,10 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               rowKey={(i) => String(i.item_code)}
             />
           )}
-        </section>
+        </Card>
       )}
       {d.returns && !d.returns.is_return && d.returns.returns && d.returns.returns.length > 0 && (
-        <section className="info-card case-section">
+        <Card className="case-section">
           <h2>Returns against this sale</h2>
           <DataTable
             columns={[
@@ -552,11 +552,11 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             rows={d.returns.returns}
             rowKey={(x) => String(x.id)}
           />
-        </section>
+        </Card>
       )}
 
       <div className="case-panel case-two">
-        <section className="info-card case-section">
+        <Card className="case-section">
           <h2>Details</h2>
           <dl className="kv">
             {fields.map(([k, v]) => (
@@ -569,10 +569,10 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           <p className="hint" style={{ marginTop: '.5rem' }}>
             Transaction id <code>{d.id}</code> <CopyButton value={d.id} />
           </p>
-        </section>
+        </Card>
 
         <div className="case-stack">
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>Related cases</h2>
             {d.cases.length === 0 ? (
               <p className="cc-empty">No case has been raised for this store and day.</p>
@@ -591,8 +591,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 ))}
               </ul>
             )}
-          </section>
-          <section className="info-card case-section">
+          </Card>
+          <Card className="case-section">
             <h2>Linked transactions</h2>
             {d.linked_transactions.length === 0 ? (
               <p className="cc-empty">
@@ -628,9 +628,9 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 rowKey={(t) => String(t.id)}
               />
             )}
-          </section>
+          </Card>
           {d.adjustments.length > 0 && (
-            <section className="info-card case-section">
+            <Card className="case-section">
               <h2>Adjustments</h2>
               {d.adjustments.map((a) => (
                 <div key={a.id} className="indicator">
@@ -640,16 +640,18 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                       {a.rationale} · {a.proposed_by} · {when(a.created_at)}
                     </p>
                   </div>
-                  <span className="badge badge-sm badge-secondary">{a.status}</span>
+                  <Badge variant="secondary" size="sm">
+                    {a.status}
+                  </Badge>
                 </div>
               ))}
               <Link href="/corrections">Open Transaction Corrections</Link>
-            </section>
+            </Card>
           )}
         </div>
       </div>
 
-      <section className="info-card case-section">
+      <Card className="case-section">
         <h2>Source record</h2>
         {!src ? (
           <p className="cc-empty">This transaction has no archived source record.</p>
@@ -703,7 +705,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             </div>
           </>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

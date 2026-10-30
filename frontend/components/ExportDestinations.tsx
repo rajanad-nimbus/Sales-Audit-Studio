@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ExportDest } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
-import { Alert, Button } from '@/components/ui';
+import { Alert, Button, EmptyState, Field } from '@/components/ui';
 
 const apiError = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback;
@@ -77,9 +77,9 @@ export function ExportDestinations() {
           Destinations <span className="cc-count">{dests.length}</span>
         </h2>
         {canEdit && (
-          <button className="btn-secondary btn-small" onClick={() => setAdding(!adding)}>
+          <Button size="sm" onClick={() => setAdding(!adding)}>
             {adding ? 'Cancel' : 'Add destination'}
-          </button>
+          </Button>
         )}
       </div>
       {adding && (
@@ -94,8 +94,7 @@ export function ExportDestinations() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </label>
-            <label className="field">
-              Kind
+            <Field label="Kind">
               <select
                 value={form.kind}
                 onChange={(e) => setForm({ ...form, kind: e.target.value })}
@@ -103,9 +102,8 @@ export function ExportDestinations() {
                 <option value="webhook">Webhook (HTTP POST)</option>
                 <option value="file">File drop</option>
               </select>
-            </label>
-            <label className="field">
-              Format
+            </Field>
+            <Field label="Format">
               <select
                 value={form.format}
                 onChange={(e) => setForm({ ...form, format: e.target.value })}
@@ -113,7 +111,7 @@ export function ExportDestinations() {
                 <option value="json">JSON</option>
                 <option value="csv">CSV</option>
               </select>
-            </label>
+            </Field>
             {form.kind === 'webhook' && (
               <>
                 <label className="field grow">
@@ -125,18 +123,18 @@ export function ExportDestinations() {
                     aria-invalid={!!form.url && !/^https?:\/\//.test(form.url)}
                   />
                 </label>
-                <label className="field">
-                  Signing secret
+                <Field label="Signing secret">
                   <input
                     type="password"
                     value={form.secret}
                     onChange={(e) => setForm({ ...form, secret: e.target.value })}
                   />
-                </label>
+                </Field>
               </>
             )}
-            <button
-              className="btn-primary"
+            <Button
+              variant="primary"
+
               disabled={
                 busy ||
                 !form.name.trim() ||
@@ -145,7 +143,7 @@ export function ExportDestinations() {
               onClick={addDest}
             >
               Create
-            </button>
+            </Button>
           </div>
           <p className="hint" style={{ marginTop: '.6rem' }}>
             Webhook deliveries carry an HMAC-SHA256 signature in <code>X-Nimbus-Signature</code> and
@@ -155,10 +153,9 @@ export function ExportDestinations() {
         </div>
       )}
       {dests.length === 0 ? (
-        <div className="empty-state">
-          <b>No destinations yet</b>
+        <EmptyState title="No destinations yet">
           <p>Add a webhook or file drop to start exporting.</p>
-        </div>
+        </EmptyState>
       ) : (
         <div
           className="ac-tiles"
@@ -180,8 +177,9 @@ export function ExportDestinations() {
               </small>
               <b style={{ fontSize: '1rem' }}>{d.name}</b>
               <em>{d.config.url ?? 'Writes files to the exports folder'}</em>
-              <button
-                className="btn-secondary btn-small"
+              <Button
+                size="sm"
+
                 style={{ marginTop: '.4rem' }}
                 onClick={() =>
                   act(async () => {
@@ -191,7 +189,7 @@ export function ExportDestinations() {
                 }
               >
                 {d.enabled ? 'Disable' : 'Enable'}
-              </button>
+              </Button>
             </div>
           ))}
         </div>

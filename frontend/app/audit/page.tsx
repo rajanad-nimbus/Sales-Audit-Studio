@@ -202,12 +202,13 @@ export default function AuditPage() {
           title="To date"
         />
         {hasFilter && (
-          <button
-            className="btn-secondary btn-sm"
+          <Button
+            size="sm"
+
             onClick={() => setF({ event_type: '', actor: '', q: '', date_from: '', date_to: '' })}
           >
             Clear filters
-          </button>
+          </Button>
         )}
       </div>
 
@@ -269,23 +270,25 @@ export default function AuditPage() {
             <div className="ac-pager pager-sticky">
               <span>{total.toLocaleString()} event(s)</span>
               <span className="ac-spacer" />
-              <button
-                className="btn-secondary btn-small"
+              <Button
+                size="sm"
+
                 disabled={page <= 1}
                 onClick={() => setPage(page - 1)}
               >
                 Previous
-              </button>
+              </Button>
               <span>
                 Page {page} of {pages.toLocaleString()}
               </span>
-              <button
-                className="btn-secondary btn-small"
+              <Button
+                size="sm"
+
                 disabled={page >= pages}
                 onClick={() => setPage(page + 1)}
               >
                 Next
-              </button>
+              </Button>
             </div>
           }
         />

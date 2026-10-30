@@ -4,7 +4,7 @@ import { Fragment, use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SkeletonRows, useToast } from '@/components/Feedback';
-import { Alert, Button, DataTable } from '@/components/ui';
+import { Alert, Badge, Button, Card, DataTable, Field } from '@/components/ui';
 import { PriorityBadge, StatusBadge } from '@/components/CaseTable';
 import { AgentModeNotice, useAgentMode } from '@/components/AgentMode';
 import { useMe } from '@/components/UserMenu';
@@ -362,9 +362,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           <PriorityBadge p={c.priority} />
           <StatusBadge s={c.status} />
           {canInvestigate && findings.length > 0 && (
-            <button className="btn-secondary btn-sm" disabled={busy} onClick={investigate}>
+            <Button size="sm" disabled={busy} onClick={investigate}>
               Re-run investigation
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -434,7 +434,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <div key={r.id} className="next-rec">
                 <div>
                   <b>{pretty(r.disposition_type)}</b>{' '}
-                  <span className="badge badge-sm badge-secondary">{pretty(r.action_class)}</span>
+                  <Badge variant="secondary" size="sm">
+                    {pretty(r.action_class)}
+                  </Badge>
                   <p>
                     Confidence {r.confidence}
                     {r.financial_impact ? ` · Impact ${money(r.financial_impact)}` : ''}
@@ -442,20 +444,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   {r.expected_workflow && <p>On approval: {r.expected_workflow}</p>}
                 </div>
                 <div className="action-buttons">
-                  <button
-                    className="btn-primary"
+                  <Button
+                    variant="primary"
+
                     disabled={busy}
                     onClick={() => decide(r.id, 'Approved')}
                   >
                     Approve
-                  </button>
-                  <button
-                    className="btn-secondary"
-                    disabled={busy}
-                    onClick={() => decide(r.id, 'Escalated')}
-                  >
+                  </Button>
+                  <Button disabled={busy} onClick={() => decide(r.id, 'Escalated')}>
                     Escalate
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -488,9 +487,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <b>Execute {w.workflow_type} workflow</b>
                 <p>Approved. Waiting on you to run: {w.current_step}.</p>
               </div>
-              <button className="btn-primary" disabled={busy} onClick={() => execute(w.id)}>
+              <Button variant="primary" disabled={busy} onClick={() => execute(w.id)}>
                 Execute action
-              </button>
+              </Button>
             </div>
           ))
         ) : openVal.length > 0 ? (
@@ -500,9 +499,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <b>Validate the outcome</b>
                 <p>Expected: {v.expected_observation}</p>
               </div>
-              <button className="btn-primary" disabled={busy} onClick={() => validate(v.id)}>
+              <Button variant="primary" disabled={busy} onClick={() => validate(v.id)}>
                 Run validation
-              </button>
+              </Button>
             </div>
           ))
         ) : exceptions.length === 0 ? (
@@ -519,9 +518,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <AgentModeNotice mode={agentMode} compact />
               </p>
             </div>
-            <button className="btn-primary" disabled={busy} onClick={investigate}>
+            <Button variant="primary" disabled={busy} onClick={investigate}>
               {busy ? 'Investigating…' : 'Run investigation'}
-            </button>
+            </Button>
           </div>
         ) : (
           <p>
@@ -558,7 +557,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
       {tab === 'overview' && (
         <div className="case-panel">
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>What happened</h2>
             {exceptions.length === 0 ? (
               <p className="cc-empty">No exceptions recorded.</p>
@@ -599,9 +598,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 rowKey={(x) => String(x.id)}
               />
             )}
-          </section>
+          </Card>
 
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>Why it happened</h2>
             {findings.length === 0 ? (
               <p className="cc-empty">No findings yet. Run the investigation to find the cause.</p>
@@ -610,14 +609,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 {findings.map((f) => (
                   <li key={f.id}>
                     {f.conclusion}{' '}
-                    <span className="badge badge-sm badge-success">{f.confidence} confidence</span>
+                    <Badge variant="success" size="sm">
+                      {f.confidence} confidence
+                    </Badge>
                   </li>
                 ))}
               </ul>
             )}
-          </section>
+          </Card>
 
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>Policy check</h2>
             {policies.length === 0 ? (
               <p className="cc-empty">No policy evaluation yet.</p>
@@ -629,13 +630,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 </div>
               ))
             )}
-          </section>
+          </Card>
 
           {(decisions.length > 0 ||
             earlier.length > 0 ||
             workflows.length > 0 ||
             validations.length > 0) && (
-            <section className="info-card case-section">
+            <Card className="case-section">
               <h2>Decisions &amp; follow-through</h2>
               {earlier.map((r) => (
                 <div key={r.id} className="indicator">
@@ -645,7 +646,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       {pretty(r.action_class)} · confidence {r.confidence}
                     </p>
                   </div>
-                  <span className="badge badge-sm badge-secondary">{r.status}</span>
+                  <Badge variant="secondary" size="sm">
+                    {r.status}
+                  </Badge>
                 </div>
               ))}
               {decisions.map((d) => (
@@ -692,14 +695,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </span>
                 </div>
               ))}
-            </section>
+            </Card>
           )}
         </div>
       )}
 
       {tab === 'records' && (
         <div className="case-panel">
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>Source records</h2>
             {reconciliation && <p className="case-help">{reconciliation.message}</p>}
             <p className="hint">
@@ -782,20 +785,19 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       placeholder="Why do these records match?"
                       aria-label="Manual match rationale"
                     />
-                    <button
-                      className="btn-secondary"
+                    <Button
                       disabled={busy || matchIds.length < 2 || !matchRationale.trim()}
                       onClick={proposeMatch}
                     >
                       Propose match
-                    </button>
+                    </Button>
                   </div>
                 </details>
               </>
             )}
-          </section>
+          </Card>
 
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>Evidence</h2>
             {evidence.length === 0 ? (
               <p className="cc-empty">
@@ -831,12 +833,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           <td className="num">{e.source_record_ids.length}</td>
                           <td>
                             {e.status === 'Unavailable' && !closed && (
-                              <button
-                                className="btn-secondary btn-sm"
+                              <Button
+                                size="sm"
+
                                 onClick={() => startProvide(e.evidence_type)}
                               >
                                 Provide evidence
-                              </button>
+                              </Button>
                             )}
                           </td>
                         </tr>
@@ -859,27 +862,22 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                       autoFocus
                                     />
                                   </label>
-                                  <label className="field">
-                                    Reference (optional)
+                                  <Field label="Reference (optional)">
                                     <input
                                       value={provideRef}
                                       onChange={(ev) => setProvideRef(ev.target.value)}
                                       placeholder="Ticket, document or system id"
                                     />
-                                  </label>
-                                  <button
-                                    className="btn-primary"
+                                  </Field>
+                                  <Button
+                                    variant="primary"
+
                                     disabled={busy || !provideNote.trim()}
                                     onClick={provide}
                                   >
                                     Record evidence
-                                  </button>
-                                  <button
-                                    className="btn-secondary"
-                                    onClick={() => setProvideFor(null)}
-                                  >
-                                    Cancel
-                                  </button>
+                                  </Button>
+                                  <Button onClick={() => setProvideFor(null)}>Cancel</Button>
                                 </div>
                               </div>
                             </td>
@@ -891,13 +889,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 </table>
               </div>
             )}
-          </section>
+          </Card>
         </div>
       )}
 
       {tab === 'activity' && (
         <div className="case-panel case-two">
-          <section className="info-card case-section">
+          <Card className="case-section">
             <h2>Timeline</h2>
             {timeline.length === 0 ? (
               <p className="cc-empty">No case events recorded.</p>
@@ -917,10 +915,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 ))}
               </ol>
             )}
-          </section>
+          </Card>
 
           <div className="case-stack">
-            <section className="info-card case-section">
+            <Card className="case-section">
               <h2>Notes</h2>
               <div className="cc-askrow">
                 <input
@@ -932,9 +930,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   placeholder="Add an investigation note"
                   aria-label="Note"
                 />
-                <button className="btn-primary" disabled={busy || !note.trim()} onClick={addNote}>
+                <Button variant="primary" disabled={busy || !note.trim()} onClick={addNote}>
                   Add
-                </button>
+                </Button>
               </div>
               {collab.notes.length === 0 ? (
                 <p className="cc-empty" style={{ marginTop: '.6rem' }}>
@@ -949,9 +947,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </div>
                 ))
               )}
-            </section>
+            </Card>
 
-            <section className="info-card case-section">
+            <Card className="case-section">
               <h2>Request evidence</h2>
               <div className="case-request">
                 <input
@@ -966,13 +964,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   placeholder="Who should provide it?"
                   aria-label="Requested from"
                 />
-                <button
-                  className="btn-secondary"
+                <Button
                   disabled={busy || !requirement.trim() || !requestedFrom.trim()}
                   onClick={requestEvidence}
                 >
                   Request
-                </button>
+                </Button>
               </div>
               {collab.evidence_requests.map((r) => {
                 const tone =
@@ -1026,13 +1023,15 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           you cannot approve it.
                         </p>
                       ) : (
-                        <button
-                          className="btn-primary btn-sm"
+                        <Button
+                          variant="primary"
+                          size="sm"
+
                           disabled={busy}
                           onClick={() => approveOverride(r.id)}
                         >
                           Approve override
-                        </button>
+                        </Button>
                       ))}
                     {actionable &&
                       provideFor !== r.requirement &&
@@ -1040,16 +1039,18 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       overrideFor !== r.id && (
                         <div className="action-buttons" style={{ marginTop: '.4rem' }}>
                           {r.status === 'Open' && (
-                            <button
-                              className="btn-secondary btn-sm"
+                            <Button
+                              size="sm"
+
                               onClick={() => startProvide(r.requirement)}
                             >
                               Provide evidence
-                            </button>
+                            </Button>
                           )}
                           {r.status === 'Open' && (
-                            <button
-                              className="btn-secondary btn-sm"
+                            <Button
+                              size="sm"
+
                               onClick={() => {
                                 setRejectFor(r.id);
                                 setRejectReason('');
@@ -1057,10 +1058,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               }}
                             >
                               Reject
-                            </button>
+                            </Button>
                           )}
-                          <button
-                            className="btn-secondary btn-sm"
+                          <Button
+                            size="sm"
+
                             onClick={() => {
                               setOverrideFor(r.id);
                               setOverrideReason('');
@@ -1069,7 +1071,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             }}
                           >
                             Override
-                          </button>
+                          </Button>
                         </div>
                       )}
                     {r.status === 'Open' && provideFor === r.requirement && (
@@ -1082,26 +1084,28 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             autoFocus
                           />
                         </label>
-                        <label className="field">
-                          Reference (optional)
+                        <Field label="Reference (optional)">
                           <input
                             value={provideRef}
                             onChange={(ev) => setProvideRef(ev.target.value)}
                           />
-                        </label>
-                        <button
-                          className="btn-primary btn-sm"
+                        </Field>
+                        <Button
+                          variant="primary"
+                          size="sm"
+
                           disabled={busy || !provideNote.trim()}
                           onClick={provide}
                         >
                           Record
-                        </button>
-                        <button
-                          className="btn-secondary btn-sm"
+                        </Button>
+                        <Button
+                          size="sm"
+
                           onClick={() => setProvideFor(null)}
                         >
                           Cancel
-                        </button>
+                        </Button>
                       </div>
                     )}
                     {rejectFor === r.id && (
@@ -1114,16 +1118,18 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             autoFocus
                           />
                         </label>
-                        <button
-                          className="btn-primary btn-sm"
+                        <Button
+                          variant="primary"
+                          size="sm"
+
                           disabled={busy || !rejectReason.trim()}
                           onClick={reject}
                         >
                           Reject request
-                        </button>
-                        <button className="btn-secondary btn-sm" onClick={() => setRejectFor(null)}>
+                        </Button>
+                        <Button size="sm" onClick={() => setRejectFor(null)}>
                           Cancel
-                        </button>
+                        </Button>
                       </div>
                     )}
                     {overrideFor === r.id && (
@@ -1142,8 +1148,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               autoFocus
                             />
                           </label>
-                          <label className="field">
-                            Financial impact ($)
+                          <Field label="Financial impact ($)">
                             <input
                               inputMode="decimal"
                               value={overrideImpact}
@@ -1155,20 +1160,23 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                   : { width: '9rem' }
                               }
                             />
-                          </label>
-                          <button
-                            className="btn-primary btn-sm"
+                          </Field>
+                          <Button
+                            variant="primary"
+                            size="sm"
+
                             disabled={busy || !overrideReason.trim() || !impactOk}
                             onClick={submitOverride}
                           >
                             Override
-                          </button>
-                          <button
-                            className="btn-secondary btn-sm"
+                          </Button>
+                          <Button
+                            size="sm"
+
                             onClick={() => setOverrideFor(null)}
                           >
                             Cancel
-                          </button>
+                          </Button>
                         </div>
                         {!impactOk && (
                           <p className="next-err" role="alert">
@@ -1180,7 +1188,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </div>
                 );
               })}
-            </section>
+            </Card>
           </div>
         </div>
       )}

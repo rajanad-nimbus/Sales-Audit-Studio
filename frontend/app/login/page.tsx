@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { useMe } from '@/components/MeProvider';
-import { Alert } from '@/components/ui';
+import { Alert, Button } from '@/components/ui';
 
 const STUDIO = process.env.NEXT_PUBLIC_ONTOLOGY_STUDIO_URL || 'http://localhost:3050';
 
@@ -69,13 +69,16 @@ export default function LoginPage() {
         ) : (
           <>
             {signedOut && <Alert tone="info">You have been signed out.</Alert>}
-            <button
-              className="btn-primary btn-lg login-btn"
+            <Button
+              variant="primary"
+              size="lg"
+              className="login-btn"
+
               onClick={signIn}
               disabled={redirecting}
             >
               {redirecting ? 'Opening Ontology Studio…' : 'Sign in with Ontology Studio'}
-            </button>
+            </Button>
             <p className="login-note">
               Your account, role and stores are managed in Ontology Studio. After signing in there,
               come back to Sales Audit Studio and you will be taken straight in.

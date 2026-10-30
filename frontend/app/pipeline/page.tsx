@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, BatchStatus } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
-import { Alert, Button, DataTable, PageHeader } from '@/components/ui';
+import { Alert, Badge, Button, DataTable, EmptyState, PageHeader } from '@/components/ui';
 
 interface Stats {
   source_records: Record<string, number>;
@@ -294,10 +294,9 @@ export default function PipelinePage() {
                 (or <code>POST /api/batch/run</code>) after the extract lands.
               </p>
               {runs.length === 0 ? (
-                <div className="empty-state">
-                  <b>No batch runs yet</b>
+                <EmptyState title="No batch runs yet">
                   <p>Use “Run nightly batch” above to load the demo feed.</p>
-                </div>
+                </EmptyState>
               ) : (
                 <DataTable
                   columns={[
@@ -437,9 +436,9 @@ export default function PipelinePage() {
                             <td className="num">{n(d.processed)}</td>
                             <td className="num">
                               {d.quarantined > 0 ? (
-                                <span className="badge badge-sm badge-warning">
+                                <Badge variant="warning" size="sm">
                                   {n(d.quarantined)}
-                                </span>
+                                </Badge>
                               ) : (
                                 0
                               )}
@@ -462,10 +461,9 @@ export default function PipelinePage() {
                 and re-deliver them.
               </p>
               {quarantined.length === 0 ? (
-                <div className="empty-state">
-                  <b>Nothing in quarantine</b>
+                <EmptyState title="Nothing in quarantine">
                   <p>Every received record passed validation.</p>
-                </div>
+                </EmptyState>
               ) : (
                 <DataTable
                   columns={[
@@ -494,8 +492,7 @@ export default function PipelinePage() {
                     own.
                   </p>
                   <div className="cc-actions">
-                    <button
-                      className="btn-secondary"
+                    <Button
                       disabled={!!busy}
                       onClick={() =>
                         run('feed', async () => {
@@ -506,9 +503,8 @@ export default function PipelinePage() {
                       }
                     >
                       {busy === 'feed' ? 'Ingesting…' : '1. Ingest synthetic day'}
-                    </button>
-                    <button
-                      className="btn-secondary"
+                    </Button>
+                    <Button
                       disabled={!!busy}
                       onClick={() =>
                         run('recon', async () => {
@@ -519,7 +515,7 @@ export default function PipelinePage() {
                       }
                     >
                       {busy === 'recon' ? 'Reconciling…' : '2. Run reconciliation'}
-                    </button>
+                    </Button>
                   </div>
                   {ingestRes && (
                     <div className="sd-section">
@@ -566,8 +562,7 @@ export default function PipelinePage() {
                     exceptions, so they cannot be investigated.
                   </p>
                   <div className="cc-actions">
-                    <button
-                      className="btn-secondary"
+                    <Button
                       disabled={!!busy}
                       onClick={() =>
                         run('vol', async () => {
@@ -579,12 +574,14 @@ export default function PipelinePage() {
                       }
                     >
                       {busy === 'vol' ? 'Loading…' : 'Load 50k synthetic cases'}
-                    </button>
+                    </Button>
                     {confirmClr ? (
                       <span className="confirm-inline">
                         Delete all synthetic cases?
-                        <button
-                          className="btn-danger btn-small"
+                        <Button
+                          variant="danger"
+                          size="sm"
+
                           disabled={!!busy}
                           onClick={() => {
                             setConfirmClr(false);
@@ -595,22 +592,19 @@ export default function PipelinePage() {
                           }}
                         >
                           Yes, remove
-                        </button>
-                        <button
-                          className="btn-secondary btn-small"
+                        </Button>
+                        <Button
+                          size="sm"
+
                           onClick={() => setConfirmClr(false)}
                         >
                           Cancel
-                        </button>
+                        </Button>
                       </span>
                     ) : (
-                      <button
-                        className="btn-secondary"
-                        disabled={!!busy}
-                        onClick={() => setConfirmClr(true)}
-                      >
+                      <Button disabled={!!busy} onClick={() => setConfirmClr(true)}>
                         Remove synthetic cases
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </section>

@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { api } from '@/lib/api';
+import { Button } from '@/components/ui';
 
 /* ---------- types ---------- */
 interface Source {
@@ -580,9 +581,9 @@ export function ChatPanel() {
               aria-label="Search conversations"
             />
           </div>
-          <button className="btn-primary btn-small" onClick={startNew}>
+          <Button variant="primary" size="sm" onClick={startNew}>
             <Icon n="plus" s={13} /> New conversation
-          </button>
+          </Button>
           <div className="as-sessions">
             {shown.length === 0 && <p className="cc-empty">No conversations match.</p>}
             {shown.map((s) => (
@@ -811,13 +812,15 @@ export function ChatPanel() {
                 }
               }}
             />
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               type="submit"
-              className="btn-primary btn-small"
+
               disabled={busy || !input.trim()}
             >
               <Icon n="send" s={13} /> Send
-            </button>
+            </Button>
           </form>
           <div className="as-hint">Enter to send · Shift+Enter for a new line</div>
         </>

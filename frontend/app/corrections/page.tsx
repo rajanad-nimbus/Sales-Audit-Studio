@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
-import { Alert, PageHeader } from '@/components/ui';
+import { Alert, Button, Card, Field, PageHeader, Segmented } from '@/components/ui';
 
 type Adjustment = {
   id: string;
@@ -202,7 +202,7 @@ export default function CorrectionsPage() {
           {error}
         </Alert>
       )}
-      <section className="info-card">
+      <Card>
         <div className="cc-head">
           <div>
             <h2>1. Propose a governed correction</h2>
@@ -248,13 +248,14 @@ export default function CorrectionsPage() {
                     }}
                     placeholder="Canonical ID, payment reference, settlement reference, or store"
                   />
-                  <button
-                    className="btn-secondary btn-sm"
+                  <Button
+                    size="sm"
+
                     disabled={searching || search.trim().length < 2}
                     onClick={lookup}
                   >
                     {searching ? 'Searching…' : 'Search'}
-                  </button>
+                  </Button>
                 </div>
                 {results.length > 0 && (
                   <div className="table-container" style={{ marginTop: '.6rem' }}>
@@ -285,12 +286,14 @@ export default function CorrectionsPage() {
                             <td>{money(tx.signed_amount)}</td>
                             <td>{tx.tender_type || '—'}</td>
                             <td>
-                              <button
-                                className="btn-primary btn-small"
+                              <Button
+                                variant="primary"
+                                size="sm"
+
                                 onClick={() => selectTransaction(tx)}
                               >
                                 Use transaction
-                              </button>
+                              </Button>
                             </td>
                           </tr>
                         ))}
@@ -326,10 +329,9 @@ export default function CorrectionsPage() {
                 </datalist>
               )}
               {kind === 'MissingTransaction' && (
-                <label className="field">
-                  Business date
+                <Field label="Business date">
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                </label>
+                </Field>
               )}
             </div>
             {transactionId && kind !== 'MissingTransaction' && (
@@ -350,8 +352,7 @@ export default function CorrectionsPage() {
                 </label>
                 {kind === 'MissingTransaction' && (
                   <>
-                    <label className="field">
-                      Transaction type
+                    <Field label="Transaction type">
                       <select
                         value={transactionType}
                         onChange={(e) => setTransactionType(e.target.value)}
@@ -363,9 +364,8 @@ export default function CorrectionsPage() {
                           <option key={x}>{x}</option>
                         ))}
                       </select>
-                    </label>
-                    <label className="field">
-                      Tender
+                    </Field>
+                    <Field label="Tender">
                       <select value={tender} onChange={(e) => setTender(e.target.value)}>
                         {(facets.tenders.length
                           ? facets.tenders
@@ -374,7 +374,7 @@ export default function CorrectionsPage() {
                           <option key={x}>{x}</option>
                         ))}
                       </select>
-                    </label>
+                    </Field>
                   </>
                 )}
               </div>
@@ -430,14 +430,15 @@ export default function CorrectionsPage() {
                 style={{ width: '100%', marginTop: 6 }}
               />
             </label>
-            <button
-              className="btn-primary"
+            <Button
+              variant="primary"
+
               disabled={!valid}
               onClick={submit}
               style={{ marginTop: '.75rem' }}
             >
               Submit for Finance review
-            </button>
+            </Button>
           </div>
           <div className="cc-card" style={{ margin: 0 }}>
             <h3>2. Review payload</h3>
@@ -453,8 +454,8 @@ export default function CorrectionsPage() {
             )}
           </div>
         </div>
-      </section>
-      <section className="info-card">
+      </Card>
+      <Card>
         <div className="cc-head">
           <div>
             <h2>Finance review queue</h2>
@@ -463,12 +464,15 @@ export default function CorrectionsPage() {
             </p>
           </div>
         </div>
-        <div className="cc-seg" style={{ alignSelf: 'flex-start', margin: '1rem 0' }}>
-          {(['All', 'Proposed', 'Approved', 'Rejected'] as const).map((x) => (
-            <button key={x} className={filter === x ? 'on' : ''} onClick={() => setFilter(x)}>
-              {x} {counts(x)}
-            </button>
-          ))}
+        <div className="mt-md mb-md" style={{ alignSelf: 'flex-start' }}>
+          <Segmented
+            value={filter}
+            onChange={setFilter}
+            options={(['All', 'Proposed', 'Approved', 'Rejected'] as const).map((x) => ({
+              value: x,
+              label: `${x} ${counts(x)}`,
+            }))}
+          />
         </div>
         <div className="table-container">
           <table className="data-table">
@@ -510,18 +514,21 @@ export default function CorrectionsPage() {
                     <td>
                       {row.status === 'Proposed' && (
                         <span style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            className="btn-primary btn-small"
+                          <Button
+                            variant="primary"
+                            size="sm"
+
                             onClick={() => decide(row.id, 'approve')}
                           >
                             Approve
-                          </button>
-                          <button
-                            className="btn-secondary btn-small"
+                          </Button>
+                          <Button
+                            size="sm"
+
                             onClick={() => decide(row.id, 'reject')}
                           >
                             Reject
-                          </button>
+                          </Button>
                         </span>
                       )}
                     </td>
@@ -537,7 +544,7 @@ export default function CorrectionsPage() {
             </tbody>
           </table>
         </div>
-      </section>
+      </Card>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ACRow, BatchStatus, compact, money } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useDataChanged } from '@/lib/sync';
-import { Alert } from '@/components/ui';
+import { Alert, Badge, Button, Segmented } from '@/components/ui';
 
 interface F {
   q: string;
@@ -373,12 +373,12 @@ export default function ActionCenter() {
             </span>
           </div>
           <div className="cc-controls">
-            <button className="btn-secondary btn-small" onClick={load}>
+            <Button size="sm" onClick={load}>
               Refresh
-            </button>
-            <button className="btn-secondary btn-small" onClick={download}>
+            </Button>
+            <Button size="sm" onClick={download}>
               Export CSV
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -491,20 +491,19 @@ export default function ActionCenter() {
             <option value="me">Me</option>
             <option value="unassigned">Unassigned</option>
           </select>
-          <button
-            className={`btn-secondary btn-small ac-more${moreOpen ? ' on' : ''}`}
+          <Button
+            size="sm"
+            className={`ac-more${moreOpen ? ' on' : ''}`}
             onClick={() => setMoreOpen(!moreOpen)}
             aria-expanded={moreOpen}
           >
             Filters{advCount > 0 ? ` (${advCount})` : ''} {moreOpen ? '▴' : '▾'}
-          </button>
-          <div className="cc-seg" aria-label="Group by">
-            {GROUPS.map(([k, l]) => (
-              <button key={k} className={groupBy === k ? 'on' : ''} onClick={() => setGroupBy(k)}>
-                {k === '' ? 'No grouping' : l}
-              </button>
-            ))}
-          </div>
+          </Button>
+          <Segmented
+            value={groupBy}
+            onChange={setGroupBy}
+            options={GROUPS.map(([k, l]) => ({ value: k, label: k === '' ? 'No grouping' : l }))}
+          />
         </div>
         {moreOpen && (
           <div className="ac-filters ac-adv">
@@ -655,8 +654,10 @@ export default function ActionCenter() {
               </ul>
             </details>
             <span className="ac-spacer" />
-            <button
-              className="btn-primary btn-small"
+            <Button
+              variant="primary"
+              size="sm"
+
               onClick={() =>
                 setConfirm({
                   id: 'approve',
@@ -666,7 +667,7 @@ export default function ActionCenter() {
               }
             >
               Approve {proposed.length}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -684,9 +685,9 @@ export default function ActionCenter() {
             {allMatching && <span>· all matching the current filters</span>}
             <span className="ac-spacer" />
             {ACTIONS.map((a) => (
-              <button key={a.id} className="btn-secondary btn-small" onClick={() => setConfirm(a)}>
+              <Button size="sm" key={a.id} onClick={() => setConfirm(a)}>
                 {a.label}
-              </button>
+              </Button>
             ))}
             <button
               className="ac-link"
@@ -730,9 +731,9 @@ export default function ActionCenter() {
                     <td>{money(g.exposure)}</td>
                     <td>
                       {g.breached ? (
-                        <span className="badge badge-sm badge-error">
+                        <Badge variant="error" size="sm">
                           {g.breached.toLocaleString()}
-                        </span>
+                        </Badge>
                       ) : (
                         '-'
                       )}
@@ -856,23 +857,25 @@ export default function ActionCenter() {
                   </option>
                 ))}
               </select>
-              <button
-                className="btn-secondary btn-small"
+              <Button
+                size="sm"
+
                 disabled={page <= 1}
                 onClick={() => setPage(page - 1)}
               >
                 Previous
-              </button>
+              </Button>
               <span>
                 Page {page} of {pages.toLocaleString()}
               </span>
-              <button
-                className="btn-secondary btn-small"
+              <Button
+                size="sm"
+
                 disabled={page >= pages}
                 onClick={() => setPage(page + 1)}
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -897,12 +900,10 @@ export default function ActionCenter() {
               <p className="ac-hint">Bulk actions touch at most 1,000 cases per run.</p>
             )}
             <div className="cc-actions" style={{ justifyContent: 'flex-end' }}>
-              <button className="btn-secondary" onClick={() => setConfirm(null)}>
-                Cancel
-              </button>
-              <button className="btn-primary" onClick={runBulk}>
+              <Button onClick={() => setConfirm(null)}>Cancel</Button>
+              <Button variant="primary" onClick={runBulk}>
                 Confirm
-              </button>
+              </Button>
             </div>
           </div>
         </div>

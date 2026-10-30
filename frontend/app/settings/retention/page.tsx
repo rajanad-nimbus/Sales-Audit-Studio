@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
-import { Alert, Button, DataTable } from '@/components/ui';
+import { Alert, Button, Card, DataTable } from '@/components/ui';
 
 interface Policy {
   id: string;
@@ -90,7 +90,7 @@ export default function RetentionPage() {
   };
 
   return (
-    <section className="info-card">
+    <Card>
       <h2>Data retention</h2>
       <p className="hint" style={{ marginBottom: '.75rem' }}>
         How long each dataset is kept. Policies are previewed safely. Purging is a separate,
@@ -189,6 +189,6 @@ export default function RetentionPage() {
           rowKey={(r) => String(r.id)}
         />
       )}
-    </section>
+    </Card>
   );
 }

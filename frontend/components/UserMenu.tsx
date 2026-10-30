@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useMe } from './MeProvider';
+import { Button } from '@/components/ui';
 
 const PERSONAS = [
   ['analyst', 'Sales Auditor'],
@@ -162,8 +163,10 @@ export function UserMenu() {
                     A real store manager gets these from Ontology Studio. With none, the store
                     manager sees nothing.
                   </small>
-                  <button
-                    className="btn-primary btn-small"
+                  <Button
+                    variant="primary"
+                    size="sm"
+
                     onClick={() =>
                       impersonate(
                         'store_manager',
@@ -176,7 +179,7 @@ export function UserMenu() {
                     }
                   >
                     Act as Store Manager
-                  </button>
+                  </Button>
                 </div>
               )}
               {me!.impersonating && (

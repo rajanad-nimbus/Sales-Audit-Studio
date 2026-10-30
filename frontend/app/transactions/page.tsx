@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { api, money } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
-import { Alert, Button, DataTable, PageHeader, Pager } from '@/components/ui';
+import { Alert, Button, DataTable, EmptyState, PageHeader, Pager } from '@/components/ui';
 import type { Column } from '@/components/ui';
 
 interface Row {
@@ -356,15 +356,16 @@ export default function TransactionsPage() {
           onChange={(e) => set({ date_to: e.target.value })}
         />
         {filtered && (
-          <button
-            className="btn-secondary btn-sm"
+          <Button
+            size="sm"
+
             onClick={() => {
               setF(EMPTY);
               setQd('');
             }}
           >
             Clear filters
-          </button>
+          </Button>
         )}
         <span className="toolbar-count">
           {data ? `${data.total.toLocaleString()} ${filtered ? 'matching' : 'total'}` : ''}
@@ -374,25 +375,25 @@ export default function TransactionsPage() {
       {!data ? (
         <SkeletonRows rows={8} label="Loading transactions" />
       ) : data.items.length === 0 ? (
-        <div className="empty-state">
-          <b>No transactions match</b>
+        <EmptyState title="No transactions match">
           <p>
             {filtered
               ? 'Try clearing a filter.'
               : 'Transactions appear after a feed is ingested and normalized. Run the batch on the Data Pipeline page.'}
           </p>
           {filtered && (
-            <button
-              className="btn-secondary btn-sm"
+            <Button
+              size="sm"
+
               onClick={() => {
                 setF(EMPTY);
                 setQd('');
               }}
             >
               Clear filters
-            </button>
+            </Button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <DataTable
           columns={COLUMNS}
