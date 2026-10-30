@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 import auth
 from apps.cash import routes as cash
 from apps.store_days import routes as sd
-import scope
+from apps.security import scope
 from models import Base, CashControl, CashDeposit, StoreDay
 
 D = Decimal

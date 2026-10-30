@@ -2,8 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 
-import access
-import scope
+from apps.security import access, scope
 from auth import current_user
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse

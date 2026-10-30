@@ -1,6 +1,6 @@
 """Screen access: one map, enforced by the API, consistent with every endpoint's own role check."""
 
-import access
+from apps.security import access
 from auth import role_allowed
 
 

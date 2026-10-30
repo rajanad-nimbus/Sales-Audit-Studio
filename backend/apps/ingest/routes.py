@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import access
+from apps.security import access
 import auth
 from apps.assistant import chat
 from apps.ingest import service as ingest

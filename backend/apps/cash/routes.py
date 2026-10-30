@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import scope
+from apps.security import scope
 from auth import require_role
 from database import get_db
 from models import CanonicalTransaction, CashControl, CashDeposit
