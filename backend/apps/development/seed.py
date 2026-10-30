@@ -3,7 +3,8 @@ import asyncio, uuid
 from decimal import Decimal
 from sqlalchemy import func, select
 from database import async_session
-import ingest, investigation_service
+from apps.ingest import service as ingest
+from apps.agents import investigation_service
 from models import (AuditTotalDefinition, CanonicalTransaction, CashControl, CashDeposit, Case,
     ConfiguredAuditRule, FoundationReference, GLCrossReference, ReconciliationPolicy, StoreDay)
 from fastapi import HTTPException

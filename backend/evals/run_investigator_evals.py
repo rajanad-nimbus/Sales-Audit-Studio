@@ -15,7 +15,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-import investigator
+from apps.agents import investigator
 import ontology
 from models import Base, Case, CanonicalTransaction, Exception as Exc, SourceRecord
 

@@ -13,17 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import access
 import scope
 from database import engine, get_db
-import investigation_service
-import llm
+from apps.agents import investigation_service, llm
 import nimbus
 import ontology
 from ontology_integration import integration as ontology_integration
 from auth import AUTH_ENABLED, current_user, require_role
 from apps.ingest.routes import router as ingest_router
 from apps.agents.action_center import router as action_router
-from batch import router as batch_router
-from audit_api import router as audit_router
-from exports import router as exports_router
+from apps.operations.batch import router as batch_router
+from apps.audit.routes import router as audit_router
+from apps.exports.service import router as exports_router
 from apps.store_days.routes import router as store_day_router
 from apps.controls.foundation_routes import router as foundation_router
 from apps.cash.routes import router as cash_router

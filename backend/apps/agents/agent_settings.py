@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 import nimbus
-from agent_tools import TOOL_SPECS
+from apps.agents.agent_tools import TOOL_SPECS
 from models import AgentSetting
 
 ALLOWED_MODELS = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"]

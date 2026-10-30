@@ -33,7 +33,7 @@ def test_finance_it_admin_unchanged():
 def test_agent_settings_validation_rejects_unsafe_changes():
     import pytest
     from fastapi import HTTPException
-    import agent_settings as s
+    from apps.agents import agent_settings as s
     assert s.validate({"model": "claude-opus-5-5", "tools": ["get_source_record"]})["tools"] == ["get_source_record"]
     for bad in ({"model": "gpt-x"}, {"tools": []}, {"tools": ["delete_everything"]},
                 {"investigator_enabled": "yes"}, {"autonomy_limit": 99999}):
@@ -44,7 +44,7 @@ def test_agent_settings_validation_rejects_unsafe_changes():
 def test_chat_via_agent_sdk_is_read_only_and_uses_result(monkeypatch):
     import asyncio
     from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
-    import llm
+    from apps.agents import llm
     seen = {}
 
     async def fake_query(prompt, options):

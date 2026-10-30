@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from database import async_session
-from batch import run_daily_batch
+from apps.operations.batch import run_daily_batch
 
 
 async def main() -> int:

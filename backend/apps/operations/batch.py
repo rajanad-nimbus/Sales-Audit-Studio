@@ -8,10 +8,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import agent_settings
-import ingest
-import investigation_service
-import shopify_adapter
+from apps.agents import agent_settings, investigation_service
+from apps.ingest import service as ingest
+from apps.ingest import shopify_adapter
 from auth import require_role
 from database import get_db
 from models import BatchRun, CanonicalTransaction, utcnow

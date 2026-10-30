@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import access
 import auth
-import chat
-import ingest
-import llm
+from apps.assistant import chat
+from apps.ingest import service as ingest
+from apps.agents import llm
 import ontology
 from nimbus import audit
 from ontology_integration import integration as ontology_integration

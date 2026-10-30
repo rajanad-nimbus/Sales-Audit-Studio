@@ -15,16 +15,16 @@ The Shopify integration allows ZeTSA to:
 
 ### Components
 
-1. **shopify_adapter.py** — REST API client for fetching orders and refunds
-2. **shopify_ingest.py** — Validation and parsing of Shopify records
-3. **routes_shopify.py** — REST endpoints for sync, webhooks, and status
+1. **`backend/apps/ingest/shopify_adapter.py`** — REST API client for fetching orders and refunds
+2. **`backend/apps/ingest/shopify_ingest.py`** — Validation and parsing of Shopify records
+3. **`backend/apps/ingest/shopify_routes.py`** — REST endpoints for sync, webhooks, and status
 4. **ingest.py** (updated) — Core ingestion pipeline with Shopify support
 5. **ontology.py** (updated) — Shopify-specific exception types
 
 ### Data Flow
 
 ```
-Shopify API → shopify_adapter → shopify_ingest → ingest.py → CanonicalTransaction
+Shopify API → `apps.ingest.shopify_adapter` → `apps.ingest.shopify_ingest` → `apps.ingest.service` → CanonicalTransaction
                                                    ↓
                                            reconcile_shopify() → Exceptions → Cases
 ```

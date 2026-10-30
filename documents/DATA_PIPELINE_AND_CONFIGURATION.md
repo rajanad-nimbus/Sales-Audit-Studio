@@ -5,7 +5,7 @@ How data gets into Nimbus and becomes cases, and where each part of that behavio
 - **Data Pipeline** (`/pipeline`) is the operational view: is my data current, and what happened to it?
 - **Configuration** (`/settings/*`) is where you change how Nimbus behaves.
 
-Sources: `backend/ingest.py`, `backend/batch.py`, `backend/batch_job.py`, `backend/routes_ingest.py`, `backend/routes_shopify.py`, `backend/routes_operations.py`, `backend/exports.py`, `backend/routes_foundation.py`, `backend/agent_settings.py`, `backend/investigation_service.py`, `backend/nimbus.py`, `backend/access.py`, `backend/main.py`, `frontend/app/pipeline/page.tsx`, `frontend/app/settings/`.
+Sources: `backend/apps/`, `backend/nimbus.py`, `backend/access.py`, `backend/main.py`, `frontend/app/pipeline/page.tsx`, `frontend/app/settings/`.
 
 ## Contents
 
@@ -192,9 +192,9 @@ Matched records are set to `Matched / Closed`. Records in a break are set to `Ex
 | --------- | ------------------------------------------------------------------------------------------------------------------ |
 | UI        | "Run nightly batch" on the Pipeline page (IT)                                                                      |
 | API       | `POST /api/batch/run` with optional `business_date`, `rerun`, `feeds`                                              |
-| Scheduler | `python batch_job.py --date YYYY-MM-DD [--rerun]`. It exits 0 on success and 1 on failure, so cron can alert on it |
+| Scheduler | `PYTHONPATH=backend python -m apps.operations.batch_job --date YYYY-MM-DD [--rerun]`. It exits 0 on success and 1 on failure, so cron can alert on it |
 
-If no date is given, the API uses the day before the earliest loaded business date (or yesterday if nothing is loaded). `batch_job.py` defaults to yesterday in UTC.
+If no date is given, the API uses the day before the earliest loaded business date (or yesterday if nothing is loaded). `apps.operations.batch_job` defaults to yesterday in UTC.
 
 **Auto-investigation.** After a successful batch, open cases for that date with a pending investigation are taken highest exposure first. The LLM agent handles up to `NIMBUS_AGENT_BATCH_LIMIT` of them (default 25) so an unattended run has bounded time and cost. The rest get the deterministic investigation and can be run on demand. A failure on one case never fails the batch.
 
@@ -499,8 +499,8 @@ Do not commit real credentials. Keep them in `.env`.
 | I want to…                                           | Do this                                                                                                            |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Check whether my data is current                     | Open Data Pipeline and read the health banner                                                                      |
-| Load a day's data                                    | Run nightly batch (IT), or schedule`python batch_job.py --date YYYY-MM-DD`                                         |
-| Re-run a day that already succeeded                  | `POST /api/batch/run` with `rerun=true`, or `batch_job.py --rerun`                                                 |
+| Load a day's data                                    | Run nightly batch (IT), or schedule `PYTHONPATH=backend python -m apps.operations.batch_job --date YYYY-MM-DD`     |
+| Re-run a day that already succeeded                  | `POST /api/batch/run` with `rerun=true`, or `apps.operations.batch_job --rerun`                                    |
 | Find out why a record didn't load                    | Pipeline → Quarantine tab                                                                                          |
 | Add a feed with different column names               | Settings → Integrations → Add source-feed profile with a column mapping (IT), then ingest CSV with its`profile_id` |
 | Fix a feed showing "overdue"                         | Check the source delivery. Confirm the schedule text contains`daily` or `weekly`                                   |

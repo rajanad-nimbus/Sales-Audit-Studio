@@ -285,7 +285,7 @@ export default function PipelinePage() {
             <section className="cc-card">
               <p className="hint" style={{ marginBottom: '.75rem' }}>
                 Cases appear when a batch finishes. In production a schedule runs{' '}
-                <code>python batch_job.py --date YYYY-MM-DD</code> (or{' '}
+                <code>PYTHONPATH=backend python -m apps.operations.batch_job --date YYYY-MM-DD</code> (or{' '}
                 <code>POST /api/batch/run</code>) after the extract lands.
               </p>
               {runs.length === 0 ? (

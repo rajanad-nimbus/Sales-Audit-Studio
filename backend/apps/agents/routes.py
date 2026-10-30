@@ -7,10 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
 from database import get_db
-import agent_settings
-import agent_tools
-import investigator
-import llm
+from apps.agents import agent_settings, agent_tools, investigator, llm
 import nimbus
 from models import AuditEvent, Case, Exception as DBException, HumanDecision, Recommendation
 

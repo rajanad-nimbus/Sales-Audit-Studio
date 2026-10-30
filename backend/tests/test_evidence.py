@@ -2,7 +2,7 @@
 from types import SimpleNamespace as NS
 
 import ontology
-from investigation_service import evidence_for_requirement
+from apps.agents.investigation_service import evidence_for_requirement
 
 
 def rows():
@@ -60,7 +60,7 @@ def test_provided_evidence_closes_a_gap_and_supersedes_the_old_recommendation():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import StaticPool
 
-    import investigation_service as svc
+    from apps.agents import investigation_service as svc
     from models import (Base, CanonicalTransaction, Case, EvidenceRequest, EvidenceSnapshot, Exception as Exc,
                         Recommendation, SourceRecord)
 

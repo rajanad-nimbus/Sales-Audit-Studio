@@ -6,8 +6,8 @@ from decimal import Decimal
 
 import pytest
 
-import shopify_adapter as sa
-import shopify_ingest as si
+from apps.ingest import shopify_adapter as sa
+from apps.ingest import shopify_ingest as si
 
 
 def test_next_page_info_parses_link_header():

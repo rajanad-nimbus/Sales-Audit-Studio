@@ -10,8 +10,8 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import select
 
 import ontology
-import shopify_ingest
-import transaction_detail
+from apps.ingest import shopify_ingest
+from apps.transactions import detail as transaction_detail
 from models import (Case, CanonicalTransaction, Exception as DBException, ReconciliationPolicy, SourceRecord, TransactionDiscount,
                     TransactionLine, TransactionTax, TransactionTender, utcnow)
 from nimbus import audit, sla_due

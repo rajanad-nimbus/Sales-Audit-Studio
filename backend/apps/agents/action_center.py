@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, case as sql_case, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import investigation_service
+from apps.agents import investigation_service
 import nimbus
 from ontology_integration import integration as ontology_integration
 from auth import require_role

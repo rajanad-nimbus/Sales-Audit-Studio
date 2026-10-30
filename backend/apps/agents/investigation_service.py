@@ -4,9 +4,7 @@ import os
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import agent_settings
-import investigator
-import llm
+from apps.agents import agent_settings, investigator, llm
 import nimbus
 import ontology
 from models import AuditTotal, Case, CanonicalTransaction, EvidenceRequest, Recommendation, SourceRecord, StoreDay

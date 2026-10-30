@@ -8,8 +8,8 @@ from types import SimpleNamespace as NS
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-import investigator
-from agent_tools import EvidenceTools
+from apps.agents import investigator
+from apps.agents.agent_tools import EvidenceTools
 from models import Base, Case, CanonicalTransaction, Exception as Exc, SourceRecord
 
 
@@ -108,7 +108,7 @@ def test_failure_returns_trace_without_result():
 
 def test_auto_investigate_processes_new_cases_and_isolates_scope():
     async def go():
-        import investigation_service
+        from apps.agents import investigation_service
         Session, case, exc, ids = await seed()
         async with Session() as db:
             n = await investigation_service.auto_investigate(db, "2026-10-01")
@@ -147,7 +147,7 @@ def test_eligibility_requires_all_permit_conditions_and_grounded_finding():
 
 def test_settings_update_persists_and_is_audited_and_gates_tools():
     async def go():
-        import agent_settings
+        from apps.agents import agent_settings
         from sqlalchemy import select
         from models import AuditEvent
         Session, case, exc, ids = await seed()

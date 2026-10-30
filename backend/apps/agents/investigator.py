@@ -8,7 +8,7 @@ import asyncio
 import json
 import os
 
-from agent_tools import TOOL_SPECS, EvidenceTools, dumps
+from apps.agents.agent_tools import TOOL_SPECS, EvidenceTools, dumps
 
 MAX_TURNS = 6
 MAX_OUTPUT_TOKENS = 1200

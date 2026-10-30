@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
 from database import get_db
-import transaction_detail as detail_math
+from apps.transactions import detail as detail_math
 from models import (AuditEvent, CanonicalTransaction, Case, SourceRecord, TransactionAdjustment, TransactionDiscount, TransactionLine,
                     TransactionTax, TransactionTender)
 

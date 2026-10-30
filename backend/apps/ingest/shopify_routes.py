@@ -10,8 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import ingest
-import shopify_adapter
+from apps.ingest import service as ingest
+from apps.ingest import shopify_adapter
 from auth import require_role
 from database import get_db
 from models import SourceRecord, utcnow

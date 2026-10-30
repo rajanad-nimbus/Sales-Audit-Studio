@@ -110,7 +110,7 @@ def test_audit_preserves_pinned_run_context():
 
 
 def test_prompt_includes_governed_rules_without_changing_tool_permissions():
-    from investigator import ontology_prompt
+    from apps.agents.investigator import ontology_prompt
     assert ontology_prompt(None) == ""
     prompt = ontology_prompt({"ontology": META, "definitions": {
         "business-rules": [{"ruleCode": "NSA-EVIDENCE-REQUIRED", "expression": "Require evidence"}],
