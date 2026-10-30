@@ -1,6 +1,7 @@
 """Shopify-specific ingestion parsing and validation."""
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from apps.transactions import detail as transaction_detail
 
 SHOPIFY_VALID_RECORD_TYPES = {"Order", "Refund"}
 
@@ -23,6 +24,16 @@ IMMUTABLE_FIELDS = (
 def identity_payload(rec: dict) -> dict:
     """The subset of a record used for duplicate/conflict detection."""
     return {k: rec.get(k) for k in IMMUTABLE_FIELDS}
+
+
+def tax_detail(rec: dict, sign: int) -> dict | None:
+    """The tax Shopify reported on an order or refund, as a transaction detail block (negative for a refund)."""
+    if not rec.get("taxes"):
+        return None
+    try:
+        return transaction_detail.extract({"taxes": rec["taxes"]}, sign)
+    except (ValueError, InvalidOperation, OverflowError) as e:
+        raise ValueError(f"invalid transaction detail: {e}")
 
 
 def parse_shopify_order(rec: dict) -> dict:
@@ -60,6 +71,7 @@ def parse_shopify_order(rec: dict) -> dict:
         "ts": ts,
         "financial_status": financial_status,
         "channel_id": "ecommerce",
+        "detail": tax_detail(rec, 1),
     }
 
 
@@ -95,6 +107,7 @@ def parse_shopify_refund(rec: dict) -> dict:
         "order_id": str(rec["order_id"]),
         "refund_id": str(rec.get("refund_id", "")),
         "channel_id": "ecommerce",
+        "detail": tax_detail(rec, -1),
     }
 
 

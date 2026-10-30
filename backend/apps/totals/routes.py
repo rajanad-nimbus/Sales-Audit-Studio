@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
-from models import AuditTotalDefinition, CanonicalTransaction, SalesAuditErrorDefinition
+from models import AuditTotalDefinition, CanonicalTransaction, SalesAuditErrorDefinition, TransactionTax
 from .domain import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
 class TotalDefinitionBody(BaseModel):
     name: str
     aggregation: str = "Sum"
+    measure: str = "Amount"
     source_system: str | None = None
     transaction_types: list[str] = []
     tender_type: str | None = None
@@ -97,5 +98,10 @@ async def preview_definition(definition_id: str, store_id: str, business_date: s
     if definition.source_system: rows = [row for row in rows if row.source_lineage.startswith(definition.source_system.lower())]
     if definition.transaction_types: rows = [row for row in rows if row.transaction_type in definition.transaction_types]
     if definition.tender_type: rows = [row for row in rows if row.tender_type == definition.tender_type]
-    value = sum((row.signed_amount for row in rows), Decimal("0")) if definition.aggregation == "Sum" else len(rows)
+    if definition.measure == "Tax":
+        ids = [row.id for row in rows]
+        taxes = (await db.execute(select(TransactionTax.tax_amount).where(TransactionTax.transaction_id.in_(ids)))).scalars().all() if ids else []
+        value = sum(taxes, Decimal("0"))
+    else:
+        value = sum((row.signed_amount for row in rows), Decimal("0")) if definition.aggregation == "Sum" else len(rows)
     return {"definition": view(definition), "store_id": store_id, "business_date": business_date, "value": value, "record_count": len(rows)}

@@ -224,7 +224,8 @@ async def reconcile(db, business_date: str | None = None) -> dict:
             flag("ORPHAN_PAYMENT", abs(p.signed_amount), p)
 
     await reconcile_shopify(db, txns, flag)
-    await run_controls(db, business_date, add)
+    await run_transaction_audit(db, txns, flag)
+    await run_controls(db, business_date, add, policy)
     await run_settlement_controls(db, txns, add, amount_tolerance)
 
     groups = defaultdict(list)
@@ -313,7 +314,23 @@ async def close_paid_orders(db, orders):
             o.reconciliation_status, o.disposition = "Matched", "Closed"
 
 
-async def run_controls(db, business_date, add):
+async def run_transaction_audit(db, txns, flag):
+    """Per-transaction audit errors from stored detail: out of balance, and a manual discount with no reason."""
+    pos = [t for t in txns if t.source_lineage == LINEAGE["POS"] and t.reconciliation_status != "Exception"]
+    for t in pos:
+        if t.detail_status == "Unbalanced":
+            flag("TRAN_OUT_BAL", abs(t.signed_amount), t)
+    ids = [t.id for t in pos]
+    by_id = {t.id: t for t in pos}
+    for i in range(0, len(ids), 500):
+        rows = (await db.execute(select(TransactionDiscount).where(
+            TransactionDiscount.transaction_id.in_(ids[i:i + 500]), TransactionDiscount.kind == "Manual"))).scalars().all()
+        for d in rows:
+            if not (d.description or "").strip():
+                flag("DISC_REASON_REQ", Decimal("0"), by_id[d.transaction_id])
+
+
+async def run_controls(db, business_date, add, policy=None):
     """Completeness and balancing: compare POS control manifests with ingested POS transactions."""
     q = select(SourceRecord).where(SourceRecord.source_system == "POSControl", SourceRecord.status == "Archived")
     for m in (await db.execute(q)).scalars().all():
@@ -327,6 +344,9 @@ async def run_controls(db, business_date, add):
         count, total = len(rows), sum((r.signed_amount for r in rows), Decimal("0"))
         dcount, dtotal = int(d["declared_count"]), Decimal(str(d["declared_total"]))
         if count < dcount:
+            gap_min, gap_share = (policy.gap_min_count, policy.gap_share) if policy else (10, Decimal("0.1"))
+            if dcount - count >= max(gap_min, dcount * gap_share):
+                add("MISSING_TRAN_BIG_GAP", store, bd, abs(dtotal - total))
             add("INCOMPLETE_FEED", store, bd, abs(dtotal - total))
         elif count != dcount or total != dtotal:
             add("BALANCING_VARIANCE", store, bd, abs(total - dtotal))

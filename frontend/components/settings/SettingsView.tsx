@@ -59,6 +59,8 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
   const [reconciliationPolicy, setReconciliationPolicy] = useState<{
     amount_tolerance: number;
     settlement_day_tolerance: number;
+    gap_min_count: number;
+    gap_share: number | string;
     source: string;
     updated_by: string | null;
   } | null>(null);
@@ -509,7 +511,36 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                   }
                 />
               </label>
-              <span />
+              <label>
+                Large gap: minimum missing
+                <input
+                  type="number"
+                  min="1"
+                  value={reconciliationPolicy.gap_min_count}
+                  onChange={(e) =>
+                    setReconciliationPolicy({
+                      ...reconciliationPolicy,
+                      gap_min_count: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Large gap: share of declared (%)
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value={Math.round(Number(reconciliationPolicy.gap_share) * 100)}
+                  onChange={(e) =>
+                    setReconciliationPolicy({
+                      ...reconciliationPolicy,
+                      gap_share: Number(e.target.value) / 100,
+                    })
+                  }
+                />
+              </label>
               <span />
               <Button size="sm" onClick={savePolicy}>
                 Save tolerance

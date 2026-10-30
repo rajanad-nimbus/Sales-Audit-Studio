@@ -5,6 +5,24 @@ ONTOLOGY_VERSION = "ontology-v1.0"
 DEFAULT_EVIDENCE = ["Source record", "Settlement status"]
 
 EXCEPTION_TYPES = {
+    "TRAN_OUT_BAL": {
+        "label": "Transaction Out of Balance", "family": "Transaction Audit", "exposure": "amount",
+        "evidence": ["POS journal", "Transaction detail"],
+        "known_causes": ["Item, tax or discount keyed incorrectly", "Tender amount edited"],
+        "disposition": ["Correction", "Manual Review", "amount", "Adjust items, tender or payment amount -> Re-audit -> Close"],
+    },
+    "DISC_REASON_REQ": {
+        "label": "Missing Discount Reason", "family": "Transaction Audit", "exposure": "zero",
+        "evidence": ["POS journal", "Transaction detail"],
+        "known_causes": ["Cashier skipped the reason prompt"],
+        "disposition": ["Correction", "Manual Review", "zero", "Enter a discount reason -> Close"],
+    },
+    "MISSING_TRAN_BIG_GAP": {
+        "label": "Large Transaction Gap", "family": "Completeness", "exposure": "amount",
+        "evidence": ["POS control manifest", "Ingested transaction count"],
+        "known_causes": ["Corrupt input file", "Incomplete store poll"],
+        "disposition": ["Escalation", "Manual Review", "amount", "Re-poll the store -> Re-audit -> Close"],
+    },
     "CONFIGURED_RULE_VARIANCE": {
         "label": "Configured Audit Rule Breach", "family": "Configured Control", "exposure": "amount",
         "evidence": ["Calculated total", "Rule definition", "Source transaction lineage"],
@@ -136,6 +154,8 @@ EXCEPTION_TYPES = {
 #   None                     not held in any ingested data: always "Unavailable" until a person supplies it
 EVIDENCE_SOURCES: dict[str, dict | None] = {
     "Source record": {"source": "POS"},
+    "Transaction detail": {"source": "POS"},
+    "Ingested transaction count": {"source": "POS"},
     "Settlement status": {"source": "Processor"},
     "Calculated total": {"totals": True},
     "Rule definition": {"ontology": True},

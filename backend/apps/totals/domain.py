@@ -9,6 +9,7 @@ from typing import Protocol
 
 class TotalDefinitionLike(Protocol):
     aggregation: str
+    measure: str
     level: str
     status: str
     calculation_basis: str
@@ -26,6 +27,7 @@ class PersistedDefinitionLike(TotalDefinitionLike, Protocol):
 
 
 VALID_AGGREGATIONS = frozenset({"Sum", "Count"})
+VALID_MEASURES = frozenset({"Amount", "Tax"})
 VALID_LEVELS = frozenset({"Store", "Register", "Cashier", "Tender"})
 VALID_STATUSES = frozenset({"Worksheet", "Active", "Inactive"})
 VALID_BASES = frozenset({"Raw", "Combined"})
@@ -37,6 +39,10 @@ def validate_definition(definition: TotalDefinitionLike) -> None:
     """Raise ValueError when a total definition violates domain invariants."""
     if definition.aggregation not in VALID_AGGREGATIONS:
         raise ValueError("Aggregation must be Sum or Count")
+    if definition.measure not in VALID_MEASURES:
+        raise ValueError("Measure must be Amount or Tax")
+    if definition.measure == "Tax" and definition.aggregation != "Sum":
+        raise ValueError("A tax total must be a Sum")
     if definition.level not in VALID_LEVELS:
         raise ValueError("Unsupported total balancing level")
     if definition.status not in VALID_STATUSES:

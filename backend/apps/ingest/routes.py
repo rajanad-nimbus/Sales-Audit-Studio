@@ -1,6 +1,7 @@
 import csv
 import io
 import uuid
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -56,6 +57,8 @@ class SourceFeedProfilePatch(BaseModel):
 class ReconciliationPolicyRequest(BaseModel):
     amount_tolerance: float = 0
     settlement_day_tolerance: int = 0
+    gap_min_count: int = 10
+    gap_share: float = 0.1
 
 
 class ManualMatchRequest(BaseModel):
@@ -133,6 +136,7 @@ async def get_reconciliation_policy(db: AsyncSession = Depends(get_db), _: dict 
     policy = (await db.execute(select(ReconciliationPolicy).where(ReconciliationPolicy.active == True))).scalars().first()  # noqa: E712
     return {"source": "local-fallback", "amount_tolerance": policy.amount_tolerance if policy else 0,
             "settlement_day_tolerance": policy.settlement_day_tolerance if policy else 0,
+            "gap_min_count": policy.gap_min_count if policy else 10, "gap_share": policy.gap_share if policy else 0.1,
             "updated_by": policy.updated_by if policy else None, "updated_at": policy.updated_at if policy else None}
 
 
@@ -140,14 +144,17 @@ async def get_reconciliation_policy(db: AsyncSession = Depends(get_db), _: dict 
 async def update_reconciliation_policy(body: ReconciliationPolicyRequest, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance"))):
     if body.amount_tolerance < 0 or body.settlement_day_tolerance < 0 or body.settlement_day_tolerance > 31:
         raise HTTPException(status_code=422, detail="Tolerance values must be non-negative; settlement days may not exceed 31")
+    if body.gap_min_count < 1 or not 0 < body.gap_share <= 1:
+        raise HTTPException(status_code=422, detail="Gap minimum must be at least 1 and gap share between 0 and 1")
     policy = (await db.execute(select(ReconciliationPolicy).where(ReconciliationPolicy.active == True))).scalars().first()  # noqa: E712
     if not policy:
         policy = ReconciliationPolicy(id=str(uuid.uuid4()), name="Nimbus fallback reconciliation policy")
         db.add(policy)
     policy.amount_tolerance, policy.settlement_day_tolerance = body.amount_tolerance, body.settlement_day_tolerance
+    policy.gap_min_count, policy.gap_share = body.gap_min_count, Decimal(str(body.gap_share))
     policy.updated_by, policy.updated_at = user["user"] or "ontology.user", utcnow()
     await db.commit()
-    return {"source": "local-fallback", "amount_tolerance": policy.amount_tolerance, "settlement_day_tolerance": policy.settlement_day_tolerance, "updated_by": policy.updated_by, "updated_at": policy.updated_at}
+    return {"source": "local-fallback", "amount_tolerance": policy.amount_tolerance, "settlement_day_tolerance": policy.settlement_day_tolerance, "gap_min_count": policy.gap_min_count, "gap_share": policy.gap_share, "updated_by": policy.updated_by, "updated_at": policy.updated_at}
 
 
 @router.get("/api/reconciliation/matches")

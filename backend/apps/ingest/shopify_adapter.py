@@ -125,7 +125,7 @@ class ShopifyAdapter:
             "created_at_min": created_at_min.isoformat(),
             "created_at_max": created_at_max.isoformat(),
             "fields": "id,order_number,created_at,updated_at,financial_status,fulfillment_status,"
-                      "total_price,currency,customer,note",
+                      "total_price,currency,customer,note,tax_lines",
         }
 
         while True:
@@ -202,6 +202,23 @@ async def fetch_shopify_feed(
         await adapter.close()
 
 
+def _tax(code: str, name: str, rate, amount) -> dict:
+    return {"tax_code": code[:30], "tax_name": name[:100], "rate": str(Decimal(str(rate or 0)).quantize(Decimal("0.0001"))),
+            "tax_amount": str(abs(Decimal(str(amount or 0))).quantize(Decimal("0.01")))}
+
+
+def order_taxes(order: dict) -> list[dict]:
+    """Tax lines Shopify reports on an order, one entry per tax."""
+    return [_tax(str(t.get("title") or "TAX"), str(t.get("title") or "TAX"), t.get("rate"), t.get("price"))
+            for t in order.get("tax_lines") or [] if Decimal(str(t.get("price") or 0)) != 0]
+
+
+def refund_taxes(refund: dict) -> list[dict]:
+    """Tax returned with a refund: the tax on its refunded line items, as one entry."""
+    total = sum((Decimal(str(li.get("total_tax") or 0)) for li in refund.get("refund_line_items") or []), Decimal("0"))
+    return [_tax("TAX", "Refunded tax", 0, total)] if total else []
+
+
 def normalize_order(order: dict, store_id: str) -> dict:
     """Convert a Shopify order (REST or webhook payload) to ingest format."""
     return {
@@ -217,6 +234,7 @@ def normalize_order(order: dict, store_id: str) -> dict:
         "order_number": order.get("order_number"),
         "customer_id": (order.get("customer") or {}).get("id"),
         "note": order.get("note"),
+        "taxes": order_taxes(order),
     }
 
 
@@ -248,4 +266,5 @@ def normalize_refund(refund: dict, order_id, currency: str | None, store_id: str
         "refund_id": str(refund["id"]),
         "order_id": str(order_id),
         "note": refund.get("note"),
+        "taxes": refund_taxes(refund),
     }

@@ -8,6 +8,7 @@ from apps.totals.domain import validate_definition
 def definition(**overrides):
     values = {
         "aggregation": "Sum",
+        "measure": "Amount",
         "level": "Store",
         "status": "Worksheet",
         "calculation_basis": "Raw",

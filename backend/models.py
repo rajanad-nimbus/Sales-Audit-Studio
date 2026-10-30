@@ -359,6 +359,8 @@ class ReconciliationPolicy(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True)
     amount_tolerance: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
     settlement_day_tolerance: Mapped[int] = mapped_column(Integer, default=0)
+    gap_min_count: Mapped[int] = mapped_column(Integer, default=10)          # a missing-transaction gap is "big" from this many...
+    gap_share: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.1"))   # ...and this share of the declared count
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -471,6 +473,7 @@ class AuditTotalDefinition(Base):
     calculation_basis: Mapped[str] = mapped_column(String(32), default="Raw")
     status: Mapped[str] = mapped_column(String(24), default="Worksheet")
     aggregation: Mapped[str] = mapped_column(String(16), default="Sum")
+    measure: Mapped[str] = mapped_column(String(16), default="Amount")      # Amount (header amount) | Tax (tax recorded in the detail)
     source_system: Mapped[str | None] = mapped_column(String(50))
     transaction_types: Mapped[list] = mapped_column(JSON, default=list)
     tender_type: Mapped[str | None] = mapped_column(String(50))
