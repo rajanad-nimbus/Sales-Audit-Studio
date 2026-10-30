@@ -3,11 +3,12 @@ import uuid
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_role
 from database import get_db
-from models import AuditTotalDefinition, CanonicalTransaction
+from models import AuditTotalDefinition, CanonicalTransaction, SalesAuditErrorDefinition
+from domain.totals import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
 class TotalDefinitionBody(BaseModel):
@@ -18,17 +19,69 @@ class TotalDefinitionBody(BaseModel):
     tender_type: str | None = None
     level: str = "Store"
     active: bool = True
-def view(row: AuditTotalDefinition): return {"id": row.id, "name": row.name, "aggregation": row.aggregation, "source_system": row.source_system, "transaction_types": row.transaction_types, "tender_type": row.tender_type, "level": row.level, "active": row.active, "updated_by": row.updated_by, "updated_at": row.updated_at}
+    revision: int | None = None
+    description: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    category: str = "Miscellaneous"
+    over_short_group: str | None = None
+    over_short_operator: str | None = None
+    calculation_basis: str = "Raw"
+    status: str = "Worksheet"
+    corresponds_to_rtlog: bool = False
+    system_calculated: bool = True
+    created_with_wizard: bool = True
+    required_by_system: bool = False
+    display_group: int = 0
+    realms: list = []
+    joins: list = []
+    parameters: list = []
+    rollups: list = []
+    restrictions: list = []
+    combined_total_ids: list = []
+    location_traits: list = []
+    usages: list = []
+    sql_statement: str | None = None
+def view(row: AuditTotalDefinition): return serialize_definition(row)
 @router.get("")
 async def list_definitions(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))): return [view(row) for row in (await db.execute(select(AuditTotalDefinition).order_by(AuditTotalDefinition.name))).scalars().all()]
 @router.post("")
 async def create_definition(body: TotalDefinitionBody, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance"))):
-    if body.aggregation not in {"Sum", "Count"} or body.level not in {"Store", "Register", "Tender"}: raise HTTPException(status_code=422, detail="Unsupported aggregation or total level")
-    row = AuditTotalDefinition(id=str(uuid.uuid4()), **body.model_dump(), updated_by=user["user"] or "ontology.user")
+    try: validate_definition(body)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+    latest = (await db.execute(select(func.max(AuditTotalDefinition.revision)).where(AuditTotalDefinition.name == body.name))).scalar() or 0
+    row = AuditTotalDefinition(id=str(uuid.uuid4()), revision=int(latest) + 1, **body.model_dump(exclude={"revision"}), updated_by=user["user"] or "ontology.user")
     db.add(row)
     try: await db.commit()
     except Exception: await db.rollback(); raise HTTPException(status_code=409, detail="A total definition with this name already exists")
     return view(row)
+
+@router.get("/{definition_id}/revisions")
+async def revision_history(definition_id: str, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
+    current = (await db.execute(select(AuditTotalDefinition).where(AuditTotalDefinition.id == definition_id))).scalar_one_or_none()
+    if not current:
+        raise HTTPException(status_code=404, detail="Total definition not found")
+    rows = (await db.execute(select(AuditTotalDefinition).where(AuditTotalDefinition.name == current.name).order_by(AuditTotalDefinition.revision))).scalars().all()
+    return [view(row) for row in rows]
+
+@router.put("/{definition_id}")
+async def update_definition(definition_id: str, body: TotalDefinitionBody, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance"))):
+    current = (await db.execute(select(AuditTotalDefinition).where(AuditTotalDefinition.id == definition_id))).scalar_one_or_none()
+    if not current:
+        raise HTTPException(status_code=404, detail="Total definition not found")
+    try: validate_definition(body)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+    latest = (await db.execute(select(func.max(AuditTotalDefinition.revision)).where(AuditTotalDefinition.name == current.name))).scalar() or current.revision
+    payload = body.model_dump(exclude={"revision", "name"})
+    row = AuditTotalDefinition(id=str(uuid.uuid4()), name=current.name, revision=int(latest) + 1, **payload, updated_by=user["user"] or "ontology.user")
+    db.add(row)
+    await db.commit()
+    return view(row)
+
+@router.get("/errors")
+async def list_errors(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("analyst", "finance", "it", "auditor"))):
+    rows = (await db.execute(select(SalesAuditErrorDefinition).where(SalesAuditErrorDefinition.active.is_(True)).order_by(SalesAuditErrorDefinition.code))).scalars().all()
+    return [{c.name: getattr(row, c.name) for c in row.__table__.columns} for row in rows]
 @router.get("/{definition_id}/preview")
 async def preview_definition(definition_id: str, store_id: str, business_date: str, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
     definition = (await db.execute(select(AuditTotalDefinition).where(AuditTotalDefinition.id == definition_id))).scalar_one_or_none()

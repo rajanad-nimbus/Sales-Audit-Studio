@@ -460,15 +460,49 @@ class AuditTotalDefinition(Base):
     """Retailer-defined total evaluated against immutable canonical transactions."""
     __tablename__ = "audit_total_definitions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    name: Mapped[str] = mapped_column(String(100), index=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    description: Mapped[str | None] = mapped_column(Text)
+    start_date: Mapped[str | None] = mapped_column(String(10))
+    end_date: Mapped[str | None] = mapped_column(String(10))
+    category: Mapped[str] = mapped_column(String(50), default="Miscellaneous")
+    over_short_group: Mapped[str | None] = mapped_column(String(32))
+    over_short_operator: Mapped[str | None] = mapped_column(String(8))
+    calculation_basis: Mapped[str] = mapped_column(String(32), default="Raw")
+    status: Mapped[str] = mapped_column(String(24), default="Worksheet")
     aggregation: Mapped[str] = mapped_column(String(16), default="Sum")
     source_system: Mapped[str | None] = mapped_column(String(50))
     transaction_types: Mapped[list] = mapped_column(JSON, default=list)
     tender_type: Mapped[str | None] = mapped_column(String(50))
     level: Mapped[str] = mapped_column(String(24), default="Store")
+    corresponds_to_rtlog: Mapped[bool] = mapped_column(Boolean, default=False)
+    system_calculated: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_with_wizard: Mapped[bool] = mapped_column(Boolean, default=True)
+    required_by_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    display_group: Mapped[int] = mapped_column(Integer, default=0)
+    realms: Mapped[list] = mapped_column(JSON, default=list)
+    joins: Mapped[list] = mapped_column(JSON, default=list)
+    parameters: Mapped[list] = mapped_column(JSON, default=list)
+    rollups: Mapped[list] = mapped_column(JSON, default=list)
+    restrictions: Mapped[list] = mapped_column(JSON, default=list)
+    combined_total_ids: Mapped[list] = mapped_column(JSON, default=list)
+    location_traits: Mapped[list] = mapped_column(JSON, default=list)
+    usages: Mapped[list] = mapped_column(JSON, default=list)
+    sql_statement: Mapped[str | None] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class SalesAuditErrorDefinition(Base):
+    __tablename__ = "sales_audit_error_definitions"
+    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    description: Mapped[str] = mapped_column(Text)
+    short_description: Mapped[str] = mapped_column(String(255))
+    form: Mapped[str | None] = mapped_column(String(100))
+    tab: Mapped[str | None] = mapped_column(String(100))
+    recommended_solution: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class ConfiguredAuditRule(Base):
