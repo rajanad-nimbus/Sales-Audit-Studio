@@ -1,6 +1,5 @@
 import os
 import uuid
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Depends
@@ -8,12 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import engine, get_db
+from database import get_db
 from apps.agents import investigation_service
 from integrations.ontology import nimbus, ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import require_role
 from apps.router_registry import register_routes
+from apps.system.lifecycle import lifespan
 from models import (Case, Connector, PolicyEvaluation, Workflow, ValidationObligation,
                     Exception as DBException, Finding, Recommendation, HumanDecision, AuditEvent,
                     CanonicalTransaction, SourceRecord, EvidenceSnapshot, CaseNote, EvidenceRequest, utcnow)
@@ -23,13 +23,6 @@ from schemas import (
     HumanDecisionCreate, HumanDecision as HumanDecisionSchema, CaseDetailResponse, AuditEventSchema,
     ValidationRunRequest, CaseNoteCreate, EvidenceRequestCreate, EvidenceProvide, EvidenceReject, EvidenceOverride
 )
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await ontology_integration.refresh()
-    yield
-    await engine.dispose()
 
 
 app = FastAPI(
