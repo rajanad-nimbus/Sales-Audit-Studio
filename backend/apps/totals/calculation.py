@@ -85,35 +85,57 @@ async def calculate_definitions(
     for definition in definitions:
         if definition.calculation_basis == "Combined":
             continue
-        candidates = rows
-        if definition.source_system:
-            candidates = [row for row in candidates if row.source_lineage.startswith(definition.source_system.lower())]
-        if definition.transaction_types:
-            candidates = [row for row in candidates if row.transaction_type in definition.transaction_types]
-        if definition.tender_type:
-            candidates = [row for row in candidates if row.tender_type == definition.tender_type]
-        if definition.level == "Cashier" and any(not row.cashier_id for row in candidates):
-            raise ValueError(f"Total {definition.name} requires cashier IDs on all matching transactions")
+        candidates = matching_transactions(definition, rows)
+        validate_definition_transactions(definition, candidates)
         counts[definition.id] = len(candidates)
-        groups: dict[str | None, Decimal] = defaultdict(Decimal)
-        for row in candidates:
-            if definition.level == "Store":
-                key = None
-            elif definition.level == "Register":
-                key = row.register_id or "Unspecified"
-            elif definition.level == "Cashier":
-                key = row.cashier_id
-            else:
-                key = row.tender_type or "Unspecified"
-            if definition.aggregation == "Count":
-                groups[key] += 1
-            elif definition.measure == "Tax":
-                groups[key] += taxes.get(row.id, Decimal(0))
-            else:
-                groups[key] += amounts[row.id] if amounts is not None else row.signed_amount
-        values[definition.id] = dict(groups)
+        values[definition.id] = aggregate_definition(definition, candidates, taxes, amounts)
     calculate_combined(definitions, values)
     return values, counts
+
+
+def matching_transactions(definition: AuditTotalDefinition, rows: list[CanonicalTransaction]):
+    """Select transactions included by a definition's source, type, and tender filters."""
+    return [
+        row for row in rows
+        if (not definition.source_system
+            or row.source_lineage.startswith(definition.source_system.lower()))
+        and (not definition.transaction_types or row.transaction_type in definition.transaction_types)
+        and (not definition.tender_type or row.tender_type == definition.tender_type)
+    ]
+
+
+def validate_definition_transactions(definition: AuditTotalDefinition, rows: list[CanonicalTransaction]) -> None:
+    """Validate transaction attributes required by a definition's balancing level."""
+    if definition.level == "Cashier" and any(not row.cashier_id for row in rows):
+        raise ValueError(f"Total {definition.name} requires cashier IDs on all matching transactions")
+
+
+def aggregate_definition(
+    definition: AuditTotalDefinition, rows: list[CanonicalTransaction], taxes: dict[str, Decimal],
+    amounts: dict[str, Decimal] | None,
+) -> dict[str | None, Decimal]:
+    """Aggregate matching transactions by the definition's dimension."""
+    groups: dict[str | None, Decimal] = defaultdict(Decimal)
+    for row in rows:
+        dimension = definition_dimension(definition, row)
+        if definition.aggregation == "Count":
+            groups[dimension] += 1
+        elif definition.measure == "Tax":
+            groups[dimension] += taxes.get(row.id, Decimal(0))
+        else:
+            groups[dimension] += amounts[row.id] if amounts is not None else row.signed_amount
+    return dict(groups)
+
+
+def definition_dimension(definition: AuditTotalDefinition, row: CanonicalTransaction) -> str | None:
+    """Return the balancing dimension for a transaction under one definition."""
+    if definition.level == "Store":
+        return None
+    if definition.level == "Register":
+        return row.register_id or "Unspecified"
+    if definition.level == "Cashier":
+        return row.cashier_id
+    return row.tender_type or "Unspecified"
 
 
 async def calculate_store_day(
