@@ -7,6 +7,7 @@ import uuid
 
 from sqlalchemy import and_, func, or_, select, text, tuple_
 
+from apps.cases.identifiers import generate_case_number
 from apps.corrections.effects import effective_amounts
 from apps.ingest.common import (
     COMPOSITE_SCOPE_BATCH_SIZE, LINEAGE, MAX_SETTLEMENT_GROUPS,
@@ -139,7 +140,7 @@ async def reconcile(
         exposure = Decimal("0") if od["exposure"] == "zero" else amount
         cid = str(uuid.uuid4())
         db.add(Case(
-            id=cid, case_number=f"ZA-{bdate.replace('-', '')}-{uuid.uuid4().hex[:4].upper()}", status="Open",
+            id=cid, case_number=generate_case_number(bdate), status="Open",
             case_type=od["label"], business_date=bdate, store_id=store, currency=currency, total_exception_amount=amount,
             total_exposure=exposure, investigation_status="Pending", evidence_completeness=0,
             priority=(prio := "Critical" if amount > 3000 else "High" if amount > 1000 else "Normal"),

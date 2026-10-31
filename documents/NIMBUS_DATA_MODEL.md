@@ -179,7 +179,7 @@ ExportRecord (1) ──→ CanonicalTransaction
 **Attributes:**
 
 - `id` (UUID) — case identity
-- `case_number` — human-readable identifier (e.g., "ZA-20261006-0147")
+- `case_number` — human-readable identifier (e.g., "ZA-20261006-0147A3F92C80")
 - `related_exceptions` — array of exception IDs
 - `primary_exception_id` — leading exception in group
 - `incident_id` — if multiple cases share common incident

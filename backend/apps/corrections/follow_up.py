@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.cases.identifiers import generate_case_number
 from apps.security import scope
 from integrations.ontology.nimbus import audit, sla_due
 from models import AuditEvent, Case, Exception as CaseException
@@ -78,7 +79,7 @@ async def create_follow_up(db: AsyncSession, case_id: str, user: dict) -> Case:
         originals = (await db.execute(select(CaseException).where(CaseException.case_id == parent.id))).scalars().all()
         if not originals:
             raise HTTPException(status_code=409, detail="Closed case has no exceptions to review")
-        child = Case(id=str(uuid.uuid4()), case_number=f"ZA-{parent.business_date.replace('-', '')}-{uuid.uuid4().hex[:12].upper()}",
+        child = Case(id=str(uuid.uuid4()), case_number=generate_case_number(parent.business_date),
                      status="Open", case_type=parent.case_type, business_date=parent.business_date, store_id=parent.store_id,
                      currency=parent.currency, amount_needs_review=True, total_exception_amount=parent.total_exception_amount,
                      total_exposure=parent.total_exposure, investigation_status="Pending", evidence_completeness=0,

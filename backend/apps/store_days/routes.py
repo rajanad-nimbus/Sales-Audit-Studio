@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.security import scope
+from apps.cases.identifiers import generate_case_number
 from apps.ingest.manifests import iter_manifests, validate_business_date
+from apps.security import scope
 from apps.store_days.freshness import lock_configuration, lock_store_day_identity
 from apps.totals.calculation import calculate_store_day, effective_definitions
 from apps.totals.currency import single_currency
@@ -298,7 +299,7 @@ async def retotal_store_day(store_id: str, business_date: str, db: AsyncSession 
         case_id = str(uuid.uuid4())
         priority = "Critical" if rule.severity == "Critical" else "High" if rule.severity == "High" else "Normal"
         exposure = abs(observed) if rule.threshold_currency is not None else Decimal("0")
-        db.add(Case(id=case_id, case_number=f"ZA-{business_date.replace('-', '')}-{uuid.uuid4().hex[:4].upper()}", status="Open", case_type=case_type, business_date=business_date, store_id=store_id, currency=currency if rule.threshold_currency is not None else None, total_exception_amount=abs(observed), total_exposure=exposure, investigation_status="Pending", evidence_completeness=0, assigned_to=rule.owner, priority=priority, sla_due_at=sla_due(priority)))
+        db.add(Case(id=case_id, case_number=generate_case_number(business_date), status="Open", case_type=case_type, business_date=business_date, store_id=store_id, currency=currency if rule.threshold_currency is not None else None, total_exception_amount=abs(observed), total_exposure=exposure, investigation_status="Pending", evidence_completeness=0, assigned_to=rule.owner, priority=priority, sla_due_at=sla_due(priority)))
         await db.flush()
         db.add(DBException(id=str(uuid.uuid4()), case_id=case_id, exception_type="CONFIGURED_RULE_VARIANCE", exception_family="Configured Control", source_system="Configured Rule", detection_origin="Configured Rule", detection_rule_id=rule.id, exception_amount=abs(observed), estimated_exposure=exposure, severity=rule.severity, confidence="High", close_impact="Yes" if exposure else "No"))
         await db.flush()

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.cases.identifiers import generate_case_number
 from apps.corrections.follow_up import create_follow_up
 from apps.security import scope
 from apps.transactions.detail import MAX_MONEY
@@ -199,7 +200,7 @@ async def create_case(
     if case.priority not in nimbus.SLA_HOURS:
         raise HTTPException(status_code=422, detail="Invalid priority")
     case_id = str(uuid.uuid4())
-    case_number = f"ZA-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    case_number = generate_case_number(datetime.now(timezone.utc).strftime("%Y%m%d"))
     db_case = Case(
         id=case_id,
         case_number=case_number,
