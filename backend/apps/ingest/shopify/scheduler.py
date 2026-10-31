@@ -36,6 +36,13 @@ class SourceDisabledDuringSync(Exception):
     """The source was switched off while the connector was fetching its feed."""
 
 
+def safe_failure_message(error: Exception) -> str:
+    """Return a persisted sync status message without exception payload details."""
+    if isinstance(error, SourceDisabledDuringSync):
+        return "Shopify source disabled during sync"
+    return shopify_adapter.safe_failure_message(error)
+
+
 def parse_time(value: str) -> time:
     hour, minute = value.split(":")
     return time(int(hour), int(minute))
@@ -173,7 +180,7 @@ async def run_if_due(session_factory=async_session, now: datetime | None = None)
         except Exception as exc:  # a failed run is recorded and retried at the next scheduled time; it must never stop the loop
             await db.rollback()
             status = "Skipped" if isinstance(exc, SourceDisabledDuringSync) else "Failed"
-            message = str(exc)[:255] or exc.__class__.__name__
+            message = safe_failure_message(exc)
             needs_outcome_record = True
             log.warning("Scheduled Shopify sync failed: %s", message)
     if needs_outcome_record:

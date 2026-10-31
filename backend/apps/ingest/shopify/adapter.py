@@ -27,6 +27,32 @@ class ShopifyFeedLimitError(ShopifyAPIError):
     """The remote feed exceeds the ingestion limits and cannot be collected safely."""
 
 
+def safe_failure_message(error: Exception) -> str:
+    """Describe an integration failure without exposing request URLs or remote details."""
+    if isinstance(error, asyncio.TimeoutError):
+        return "Shopify request timed out"
+    if isinstance(error, aiohttp.ClientError):
+        return "Shopify request failed"
+    if isinstance(error, ShopifyAPIError):
+        message = str(error)
+        safe_patterns = (
+            r"Shopify API response exceeds the [\d,]+-byte limit",
+            r"Shopify feed exceeds the [\d,]+-record delivery limit",
+            r"Shopify feed exceeds the [\d,]+-byte delivery limit",
+            r"Shopify pagination exceeded the [\d,]+-page limit",
+            r"Shopify returned a repeated pagination cursor",
+            r"Shopify returned an invalid JSON response",
+            r"Shopify returned an invalid (shop|locations|products|orders|refunds|transactions) response",
+            r"Status \d+ after \d+ attempts",
+            r"Shopify API returned HTTP \d+",
+            r"Request failed after \d+ attempts: Shopify request (timed out|failed)",
+        )
+        if any(re.fullmatch(pattern, message) for pattern in safe_patterns):
+            return message
+        return "Shopify API request failed"
+    return f"Shopify operation failed ({type(error).__name__})"
+
+
 MAX_RETRY_DELAY_SECONDS = 30.0
 MAX_SHOPIFY_PAGES = 1_000
 MAX_SHOPIFY_RESPONSE_BYTES = MAX_DELIVERY_BYTES
@@ -167,7 +193,7 @@ class ShopifyAdapter:
 
                     return await _read_response_json(resp), dict(resp.headers)
             except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-                last_error = str(e) or type(e).__name__
+                last_error = safe_failure_message(e)
                 if not last:
                     await asyncio.sleep(retry_delay(None, attempt))
                     continue

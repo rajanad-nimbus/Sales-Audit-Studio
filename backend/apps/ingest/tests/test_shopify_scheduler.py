@@ -71,6 +71,13 @@ def test_describe_reads_naturally():
     assert sch.describe(row(sync_frequency=None)) == "Off"
 
 
+def test_scheduled_failure_status_redacts_exception_details():
+    error = RuntimeError("request https://shop.example/?token=top-secret failed")
+    assert sch.safe_failure_message(error) == "Shopify operation failed (RuntimeError)"
+    assert "top-secret" not in sch.safe_failure_message(error)
+    assert sch.safe_failure_message(sch.SourceDisabledDuringSync()) == "Shopify source disabled during sync"
+
+
 def test_a_schedule_must_be_well_formed():
     assert SourceSettingPatch(sync_frequency="weekly", sync_time="23:59", sync_weekday=6, sync_timezone="Europe/London")
     for bad in ({"sync_time": "25:00"}, {"sync_time": "9:00"}, {"sync_weekday": 7}, {"sync_timezone": "Mars/Base"}, {"sync_frequency": "hourly"}):

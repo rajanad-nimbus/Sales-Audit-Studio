@@ -271,6 +271,37 @@ def test_shopify_feed_stops_at_delivery_byte_limit(monkeypatch):
         asyncio.run(sa.fetch_shopify_feed("S1"))
 
 
+def test_transport_error_does_not_include_configured_request_url():
+    secret_url = "https://shop.example/admin?token=top-secret"
+
+    class FailedRequest:
+        async def __aenter__(self):
+            raise sa.aiohttp.ClientError(f"connection failed for {secret_url}")
+
+        async def __aexit__(self, *_args):
+            pass
+
+    class Session:
+        def request(self, *_args, **_kwargs):
+            return FailedRequest()
+
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+    adapter.max_retries = 1
+
+    async def get_session():
+        return Session()
+
+    adapter._get_session = get_session
+
+    with pytest.raises(sa.ShopifyAPIError) as error:
+        asyncio.run(adapter._request("GET", "/orders.json"))
+
+    assert "Shopify request failed" in str(error.value)
+    assert "top-secret" not in str(error.value)
+    assert "shop.example" not in str(error.value)
+    assert sa.safe_failure_message(sa.ShopifyAPIError(secret_url)) == "Shopify API request failed"
+
+
 def test_identity_payload_ignores_mutable_fields():
     a = sa.normalize_order({"id": 1, "created_at": "2024-01-15T10:00:00Z", "total_price": "20.00",
                             "financial_status": "paid"}, "S1")

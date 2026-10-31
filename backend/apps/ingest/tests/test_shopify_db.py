@@ -8,8 +8,9 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from sqlalchemy import event, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -109,6 +110,41 @@ def test_manual_sync_fetches_and_stamps_configured_store(monkeypatch):
     ))
     assert result.status == "success"
     assert seen == {"store_id": "CONFIGURED-STORE", "record_store_ids": []}
+
+
+def test_manual_sync_does_not_return_database_exception_details(monkeypatch):
+    secret = "private-record-value"
+
+    class FakeDb:
+        def __init__(self):
+            self.rolled_back = False
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    async def fetch(*_args, **_kwargs):
+        return {"Shopify": []}
+
+    async def reject_ingest(*_args, **_kwargs):
+        raise IntegrityError("insert", {"payload": secret}, Exception(f"constraint rejected {secret}"))
+
+    async def allowed(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(routes_shopify.shopify_adapter, "fetch_shopify_feed", fetch)
+    monkeypatch.setattr(routes_shopify.ingest, "ingest", reject_ingest)
+    monkeypatch.setattr(routes_shopify.source_settings, "require_allowed", allowed)
+    db = FakeDb()
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            routes_shopify.sync_shopify(routes_shopify.ShopifySyncRequest(), db, {"user": "finance"})
+        )
+
+    assert error.value.status_code == 500
+    assert secret not in error.value.detail
+    assert "database rejected" in error.value.detail
+    assert db.rolled_back
 
 
 async def case_types(db, date=None):

@@ -75,9 +75,12 @@ async def sync_shopify(
             created_at_max=req.created_at_max,
         )
     except shopify_adapter.ShopifyFeedLimitError as e:
-        raise HTTPException(status_code=413, detail=str(e)) from e
+        raise HTTPException(status_code=413, detail=shopify_adapter.safe_failure_message(e)) from e
     except shopify_adapter.ShopifyAPIError as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch from Shopify: {str(e)}") from e
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch from Shopify: {shopify_adapter.safe_failure_message(e)}",
+        ) from e
 
     delivery_id = f"SHOPIFY-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
 
@@ -87,9 +90,18 @@ async def sync_shopify(
               f"Shopify sync for store {store_id}: {stats['canonical_created']} transactions created",
               actor="shopify-connector")
         await db.commit()
-    except (shopify_adapter.ShopifyAPIError, IntegrityError) as e:
+    except shopify_adapter.ShopifyAPIError as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ingestion failed: {shopify_adapter.safe_failure_message(e)}",
+        ) from e
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Ingestion failed because the database rejected the Shopify delivery",
+        ) from e
 
     return ShopifySyncResponse(
         status="success",
@@ -114,7 +126,10 @@ async def sync_reference(
     try:
         staged = await reference_sync.stage(adapter, db, sync_id, store_code)
     except shopify_adapter.ShopifyAPIError as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch from Shopify: {str(e)}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch from Shopify: {shopify_adapter.safe_failure_message(e)}",
+        ) from e
     finally:
         await adapter.close()
     actor = user.get("user") or "shopify-connector"
@@ -191,9 +206,18 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
               f"Webhook {topic} for {record['source_record_id']}: {stats['canonical_created']} created, "
               f"{stats['quarantined']} quarantined", actor="shopify-webhook")
         await db.commit()
-    except (shopify_adapter.ShopifyAPIError, IntegrityError) as e:
+    except shopify_adapter.ShopifyAPIError as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Webhook processing failed: {shopify_adapter.safe_failure_message(e)}",
+        ) from e
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Webhook processing failed because the database rejected the delivery",
+        ) from e
 
     return {"status": "received", "topic": topic, **stats}
 
