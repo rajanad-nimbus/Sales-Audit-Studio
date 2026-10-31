@@ -3,7 +3,7 @@
 import httpx
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth
@@ -54,11 +54,18 @@ async def store_choices(db: AsyncSession = Depends(get_db), user: dict = Depends
     """Stores to offer in any store field. A store manager gets only their own; everyone else gets every known store."""
     if scope.scoped(user):
         return sorted(scope.allowed_stores(user) or [])
-    codes = set((await db.execute(select(FoundationReference.code).where(
-        FoundationReference.category == "Store", FoundationReference.active.is_(True)))).scalars())
-    codes |= set((await db.execute(select(CanonicalTransaction.store_id).distinct())).scalars())
-    codes |= set((await db.execute(select(StoreDay.store_id).distinct())).scalars())
-    return sorted(c for c in codes if c)
+    store_codes = union(
+        select(FoundationReference.code.label("store_id")).where(
+            FoundationReference.category == "Store", FoundationReference.active.is_(True),
+            FoundationReference.code.is_not(None),
+        ),
+        select(CanonicalTransaction.store_id.label("store_id")).where(
+            CanonicalTransaction.store_id.is_not(None),
+        ),
+        select(StoreDay.store_id.label("store_id")).where(StoreDay.store_id.is_not(None)),
+    ).subquery()
+    codes = (await db.execute(select(store_codes.c.store_id).order_by(store_codes.c.store_id))).scalars().all()
+    return [code for code in codes if code]
 
 
 async def _lookup(db: AsyncSession, user: dict, category: str, txn_column, control_column, store_id: str | None) -> list[dict]:

@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.security import scope
@@ -144,9 +144,13 @@ async def list_store_days(store_id: Annotated[str | None, Query(min_length=1, ma
 async def store_selector(db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
     if scope.scoped(user):
         return sorted(scope.allowed_stores(user) or [])
-    transaction_stores = (await db.execute(select(CanonicalTransaction.store_id).distinct())).scalars().all()
-    store_day_stores = (await db.execute(select(StoreDay.store_id).distinct())).scalars().all()
-    return sorted(set(transaction_stores) | set(store_day_stores))
+    stores = union(
+        select(CanonicalTransaction.store_id.label("store_id")).where(
+            CanonicalTransaction.store_id.is_not(None),
+        ),
+        select(StoreDay.store_id.label("store_id")).where(StoreDay.store_id.is_not(None)),
+    ).subquery()
+    return (await db.execute(select(stores.c.store_id).order_by(stores.c.store_id))).scalars().all()
 
 
 @router.get("/{store_id}/{business_date}")
