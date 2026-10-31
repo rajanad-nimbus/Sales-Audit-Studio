@@ -396,6 +396,18 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         for exception in exception_rows:
             exceptions_by_case.setdefault(exception.case_id, []).append(exception)
 
+    recommendations_by_case: dict[str, Recommendation] = {}
+    if req.action in ("approve", "escalate") and cases:
+        recommendations = (await db.execute(
+            select(Recommendation).where(
+                Recommendation.case_id.in_([case.id for case in cases]),
+                Recommendation.status == "Proposed",
+            ).order_by(Recommendation.case_id, Recommendation.created_at.desc(), Recommendation.id.desc())
+        )).scalars()
+        for recommendation in recommendations:
+            recommendations_by_case.setdefault(recommendation.case_id, recommendation)
+
+    approved_rule_codes = None
     ok, skipped = 0, []
     evidence_cache = investigation_service.InvestigationEvidenceCache(db)
     skip = lambda c, why: skipped.append({"case_number": c.case_number, "reason": why})
@@ -424,16 +436,16 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         elif a in ("approve", "escalate"):
             if user["role"] not in ("finance", "admin"): skip(c, "requires finance role"); continue
             if c.status != "In Review": skip(c, f"not awaiting decision ({c.status})"); continue
-            rec = (await db.execute(select(Recommendation).where(
-                Recommendation.case_id == c.id, Recommendation.status == "Proposed").order_by(
-                    Recommendation.created_at.desc(), Recommendation.id.desc()).limit(1))).scalars().first()
+            rec = recommendations_by_case.get(c.id)
             if not rec: skip(c, "no open recommendation"); continue
             if a == "approve":
                 if rec.financial_impact != 0 and c.currency != nimbus.THRESHOLD_CURRENCY:
                     skip(c, "bulk financial limit is in USD; review this currency individually"); continue
                 if abs(rec.financial_impact) > BULK_APPROVE_MAX_IMPACT:
                     skip(c, f"financial movement above bulk limit ({BULK_APPROVE_MAX_IMPACT}); review individually"); continue
-                if nimbus.evaluate_policy(db, c, rec, await ontology_integration.refresh()).outcome == "RequestEvidence":
+                if approved_rule_codes is None:
+                    approved_rule_codes = await ontology_integration.refresh()
+                if nimbus.evaluate_policy(db, c, rec, approved_rule_codes).outcome == "RequestEvidence":
                     skip(c, "policy: evidence incomplete"); continue
                 rec.status = "Approved"; nimbus.start_workflow(db, c, rec)
                 decision = "Approved"
