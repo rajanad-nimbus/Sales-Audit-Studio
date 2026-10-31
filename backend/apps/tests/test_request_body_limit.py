@@ -3,8 +3,9 @@ import asyncio
 import httpx
 import pytest
 from fastapi import FastAPI, Request
+from starlette.requests import Request as StarletteRequest
 
-from apps.request_body import RequestBodyLimitMiddleware, _RequestBodyTooLarge
+from apps.request_body import RequestBodyLimitMiddleware, _RequestBodyTooLarge, read_limited_body
 
 
 def test_request_body_limit_rejects_oversized_and_allows_exact_limit():
@@ -96,7 +97,7 @@ def test_request_body_limit_does_not_suppress_handler_error_after_response_start
     asyncio.run(run())
 
 
-def test_request_body_limit_ignores_invalid_content_length_and_handles_non_http_scope():
+def test_request_body_limit_rejects_invalid_content_length_and_handles_non_http_scope():
     async def run():
         requests = []
 
@@ -116,14 +117,43 @@ def test_request_body_limit_ignores_invalid_content_length_and_handles_non_http_
         async def send(message):
             sent.append(message)
 
-        await middleware(
-            {"type": "http", "method": "POST", "headers": [(b"content-length", b"invalid")]},
-            receive,
-            send,
-        )
+        for headers in (
+            [(b"content-length", b"invalid")],
+            [(b"content-length", b"\xff")],
+            [(b"content-length", b"-1")],
+            [(b"content-length", b"1"), (b"content-length", b"1")],
+        ):
+            await middleware({"type": "http", "method": "POST", "headers": headers}, receive, send)
         await middleware({"type": "websocket"}, receive, send)
 
-        assert requests == ["http", "websocket"]
-        assert sent[0]["status"] == 200
+        assert requests == ["websocket"]
+        assert [message["status"] for message in sent if message["type"] == "http.response.start"] == [400] * 4
+
+    asyncio.run(run())
+
+
+def test_read_limited_body_rejects_invalid_content_length():
+    async def run():
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = StarletteRequest(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/",
+                "headers": [(b"content-length", b"-1")],
+                "query_string": b"",
+                "server": ("test", 80),
+                "client": ("test", 1234),
+                "scheme": "http",
+            },
+            receive,
+        )
+        with pytest.raises(HTTPException) as exc:
+            await read_limited_body(request, 8)
+        assert exc.value.status_code == 400
+
+    from fastapi import HTTPException
 
     asyncio.run(run())
