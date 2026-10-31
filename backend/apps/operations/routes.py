@@ -19,8 +19,6 @@ from database import get_db
 from models import (
     AuditEvent,
     CanonicalTransaction,
-    RetentionPolicy,
-    RetentionRun,
     SourceRecord,
     TransactionAdjustment,
     TransactionDiscount,
@@ -29,6 +27,7 @@ from models import (
     TransactionTender,
     utcnow,
 )
+from apps.operations.models import RetentionPolicy, RetentionRun
 from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/operations", tags=["Production operations"])
