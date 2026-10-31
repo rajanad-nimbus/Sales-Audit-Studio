@@ -14,7 +14,14 @@ from apps.ingest.manifests import validate_business_date
 from apps.totals.currency import validate_currency
 from apps.store_days.freshness import invalidate_totals_many, lock_store_days
 from apps.transactions import detail as transaction_detail
-from models import CanonicalTransaction, TransactionDiscount, TransactionLine, TransactionTax, TransactionTender, utcnow
+from apps.transactions.models import (
+    CanonicalTransaction,
+    TransactionDiscount,
+    TransactionLine,
+    TransactionTax,
+    TransactionTender,
+)
+from model_base import utcnow
 from apps.ingest.models import SourceRecord
 
 STRING_FIELD_LIMITS = {

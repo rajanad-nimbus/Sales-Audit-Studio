@@ -4,10 +4,16 @@ from decimal import Decimal
 
 from integrations.ontology import ontology
 
-from models import (
-    AuditEvent, EvidenceSnapshot, Finding, Recommendation,
-    PolicyEvaluation, Workflow, ValidationObligation, utcnow,
+from apps.audit.models import AuditEvent
+from apps.cases.models import (
+    EvidenceSnapshot,
+    Finding,
+    Recommendation,
+    PolicyEvaluation,
+    Workflow,
+    ValidationObligation,
 )
+from model_base import utcnow
 
 POLICY_VERSION = "policy-v1.1"
 AUTONOMY_LIMIT = Decimal("1000")

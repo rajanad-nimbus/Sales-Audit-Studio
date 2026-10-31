@@ -17,7 +17,13 @@ from sqlalchemy.pool import StaticPool
 
 from apps.agents import investigator
 from integrations.ontology import ontology
-from models import Base, Case, CanonicalTransaction, Exception as Exc, SourceRecord
+from models import Base
+from apps.cases.models import (
+    Case,
+    Exception as Exc,
+)
+from apps.transactions.models import CanonicalTransaction
+from apps.ingest.models import SourceRecord
 
 
 async def run_scenario(sc):

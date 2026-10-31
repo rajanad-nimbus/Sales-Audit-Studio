@@ -7,8 +7,16 @@ from sqlalchemy import func, or_, select
 
 from apps.security import scope
 from integrations.ontology import ontology
-from models import (AuditEvent, BatchRun, Case, Exception as DBException, Finding,
-                    Recommendation, ValidationObligation, Workflow)
+from apps.audit.models import AuditEvent
+from apps.operations.models import BatchRun
+from apps.cases.models import (
+    Case,
+    Exception as DBException,
+    Finding,
+    Recommendation,
+    ValidationObligation,
+    Workflow,
+)
 from apps.cases.models import PolicyEvaluation
 from apps.system.models import Connector
 

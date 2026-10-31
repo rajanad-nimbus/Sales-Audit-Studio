@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
 from database import get_db
-from models import AuditEvent, Case, Exception as DBException, Finding, Recommendation
+from apps.audit.models import AuditEvent
+from apps.cases.models import (
+    Case,
+    Exception as DBException,
+    Finding,
+    Recommendation,
+)
 
 router = APIRouter(tags=["Development"])
 

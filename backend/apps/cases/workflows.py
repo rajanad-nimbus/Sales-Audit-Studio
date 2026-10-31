@@ -13,7 +13,9 @@ from apps.security import scope
 from auth import require_role
 from database import get_db
 from integrations.ontology import nimbus
-from models import CanonicalTransaction, SourceRecord, utcnow
+from apps.transactions.models import CanonicalTransaction
+from apps.ingest.models import SourceRecord
+from model_base import utcnow
 from apps.cases.models import PolicyEvaluation
 from apps.cases.models import (Case, EvidenceSnapshot, Exception as DBException,
                                 ValidationObligation, Workflow)

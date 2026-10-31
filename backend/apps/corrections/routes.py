@@ -20,7 +20,9 @@ from apps.corrections.effects import effective_amounts
 from apps.corrections.reconciliation import invalidate_case_evidence, linked_cases, related_exception_ids, requeue_linked_exceptions
 from apps.transactions.detail import MAX_MONEY, cent_value, money
 from database import get_db
-from models import CanonicalTransaction, SourceRecord, utcnow
+from apps.transactions.models import CanonicalTransaction
+from apps.ingest.models import SourceRecord
+from model_base import utcnow
 from apps.corrections.models import TransactionAdjustment
 from integrations.ontology.nimbus import audit
 

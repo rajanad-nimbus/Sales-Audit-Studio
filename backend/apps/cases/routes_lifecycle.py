@@ -16,7 +16,7 @@ from apps.transactions.detail import MAX_MONEY
 from auth import require_role
 from database import get_db
 from integrations.ontology import nimbus
-from models import AuditEvent
+from apps.audit.models import AuditEvent
 from apps.cases.models import Case, Exception as DBException, Finding, HumanDecision, Recommendation
 from schemas import CaseAmountReview, CaseCreate, CaseDetailResponse, Case as CaseSchema, CaseUpdate
 

@@ -15,7 +15,7 @@ from apps.ingest.manifests import validate_business_date
 from apps.security import scope
 from auth import require_role
 from database import get_db
-from models import CanonicalTransaction
+from apps.transactions.models import CanonicalTransaction
 from apps.gl.models import GLCrossReference
 
 router = APIRouter(prefix="/api/gl", tags=["General ledger"])

@@ -18,7 +18,7 @@ from apps.ingest import service as ingest
 from apps.ingest import shopify_adapter, source_settings
 from database import async_session
 from integrations.ontology.nimbus import audit
-from models import utcnow
+from model_base import utcnow
 from apps.ingest.models import SourceSetting
 
 log = logging.getLogger(__name__)

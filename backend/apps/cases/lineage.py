@@ -3,7 +3,7 @@
 from sqlalchemy import String, cast, literal_column
 from sqlalchemy.dialects.postgresql import JSONB
 
-from models import AuditEvent
+from apps.audit.models import AuditEvent
 
 
 def case_creation_mentions_transaction(db, transaction_id: str):

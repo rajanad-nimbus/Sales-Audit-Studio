@@ -9,7 +9,16 @@ from apps.corrections.effects import effective_amounts
 from apps.cases.lineage import case_creation_mentions_transaction
 from apps.transactions.detail import card_amount
 from integrations.ontology.nimbus import audit
-from models import AuditEvent, CanonicalTransaction, Case, ReconciliationPolicy, Recommendation, TransactionTender
+from apps.audit.models import AuditEvent
+from apps.transactions.models import (
+    CanonicalTransaction,
+    TransactionTender,
+)
+from apps.cases.models import (
+    Case,
+    Recommendation,
+)
+from apps.ingest.models import ReconciliationPolicy
 
 
 async def linked_cases(db: AsyncSession, transaction: CanonicalTransaction) -> list[Case]:

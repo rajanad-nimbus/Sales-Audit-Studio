@@ -3,6 +3,7 @@
 This is an adapter, not a second ontology. Missing enterprise definitions remain
 visible gaps; SQLAlchemy metadata describes only what Nimbus actually stores.
 """
+# The ontology inventory needs every feature model registered in SQLAlchemy.
 from models import Base
 
 ENTITY_ALIASES = {

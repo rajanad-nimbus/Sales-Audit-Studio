@@ -23,7 +23,8 @@ from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 from apps.ingest.manifests import validate_business_date
 from auth import require_role
 from database import get_db
-from models import CanonicalTransaction, utcnow
+from apps.transactions.models import CanonicalTransaction
+from model_base import utcnow
 from apps.operations.models import BatchRun
 from integrations.ontology.nimbus import audit
 

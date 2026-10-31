@@ -10,7 +10,13 @@ from database import get_db
 from apps.agents import agent_settings, investigator, llm
 from apps.security import scope
 from integrations.ontology import nimbus
-from models import AuditEvent, Case, Exception as DBException, HumanDecision, Recommendation
+from apps.audit.models import AuditEvent
+from apps.cases.models import (
+    Case,
+    Exception as DBException,
+    HumanDecision,
+    Recommendation,
+)
 
 router = APIRouter(prefix="/api/agent")
 

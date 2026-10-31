@@ -19,7 +19,15 @@ from apps.ingest.manifests import iter_manifests, validate_business_date
 from apps.transactions import detail as transaction_detail
 from integrations.ontology import ontology
 from integrations.ontology.nimbus import audit, sla_due
-from models import CanonicalTransaction, Case, Exception as DBException, TransactionDiscount, TransactionTender
+from apps.transactions.models import (
+    CanonicalTransaction,
+    TransactionDiscount,
+    TransactionTender,
+)
+from apps.cases.models import (
+    Case,
+    Exception as DBException,
+)
 from apps.ingest.models import ReconciliationPolicy, SourceRecord
 
 

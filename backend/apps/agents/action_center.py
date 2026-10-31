@@ -20,7 +20,14 @@ from integrations.ontology import nimbus
 from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import require_role
 from database import get_db
-from models import Case, Exception as DBException, HumanDecision, Recommendation, Workflow, ValidationObligation
+from apps.cases.models import (
+    Case,
+    Exception as DBException,
+    HumanDecision,
+    Recommendation,
+    Workflow,
+    ValidationObligation,
+)
 
 router = APIRouter(prefix="/api/action-center")
 

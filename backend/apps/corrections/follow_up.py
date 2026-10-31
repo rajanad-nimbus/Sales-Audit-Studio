@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.cases.identifiers import generate_case_number
 from apps.security import scope
 from integrations.ontology.nimbus import audit, sla_due
-from models import AuditEvent, Case, Exception as CaseException
+from apps.audit.models import AuditEvent
+from apps.cases.models import (
+    Case,
+    Exception as CaseException,
+)
 
 
 async def create_follow_up(db: AsyncSession, case_id: str, user: dict) -> Case:
