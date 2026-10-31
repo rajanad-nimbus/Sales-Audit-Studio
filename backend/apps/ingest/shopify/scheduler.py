@@ -15,7 +15,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select, text, update
 
 from apps.ingest import service as ingest
-from apps.ingest import shopify_adapter, source_settings
+from apps.ingest import source_settings
+from apps.ingest.shopify import adapter as shopify_adapter
 from database import async_session
 from integrations.ontology.nimbus import audit
 from model_base import utcnow

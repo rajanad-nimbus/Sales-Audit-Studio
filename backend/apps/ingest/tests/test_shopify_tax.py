@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.ingest import service, shopify_adapter
+from apps.ingest import service
+from apps.ingest.shopify import adapter as shopify_adapter
 from models import Base, CanonicalTransaction, TransactionTax
 
 ORDER = {"id": 1, "created_at": "2026-10-01T10:00:00Z", "total_price": "113.00", "currency": "USD", "financial_status": "paid",

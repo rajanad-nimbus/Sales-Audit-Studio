@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.ingest import service as ingest
-from apps.ingest import shopify_adapter
+from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.limits import MAX_DELIVERY_BYTES
 from apps.ingest import source_settings
 from apps.ingest.shopify import reference_sync

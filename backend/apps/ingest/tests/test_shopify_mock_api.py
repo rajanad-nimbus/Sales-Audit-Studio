@@ -5,7 +5,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from apps.ingest import shopify_adapter as sa
+from apps.ingest.shopify import adapter as sa
 
 
 def make_app(state):

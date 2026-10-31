@@ -18,7 +18,8 @@ from apps.ingest import reconciliation
 from apps.ingest import service as ingest
 from apps.ingest.common import VALID_TYPES
 from apps.ingest.simulation import simulate_feed
-from apps.ingest import shopify_adapter, source_settings
+from apps.ingest import source_settings
+from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 from apps.ingest.manifests import validate_business_date
 from apps.security.authentication import require_role

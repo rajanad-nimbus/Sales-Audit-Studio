@@ -8,7 +8,7 @@ from decimal import InvalidOperation
 
 from sqlalchemy import and_, or_, select, text, tuple_
 
-from apps.ingest import shopify_ingest
+from apps.ingest.shopify import ingest as shopify_ingest
 from apps.ingest.common import COMPOSITE_SCOPE_BATCH_SIZE, LINEAGE, REQUIRED, SIGN, VALID_TYPES
 from apps.ingest.manifests import validate_business_date
 from apps.totals.currency import validate_currency

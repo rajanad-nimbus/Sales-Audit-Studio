@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.ingest import shopify_adapter
+from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.shopify import reference_sync
 from models import Base, FoundationReference, ShopifyReferenceStage, ShopifyReferenceSyncState
 
