@@ -1,6 +1,8 @@
 """Action Center filters reject malformed or reversed calendar-date ranges."""
 
 import asyncio
+import csv
+import io
 
 import httpx
 import pytest
@@ -173,6 +175,49 @@ def test_action_center_export_refuses_to_return_a_silent_partial_file(monkeypatc
 
             assert response.status_code == 413
             assert "Export contains 3 cases" in response.json()["detail"]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_action_center_csv_export_neutralizes_spreadsheet_formulas():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                db.add(Case(
+                    id="case-formula", case_number="=1+1", case_type="+SUM(A1:A2)",
+                    business_date="2026-10-01", store_id="S1",
+                ))
+                await db.commit()
+
+            app = FastAPI()
+            app.include_router(action_center.router)
+
+            async def identity():
+                return {"user": "finance@example.test", "role": "finance"}
+
+            async def database():
+                async with sessions() as db:
+                    yield db
+
+            app.dependency_overrides[auth.current_user] = identity
+            app.dependency_overrides[get_db] = database
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.get("/api/action-center/export.csv")
+
+            assert response.status_code == 200
+            rows = list(csv.reader(io.StringIO(response.text)))
+            case_number_column = rows[0].index("case_number")
+            case_type_column = rows[0].index("case_type")
+            assert rows[1][case_number_column] == "'=1+1"
+            assert rows[1][case_type_column] == "'+SUM(A1:A2)"
         finally:
             await engine.dispose()
 

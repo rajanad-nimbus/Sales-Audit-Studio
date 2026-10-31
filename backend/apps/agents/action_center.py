@@ -1,6 +1,4 @@
 """Action Center: server-side triage at scale (filters, facets, aggregates, bulk actions, export)."""
-import csv
-import io
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -15,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.agents import bulk_actions
 from apps.agents.bulk_actions import BULK_LIMIT, HEAVY_LIMIT
 from apps.search import contains_literal
+from apps.csv_export import csv_row
 from apps.security import scope
 from integrations.ontology import nimbus
 from apps.security.authentication import require_role
@@ -460,19 +459,14 @@ async def export_csv(f: Filters = Depends(filters), sort: str = "sla", dir: str 
         now = datetime.now(timezone.utc)
         descending = dir.lower() == "desc"
 
-        def csv_line(values):
-            buffer = io.StringIO()
-            csv.writer(buffer).writerow(values)
-            return buffer.getvalue()
-
-        yield csv_line(cols)
+        yield csv_row(cols)
         ordering = col.desc().nulls_last() if descending else col.asc().nulls_last()
         stmt = apply(select(Case), f, user).order_by(ordering, Case.id).limit(MAX_ACTION_CENTER_EXPORT_CASES)
         result = await db.stream(stmt.execution_options(yield_per=EXPORT_BATCH_SIZE))
         try:
             async for case_row in result.scalars():
                 values = row(case_row, now)
-                yield csv_line([values[key] for key in cols])
+                yield csv_row(values[key] for key in cols)
         finally:
             await result.close()
 

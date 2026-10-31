@@ -1,6 +1,4 @@
 """Audit trail: search, integrity verification and export. The trail itself is append-only and hash-chained in the database."""
-import csv
-import io
 import json
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated
@@ -12,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.security.authentication import require_role
 from apps.search import contains_literal
+from apps.csv_export import csv_row
 from database import get_db
 from apps.audit.models import AuditEvent
 from apps.audit.schemas import AuditEventSchema
@@ -83,30 +82,16 @@ async def prepare_export(db: AsyncSession, conds: list, format: str) -> tuple[in
     return head_seq, head_hash, count
 
 
-def csv_line(values: list) -> str:
-    """Encode a row safely for CSV consumers, including spreadsheet applications."""
-    buffer = io.StringIO()
-    csv.writer(buffer).writerow([spreadsheet_safe_cell(value) for value in values])
-    return buffer.getvalue()
-
-
-def spreadsheet_safe_cell(value):
-    """Prevent untrusted text from becoming a spreadsheet formula when exported."""
-    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
-        return f"'{value}"
-    return value
-
-
 async def generate_csv(db: AsyncSession, conds: list, head_seq: int):
     """Stream a stable audit export as CSV pages."""
     columns = [
         "seq", "created_at", "event_type", "actor", "object_type", "object_id",
         "case_id", "description", "prev_hash", "hash",
     ]
-    yield csv_line(columns)
+    yield csv_row(columns)
     async for records in export_event_pages(db, conds, head_seq):
         for record in records:
-            yield csv_line([record[column] for column in columns])
+            yield csv_row(record[column] for column in columns)
 
 
 async def generate_json(db: AsyncSession, conds: list, head_seq: int, head_hash: str | None, count: int):
