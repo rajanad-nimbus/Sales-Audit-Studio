@@ -348,6 +348,8 @@ def test_postgresql_migration_chain_renders_offline():
     assert "CREATE UNIQUE INDEX ix_audit_total_definitions_name_revision" in result.stdout
     assert "CREATE INDEX CONCURRENTLY ix_audit_events_case_seq" in result.stdout
     assert "CREATE INDEX CONCURRENTLY ix_audit_events_object_seq" in result.stdout
+    assert "CREATE INDEX CONCURRENTLY ix_audit_case_created_transaction_ids" in result.stdout
+    assert "USING gin ((after_state::jsonb -> 'transaction_ids'))" in result.stdout
     assert "CREATE INDEX CONCURRENTLY ix_evidence_snapshots_case_retrieved_id" in result.stdout
     assert "CREATE INDEX CONCURRENTLY ix_transaction_adjustments_created_id" in result.stdout
     assert "CREATE INDEX CONCURRENTLY ix_transaction_adjustments_status_created_id" in result.stdout

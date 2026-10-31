@@ -11,6 +11,7 @@ from sqlalchemy import String, case as sql_case, cast, func, literal, or_, selec
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
+from apps.cases.lineage import case_creation_mentions_transaction
 from database import get_db
 from apps.search import contains_literal
 from apps.transactions import detail as detail_math
@@ -288,7 +289,7 @@ async def transaction_detail(transaction_id: str, db: AsyncSession = Depends(get
     candidate_events = select(AuditEvent.case_id, AuditEvent.after_state).join(
         Case, Case.id == AuditEvent.case_id
     ).where(AuditEvent.event_type == "CASE_CREATED",
-            cast(AuditEvent.after_state, String).like(f'%"{tx.id}"%'))
+            case_creation_mentions_transaction(db, tx.id))
     candidate_events = scope.restrict(candidate_events, _, Case.store_id)
     candidates = (await db.execute(candidate_events)).all()
     causal_ids = {

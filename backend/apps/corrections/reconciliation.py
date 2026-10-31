@@ -2,10 +2,11 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import String, cast, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.corrections.effects import effective_amounts
+from apps.cases.lineage import case_creation_mentions_transaction
 from apps.transactions.detail import card_amount
 from integrations.ontology.nimbus import audit
 from models import AuditEvent, CanonicalTransaction, Case, ReconciliationPolicy, Recommendation, TransactionTender
@@ -21,7 +22,7 @@ async def linked_cases(db: AsyncSession, transaction: CanonicalTransaction) -> l
     while True:
         events = (await db.execute(select(AuditEvent).join(Case, Case.id == AuditEvent.case_id).where(
             Case.store_id == transaction.store_id, AuditEvent.event_type == "CASE_CREATED",
-            cast(AuditEvent.after_state, String).contains(transaction.id, autoescape=True)))).scalars().all()
+            case_creation_mentions_transaction(db, transaction.id)))).scalars().all()
         parents = {event.case_id: event.after_state.get("parent_case_id") for event in events
                    if isinstance(event.after_state, dict) and isinstance(event.after_state.get("transaction_ids"), list)
                    and transaction.id in event.after_state["transaction_ids"] and event.case_id}
@@ -65,7 +66,7 @@ async def related_exception_ids(db: AsyncSession, transaction: CanonicalTransact
         return {transaction.id}
     events = (await db.execute(select(AuditEvent).join(Case, Case.id == AuditEvent.case_id).where(
         Case.store_id == transaction.store_id, AuditEvent.event_type == "CASE_CREATED",
-        cast(AuditEvent.after_state, String).contains(transaction.id, autoescape=True)))).scalars().all()
+        case_creation_mentions_transaction(db, transaction.id)))).scalars().all()
     linked = set()
     for event in events:
         state = event.after_state
