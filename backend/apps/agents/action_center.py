@@ -34,6 +34,7 @@ BULK_LIMIT = 1000          # max cases touched per bulk call
 HEAVY_LIMIT = 200          # max cases for agent-driven bulk actions
 BULK_APPROVE_MAX_IMPACT = 5000  # bulk approval refuses larger financial movements
 EXPORT_BATCH_SIZE = 1000
+MAX_ACTION_CENTER_EXPORT_CASES = 50_000
 MAX_FILTER_VALUES = 100
 FILTER_VALUE_LENGTHS = {"status": 50, "case_type": 50, "store": 50, "priority": 20}
 SORTS = {
@@ -519,6 +520,16 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
 @router.get("/export.csv")
 async def export_csv(f: Filters = Depends(filters), sort: str = "sla", dir: str = "asc",
                      db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
+    matching_cases = (await db.execute(
+        apply(select(func.count()).select_from(Case), f, user)
+    )).scalar_one()
+    if matching_cases > MAX_ACTION_CENTER_EXPORT_CASES:
+        raise HTTPException(
+            status_code=413,
+            detail=(f"Export contains {matching_cases:,} cases; the limit is "
+                    f"{MAX_ACTION_CENTER_EXPORT_CASES:,}. Narrow the filters."),
+        )
+
     col = SORTS.get(sort, Case.sla_due_at)
     cols = ["case_number", "case_type", "store_id", "business_date", "status", "priority", "amount", "exposure",
             "evidence", "assigned_to", "sla_due_at", "sla_state", "age_hours"]
@@ -534,7 +545,7 @@ async def export_csv(f: Filters = Depends(filters), sort: str = "sla", dir: str 
 
         yield csv_line(cols)
         ordering = col.desc().nulls_last() if descending else col.asc().nulls_last()
-        stmt = apply(select(Case), f, user).order_by(ordering, Case.id).limit(50000)
+        stmt = apply(select(Case), f, user).order_by(ordering, Case.id).limit(MAX_ACTION_CENTER_EXPORT_CASES)
         result = await db.stream(stmt.execution_options(yield_per=EXPORT_BATCH_SIZE))
         try:
             async for case_row in result.scalars():

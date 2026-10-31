@@ -5,10 +5,14 @@ import asyncio
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 import auth
+from apps.agents import action_center
 from apps.agents.action_center import router
 from database import get_db
+from models import Base, Case
 
 
 @pytest.mark.parametrize(
@@ -129,6 +133,50 @@ def test_action_center_accepts_supported_filter_values():
 
     supported = filters(store="STORE-1", stage="open", sla="at_risk", snoozed="only", min_amount=1, max_amount=10)
     assert supported.store == "STORE-1" and supported.stage == "open"
+
+
+def test_action_center_export_refuses_to_return_a_silent_partial_file(monkeypatch):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                db.add_all([
+                    Case(
+                        id=f"case-{index}", case_number=f"CASE-{index}", case_type="Test",
+                        business_date="2026-10-01", store_id="S1",
+                    )
+                    for index in range(3)
+                ])
+                await db.commit()
+
+            app = FastAPI()
+            app.include_router(action_center.router)
+
+            async def identity():
+                return {"user": "finance@example.test", "role": "finance"}
+
+            async def database():
+                async with sessions() as db:
+                    yield db
+
+            app.dependency_overrides[auth.current_user] = identity
+            app.dependency_overrides[get_db] = database
+            monkeypatch.setattr(action_center, "MAX_ACTION_CENTER_EXPORT_CASES", 2)
+
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.get("/api/action-center/export.csv")
+
+            assert response.status_code == 413
+            assert "Export contains 3 cases" in response.json()["detail"]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize(
