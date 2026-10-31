@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.security import scope
-from apps.ingest.manifests import manifest_query, validate_business_date
+from apps.ingest.manifests import iter_manifests, validate_business_date
 from apps.store_days.freshness import lock_configuration, lock_store_day_identity
 from apps.totals.calculation import calculate_store_day, effective_definitions
 from apps.totals.currency import single_currency
@@ -241,13 +241,12 @@ async def retotal_store_day(store_id: str, business_date: str, db: AsyncSession 
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Reopen the store day with a rationale before re-totaling")
-    manifests = (await db.execute(manifest_query(business_date, ("Archived", "Processed")))).scalars().all()
     declared = Decimal("0")
-    manifest_currencies = []
-    for manifest in manifests:
+    manifest_currencies: set[str] = set()
+    async for manifest in iter_manifests(db, business_date, ("Archived", "Processed")):
         payload = json.loads(manifest.payload)
         if payload.get("store_id") == store_id and str(payload.get("business_date", ""))[:10] == business_date:
-            manifest_currencies.append(payload.get("currency", "USD"))
+            manifest_currencies.add(payload.get("currency", "USD"))
             declared += Decimal(str(payload.get("declared_total", 0)))
     has_manifest = bool(manifest_currencies)
     try:

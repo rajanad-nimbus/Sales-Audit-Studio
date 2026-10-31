@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -190,6 +191,31 @@ def test_other_store_manifest_does_not_create_declared_total():
             detail = await sd.get_store_day("S1", "2026-10-01", db=db, user=user)
             assert result["totals_created"] == 2
             assert "POS Control Declared" not in {total["name"] for total in detail["totals"]}
+    run(go())
+
+
+def test_retotal_pages_manifests_and_aggregates_only_the_requested_store(monkeypatch):
+    async def go():
+        Session = await session()
+        async with Session() as db:
+            db.add(StoreDay(id="day", store_id="S1", business_date="2026-10-01", status="Open"))
+            await ingest.ingest(db, "POSControl", "d1", [
+                {"source_record_id": f"manifest-{index}", "store_id": store,
+                 "business_date": "2026-10-01", "declared_count": 0,
+                 "declared_total": amount}
+                for index, (store, amount) in enumerate([
+                    ("S1", "10"), ("S2", "999"), ("S1", "20"), ("S3", "500"),
+                ])
+            ])
+            await db.commit()
+            monkeypatch.setattr("apps.ingest.manifests.MANIFEST_PAGE_SIZE", 1)
+
+            await sd.retotal_store_day("S1", "2026-10-01", db, {"user": "finance", "role": "finance"})
+
+            declared_total = (await db.execute(select(AuditTotal).where(
+                AuditTotal.store_day_id == "day", AuditTotal.total_name == "POS Control Declared",
+            ))).scalar_one()
+            assert declared_total.declared_amount == 30
     run(go())
 
 
