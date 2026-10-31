@@ -17,6 +17,16 @@ def test_destination_schema_normalizes_name_and_bounds_database_fields():
         DestIn(name="ERP", kind="webhook", url="x" * 2049)
     with pytest.raises(ValidationError):
         DestIn(name="ERP", kind="webhook", secret="x" * 4097)
+    with pytest.raises(ValidationError, match="at least 32 characters"):
+        DestIn(name="ERP", kind="webhook", url="https://erp.example")
+    with pytest.raises(ValidationError, match="signing secret"):
+        DestIn(name="ERP", kind="webhook", url="https://erp.example", secret="  ")
+    with pytest.raises(ValidationError, match="at least 32 characters"):
+        DestIn(name="ERP", kind="webhook", url="https://erp.example", secret="short-secret")
+
+    webhook_secret = "s" * 32
+    webhook = DestIn(name="ERP", kind="webhook", url="https://erp.example", secret=webhook_secret)
+    assert webhook.secret == webhook_secret
 
 
 def test_failed_export_resolution_rejects_unknown_outcomes():

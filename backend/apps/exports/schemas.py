@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class DestIn(BaseModel):
@@ -19,6 +19,12 @@ class DestIn(BaseModel):
         if not normalized:
             raise ValueError("name cannot be blank")
         return normalized
+
+    @model_validator(mode="after")
+    def require_webhook_secret(self):
+        if self.kind == "webhook" and (self.secret is None or len(self.secret.strip()) < 32):
+            raise ValueError("A webhook needs a signing secret of at least 32 characters")
+        return self
 
 
 class RunIn(BaseModel):
