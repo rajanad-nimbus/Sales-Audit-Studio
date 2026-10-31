@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from auth import require_role
+from apps.database_errors import violates_unique_constraint
 from apps.request_body import read_limited_body
 from database import get_db
 from models import (AuditEvent, Case, ExportBatch, ExportDestination, ExportItem, HumanDecision, Recommendation, TestSinkReceipt,
@@ -66,6 +67,26 @@ def sign_envelope(secret: str, dataset: str, idempotency_key: str, body: bytes) 
     """Sign canonical delivery metadata and the payload digest (protocol v1)."""
     message = f"nimbus-export-v1\n{dataset}\n{idempotency_key}\n{hashlib.sha256(body).hexdigest()}".encode("ascii")
     return "sha256=" + hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+
+
+def _is_duplicate_destination_name(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"export_destinations_name_key"},
+        sqlite_messages={"UNIQUE constraint failed: export_destinations.name"},
+    )
+
+
+def _is_export_reservation_conflict(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"export_batches_idempotency_key_key", "uq_export_item"},
+        sqlite_messages={
+            "UNIQUE constraint failed: export_batches.idempotency_key",
+            "UNIQUE constraint failed: export_items.destination_id, export_items.dataset, "
+            "export_items.object_id, export_items.object_version",
+        },
+    )
 
 
 def valid_signature(actual: str | None, expected: str) -> bool:
@@ -394,7 +415,9 @@ async def create_destination(body: DestIn, db: AsyncSession = Depends(get_db), u
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="A destination with that name exists") from exc
+        if _is_duplicate_destination_name(exc):
+            raise HTTPException(status_code=409, detail="A destination with that name exists") from exc
+        raise
     return dest_view(d)
 
 
@@ -473,9 +496,11 @@ async def run_export(body: RunIn, db: AsyncSession = Depends(get_db), user: dict
             db.add(ExportItem(id=str(uuid.uuid4()), batch_id=b.id, destination_id=dest.id, dataset=body.dataset, object_id=oid,
                               object_version=ver, state="Pending", **meta))
         await db.flush()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="This export or some of its records are already reserved. Refresh and try again.")
+        if _is_export_reservation_conflict(exc):
+            raise HTTPException(status_code=409, detail="This export or some of its records are already reserved. Refresh and try again.") from exc
+        raise
     audit(db, "EXPORT_CREATED", None, "ExportBatch", b.id, f"Export of {len(records)} {body.dataset} record(s) to '{dest.name}' created"
           + (f" ({summary['backposted']} back-posted)" if summary["backposted"] else ""),
           actor=actor, after={"payload_hash": b.payload_hash, "idempotency_key": key, "scope": body.scope, **summary})

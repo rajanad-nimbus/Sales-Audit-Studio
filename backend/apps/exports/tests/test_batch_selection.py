@@ -122,7 +122,9 @@ def test_batch_insert_conflict_returns_conflict_without_delivering(monkeypatch):
                 delivered = []
 
                 async def fail_flush(*_args, **_kwargs):
-                    raise IntegrityError("insert", {}, Exception("duplicate idempotency key"))
+                    raise IntegrityError(
+                        "insert", {}, Exception("UNIQUE constraint failed: export_batches.idempotency_key")
+                    )
 
                 async def deliver(*_args):
                     delivered.append(True)
