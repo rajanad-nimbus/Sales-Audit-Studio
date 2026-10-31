@@ -190,6 +190,14 @@ def _set_page_headers(response: Response, total: int, skip: int, returned: int) 
     response.headers["X-Total-Count"] = str(total)
     response.headers["X-Has-More"] = str(skip + returned < total).lower()
 
+
+def _is_duplicate_deposit_reference(exc: IntegrityError) -> bool:
+    """Recognize only the deposit-reference unique constraint across supported databases."""
+    constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+    if constraint_name == "cash_deposits_deposit_reference_key":
+        return True
+    return "UNIQUE constraint failed: cash_deposits.deposit_reference" in str(exc.orig)
+
 @router.post("/deposits")
 async def record_deposit(body: CashDepositBody, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
     scope.require_store(user, body.store_id)
@@ -207,5 +215,7 @@ async def record_deposit(body: CashDepositBody, db: AsyncSession = Depends(get_d
     try: await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Deposit reference already exists") from exc
+        if _is_duplicate_deposit_reference(exc):
+            raise HTTPException(status_code=409, detail="Deposit reference already exists") from exc
+        raise
     await db.refresh(row); return deposit_view(row)

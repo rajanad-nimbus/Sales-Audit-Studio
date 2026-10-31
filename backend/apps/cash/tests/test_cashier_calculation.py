@@ -3,10 +3,12 @@ import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.cash.routes import CashControlBody, declare_cash
+from apps.cash.routes import CashControlBody, CashDepositBody, declare_cash, record_deposit
 from models import Base, CanonicalTransaction, StoreDay
 
 
@@ -63,6 +65,36 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                 assert cashier_two["expected_amount"] == Decimal("20.00")
                 assert register["expected_amount"] == Decimal("30.00")
                 assert all(item["status"] == "Balanced" for item in (cashier_one, cashier_two, register))
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_duplicate_deposit_reference_is_conflict():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                db.add(StoreDay(
+                    id="day-1", store_id="S1", business_date="2026-10-01", status="Auditing",
+                ))
+                await db.flush()
+                finance = {"user": "finance@example.test", "role": "finance"}
+                deposit = CashDepositBody(
+                    store_id="S1", business_date="2026-10-01",
+                    deposit_reference="BANK-REF-1", deposited_amount=Decimal("10.00"),
+                )
+                await record_deposit(deposit, db, finance)
+
+                with pytest.raises(HTTPException) as error:
+                    await record_deposit(deposit, db, finance)
+
+                assert error.value.status_code == 409
+                assert error.value.detail == "Deposit reference already exists"
         finally:
             await engine.dispose()
 
