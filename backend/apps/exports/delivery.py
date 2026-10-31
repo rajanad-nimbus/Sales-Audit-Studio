@@ -84,6 +84,9 @@ def write_file_delivery(
         raise ValueError("Destination directory is outside the export root")
     folder.mkdir(parents=True, exist_ok=True)
     name = f"{batch.dataset}-{batch.id}.{destination.format}"
+    checksum_path = folder / (name + ".sha256")
+    previous_checksum = checksum_path.read_bytes() if checksum_path.exists() else None
+    checksum_published = False
     temporary_paths = []
     try:
         artifacts = (
@@ -95,7 +98,19 @@ def write_file_delivery(
                 temporary_paths.append(Path(temporary.name))
                 temporary.write(contents)
             os.replace(temporary_paths[-1], folder / (name + suffix))
+            if suffix == ".sha256":
+                checksum_published = True
         return str(folder / name)
+    except BaseException:
+        if checksum_published:
+            if previous_checksum is None:
+                checksum_path.unlink(missing_ok=True)
+            else:
+                with tempfile.NamedTemporaryFile(dir=folder, prefix=".nimbus-", delete=False) as backup:
+                    backup.write(previous_checksum)
+                    temporary_paths.append(Path(backup.name))
+                os.replace(temporary_paths[-1], checksum_path)
+        raise
     finally:
         for temporary_path in temporary_paths:
             temporary_path.unlink(missing_ok=True)

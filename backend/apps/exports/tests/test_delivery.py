@@ -214,4 +214,34 @@ def test_failed_publish_does_not_expose_partial_payload(tmp_path, monkeypatch):
     asyncio.run(routes.deliver(destination, batch))
     assert batch.status == "Failed"
     assert list((tmp_path / "ERP").glob("*.json")) == []
+    assert list((tmp_path / "ERP").glob("*.sha256")) == []
     assert list((tmp_path / "ERP").glob(".nimbus-*")) == []
+
+
+def test_failed_retry_restores_previous_checksum(tmp_path, monkeypatch):
+    monkeypatch.setattr(routes, "EXPORT_DIR", tmp_path)
+    destination, batch = make_delivery()
+
+    async def publish_original():
+        await routes.deliver(destination, batch)
+
+    asyncio.run(publish_original())
+    path = Path(batch.response_ref)
+    previous_payload = path.read_bytes()
+    previous_checksum = path.with_name(path.name + ".sha256").read_bytes()
+    batch.payload = '{"records": [2]}'
+    batch.payload_hash = hashlib.sha256(batch.payload.encode()).hexdigest()
+    replace = routes.os.replace
+
+    def fail_payload(source, target):
+        if str(target).endswith(".json"):
+            raise OSError("disk unavailable")
+        replace(source, target)
+
+    monkeypatch.setattr(routes.os, "replace", fail_payload)
+    asyncio.run(routes.deliver(destination, batch))
+
+    assert batch.status == "Failed"
+    assert path.read_bytes() == previous_payload
+    assert path.with_name(path.name + ".sha256").read_bytes() == previous_checksum
+    assert list(path.parent.glob(".nimbus-*")) == []
