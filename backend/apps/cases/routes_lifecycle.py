@@ -1,6 +1,7 @@
 """Case lifecycle, list, summary, and detail endpoints."""
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
@@ -307,34 +308,9 @@ async def review_case_amounts(
     exceptions = (await db.execute(
         select(DBException).where(DBException.case_id == case_id).with_for_update()
     )).scalars().all()
-    supplied = {item.exception_id: item for item in body.exceptions}
-    if not exceptions or len(supplied) != len(body.exceptions) or set(supplied) != {item.id for item in exceptions}:
-        raise HTTPException(status_code=422, detail="Provide each case exception exactly once")
-    for item in body.exceptions:
-        for value in (item.amount, item.exposure):
-            try:
-                valid = value.is_finite() and 0 <= value <= MAX_MONEY and value == value.quantize(Decimal("0.01"))
-            except InvalidOperation:
-                valid = False
-            if not valid:
-                raise HTTPException(status_code=422, detail="Amounts must be non-negative and fit monetary precision")
-    total = sum((item.amount for item in body.exceptions), Decimal("0"))
-    exposure = sum((item.exposure for item in body.exceptions), Decimal("0"))
-    if total > MAX_MONEY or exposure > MAX_MONEY:
-        raise HTTPException(status_code=422, detail="Case totals exceed supported monetary precision")
-    before = {
-        "amount": str(case.total_exception_amount),
-        "exposure": str(case.total_exposure),
-        "exceptions": [
-            {"id": item.id, "amount": str(item.exception_amount), "exposure": str(item.estimated_exposure)}
-            for item in exceptions
-        ],
-    }
-    for item in exceptions:
-        item.exception_amount = supplied[item.id].amount
-        item.estimated_exposure = supplied[item.id].exposure
-    case.total_exception_amount = total
-    case.total_exposure = exposure
+    totals = validate_case_amount_review(body, exceptions)
+    before = case_amount_snapshot(case, exceptions)
+    apply_case_amount_review(case, exceptions, body, totals)
     case.amount_needs_review = False
     nimbus.audit(
         db,
@@ -346,8 +322,8 @@ async def review_case_amounts(
         actor=user["user"] or "ontology.user",
         after={
             "before": before,
-            "amount": str(total),
-            "exposure": str(exposure),
+            "amount": str(totals.amount),
+            "exposure": str(totals.exposure),
             "exceptions": [
                 {"id": item.id, "amount": str(item.exception_amount), "exposure": str(item.estimated_exposure)}
                 for item in exceptions
@@ -357,6 +333,61 @@ async def review_case_amounts(
     await db.commit()
     await db.refresh(case)
     return case
+
+
+@dataclass
+class CaseAmountTotals:
+    amount: Decimal
+    exposure: Decimal
+
+
+def validate_case_amount_review(body: CaseAmountReview, exceptions: list[DBException]) -> CaseAmountTotals:
+    """Require a valid amount and exposure for every exception exactly once."""
+    supplied = {item.exception_id: item for item in body.exceptions}
+    if not exceptions or len(supplied) != len(body.exceptions) or set(supplied) != {item.id for item in exceptions}:
+        raise HTTPException(status_code=422, detail="Provide each case exception exactly once")
+    for item in body.exceptions:
+        validate_reviewed_money(item.amount)
+        validate_reviewed_money(item.exposure)
+    amount = sum((item.amount for item in body.exceptions), Decimal("0"))
+    exposure = sum((item.exposure for item in body.exceptions), Decimal("0"))
+    if amount > MAX_MONEY or exposure > MAX_MONEY:
+        raise HTTPException(status_code=422, detail="Case totals exceed supported monetary precision")
+    return CaseAmountTotals(amount, exposure)
+
+
+def validate_reviewed_money(value: Decimal) -> None:
+    """Reject negative, non-finite, over-precision, or overflowing review amounts."""
+    try:
+        valid = value.is_finite() and 0 <= value <= MAX_MONEY and value == value.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        valid = False
+    if not valid:
+        raise HTTPException(status_code=422, detail="Amounts must be non-negative and fit monetary precision")
+
+
+def case_amount_snapshot(case: Case, exceptions: list[DBException]) -> dict:
+    """Capture prior case and exception amounts for the audit event."""
+    return {
+        "amount": str(case.total_exception_amount),
+        "exposure": str(case.total_exposure),
+        "exceptions": [
+            {"id": item.id, "amount": str(item.exception_amount), "exposure": str(item.estimated_exposure)}
+            for item in exceptions
+        ],
+    }
+
+
+def apply_case_amount_review(
+    case: Case, exceptions: list[DBException], body: CaseAmountReview, totals: CaseAmountTotals
+) -> None:
+    """Apply the validated review values to locked case and exception rows."""
+    supplied = {item.exception_id: item for item in body.exceptions}
+    for item in exceptions:
+        item.exception_amount = supplied[item.id].amount
+        item.estimated_exposure = supplied[item.id].exposure
+    case.total_exception_amount = totals.amount
+    case.total_exposure = totals.exposure
 
 
 @router.post("/api/cases/{case_id}/follow-up", response_model=CaseSchema)
