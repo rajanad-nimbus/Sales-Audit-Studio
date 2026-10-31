@@ -18,25 +18,40 @@ def assert_migration_schema_matches_models(sql: str) -> None:
     unique_constraints = set()
     unique_constraint_names = {}
     check_constraints = set()
+    _parse_create_tables(sql, columns_by_table, foreign_keys, unique_constraints,
+                         unique_constraint_names, check_constraints)
+    _parse_alter_table_columns(sql, columns_by_table)
+    _parse_alter_table_constraints(sql, foreign_keys, unique_constraints,
+                                   unique_constraint_names, check_constraints)
+
+    _assert_migration_columns(columns_by_table)
+    _assert_migration_indexes(sql)
+    _assert_migration_constraints(sql, foreign_keys, unique_constraints, check_constraints)
+
+
+def _record_migration_column(columns: dict, table: str, name: str, definition: str) -> None:
+    not_null = bool(re.search(r"\bNOT NULL\b", definition))
+    type_name = re.split(
+        r"\s+(?:NOT NULL|NULL|DEFAULT|PRIMARY KEY|UNIQUE|REFERENCES)\b",
+        definition.rstrip(",; "),
+        maxsplit=1,
+    )[0].strip()
+    columns.setdefault(table, {})[name] = (
+        type_name,
+        not_null,
+        _default_value(definition, type_name),
+    )
+
+
+def _parse_create_tables(sql, columns, foreign_keys, unique_constraints, unique_names, checks):
     identifier = r'(?:"([^"]+)"|([a-zA-Z_]\w*))'
-
-    def record_column(table: str, name: str, definition: str) -> None:
-        not_null = bool(re.search(r"\bNOT NULL\b", definition))
-        type_name = re.split(
-            r"\s+(?:NOT NULL|NULL|DEFAULT|PRIMARY KEY|UNIQUE|REFERENCES)\b",
-            definition.rstrip(",; "),
-            maxsplit=1,
-        )[0].strip()
-        default = _default_value(definition, type_name)
-        columns_by_table.setdefault(table, {})[name] = (type_name, not_null, default)
-
     for table, body in re.findall(r"CREATE TABLE (\w+) \((.*?)\n\);", sql, re.S):
         for line in body.splitlines():
             match = re.match(r"\s+" + identifier + r"\s+(.+)", line)
             if match and (match.group(1) or match.group(2)).upper() not in {
                 "PRIMARY", "FOREIGN", "CONSTRAINT", "UNIQUE", "CHECK"
             }:
-                record_column(table, match.group(1) or match.group(2), match.group(3))
+                _record_migration_column(columns, table, match.group(1) or match.group(2), match.group(3))
         for constrained, referred, referred_columns, actions in re.findall(
             r"FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s+(\w+)\s*\(([^)]+)\)([^,\n)]*)",
             body,
@@ -48,66 +63,63 @@ def assert_migration_schema_matches_models(sql: str) -> None:
         ):
             names = _column_names(constrained)
             unique_constraints.add((table, names))
-            # PostgreSQL names unnamed table-level unique constraints this way.
             generated_name = constraint_name or f"{table}_{'_'.join(names)}_key"
-            unique_constraint_names[(table, generated_name)] = (table, names)
-        check_constraints.update(
+            unique_names[(table, generated_name)] = (table, names)
+        checks.update(
             (table, name, _normalize_check(expression))
             for name, expression in _named_check_constraints(body)
         )
 
-    check_constraints.update(
+
+def _parse_alter_table_columns(sql, columns):
+    identifier = r'(?:"([^"]+)"|([a-zA-Z_]\w*))'
+    for match in re.finditer(r"ALTER TABLE (\w+) ADD COLUMN " + identifier + r"\s+([^;]+);", sql):
+        _record_migration_column(columns, match.group(1), match.group(2) or match.group(3), match.group(4))
+    for pattern, not_null in (
+        (r"ALTER TABLE (\w+) ALTER COLUMN (\w+) DROP NOT NULL", False),
+        (r"ALTER TABLE (\w+) ALTER COLUMN (\w+) SET NOT NULL", True),
+    ):
+        for table, column in re.findall(pattern, sql):
+            type_name, _, default = columns[table][column]
+            columns[table][column] = (type_name, not_null, default)
+    default_pattern = (
+        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) (SET DEFAULT\s+([^;]+)|DROP DEFAULT)"
+    )
+    for match in re.finditer(default_pattern, sql, re.I):
+        table, column = match.group(1), match.group(2)
+        type_name, not_null, _ = columns[table][column]
+        expression = match.group(4)
+        default = _normalize_default(expression, type_name) if expression else None
+        columns[table][column] = (type_name, not_null, default)
+
+
+def _parse_alter_table_constraints(sql, foreign_keys, unique_constraints, unique_names, checks):
+    checks.update(
         (table, name, _normalize_check(expression))
         for table, name, expression in _alter_table_checks(sql)
     )
-
-    for match in re.finditer(
-        r"ALTER TABLE (\w+) ADD COLUMN " + identifier + r"\s+([^;]+);", sql
-    ):
-        record_column(match.group(1), match.group(2) or match.group(3), match.group(4))
-
-    for table, constrained, referred, referred_columns, actions in re.findall(
+    foreign_key_pattern = (
         r"ALTER TABLE\s+(\w+)\s+ADD(?: CONSTRAINT\s+\w+)?\s+FOREIGN KEY\s*"
-        r"\(([^)]+)\)\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)([^;]*);",
-        sql,
-        re.I,
+        r"\(([^)]+)\)\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)([^;]*);"
+    )
+    for table, constrained, referred, referred_columns, actions in re.findall(
+        foreign_key_pattern, sql, re.I
     ):
         foreign_keys.add(_foreign_key_signature(table, constrained, referred, referred_columns, actions))
-    for table, constraint_name, constrained in re.findall(
-        r"ALTER TABLE\s+(\w+)\s+ADD CONSTRAINT\s+(\w+)\s+UNIQUE\s*\(([^)]+)\)",
-        sql,
-        re.I,
-    ):
+    unique_pattern = (
+        r"ALTER TABLE\s+(\w+)\s+ADD CONSTRAINT\s+(\w+)\s+UNIQUE\s*\(([^)]+)\)"
+    )
+    for table, constraint_name, constrained in re.findall(unique_pattern, sql, re.I):
         names = _column_names(constrained)
         unique_constraints.add((table, names))
-        unique_constraint_names[(table, constraint_name)] = (table, names)
+        unique_names[(table, constraint_name)] = (table, names)
     for table, constraint_name in re.findall(
         r"ALTER TABLE\s+(\w+)\s+DROP CONSTRAINT\s+(\w+)", sql, re.I
     ):
-        unique_constraints.discard(unique_constraint_names.get((table, constraint_name)))
+        unique_constraints.discard(unique_names.get((table, constraint_name)))
 
-    for table, column in re.findall(
-        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) DROP NOT NULL", sql
-    ):
-        type_name, _, default = columns_by_table[table][column]
-        columns_by_table[table][column] = (type_name, False, default)
-    for table, column in re.findall(
-        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) SET NOT NULL", sql
-    ):
-        type_name, _, default = columns_by_table[table][column]
-        columns_by_table[table][column] = (type_name, True, default)
 
-    for match in re.finditer(
-        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) (SET DEFAULT\s+([^;]+)|DROP DEFAULT)",
-        sql,
-        re.I,
-    ):
-        table, column = match.group(1), match.group(2)
-        type_name, not_null, _ = columns_by_table[table][column]
-        default_expression = match.group(4)
-        default = _normalize_default(default_expression, type_name) if default_expression else None
-        columns_by_table[table][column] = (type_name, not_null, default)
-
+def _assert_migration_columns(columns_by_table: dict) -> None:
     model_tables = set(Base.metadata.tables)
     assert set(columns_by_table) - {"alembic_version"} == model_tables
     default_mismatches = []
@@ -127,6 +139,8 @@ def assert_migration_schema_matches_models(sql: str) -> None:
                 default_mismatches.append((table.name, column.name, actual_default, expected_default))
     assert not default_mismatches, default_mismatches
 
+
+def _assert_migration_indexes(sql: str) -> None:
     migration_indexes = {
         (table, name, _column_names(columns), bool(unique), _normalize_predicate(predicate))
         for unique, name, table, columns, predicate in re.findall(
@@ -154,6 +168,10 @@ def assert_migration_schema_matches_models(sql: str) -> None:
     }
     assert migration_indexes == model_indexes
 
+
+def _assert_migration_constraints(
+    sql: str, foreign_keys: set, unique_constraints: set, check_constraints: set
+) -> None:
     model_foreign_keys = {
         (
             table.name,
