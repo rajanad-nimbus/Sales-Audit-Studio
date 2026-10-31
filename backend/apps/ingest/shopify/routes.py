@@ -164,6 +164,8 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         payload = json.loads(body)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Webhook payload must be a JSON object")
 
     if topic not in WEBHOOK_TOPICS:
         return {"status": "ignored", "topic": topic}

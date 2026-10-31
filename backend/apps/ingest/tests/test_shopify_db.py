@@ -363,6 +363,24 @@ def test_webhook_signature_and_ingest(monkeypatch):
     run(go())
 
 
+def test_webhook_rejects_signed_non_object_json(monkeypatch):
+    monkeypatch.setenv("SHOPIFY_WEBHOOK_SECRET", "s3cret")
+    body = b"[]"
+    sig = base64.b64encode(hmac.new(b"s3cret", body, hashlib.sha256).digest()).decode()
+
+    async def go():
+        Session = await make_session()
+        async with webhook_client(Session) as client:
+            response = await client.post(
+                "/api/ingest/shopify/webhook",
+                content=body,
+                headers={"X-Shopify-Hmac-SHA256": sig, "X-Shopify-Topic": "orders/create"},
+            )
+            assert response.status_code == 400
+            assert response.json()["detail"] == "Webhook payload must be a JSON object"
+    run(go())
+
+
 def test_webhook_preserves_shopify_delivery_id_within_column_limit(monkeypatch):
     monkeypatch.setenv("SHOPIFY_WEBHOOK_SECRET", "s3cret")
     delivery_id = "shopify-delivery-" + "x" * 80
