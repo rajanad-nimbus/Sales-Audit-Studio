@@ -1,111 +1,40 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, money } from '@/lib/api';
-import { useToast } from '@/components/Feedback';
-import { Alert, Button, Card, Field, PageHeader, Segmented } from '@/components/ui';
 
-type Adjustment = {
-  id: string;
-  transaction_id: string | null;
-  adjustment_type: string;
-  proposed_values: Record<string, unknown>;
-  rationale: string;
-  status: string;
-  proposed_by: string;
-  reviewed_by: string | null;
-  created_at: string;
-};
-type Kind = 'Amount' | 'Tender' | 'Tax' | 'Reference' | 'Item' | 'MissingTransaction';
-const kinds: { key: Kind; title: string; help: string }[] = [
-  {
-    key: 'Amount',
-    title: 'Amount correction',
-    help: 'Correct a signed amount using a positive or negative adjustment.',
-  },
-  {
-    key: 'Tender',
-    title: 'Tender correction',
-    help: 'Reclassify the tender without changing the source record.',
-  },
-  {
-    key: 'Tax',
-    title: 'Tax correction',
-    help: 'Record a corrected tax amount or a tax adjustment.',
-  },
-  {
-    key: 'Reference',
-    title: 'Reference correction',
-    help: 'Correct a payment, settlement, or external reference.',
-  },
-  {
-    key: 'Item',
-    title: 'Item correction',
-    help: 'Correct item detail supported by a receipt or source evidence.',
-  },
-  {
-    key: 'MissingTransaction',
-    title: 'Missing transaction',
-    help: 'Create a governed, immutable manual record when a source transaction is absent.',
-  },
-];
-const tone = (s: string) =>
-  s === 'Approved'
-    ? 'badge-success'
-    : s === 'Rejected'
-      ? 'badge-error'
-      : s === 'Proposed'
-        ? 'badge-warning'
-        : 'badge-secondary';
-const pretty = (v: string) =>
-  v
-    .replaceAll('_', ' ')
-    .replace(/([A-Z])/g, ' $1')
-    .trim();
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { api } from '@/lib/api';
+import { useToast } from '@/components/Feedback';
+import {
+  Alert,
+  Badge,
+  Button,
+  DataTable,
+  MetricGrid,
+  MetricTile,
+  PageHeader,
+  Segmented,
+  Toolbar,
+  Card,
+} from '@/components/ui';
+import { describe, pretty, statusLabel, statusVariant } from '@/lib/corrections';
+import type { Adjustment } from '@/lib/corrections';
+
+type Filter = 'All' | 'Proposed' | 'Approved' | 'Rejected';
+const FILTERS: Filter[] = ['All', 'Proposed', 'Approved', 'Rejected'];
 
 export default function CorrectionsPage() {
+  const router = useRouter();
   const toast = useToast();
-  const [rows, setRows] = useState<Adjustment[]>([]),
-    [error, setError] = useState<string | null>(null),
-    [filter, setFilter] = useState<'All' | 'Proposed' | 'Approved' | 'Rejected'>('All');
-  const [search, setSearch] = useState(''),
-    [results, setResults] = useState<
-      {
-        id: string;
-        business_date: string;
-        transaction_type: string;
-        signed_amount: string;
-        currency: string;
-        store_id: string;
-        tender_type: string | null;
-        payment_reference: string | null;
-        reconciliation_status: string;
-      }[]
-    >([]),
-    [searching, setSearching] = useState(false);
-  const [facets, setFacets] = useState<{
-    stores: string[];
-    tenders: string[];
-    transaction_types: string[];
-    items: string[];
-  }>({ stores: [], tenders: [], transaction_types: [], items: [] });
-  const [kind, setKind] = useState<Kind>('Amount'),
-    [transactionId, setTransactionId] = useState(''),
-    [rationale, setRationale] = useState(''),
-    [amount, setAmount] = useState('0'),
-    [field, setField] = useState(''),
-    [value, setValue] = useState(''),
-    [store, setStore] = useState(''),
-    [date, setDate] = useState(new Date().toISOString().slice(0, 10)),
-    [tender, setTender] = useState('Cash'),
-    [transactionType, setTransactionType] = useState('Sale');
+  const [rows, setRows] = useState<Adjustment[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>('All');
+  const [q, setQ] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [adjustments, facetData] = await Promise.all([
-        api.get('/api/transaction-adjustments'),
-        api.get('/api/transaction-adjustments/transactions/facets'),
-      ]);
-      setRows(adjustments.data);
-      setFacets(facetData.data);
+      setRows((await api.get('/api/transaction-adjustments')).data);
       setError(null);
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? 'Unable to load correction queue.');
@@ -114,436 +43,188 @@ export default function CorrectionsPage() {
   useEffect(() => {
     load();
   }, [load]);
-  const payload = useMemo(() => {
-    if (kind === 'MissingTransaction')
-      return {
-        business_date: date,
-        store_id: store,
-        amount: Number(amount),
-        transaction_type: transactionType,
-        tender_type: tender,
-      };
-    if (kind === 'Amount') return { amount_delta: Number(amount) };
-    if (kind === 'Tender') return { tender_type: value };
-    if (kind === 'Tax') return { tax_delta: Number(amount) };
-    if (kind === 'Reference') return { reference: value };
-    return { item: value };
-  }, [kind, date, store, amount, transactionType, tender, value]);
-  const valid =
-    !!rationale.trim() &&
-    (kind === 'MissingTransaction'
-      ? !!store.trim() && Number(amount) > 0
-      : !!transactionId.trim()) &&
-    (kind === 'Amount' || kind === 'Tax'
-      ? Number.isFinite(Number(amount))
-      : kind === 'MissingTransaction' || !!value.trim());
-  const lookup = async () => {
-    if (search.trim().length < 2) return;
-    try {
-      setSearching(true);
-      setResults(
-        (
-          await api.get('/api/transaction-adjustments/transactions/search', {
-            params: { q: search.trim() },
-          })
-        ).data
-      );
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'Transaction search failed.');
-    } finally {
-      setSearching(false);
-    }
-  };
-  const selectTransaction = (tx: (typeof results)[number]) => {
-    setTransactionId(tx.id);
-    setSearch('');
-    setResults([]);
-    if (kind === 'Tender' && tx.tender_type) setValue(tx.tender_type);
-    setError(null);
-  };
-  const submit = async () => {
-    try {
-      await api.post('/api/transaction-adjustments', {
-        transaction_id: kind === 'MissingTransaction' ? null : transactionId.trim(),
-        adjustment_type: kind,
-        proposed_values: payload,
-        rationale: rationale.trim(),
-      });
-      toast('Correction submitted for Finance review.', 'success');
-      setRationale('');
-      setValue('');
-      setAmount('0');
-      await load();
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'Unable to submit correction.');
-    }
-  };
+
   const decide = async (id: string, decision: 'approve' | 'reject') => {
+    setBusy(true);
     try {
       await api.post(`/api/transaction-adjustments/${id}/${decision}`);
       toast(`Correction ${decision}d.`, 'success');
       await load();
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? `Unable to ${decision} correction.`);
+    } finally {
+      setBusy(false);
     }
   };
-  const shown = rows.filter((r) => filter === 'All' || r.status === filter);
-  const counts = (status: string) =>
-    status === 'All' ? rows.length : rows.filter((x) => x.status === status).length;
-  const active = kinds.find((x) => x.key === kind)!;
+
+  const all = rows ?? [];
+  const count = (s: Filter) =>
+    s === 'All' ? all.length : all.filter((x) => x.status === s).length;
+  const needle = q.trim().toLowerCase();
+  const shown = all
+    .filter((r) => filter === 'All' || r.status === filter)
+    .filter(
+      (r) =>
+        !needle ||
+        `${r.adjustment_type} ${r.proposed_by} ${r.rationale} ${r.transaction_id ?? ''} ${describe(r.adjustment_type, r.proposed_values)}`
+          .toLowerCase()
+          .includes(needle)
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
   return (
-    <div className="page-container" style={{ maxWidth: 1280, marginLeft: 0 }}>
+    <div className="page-container">
       <PageHeader
         title="Transaction Corrections"
-        subtitle="Correct the audited view without changing the original source. Every proposal is attributable, reviewed, and retained."
+        subtitle="Correct the audited view without changing the original source. Every proposal is attributable, reviewed and retained."
+        actions={
+          <Button variant="primary" onClick={() => router.push('/corrections/new')}>
+            New correction
+          </Button>
+        }
       />
       {error && (
         <Alert tone="error" onDismiss={() => setError(null)}>
           {error}
         </Alert>
       )}
-      <Card>
-        <div className="cc-head">
-          <div>
-            <h2>1. Propose a governed correction</h2>
-            <p className="page-sub">
-              Choose the correction, identify the source transaction, and give Finance the
-              evidence-based rationale.
-            </p>
-          </div>
-          <span className="badge badge-secondary">Source remains immutable</span>
-        </div>
-        <div
-          className="cc-seg"
-          style={{ alignSelf: 'flex-start', flexWrap: 'wrap', margin: '1rem 0' }}
-        >
-          {kinds.map((k) => (
-            <button
-              key={k.key}
-              className={kind === k.key ? 'on' : ''}
-              onClick={() => {
-                setKind(k.key);
-                setValue('');
-                setAmount('0');
-              }}
-            >
-              {k.title}
-            </button>
-          ))}
-        </div>
-        <Alert tone="info" className="mb-md">
-          <b>{active.title}.</b> {active.help}
-        </Alert>
-        <div className="case-panel case-two">
-          <div>
-            {kind !== 'MissingTransaction' && (
-              <div className="cc-card" style={{ margin: '0 0 1rem', padding: '.8rem' }}>
-                <b>Find a canonical transaction</b>
-                <div className="cc-askrow" style={{ marginTop: '.5rem' }}>
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') lookup();
-                    }}
-                    placeholder="Canonical ID, payment reference, settlement reference, or store"
-                  />
-                  <Button
-                    size="sm"
-
-                    disabled={searching || search.trim().length < 2}
-                    onClick={lookup}
-                  >
-                    {searching ? 'Searching…' : 'Search'}
-                  </Button>
-                </div>
-                {results.length > 0 && (
-                  <div className="table-container" style={{ marginTop: '.6rem' }}>
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Transaction</th>
-                          <th>Store / date</th>
-                          <th>Type</th>
-                          <th>Amount</th>
-                          <th>Tender</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results.map((tx) => (
-                          <tr key={tx.id}>
-                            <td>
-                              <code style={{ fontSize: 11 }}>{tx.id}</code>
-                              <small className="act-sub">
-                                {tx.payment_reference || 'No payment reference'}
-                              </small>
-                            </td>
-                            <td>
-                              {tx.store_id} · {tx.business_date}
-                            </td>
-                            <td>{tx.transaction_type}</td>
-                            <td>{money(tx.signed_amount)}</td>
-                            <td>{tx.tender_type || '—'}</td>
-                            <td>
-                              <Button
-                                variant="primary"
-                                size="sm"
-
-                                onClick={() => selectTransaction(tx)}
-                              >
-                                Use transaction
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="form-row">
-              <label className="field grow">
-                {kind === 'MissingTransaction' ? 'Store' : 'Canonical transaction ID'}
-                <input
-                  value={kind === 'MissingTransaction' ? store : transactionId}
-                  onChange={(e) =>
-                    kind === 'MissingTransaction'
-                      ? setStore(e.target.value)
-                      : setTransactionId(e.target.value)
-                  }
-                  list={kind === 'MissingTransaction' ? 'store-options' : undefined}
-                  placeholder={
-                    kind === 'MissingTransaction'
-                      ? 'Search or select a store'
-                      : 'Search above or paste an ID'
-                  }
-                />
-              </label>
-              {kind === 'MissingTransaction' && (
-                <datalist id="store-options">
-                  {facets.stores.map((x) => (
-                    <option key={x} value={x} />
-                  ))}
-                </datalist>
-              )}
-              {kind === 'MissingTransaction' && (
-                <Field label="Business date">
-                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                </Field>
-              )}
-            </div>
-            {transactionId && kind !== 'MissingTransaction' && (
-              <p className="hint">
-                Selected canonical transaction: <code>{transactionId}</code>
-              </p>
-            )}
-            {(kind === 'Amount' || kind === 'Tax' || kind === 'MissingTransaction') && (
-              <div className="form-row">
-                <label className="field">
-                  {kind === 'MissingTransaction' ? 'Amount' : 'Adjustment amount'}
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                  />
-                </label>
-                {kind === 'MissingTransaction' && (
-                  <>
-                    <Field label="Transaction type">
-                      <select
-                        value={transactionType}
-                        onChange={(e) => setTransactionType(e.target.value)}
-                      >
-                        {(facets.transaction_types.length
-                          ? facets.transaction_types
-                          : ['Sale', 'Return']
-                        ).map((x) => (
-                          <option key={x}>{x}</option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Tender">
-                      <select value={tender} onChange={(e) => setTender(e.target.value)}>
-                        {(facets.tenders.length
-                          ? facets.tenders
-                          : ['Cash', 'Card', 'GiftCard']
-                        ).map((x) => (
-                          <option key={x}>{x}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  </>
-                )}
-              </div>
-            )}
-            {(['Tender', 'Reference', 'Item'] as Kind[]).includes(kind) && (
-              <label className="field" style={{ display: 'block' }}>
-                {kind === 'Tender'
-                  ? 'Correct tender'
-                  : kind === 'Reference'
-                    ? 'Correct reference'
-                    : 'Correct item'}
-                <input
-                  list={
-                    kind === 'Tender'
-                      ? 'tender-options'
-                      : kind === 'Item'
-                        ? 'item-options'
-                        : undefined
-                  }
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  placeholder={
-                    kind === 'Tender'
-                      ? 'Search or select tender'
-                      : kind === 'Reference'
-                        ? 'Payment or settlement reference'
-                        : 'Search or select item'
-                  }
-                />
-                {kind === 'Tender' && (
-                  <datalist id="tender-options">
-                    {facets.tenders.map((x) => (
-                      <option key={x} value={x} />
-                    ))}
-                  </datalist>
-                )}
-                {kind === 'Item' && (
-                  <datalist id="item-options">
-                    {facets.items.map((x) => (
-                      <option key={x} value={x} />
-                    ))}
-                  </datalist>
-                )}
-              </label>
-            )}
-            <label className="field" style={{ display: 'block', marginTop: '.75rem' }}>
-              Why is this correction supported?
-              <textarea
-                rows={3}
-                value={rationale}
-                onChange={(e) => setRationale(e.target.value)}
-                placeholder="Describe the receipt, source record, settlement report, or other evidence reviewed."
-                style={{ width: '100%', marginTop: 6 }}
-              />
-            </label>
-            <Button
-              variant="primary"
-
-              disabled={!valid}
-              onClick={submit}
-              style={{ marginTop: '.75rem' }}
-            >
-              Submit for Finance review
-            </Button>
-          </div>
-          <div className="cc-card" style={{ margin: 0 }}>
-            <h3>2. Review payload</h3>
-            <p className="hint">This is the immutable proposal Finance will approve or reject.</p>
-            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
-              {JSON.stringify(payload, null, 2)}
-            </pre>
-            {kind === 'MissingTransaction' && (
-              <p className="hint" style={{ marginTop: '.75rem' }}>
-                Approval creates an immutable ManualAdjustment source record and linked canonical
-                transaction.
-              </p>
-            )}
-          </div>
-        </div>
-      </Card>
-      <Card>
-        <div className="cc-head">
-          <div>
-            <h2>Finance review queue</h2>
-            <p className="page-sub">
-              Approve only when the rationale and source evidence support the proposed change.
-            </p>
-          </div>
-        </div>
-        <div className="mt-md mb-md" style={{ alignSelf: 'flex-start' }}>
+      <MetricGrid>
+        <MetricTile
+          label="Awaiting review"
+          value={count('Proposed')}
+          onClick={() => setFilter('Proposed')}
+        />
+        <MetricTile
+          label="Approved"
+          value={count('Approved')}
+          onClick={() => setFilter('Approved')}
+        />
+        <MetricTile
+          label="Rejected"
+          value={count('Rejected')}
+          onClick={() => setFilter('Rejected')}
+        />
+      </MetricGrid>
+      <Card title={`Finance review queue (${shown.length})`}>
+        <p className="hint">
+          Approve only when the rationale and source evidence support the proposed change. Select a
+          row to read the full rationale.
+        </p>
+        <Toolbar>
+          <input
+            className="grow"
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by type, person, transaction or rationale"
+            aria-label="Search corrections"
+          />
           <Segmented
             value={filter}
             onChange={setFilter}
-            options={(['All', 'Proposed', 'Approved', 'Rejected'] as const).map((x) => ({
+            options={FILTERS.map((x) => ({
               value: x,
-              label: `${x} ${counts(x)}`,
+              label: `${x === 'Proposed' ? 'Awaiting review' : x} ${count(x)}`,
             }))}
           />
-        </div>
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Correction</th>
-                <th>Target</th>
-                <th>Proposed effect</th>
-                <th>Rationale</th>
-                <th>Submitted</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {shown.length ? (
-                shown.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <b>{pretty(row.adjustment_type)}</b>
-                      <small className="act-sub">{row.proposed_by}</small>
-                    </td>
-                    <td>
-                      {row.transaction_id ? (
-                        <code style={{ fontSize: 11 }}>{row.transaction_id}</code>
-                      ) : (
-                        'New missing transaction'
-                      )}
-                    </td>
-                    <td>
-                      <code style={{ fontSize: 11 }}>{JSON.stringify(row.proposed_values)}</code>
-                    </td>
-                    <td>{row.rationale}</td>
-                    <td>{new Date(row.created_at).toLocaleString()}</td>
-                    <td>
-                      <span className={`badge badge-sm ${tone(row.status)}`}>{row.status}</span>
-                      {row.reviewed_by && <small className="act-sub">{row.reviewed_by}</small>}
-                    </td>
-                    <td>
-                      {row.status === 'Proposed' && (
-                        <span style={{ display: 'flex', gap: 6 }}>
-                          <Button
-                            variant="primary"
-                            size="sm"
-
-                            onClick={() => decide(row.id, 'approve')}
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            size="sm"
-
-                            onClick={() => decide(row.id, 'reject')}
-                          >
-                            Reject
-                          </Button>
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={7} className="cc-empty">
-                    No {filter === 'All' ? 'corrections' : 'matching corrections'}.
-                  </td>
-                </tr>
+        </Toolbar>
+        <DataTable
+          columns={[
+            {
+              key: 'type',
+              header: 'Correction',
+              primary: true,
+              render: (r) => (
+                <>
+                  {pretty(r.adjustment_type)}
+                  <small className="act-sub" style={{ display: 'block' }}>
+                    {r.proposed_by}
+                  </small>
+                </>
+              ),
+            },
+            {
+              key: 'effect',
+              header: 'Proposed effect',
+              render: (r) => describe(r.adjustment_type, r.proposed_values),
+            },
+            {
+              key: 'when',
+              header: 'Submitted',
+              nowrap: true,
+              render: (r) => new Date(r.created_at).toLocaleDateString(),
+            },
+            {
+              key: 'status',
+              header: 'Status',
+              render: (r) => (
+                <>
+                  <Badge variant={statusVariant(r.status)} size="sm">
+                    {statusLabel(r.status)}
+                  </Badge>
+                  {r.reviewed_by && (
+                    <small className="act-sub" style={{ display: 'block' }}>
+                      {r.reviewed_by}
+                    </small>
+                  )}
+                </>
+              ),
+            },
+            {
+              key: 'actions',
+              header: '',
+              stopRowClick: true,
+              render: (r) =>
+                r.status === 'Proposed' && (
+                  <div className="action-buttons">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => decide(r.id, 'approve')}
+                    >
+                      Approve
+                    </Button>
+                    <Button size="sm" disabled={busy} onClick={() => decide(r.id, 'reject')}>
+                      Reject
+                    </Button>
+                  </div>
+                ),
+            },
+          ]}
+          rows={rows === null ? null : shown}
+          rowKey={(r) => r.id}
+          onRowClick={(r) => setOpenId(openId === r.id ? null : r.id)}
+          expandedKey={openId}
+          renderDetail={(r) => (
+            <dl className="kv">
+              <dt>Why</dt>
+              <dd>{r.rationale}</dd>
+              <dt>Target</dt>
+              <dd>
+                {r.transaction_id ? <code>{r.transaction_id}</code> : 'New missing transaction'}
+              </dd>
+              <dt>Submitted</dt>
+              <dd>
+                {new Date(r.created_at).toLocaleString()} by {r.proposed_by}
+              </dd>
+              {r.reviewed_by && (
+                <>
+                  <dt>Reviewed by</dt>
+                  <dd>{r.reviewed_by}</dd>
+                </>
               )}
-            </tbody>
-          </table>
-        </div>
+              <dt>Proposal</dt>
+              <dd>
+                <code>{JSON.stringify(r.proposed_values)}</code>
+              </dd>
+            </dl>
+          )}
+          emptyTitle={all.length === 0 ? 'No corrections yet' : 'No corrections match'}
+          emptyHint={
+            all.length === 0 ? 'Use "New correction" to propose the first one.' : undefined
+          }
+        />
       </Card>
     </div>
   );

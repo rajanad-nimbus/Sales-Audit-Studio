@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ExportDest } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
-import { Alert, Button, EmptyState, Field } from '@/components/ui';
+import { Alert, Badge, Button, Card, DataTable, Field } from '@/components/ui';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 
 const apiError = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback;
@@ -71,29 +72,27 @@ export function ExportDestinations() {
     );
   if (!dests) return <SkeletonRows rows={4} label="Loading destinations" />;
   return (
-    <section id="destinations">
-      <div className="page-header" style={{ marginBottom: '.5rem' }}>
-        <h2 className="act-day" style={{ margin: 0 }}>
-          Destinations <span className="cc-count">{dests.length}</span>
-        </h2>
-        {canEdit && (
-          <Button size="sm" onClick={() => setAdding(!adding)}>
+    <SettingsSection
+      title="Export destinations"
+      description="Where approved exports are delivered. IT adds and enables destinations; Finance and auditors can see them."
+      actions={
+        canEdit && (
+          <Button variant={adding ? 'secondary' : 'primary'} onClick={() => setAdding(!adding)}>
             {adding ? 'Cancel' : 'Add destination'}
           </Button>
-        )}
-      </div>
+        )
+      }
+    >
       {adding && (
-        <div className="cc-card" style={{ marginBottom: 'var(--space-sm)' }}>
-          <h3>New destination</h3>
-          <div className="form-row">
-            <label className="field grow">
-              Name
+        <Card title="New destination">
+          <div className="cfg-form">
+            <Field label="Name">
               <input
                 placeholder="For example ERP/GL production"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
-            </label>
+            </Field>
             <Field label="Kind">
               <select
                 value={form.kind}
@@ -114,15 +113,14 @@ export function ExportDestinations() {
             </Field>
             {form.kind === 'webhook' && (
               <>
-                <label className="field grow">
-                  URL
+                <Field label="URL">
                   <input
                     placeholder="https://erp.example.com/nimbus/inbound"
                     value={form.url}
                     onChange={(e) => setForm({ ...form, url: e.target.value })}
                     aria-invalid={!!form.url && !/^https?:\/\//.test(form.url)}
                   />
-                </label>
+                </Field>
                 <Field label="Signing secret">
                   <input
                     type="password"
@@ -132,9 +130,15 @@ export function ExportDestinations() {
                 </Field>
               </>
             )}
+          </div>
+          <p className="hint">
+            Webhook deliveries carry an HMAC-SHA256 signature in <code>X-Nimbus-Signature</code> and
+            an <code>X-Nimbus-Idempotency-Key</code> so the receiver can reject forgeries and
+            replays.
+          </p>
+          <div>
             <Button
               variant="primary"
-
               disabled={
                 busy ||
                 !form.name.trim() ||
@@ -145,55 +149,61 @@ export function ExportDestinations() {
               Create
             </Button>
           </div>
-          <p className="hint" style={{ marginTop: '.6rem' }}>
-            Webhook deliveries carry an HMAC-SHA256 signature in <code>X-Nimbus-Signature</code> and
-            an <code>X-Nimbus-Idempotency-Key</code> so the receiver can reject forgeries and
-            replays.
-          </p>
-        </div>
+        </Card>
       )}
-      {dests.length === 0 ? (
-        <EmptyState title="No destinations yet">
-          <p>Add a webhook or file drop to start exporting.</p>
-        </EmptyState>
-      ) : (
-        <div
-          className="ac-tiles"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}
-        >
-          {dests.map((d) => (
-            <div
-              key={d.id}
-              className="ac-tile"
-              style={{ cursor: 'default', opacity: d.enabled ? 1 : 0.65 }}
-            >
-              <small>
-                {d.kind === 'webhook' ? 'Webhook' : 'File drop'} · {d.format.toUpperCase()} ·{' '}
-                <span
-                  className={`badge badge-sm ${d.enabled ? 'badge-success' : 'badge-secondary'}`}
-                >
+      <Card title={`Destinations (${dests.length})`}>
+        <DataTable
+          columns={[
+            { key: 'name', header: 'Name', primary: true, render: (d) => d.name },
+            {
+              key: 'kind',
+              header: 'Kind',
+              render: (d) => (d.kind === 'webhook' ? 'Webhook' : 'File drop'),
+            },
+            { key: 'format', header: 'Format', render: (d) => d.format.toUpperCase() },
+            {
+              key: 'target',
+              header: 'Target',
+              render: (d) => d.config.url ?? 'Exports folder',
+            },
+            {
+              key: 'status',
+              header: 'Status',
+              render: (d) => (
+                <Badge variant={d.enabled ? 'success' : 'secondary'} size="sm">
                   {d.enabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </small>
-              <b style={{ fontSize: '1rem' }}>{d.name}</b>
-              <em>{d.config.url ?? 'Writes files to the exports folder'}</em>
-              <Button
-                size="sm"
-
-                style={{ marginTop: '.4rem' }}
-                onClick={() =>
-                  act(async () => {
-                    await api.post(`/api/exports/destinations/${d.id}/toggle`);
-                    toast(d.enabled ? 'Destination disabled.' : 'Destination enabled.', 'success');
-                  })
-                }
-              >
-                {d.enabled ? 'Disable' : 'Enable'}
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+                </Badge>
+              ),
+            },
+            {
+              key: 'actions',
+              header: '',
+              render: (d) =>
+                canEdit && (
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    onClick={() =>
+                      act(async () => {
+                        await api.post(`/api/exports/destinations/${d.id}/toggle`);
+                        toast(
+                          d.enabled ? 'Destination disabled.' : 'Destination enabled.',
+                          'success'
+                        );
+                      })
+                    }
+                  >
+                    {d.enabled ? 'Disable' : 'Enable'}
+                  </Button>
+                ),
+            },
+          ]}
+          rows={dests}
+          rowKey={(d) => String(d.id)}
+          emptyTitle="No destinations yet"
+          emptyHint="Add a webhook or file drop to start exporting."
+        />
+      </Card>
+    </SettingsSection>
   );
 }

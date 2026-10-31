@@ -166,6 +166,28 @@ def verify_webhook_signature(secret: str | None, body: bytes, signature: str) ->
     """Verify an X-Shopify-Hmac-SHA256 header against the raw request body."""
     if not secret or not signature:
         return False
+    async def fetch_shop(self) -> dict:
+        """Fetch the shop record (its name labels the store the orders belong to)."""
+        data = await self._request("GET", "/shop.json", params={"fields": "id,name,currency,iana_timezone"})
+        return data.get("shop", {})
+
+    async def fetch_locations(self) -> list[dict]:
+        """Fetch the shop's locations (stores, warehouses, pop-ups)."""
+        data = await self._request("GET", "/locations.json")
+        return data.get("locations", [])
+
+    async def fetch_products(self) -> AsyncGenerator[dict, None]:
+        """Fetch the product catalog with variants, following Link-header pagination."""
+        params = {"limit": 250, "fields": "id,title,status,vendor,product_type,variants"}
+        while True:
+            data, headers = await self._request_full("GET", "/products.json", params=params)
+            for product in data.get("products", []):
+                yield product
+            page_info = _next_page_info(headers.get("Link", ""))
+            if not page_info:
+                break
+            params = {"limit": params["limit"], "page_info": page_info, "fields": params["fields"]}
+
     computed = hmac.new(secret.encode(), body, hashlib.sha256).digest()
     return hmac.compare_digest(base64.b64encode(computed).decode(), signature)
 

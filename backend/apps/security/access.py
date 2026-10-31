@@ -36,6 +36,8 @@ SCREENS: tuple[Screen, ...] = (
            ("/api/cases", "/api/exceptions", "/api/findings", "/api/recommendations", "/api/workflows", "/api/validations",
             "/api/policy-evaluations", "/api/decisions", "/api/reconciliation", "/api/action-center")),
     Screen("activity", "/activity", "Agent Activity", "Workspace", ("analyst", "finance", "it", "auditor"), ("/api/audit", "/api/agent/config")),
+    Screen("foundation", "/foundation", "Foundation Data", "Data & Control", ("finance", "it"),
+           ("/api/foundation", "/api/ingest/shopify/sync-reference")),
     Screen("store-days", "/store-days", "Store Days & Totals", "Data & Control", ("analyst", "finance", "store_manager", "auditor"), ("/api/store-days",)),
     Screen("transactions", "/transactions", "Transactions", "Data & Control", ("analyst", "finance", "it", "auditor"), ("/api/transactions",)),
     Screen("cash-office", "/cash-office", "Cash Office", "Data & Control", ("analyst", "finance", "store_manager", "auditor"), ("/api/cash-controls", "/api/cash")),
@@ -47,15 +49,15 @@ SCREENS: tuple[Screen, ...] = (
     Screen("settings", "/settings", "General", "Configuration", EVERYONE),
     Screen("settings-integrations", "/settings/integrations", "Integrations & readiness", "Configuration", ("analyst", "finance", "it", "auditor"),
            ("/api/ingest/profiles", "/api/ingest/shopify", "/api/ontology/integration", "/api/production-readiness", "/api/reconciliation/policy")),
-    Screen("settings-controls", "/settings/controls", "Controls & reference data", "Configuration", ("analyst", "finance", "auditor"),
-           ("/api/foundation", "/api/total-definitions", "/api/audit-rules", "/api/gl")),
+    Screen("settings-controls", "/settings/controls", "Totals, rules & GL mapping", "Configuration", ("analyst", "finance", "auditor"),
+           ("/api/total-definitions", "/api/audit-rules", "/api/gl")),
     Screen("settings-retention", "/settings/retention", "Data retention", "Configuration", ("it", "auditor"), ("/api/operations",)),
     Screen("settings-agents", "/settings/agents", "Agents", "Configuration", ("analyst", "finance", "it", "auditor"), ("/api/agent/config", "/api/agent/settings", "/api/agent/ontology")),
     Screen("settings-destinations", "/settings/destinations", "Export destinations", "Configuration", ("finance", "it", "auditor"), ("/api/exports/destinations",)),
     Screen("settings-access", "/settings/access", "Roles & access", "Configuration", EVERYONE, ("/api/access",)),
 )
 # Needed by every signed-in role to render the page chrome (freshness banner, identity).
-OPEN_PATHS = {"/api/me", "/api/batch/status", "/api/access/matrix"}
+OPEN_PATHS = {"/api/me", "/api/batch/status", "/api/access/matrix", "/api/stores", "/api/lookups/registers", "/api/lookups/cashiers"}
 
 
 def can_open(role: str, screen: Screen) -> bool:

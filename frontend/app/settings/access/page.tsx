@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
 import { Alert, Card } from '@/components/ui';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 
 interface Matrix {
   roles: { key: string; label: string }[];
@@ -24,70 +25,69 @@ export default function AccessPage() {
   if (!m) return <SkeletonRows rows={8} label="Loading access map" />;
   const groups = Array.from(new Set(m.screens.map((s) => s.group)));
   return (
-    <Card>
-      <h2>Roles &amp; access</h2>
-      <p className="hint" style={{ marginBottom: '.75rem' }}>
-        Who can open each screen. The API enforces the same map, so a role without a screen cannot
-        call its data either. Administrators can open everything and can act as another role from
-        the user menu. Your role is highlighted.
-      </p>
-      <Alert tone="info" className="mb-sm">
+    <SettingsSection
+      title="Roles & access"
+      description="Who can open each screen. The API enforces the same map, so a role without a screen cannot call its data either. Administrators can open everything and can act as another role from the user menu. Your role is highlighted."
+    >
+      <Alert tone="info">
         <b>Store managers are also limited to their own stores.</b> Which stores a person manages is
         maintained in Ontology Studio, and Nimbus applies it to every store-level screen and API
         call. With no store assigned, a store manager sees nothing.
       </Alert>
-      <div className="table-scroll">
-        <table className="data-table access-matrix">
-          <thead>
-            <tr>
-              <th>Screen</th>
-              {m.roles.map((r) => (
-                <th key={r.key} className={`num ${r.key === m.you ? 'you' : ''}`}>
-                  {r.label}
-                  {r.key === m.you && (
-                    <small className="act-sub" style={{ display: 'block' }}>
-                      You
-                    </small>
-                  )}
-                </th>
+      <Card flush>
+        <div className="table-scroll">
+          <table className="data-table access-matrix">
+            <thead>
+              <tr>
+                <th>Screen</th>
+                {m.roles.map((r) => (
+                  <th key={r.key} className={`num ${r.key === m.you ? 'you' : ''}`}>
+                    {r.label}
+                    {r.key === m.you && (
+                      <small className="act-sub" style={{ display: 'block' }}>
+                        You
+                      </small>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <Fragment key={g}>
+                  <tr className="grp">
+                    <td colSpan={m.roles.length + 1}>{g}</td>
+                  </tr>
+                  {m.screens
+                    .filter((s) => s.group === g)
+                    .map((s) => (
+                      <tr key={s.key}>
+                        <td className="font-medium">
+                          {s.label}
+                          <small className="act-sub" style={{ display: 'block' }}>
+                            {s.path}
+                          </small>
+                        </td>
+                        {m.roles.map((r) => {
+                          const ok = s.roles.includes(r.key);
+                          return (
+                            <td
+                              key={r.key}
+                              className={`num ${r.key === m.you ? 'you' : ''}`}
+                              aria-label={`${r.label}: ${ok ? 'can open' : 'cannot open'} ${s.label}`}
+                            >
+                              {ok ? <span className="ok">●</span> : <span className="no">–</span>}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                </Fragment>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((g) => (
-              <Fragment key={g}>
-                <tr className="grp">
-                  <td colSpan={m.roles.length + 1}>{g}</td>
-                </tr>
-                {m.screens
-                  .filter((s) => s.group === g)
-                  .map((s) => (
-                    <tr key={s.key}>
-                      <td className="font-medium">
-                        {s.label}
-                        <small className="act-sub" style={{ display: 'block' }}>
-                          {s.path}
-                        </small>
-                      </td>
-                      {m.roles.map((r) => {
-                        const ok = s.roles.includes(r.key);
-                        return (
-                          <td
-                            key={r.key}
-                            className={`num ${r.key === m.you ? 'you' : ''}`}
-                            aria-label={`${r.label}: ${ok ? 'can open' : 'cannot open'} ${s.label}`}
-                          >
-                            {ok ? <span className="ok">●</span> : <span className="no">–</span>}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </SettingsSection>
   );
 }

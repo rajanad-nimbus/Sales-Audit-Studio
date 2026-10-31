@@ -13,6 +13,9 @@ const icons: Record<string, React.ReactNode> = {
   cases: <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z" />,
   transactions: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
   pipeline: <path d="M4 6h6v4H4zM14 14h6v4h-6zM10 8h2a2 2 0 0 1 2 2v4" />,
+  foundation: (
+    <path d="M12 4c4.4 0 8 1.1 8 2.5S16.400 9 12 9 4 7.900 4 6.500 7.600 4 12 4Zm8 2.500v5c0 1.400-3.600 2.500-8 2.500s-8-1.100-8-2.500v-5m16 5v5c0 1.400-3.600 2.500-8 2.500s-8-1.100-8-2.500v-5" />
+  ),
   totals: <path d="M5 5h14M5 12h14M5 19h14M8 3v4m8 2v6m-8 2v4" />,
   cash: <path d="M4 7h16v10H4zM7 11h4m3 2h3M7 17v2h10v-2" />,
   controls: <path d="M5 5h14M5 12h14M5 19h14M8 3v4m8 2v6m-8 2v4" />,
@@ -39,6 +42,7 @@ const sections = [
   {
     title: 'Data & Control',
     items: [
+      { label: 'Foundation Data', href: '/foundation', icon: 'foundation' },
       { label: 'Store Days & Totals', href: '/store-days', icon: 'totals' },
       { label: 'Transactions', href: '/transactions', icon: 'transactions' },
       { label: 'Cash Office', href: '/cash-office', icon: 'cash' },

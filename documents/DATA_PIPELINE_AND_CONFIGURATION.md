@@ -248,7 +248,7 @@ Everything that sets how Nimbus behaves lives under `/settings`. The left menu s
 | ------------------------- | ------------------------ | ------------------------------------------------------------ | ----------------------------- |
 | General                   | `/settings`              | Theme and account                                            | Everyone                      |
 | Integrations & readiness  | `/settings/integrations` | Source feeds, Shopify, Ontology policy, tolerance, readiness | Analyst, Finance, IT, Auditor |
-| Controls & reference data | `/settings/controls`     | Stores, tenders, totals, audit rules, GL mapping             | Analyst, Finance, Auditor     |
+| Totals, rules & GL mapping | `/settings/controls`    | Totals and audit rules (read-only, from Ontology), GL mapping | Analyst, Finance, Auditor     |
 | Data retention            | `/settings/retention`    | How long each dataset is kept                                | IT, Auditor                   |
 | Agents                    | `/settings/agents`       | LLM investigator and per-agent permissions                   | Analyst, Finance, IT, Auditor |
 | Export destinations       | `/settings/destinations` | Where exports are delivered                                  | Finance, IT, Auditor          |
@@ -330,9 +330,13 @@ With no policy saved, both are 0, meaning exact match and same-day settlement. T
 
 It also lists the latest delivery per required feed, and the inputs still needed: source schemas and read-only endpoints, matching keys and control totals, cutoff calendar and tolerance policy, approval matrix and escalation owners.
 
-### Controls & reference data
+### Foundation Data (Data & Control)
 
-Three tabs, all feeding the audit controls. Viewing needs Finance or IT at the API level.
+`/foundation`, for Finance and IT. Tabs: Stores, Products, Calendar, Tenders, Registers & cashiers, Accounts & tax. Each entry has a code, name, active flag and free-form attributes. **Stores** (the shop and its locations) and **Products** (one entry per variant, keyed by SKU) are read-only and synced from Shopify with **Sync from Shopify** (`POST /api/ingest/shopify/sync-reference`). Entries added by hand are never overwritten, and items removed from Shopify are marked inactive. The other tabs are maintained by hand.
+
+### Totals, rules & GL mapping
+
+Two tabs, both feeding the audit controls. Totals and rules are defined and approved in Ontology Studio and shown read-only.
 
 | Tab                 | What it holds                                                                                                                                                                             |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

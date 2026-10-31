@@ -3,13 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMe } from '@/components/MeProvider';
+import { PageHeader } from '@/components/ui';
 
 const HINTS: Record<string, string> = {
-  settings: 'Appearance and your account',
-  'settings-integrations': 'Source feeds, Shopify, Ontology policy, tolerance, readiness',
-  'settings-controls': 'Stores, tenders, totals, audit rules, GL mapping',
+  settings: 'Theme and your account',
+  'settings-integrations': 'Shopify, source feeds, matching tolerance, go-live checks',
+  'settings-controls': 'Totals, audit rules and GL mapping',
   'settings-retention': 'How long each dataset is kept',
-  'settings-agents': 'The LLM agent and what each agent may do',
+  'settings-agents': 'The AI investigator and what each agent may do',
   'settings-destinations': 'Where exports are delivered',
   'settings-access': 'Which role can open which screen',
 };
@@ -24,15 +25,10 @@ export default function ConfigurationLayout({ children }: { children: React.Reac
       : pathname === path || pathname.startsWith(path + '/');
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Configuration</h1>
-          <p className="page-sub">
-            Everything that sets how Nimbus behaves, in one place. You see the sections your role
-            may open.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Configuration"
+        subtitle="Everything that sets how Nimbus behaves. You see the sections your role may open."
+      />
       <div className="cfg-layout">
         <nav className="cfg-nav" aria-label="Configuration sections">
           {items.map((s) => (

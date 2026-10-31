@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.ingest import service as ingest
 from apps.ingest import shopify_adapter
+from apps.ingest.shopify import reference_sync
 from auth import require_role
 from database import get_db
 from models import SourceRecord, utcnow
@@ -74,6 +75,30 @@ async def sync_shopify(
         canonical_created=stats["canonical_created"],
         errors=errors,
     )
+
+
+@router.post("/sync-reference")
+async def sync_reference(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("it", "finance")),
+):
+    """Sync Shopify locations (Stores) and product variants (Items) into the retail foundation data."""
+    store_code = os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN")
+    adapter = shopify_adapter.ShopifyAdapter()
+    try:
+        wanted = await reference_sync.collect(adapter, store_code)
+    except shopify_adapter.ShopifyAPIError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch from Shopify: {str(e)}")
+    finally:
+        await adapter.close()
+    actor = user.get("user") or "shopify-connector"
+    counts = await reference_sync.apply(db, wanted, actor)
+    audit(db, "SHOPIFY_REFERENCE_SYNCED", None, "ShopifySync", store_code,
+          f"Shopify reference sync: {counts['created']} created, {counts['updated']} updated, "
+          f"{counts['deactivated']} deactivated", actor=actor)
+    await db.commit()
+    return {"status": "success", "stores": sum(r["category"] == "Store" for r in wanted),
+            "items": sum(r["category"] == "Item" for r in wanted), **counts}
 
 
 WEBHOOK_TOPICS = {"orders/create", "orders/updated", "refunds/create"}

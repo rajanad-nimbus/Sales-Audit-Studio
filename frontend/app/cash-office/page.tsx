@@ -4,6 +4,8 @@ import { api, money } from '@/lib/api';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { useMe } from '@/components/MeProvider';
 import { Alert, Button, DataTable } from '@/components/ui';
+import { StoreSelect } from '@/components/StoreSelect';
+import { LookupSelect } from '@/components/LookupSelect';
 type Cash = {
   id: string;
   store_id: string;
@@ -33,6 +35,8 @@ export default function CashOfficePage() {
   const { me } = useMe();
   const [rows, setRows] = useState<Cash[]>([]),
     [deposits, setDeposits] = useState<Deposit[]>([]),
+    [controlTotal, setControlTotal] = useState(0),
+    [depositTotal, setDepositTotal] = useState(0),
     [notice, setNotice] = useState<string | null>(null);
   const [store, setStore] = useState(''),
     [date, setDate] = useState(new Date().toISOString().slice(0, 10)),
@@ -51,15 +55,37 @@ export default function CashOfficePage() {
   const load = useCallback(async () => {
     try {
       const [a, b] = await Promise.all([
-        api.get('/api/cash-controls'),
-        api.get('/api/cash-controls/deposits'),
+        api.get('/api/cash-controls', { params: { skip: 0, limit: 100 } }),
+        api.get('/api/cash-controls/deposits', { params: { skip: 0, limit: 100 } }),
       ]);
       setRows(a.data);
       setDeposits(b.data);
+      setControlTotal(Number(a.headers['x-total-count'] ?? a.data.length));
+      setDepositTotal(Number(b.headers['x-total-count'] ?? b.data.length));
     } catch {
       setNotice('Unable to load cash controls. Sign in with a Finance or IT role.');
     }
   }, []);
+  const loadMoreControls = async () => {
+    try {
+      const { data } = await api.get('/api/cash-controls', {
+        params: { skip: rows.length, limit: 100 },
+      });
+      setRows((current) => [...current, ...data]);
+    } catch {
+      setNotice('Unable to load more cash controls.');
+    }
+  };
+  const loadMoreDeposits = async () => {
+    try {
+      const { data } = await api.get('/api/cash-controls/deposits', {
+        params: { skip: deposits.length, limit: 100 },
+      });
+      setDeposits((current) => [...current, ...data]);
+    } catch {
+      setNotice('Unable to load more deposits.');
+    }
+  };
   useEffect(() => {
     load();
   }, [load]);
@@ -112,31 +138,10 @@ export default function CashOfficePage() {
       <div className="cc-card">
         <h3>Declare cash</h3>
         <div className="profile-form">
-          {me?.store_scoped ? (
-            <select value={store} onChange={(e) => setStore(e.target.value)} aria-label="Store">
-              <option value="">Select your store</option>
-              {(me.stores ?? []).map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              value={store}
-              onChange={(e) => setStore(e.target.value)}
-              placeholder="Store ID"
-            />
-          )}
+          <StoreSelect value={store} onChange={setStore} />
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <input
-            value={register}
-            onChange={(e) => setRegister(e.target.value)}
-            placeholder="Register"
-          />
-          <input
-            value={cashier}
-            onChange={(e) => setCashier(e.target.value)}
-            placeholder="Cashier"
-          />
+          <LookupSelect kind="registers" value={register} onChange={setRegister} storeId={store} />
+          <LookupSelect kind="cashiers" value={cashier} onChange={setCashier} storeId={store} />
           <select value={tender} onChange={(e) => setTender(e.target.value)}>
             <option>Cash</option>
             <option>Card</option>
@@ -216,6 +221,14 @@ export default function CashOfficePage() {
             r.status,
           ])}
         />
+        <p className="page-sub">
+          Showing {rows.length} of {controlTotal} cash controls.
+        </p>
+        {rows.length < controlTotal && (
+          <Button variant="secondary" size="sm" onClick={loadMoreControls}>
+            Load more
+          </Button>
+        )}
       </div>
       <div className="cc-card">
         <h3>Banked deposits</h3>
@@ -237,6 +250,14 @@ export default function CashOfficePage() {
             d.status,
           ])}
         />
+        <p className="page-sub">
+          Showing {deposits.length} of {depositTotal} deposits.
+        </p>
+        {deposits.length < depositTotal && (
+          <Button variant="secondary" size="sm" onClick={loadMoreDeposits}>
+            Load more
+          </Button>
+        )}
       </div>
     </div>
   );

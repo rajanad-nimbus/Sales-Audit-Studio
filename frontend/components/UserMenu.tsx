@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useMe } from './MeProvider';
 import { Button } from '@/components/ui';
+import { useStores } from '@/lib/useStores';
 
 const PERSONAS = [
   ['analyst', 'Sales Auditor'],
@@ -36,6 +37,11 @@ export function UserMenu() {
     }
   });
   const box = useRef<HTMLDivElement>(null);
+  const knownStores = useStores();
+  const chosenStores = storesText
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -152,13 +158,27 @@ export function UserMenu() {
               ))}
               {pickStores && (
                 <div className="user-pop-form">
-                  <label htmlFor="imp-stores">Which stores? (comma separated)</label>
-                  <input
-                    id="imp-stores"
-                    value={storesText}
-                    onChange={(e) => setStoresText(e.target.value)}
-                    placeholder="STORE-007, STORE-014"
-                  />
+                  <label>Which stores?</label>
+                  <div className="imp-stores" role="group" aria-label="Stores">
+                    {knownStores.length === 0 && <small className="hint">No stores yet.</small>}
+                    {knownStores.map((s) => (
+                      <label key={s} className="imp-store">
+                        <input
+                          type="checkbox"
+                          checked={chosenStores.includes(s)}
+                          onChange={(e) =>
+                            setStoresText(
+                              (e.target.checked
+                                ? [...chosenStores, s]
+                                : chosenStores.filter((x) => x !== s)
+                              ).join(',')
+                            )
+                          }
+                        />
+                        {s}
+                      </label>
+                    ))}
+                  </div>
                   <small className="hint">
                     A real store manager gets these from Ontology Studio. With none, the store
                     manager sees nothing.

@@ -7,7 +7,8 @@ import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import { AgentModeNotice, useAgentMode } from '@/components/AgentMode';
 import { ago, groupOf, pretty } from '@/lib/activityUtil';
-import { Alert, Badge, Button } from '@/components/ui';
+import { Alert, Badge, Button, MetricGrid, MetricTile } from '@/components/ui';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 
 interface AgentCfg {
   actor: string;
@@ -93,29 +94,25 @@ export function AgentsConfig() {
     );
   if (!cfg) return <SkeletonRows rows={6} label="Loading agent configuration" />;
   return (
-    <>
+    <SettingsSection
+      title="AI agents"
+      description="The automated investigators, what each may do, and the limits they run under."
+    >
       <AgentModeNotice mode={mode} />
       {cfg && (
-        <div className="ac-tiles">
-          <div className="ac-tile">
-            <small>Automated events (24h)</small>
-            <b>{cfg.agents.reduce((n, a) => n + a.events_24h, 0)}</b>
-            <em>across {cfg.agents.length} agents</em>
-          </div>
-          <div className="ac-tile">
-            <small>LLM investigation runs</small>
-            <b>{cfg.agent_runs.recent}</b>
-            <em>
-              {cfg.agent_runs.failed} failed ·{' '}
-              {(cfg.agent_runs.input_tokens + cfg.agent_runs.output_tokens).toLocaleString()} tokens
-            </em>
-          </div>
-          <div className="ac-tile">
-            <small>Autonomy</small>
-            <b>Off</b>
-            <em>every action needs a person</em>
-          </div>
-        </div>
+        <MetricGrid>
+          <MetricTile
+            label="Automated events (24h)"
+            value={cfg.agents.reduce((n, a) => n + a.events_24h, 0)}
+          />
+          <MetricTile label="LLM investigation runs" value={cfg.agent_runs.recent} />
+          <MetricTile label="Failed runs" value={cfg.agent_runs.failed} />
+          <MetricTile
+            label="Tokens used"
+            value={(cfg.agent_runs.input_tokens + cfg.agent_runs.output_tokens).toLocaleString()}
+          />
+          <MetricTile label="Autonomy" value="Off" />
+        </MetricGrid>
       )}
       <div className="agent-grid">
         {cfg && draft && (
@@ -289,6 +286,6 @@ export function AgentsConfig() {
           </p>
         )}
       </div>
-    </>
+    </SettingsSection>
   );
 }
