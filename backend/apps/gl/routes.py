@@ -54,6 +54,19 @@ def view(row: GLCrossReference) -> dict:
     }
 
 
+def _is_duplicate_cross_reference(exc: IntegrityError) -> bool:
+    """Recognize either supported GL mapping uniqueness constraint."""
+    constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+    if constraint_name in {"uq_gl_cross_reference", "uq_gl_cross_reference_default_by_type"}:
+        return True
+    message = str(exc.orig)
+    return (
+        "UNIQUE constraint failed: gl_cross_references.transaction_type, gl_cross_references.tender_type"
+        in message
+        or "UNIQUE constraint failed: gl_cross_references.transaction_type" in message
+    )
+
+
 @router.get("/cross-references")
 async def list_maps(
     db: AsyncSession = Depends(get_db),
@@ -81,10 +94,12 @@ async def create_map(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Cross-reference already exists for this transaction and tender",
-        ) from exc
+        if _is_duplicate_cross_reference(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="Cross-reference already exists for this transaction and tender",
+            ) from exc
+        raise
     return view(row)
 
 
