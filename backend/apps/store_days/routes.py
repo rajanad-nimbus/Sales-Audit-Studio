@@ -18,7 +18,8 @@ from apps.totals.calculation import calculate_store_day, effective_definitions
 from apps.totals.currency import single_currency
 from auth import require_role
 from database import get_db
-from models import AuditEvent, AuditTotal, CanonicalTransaction, Case, ConfiguredAuditRule, EvidenceRequest, Exception as DBException, FoundationReference, StoreDay, StoreDayClosureRequest, utcnow
+from models import AuditEvent, CanonicalTransaction, Case, ConfiguredAuditRule, EvidenceRequest, Exception as DBException, FoundationReference, utcnow
+from apps.store_days.models import AuditTotal, StoreDay, StoreDayClosureRequest
 from integrations.ontology.nimbus import audit, sla_due
 
 router = APIRouter(prefix="/api/store-days", tags=["Store days"])

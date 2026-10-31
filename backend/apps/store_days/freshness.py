@@ -5,7 +5,7 @@ from sqlalchemy import case, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from integrations.ontology.nimbus import audit
-from models import StoreDay, StoreDayClosureRequest
+from apps.store_days.models import StoreDay, StoreDayClosureRequest
 
 CONFIGURATION_LOCK_KEY = 665302210171
 
