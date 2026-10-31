@@ -1,10 +1,8 @@
 """Signed webhook and atomic file delivery for persisted export batches."""
 
 import asyncio
-import csv
 import hashlib
 import hmac
-import io
 import json
 import os
 import re
@@ -13,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from apps.csv_export import csv_table
 from apps.exports.models import ExportBatch, ExportDestination
 from model_base import utcnow
 
@@ -48,12 +47,13 @@ def render(
 ) -> bytes:
     """Serialize a stable payload for a reserved export batch."""
     if destination.format == "csv":
-        buffer = io.StringIO()
         if records:
-            writer = csv.DictWriter(buffer, fieldnames=list(records[0].keys()))
-            writer.writeheader()
-            writer.writerows(records)
-        return buffer.getvalue().encode()
+            fieldnames = list(records[0].keys())
+            return csv_table(
+                fieldnames,
+                ([record.get(fieldname, "") for fieldname in fieldnames] for record in records),
+            ).encode()
+        return b""
     envelope = {
         "schema_version": "1.0",
         "dataset": dataset,

@@ -12,6 +12,11 @@ def csv_row(values: Iterable[object]) -> str:
     return buffer.getvalue()
 
 
+def csv_table(headers: Iterable[object], rows: Iterable[Iterable[object]]) -> str:
+    """Encode a header and its rows using the same spreadsheet-safe cell handling."""
+    return csv_row(headers) + "".join(csv_row(row) for row in rows)
+
+
 def _spreadsheet_safe_cell(value: object) -> object:
     if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
         return f"'{value}"

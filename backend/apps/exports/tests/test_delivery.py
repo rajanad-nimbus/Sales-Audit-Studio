@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from apps.exports import routes
+from apps.exports.delivery import render
 from models import ExportBatch, ExportDestination
 
 
@@ -14,6 +15,21 @@ def make_delivery(name="ERP"):
     batch = ExportBatch(id="batch-123", dataset="resolutions", destination_id="d1", idempotency_key="key",
                         created_by="it", payload=payload, payload_hash=hashlib.sha256(payload.encode()).hexdigest())
     return destination, batch
+
+
+def test_csv_exports_neutralize_spreadsheet_formulas():
+    destination, _ = make_delivery()
+    destination.format = "csv"
+
+    payload = render(
+        destination,
+        "transactions",
+        [{"reference": "=HYPERLINK(\"https://example.test\")", "amount": 10}],
+        None,
+        "key",
+    )
+
+    assert payload.decode() == 'reference,amount\r\n"\'=HYPERLINK(""https://example.test"")",10\r\n'
 
 
 def test_file_delivery_is_stable_across_retries(tmp_path, monkeypatch):
