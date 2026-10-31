@@ -477,28 +477,9 @@ class RunIn(BaseModel):
 @router.post("/run")
 async def run_export(body: RunIn, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("it")),
                      request: Request = None):
-    if body.dataset not in DATASETS:
-        raise HTTPException(status_code=400, detail="Unknown dataset")
-    destination_query = select(ExportDestination).where(ExportDestination.id == body.destination_id)
-    if not body.dry_run:
-        # Serialize delivery claims against destination toggles. Audit exports also serialize
-        # stream ranges through this lock, so concurrent batches cannot overlap their ranges.
-        destination_query = destination_query.with_for_update()
-    dest = (await db.execute(destination_query)).scalar_one_or_none()
-    if not dest:
-        raise HTTPException(status_code=404, detail="Destination not found")
-    if not dest.enabled:
-        raise HTTPException(status_code=409, detail="Destination is disabled")
+    dest = await validate_export_request(body, db)
     actor = user["user"] or "demo.user"
-    if body.scope not in SCOPES:
-        raise HTTPException(status_code=400, detail=f"scope must be one of {SCOPES}")
-    if body.dataset == "audit" and not body.dry_run:
-        outstanding = (await db.execute(select(ExportBatch.id).where(
-            ExportBatch.destination_id == dest.id, ExportBatch.dataset == "audit",
-            ExportBatch.status.in_(["Pending", "Failed"]),
-        ).limit(1))).scalar_one_or_none()
-        if outstanding:
-            raise HTTPException(status_code=409, detail="An audit export is pending or failed; resolve the existing batch first")
+    await validate_audit_export_claim(body, dest, db)
     records, items, r_from, r_to = await build(db, dest, body.dataset, body.scope, lock_cases=not body.dry_run)
     everything = summarize(records)
     if body.dry_run and body.scope != "all" and body.dataset != "audit":
@@ -509,43 +490,88 @@ async def run_export(body: RunIn, db: AsyncSession = Depends(get_db), user: dict
                 "waiting": everything, "scope": body.scope}
     if not records:
         return {"dry_run": False, "count": 0, "message": "Nothing new to export." if body.scope == "all" else f"Nothing waiting in the '{body.scope}' scope."}
-    summary = summarize(records)
-
-    head = await head_hash(db)
-    batch_id = str(uuid.uuid4())
-    # A key belongs to one immutable batch, not its list of records. Rebuilding a
-    # cancelled batch may produce a different payload and must use a new key.
-    key = hashlib.sha256(f"nimbus-export:{batch_id}".encode()).hexdigest()
-    payload = render(dest, body.dataset, records, head, key, summary)
-    b = ExportBatch(id=batch_id, destination_id=dest.id, dataset=body.dataset, idempotency_key=key,
-                    created_by=actor, range_from=r_from, range_to=r_to,
-                    delivery_attempt_id=str(uuid.uuid4()), attempt_started_at=utcnow())
-    b.payload, b.payload_hash, b.record_count, b.audit_head_hash, b.status = payload.decode(), hashlib.sha256(payload).hexdigest(), len(records), head, "Pending"
-    b.backposted_count = summary["backposted"]
-    db.add(b)
-    # Reserve every record for this batch before anything is sent: one record, one batch, no double delivery.
-    try:
-        await db.flush()
-        for oid, ver, meta in items:
-            db.add(ExportItem(id=str(uuid.uuid4()), batch_id=b.id, destination_id=dest.id, dataset=body.dataset, object_id=oid,
-                              object_version=ver, state="Pending", **meta))
-        await db.flush()
-    except IntegrityError as exc:
-        await db.rollback()
-        if _is_export_reservation_conflict(exc):
-            raise HTTPException(status_code=409, detail="This export or some of its records are already reserved. Refresh and try again.") from exc
-        raise
-    audit(db, "EXPORT_CREATED", None, "ExportBatch", b.id, f"Export of {len(records)} {body.dataset} record(s) to '{dest.name}' created"
-          + (f" ({summary['backposted']} back-posted)" if summary["backposted"] else ""),
-          actor=actor, after={"payload_hash": b.payload_hash, "idempotency_key": key, "scope": body.scope, **summary})
-    await db.commit()
-    db.expunge(b)
+    b = await reserve_export_batch(db, body, dest, actor, records, items, r_from, r_to)
     client = getattr(request.app.state, "export_http_client", None) if request else None
     if client is None:
         await deliver(dest, b)
     else:
         await deliver(dest, b, client)
     return await finish_delivery(db, b, dest.name, retrying=False)
+
+
+async def validate_export_request(body: RunIn, db: AsyncSession) -> ExportDestination:
+    """Validate dataset, scope, and destination before preparing an export."""
+    if body.dataset not in DATASETS:
+        raise HTTPException(status_code=400, detail="Unknown dataset")
+    if body.scope not in SCOPES:
+        raise HTTPException(status_code=400, detail=f"scope must be one of {SCOPES}")
+    destination_query = select(ExportDestination).where(ExportDestination.id == body.destination_id)
+    if not body.dry_run:
+        # Serialize delivery claims against destination toggles and audit range allocation.
+        destination_query = destination_query.with_for_update()
+    destination = (await db.execute(destination_query)).scalar_one_or_none()
+    if destination is None:
+        raise HTTPException(status_code=404, detail="Destination not found")
+    if not destination.enabled:
+        raise HTTPException(status_code=409, detail="Destination is disabled")
+    return destination
+
+
+async def validate_audit_export_claim(body: RunIn, destination: ExportDestination,
+                                      db: AsyncSession) -> None:
+    """Prevent a second audit range while a prior batch remains unresolved."""
+    if body.dataset != "audit" or body.dry_run:
+        return
+    outstanding = (await db.execute(select(ExportBatch.id).where(
+        ExportBatch.destination_id == destination.id, ExportBatch.dataset == "audit",
+        ExportBatch.status.in_(["Pending", "Failed"]),
+    ).limit(1))).scalar_one_or_none()
+    if outstanding:
+        raise HTTPException(status_code=409,
+                            detail="An audit export is pending or failed; resolve the existing batch first")
+
+
+async def reserve_export_batch(db: AsyncSession, body: RunIn, destination: ExportDestination,
+                               actor: str, records: list[dict], items: list[tuple],
+                               range_from: int | None, range_to: int | None) -> ExportBatch:
+    """Persist an immutable payload and reserve its records before delivery."""
+    summary = summarize(records)
+    audit_head = await head_hash(db)
+    batch_id = str(uuid.uuid4())
+    idempotency_key = hashlib.sha256(f"nimbus-export:{batch_id}".encode()).hexdigest()
+    payload = render(destination, body.dataset, records, audit_head, idempotency_key, summary)
+    batch = ExportBatch(
+        id=batch_id, destination_id=destination.id, dataset=body.dataset,
+        idempotency_key=idempotency_key, created_by=actor,
+        range_from=range_from, range_to=range_to,
+        delivery_attempt_id=str(uuid.uuid4()), attempt_started_at=utcnow(),
+        payload=payload.decode(), payload_hash=hashlib.sha256(payload).hexdigest(),
+        record_count=len(records), audit_head_hash=audit_head, status="Pending",
+        backposted_count=summary["backposted"],
+    )
+    db.add(batch)
+    try:
+        await db.flush()
+        for object_id, version, metadata in items:
+            db.add(ExportItem(
+                id=str(uuid.uuid4()), batch_id=batch.id, destination_id=destination.id,
+                dataset=body.dataset, object_id=object_id, object_version=version,
+                state="Pending", **metadata))
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        if _is_export_reservation_conflict(exc):
+            raise HTTPException(status_code=409,
+                                detail="This export or some of its records are already reserved. Refresh and try again.") from exc
+        raise
+    audit(db, "EXPORT_CREATED", None, "ExportBatch", batch.id,
+          f"Export of {len(records)} {body.dataset} record(s) to '{destination.name}' created"
+          + (f" ({summary['backposted']} back-posted)" if summary["backposted"] else ""),
+          actor=actor, after={"payload_hash": batch.payload_hash, "idempotency_key": idempotency_key,
+                              "scope": body.scope, **summary})
+    await db.commit()
+    db.expunge(batch)
+    return batch
 
 
 @router.get("/batches")
