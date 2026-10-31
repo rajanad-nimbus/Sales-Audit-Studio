@@ -180,6 +180,8 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     delivery_id = request.headers.get("X-Shopify-Webhook-Id")
     if not delivery_id:
         delivery_id = f"SHOPIFY-WH-{hashlib.sha256(body).hexdigest()}"
+    elif len(delivery_id) > 255:
+        delivery_id = f"SHOPIFY-WH-ID-{hashlib.sha256(delivery_id.encode()).hexdigest()}"
     audit_id = delivery_id if len(delivery_id) <= 36 else str(uuid.uuid5(uuid.NAMESPACE_URL, delivery_id))
     try:
         stats = await ingest.ingest(db, "Shopify", delivery_id, [record])

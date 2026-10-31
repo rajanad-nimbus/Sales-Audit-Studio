@@ -363,7 +363,7 @@ def test_webhook_signature_and_ingest(monkeypatch):
     run(go())
 
 
-def test_webhook_preserves_long_shopify_delivery_id(monkeypatch):
+def test_webhook_preserves_shopify_delivery_id_within_column_limit(monkeypatch):
     monkeypatch.setenv("SHOPIFY_WEBHOOK_SECRET", "s3cret")
     delivery_id = "shopify-delivery-" + "x" * 80
     body = json.dumps({"id": 78, "created_at": "2024-01-15T10:00:00Z", "total_price": "10.00",
@@ -383,6 +383,29 @@ def test_webhook_preserves_long_shopify_delivery_id(monkeypatch):
         async with Session() as db:
             row = (await db.execute(select(SourceRecord))).scalar_one()
             assert row.delivery_id == delivery_id
+    run(go())
+
+
+def test_webhook_hashes_shopify_delivery_id_over_column_limit(monkeypatch):
+    monkeypatch.setenv("SHOPIFY_WEBHOOK_SECRET", "s3cret")
+    delivery_id = "x" * 256
+    expected_id = f"SHOPIFY-WH-ID-{hashlib.sha256(delivery_id.encode()).hexdigest()}"
+    body = json.dumps({"id": 79, "created_at": "2024-01-15T10:00:00Z", "total_price": "10.00",
+                       "currency": "USD", "financial_status": "paid"}).encode()
+    sig = base64.b64encode(hmac.new(b"s3cret", body, hashlib.sha256).digest()).decode()
+
+    async def go():
+        Session = await make_session()
+        async with webhook_client(Session) as client:
+            headers = {"X-Shopify-Hmac-SHA256": sig, "X-Shopify-Topic": "orders/create",
+                       "X-Shopify-Webhook-Id": delivery_id}
+            response = await client.post("/api/ingest/shopify/webhook", content=body, headers=headers)
+            assert response.status_code == 200
+            replay = await client.post("/api/ingest/shopify/webhook", content=body, headers=headers)
+            assert replay.status_code == 200 and replay.json()["canonical_created"] == 0
+        async with Session() as db:
+            row = (await db.execute(select(SourceRecord))).scalar_one()
+            assert row.delivery_id == expected_id
     run(go())
 
 
