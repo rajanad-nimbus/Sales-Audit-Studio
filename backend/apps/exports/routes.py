@@ -25,8 +25,8 @@ from auth import require_role
 from apps.database_errors import violates_unique_constraint
 from apps.request_body import read_limited_body
 from database import get_db
-from models import (AuditEvent, Case, ExportBatch, ExportDestination, ExportItem, HumanDecision, Recommendation, TestSinkReceipt,
-                    ValidationObligation, Workflow, utcnow)
+from models import AuditEvent, Case, HumanDecision, Recommendation, ValidationObligation, Workflow, utcnow
+from apps.exports.models import ExportBatch, ExportDestination, ExportItem, TestSinkReceipt
 from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/exports")
