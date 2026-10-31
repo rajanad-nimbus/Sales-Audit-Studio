@@ -22,7 +22,7 @@ LINEAGE = {
 RECONCILIATION_LOCK_KEY = 665302210172
 SETTLEMENT_QUERY_PAGE_SIZE = 500
 SHOPIFY_ORDER_KEY_BATCH_SIZE = 200
-# Two bind parameters per composite key, kept below SQLite's legacy 999-bind limit.
+# Three bind parameters per composite key, kept below SQLite's legacy 999-bind limit.
 COMPOSITE_SCOPE_BATCH_SIZE = 250
 MAX_SETTLEMENT_GROUPS = MAX_RECONCILIATION_TRANSACTIONS
 

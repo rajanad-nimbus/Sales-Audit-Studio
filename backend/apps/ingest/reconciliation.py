@@ -602,25 +602,30 @@ async def reconcile_daily_feed(
 async def collect_daily_feed_amounts(db, feed, basis):
     """Aggregate actual feed values and matched source values in bounded scope batches."""
     actual, expected = defaultdict(Decimal), defaultdict(Decimal)
+    if not feed:
+        return actual, expected
     scopes = sorted({(row.store_id, row.currency, row.business_date) for row in feed})
-    feed_query = select(CanonicalTransaction).where(
-        CanonicalTransaction.source_lineage == feed[0].source_lineage,
-        tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
-               CanonicalTransaction.business_date).in_(scopes),
-    )
-    if all(row.settlement_reference is None for row in feed):
-        feed_query = feed_query.where(CanonicalTransaction.settlement_reference.is_(None))
-    await accumulate_reconciliation_amounts(
-        db,
-        feed_query,
-        lambda row: (row.store_id, row.currency, row.business_date),
-        actual,
-        max_groups=MAX_SETTLEMENT_GROUPS,
-    )
+    unreferenced_only = all(row.settlement_reference is None for row in feed)
+    for offset in range(0, len(scopes), COMPOSITE_SCOPE_BATCH_SIZE):
+        scope_batch = scopes[offset:offset + COMPOSITE_SCOPE_BATCH_SIZE]
+        feed_query = select(CanonicalTransaction).where(
+            CanonicalTransaction.source_lineage == feed[0].source_lineage,
+            tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
+                   CanonicalTransaction.business_date).in_(scope_batch),
+        )
+        if unreferenced_only:
+            feed_query = feed_query.where(CanonicalTransaction.settlement_reference.is_(None))
+        await accumulate_reconciliation_amounts(
+            db,
+            feed_query,
+            lambda row: (row.store_id, row.currency, row.business_date),
+            actual,
+            max_groups=MAX_SETTLEMENT_GROUPS,
+        )
 
     # Restrict reads to represented feed scopes and keep all-dates scans bounded.
-    for offset in range(0, len(scopes), 250):
-        scope_batch = scopes[offset:offset + 250]
+    for offset in range(0, len(scopes), COMPOSITE_SCOPE_BATCH_SIZE):
+        scope_batch = scopes[offset:offset + COMPOSITE_SCOPE_BATCH_SIZE]
         expected_query = select(CanonicalTransaction).where(
             CanonicalTransaction.source_lineage == LINEAGE[basis],
             CanonicalTransaction.reconciliation_status == "Matched",
