@@ -15,7 +15,8 @@ from apps.database_errors import violates_unique_constraint
 from apps.store_days.freshness import lock_store_day
 from auth import require_role
 from database import get_db
-from models import CanonicalTransaction, CashControl, CashDeposit
+from models import CanonicalTransaction
+from apps.cash.models import CashControl, CashDeposit
 
 router = APIRouter(prefix="/api/cash-controls", tags=["Cash office"])
 DEFAULT_PAGE_SIZE = 100
