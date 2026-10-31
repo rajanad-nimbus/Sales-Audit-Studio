@@ -137,6 +137,57 @@ async def source_record_has_dependents(db: AsyncSession, record_ids: list[str]) 
     return (await db.execute(query)).first() is not None
 
 
+async def retention_candidates(db: AsyncSession, model, timestamp, cutoff):
+    """Select one deterministic, locked batch of expired records."""
+    query = (
+        select(model.id)
+        .where(timestamp < cutoff)
+        .order_by(timestamp, model.id)
+        .limit(MAX_RETENTION_BATCH + 1)
+        .with_for_update(skip_locked=True)
+    )
+    return await stream_retention_rows(db, query, None)
+
+
+async def ensure_retention_records_are_unreferenced(db: AsyncSession, dataset: str, record_ids: list[str]) -> None:
+    """Protect parent records whose lineage or transaction details remain in use."""
+    if dataset == "canonical_transactions" and await canonical_transaction_has_dependents(db, record_ids):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot purge canonical transactions while return links, adjustments, or transaction details refer to them",
+        )
+    if dataset == "source_records" and await source_record_has_dependents(db, record_ids):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot purge source records while canonical transactions reference their source lineage.",
+        )
+
+
+async def archive_retention_candidates(db: AsyncSession, dataset: str, model, timestamp, record_ids: list[str], expected_count: int):
+    """Archive the selected records and verify the archive matches its locked batch."""
+    archive_dir = Path(os.getenv("NIMBUS_ARCHIVE_DIR", "/app/archives")) / dataset
+    archive_path = archive_dir / f"{utcnow().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.jsonl"
+    columns = list(model.__table__.columns)
+    archive_query = select(*columns).where(model.id.in_(record_ids)).order_by(timestamp, model.id)
+    archived_ids, archive_hash, archived_count, _ = await stream_retention_rows(
+        db, archive_query, archive_path
+    )
+    if archived_ids != record_ids[:len(archived_ids)] or archived_count != expected_count:
+        raise HTTPException(
+            status_code=409,
+            detail="Retention candidates changed while preparing the archive; retry the operation",
+        )
+    return archive_path, archive_hash
+
+
+async def purge_retention_candidates(db: AsyncSession, model, record_ids: list[str]) -> int:
+    """Delete only the selected IDs and return the database's affected row count."""
+    result = await db.execute(
+        delete(model).where(model.id.in_(record_ids)).execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
+
+
 class RetentionBody(BaseModel):
     retain_days: int
     archive_before_purge: bool = True
@@ -181,40 +232,22 @@ async def execute_retention(dataset: str, body: RetentionRunBody, db: AsyncSessi
     policy = (await db.execute(select(RetentionPolicy).where(RetentionPolicy.dataset == dataset))).scalar_one_or_none()
     if not policy: raise HTTPException(status_code=409, detail="Configure retention policy before running it")
     model, timestamp = DATASETS[dataset]; cutoff = utcnow() - timedelta(days=policy.retain_days)
-    candidates = (select(model.id).where(timestamp < cutoff).order_by(timestamp, model.id)
-                  .limit(MAX_RETENTION_BATCH + 1).with_for_update(skip_locked=True))
-    record_ids, _, eligible_count, has_more = await stream_retention_rows(db, candidates, None)
+    record_ids, _, eligible_count, has_more = await retention_candidates(db, model, timestamp, cutoff)
     run = RetentionRun(id=str(uuid.uuid4()), dataset=dataset, retain_days=policy.retain_days, eligible_records=eligible_count, archived_records=0, purged_records=0, status="Succeeded", performed_by=user["user"] or "ontology.user")
     if not record_ids:
         db.add(run); await db.commit(); return {"run_id":run.id,"eligible_records":0,"message":"No records eligible"}
-    if body.confirm_purge and dataset == "canonical_transactions":
-        if await canonical_transaction_has_dependents(db, record_ids):
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot purge canonical transactions while return links, adjustments, or transaction details refer to them",
-            )
-    if body.confirm_purge and dataset == "source_records":
-        if await source_record_has_dependents(db, record_ids):
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot purge source records while canonical transactions reference their source lineage.",
-            )
+    if body.confirm_purge:
+        await ensure_retention_records_are_unreferenced(db, dataset, record_ids)
     archive_path = None
     archive_hash = None
     if policy.archive_before_purge:
-        archive_dir = Path(os.getenv("NIMBUS_ARCHIVE_DIR", "/app/archives")) / dataset
-        archive_path = archive_dir / f"{utcnow().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.jsonl"
-        columns = list(model.__table__.columns)
-        archive_query = (select(*columns).where(model.id.in_(record_ids))
-                         .order_by(timestamp, model.id))
-        archived_ids, archive_hash, archived_count, _ = await stream_retention_rows(db, archive_query, archive_path)
-        if archived_ids != record_ids[:len(archived_ids)] or archived_count != eligible_count:
-            raise HTTPException(status_code=409, detail="Retention candidates changed while preparing the archive; retry the operation")
+        archive_path, archive_hash = await archive_retention_candidates(
+            db, dataset, model, timestamp, record_ids, eligible_count
+        )
     if archive_path:
         run.archived_records, run.archive_location, run.archive_hash = eligible_count, str(archive_path), archive_hash
     if body.confirm_purge:
-        result = await db.execute(delete(model).where(model.id.in_(record_ids)).execution_options(synchronize_session=False))
-        run.purged_records = result.rowcount or 0
+        run.purged_records = await purge_retention_candidates(db, model, record_ids)
     db.add(run)
     audit(db, "RETENTION_RUN", None, "RetentionRun", run.id, f"Retention {dataset}: archived {run.archived_records}, purged {run.purged_records}", actor=run.performed_by, after={"archive_hash":run.archive_hash})
     await db.commit()
