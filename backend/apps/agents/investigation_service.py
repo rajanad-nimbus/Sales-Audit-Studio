@@ -307,7 +307,7 @@ async def auto_investigate(db: AsyncSession, business_date: str, limit: int = 20
     case_ids = (await db.execute(select(Case.id).where(
         Case.business_date == business_date, Case.status == "Open", Case.investigation_status == "Pending",
         Case.amount_needs_review.is_(False),
-    ).order_by(Case.total_exposure.desc()).limit(limit))).scalars().all()
+    ).order_by(Case.total_exposure.desc(), Case.id).limit(limit))).scalars().all()
     exceptions_by_case: dict[str, list[InvestigationException]] = {}
     if case_ids:
         exception_rows = (await db.execute(
