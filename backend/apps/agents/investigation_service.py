@@ -2,6 +2,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -36,6 +37,15 @@ class CaseSourceRows:
 
     def __iter__(self):
         return iter(self.records)
+
+
+@dataclass(frozen=True, slots=True)
+class InvestigationException:
+    """Immutable exception fields needed after an investigation batch rollback."""
+
+    id: str
+    exception_type: str
+    exception_amount: Decimal
 
 
 def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransaction, SourceRecord]] | CaseSourceRows,
@@ -298,6 +308,17 @@ async def auto_investigate(db: AsyncSession, business_date: str, limit: int = 20
         Case.business_date == business_date, Case.status == "Open", Case.investigation_status == "Pending",
         Case.amount_needs_review.is_(False),
     ).order_by(Case.total_exposure.desc()).limit(limit))).scalars().all()
+    exceptions_by_case: dict[str, list[InvestigationException]] = {}
+    if case_ids:
+        exception_rows = (await db.execute(
+            select(DBException.id, DBException.case_id, DBException.exception_type, DBException.exception_amount)
+            .where(DBException.case_id.in_(case_ids))
+            .order_by(DBException.case_id, DBException.created_at, DBException.id)
+        )).all()
+        for exception_id, case_id, exception_type, amount in exception_rows:
+            exceptions_by_case.setdefault(case_id, []).append(
+                InvestigationException(exception_id, exception_type, amount)
+            )
     done = 0
     evidence_cache = InvestigationEvidenceCache(db)
     for i, case_id in enumerate(case_ids):
@@ -305,7 +326,7 @@ async def auto_investigate(db: AsyncSession, business_date: str, limit: int = 20
             case = await db.get(Case, case_id)
             if case is None:
                 continue
-            excs = (await db.execute(select(DBException).where(DBException.case_id == case_id))).scalars().all()
+            excs = exceptions_by_case.get(case_id, [])
             if excs:
                 await run_investigation(
                     db, case, excs, use_agent=i < AGENT_BATCH_LIMIT, evidence_cache=evidence_cache
