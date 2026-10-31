@@ -64,7 +64,7 @@ yarn-error.log*
 *.sqlite
 *.sqlite3
 
-exports/
+/exports/
 .artifact_runtime/
 node_modules
 

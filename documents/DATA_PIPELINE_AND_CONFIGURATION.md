@@ -231,6 +231,7 @@ If no date is given, the API uses the day before the earliest loaded business da
 | -------------------- | ----------------------------------------------------------------------------------------------- |
 | Health banner        | One-line answer to "is my data OK?", with chips for overdue feeds and quarantined records       |
 | Stage counters       | Source records, normalized, matched, exceptions                                                 |
+| **Sources** tab      | One row per source (POS, POSControl, Processor, Bank, ERP, Shopify) with three switches: *Accept data* (master switch), *Nightly batch* (the scheduled batch pulls it) and *Manual sync / upload* (a person may sync or upload it). Settings are stored in the database, change straight away and are audited. Shopify also has a **Sync now** button here. Only IT can change them. A source with no saved setting behaves as before: on, in the batch (Shopify only when its connector is configured), manual allowed. While Shopify is off, its webhook is acknowledged and ignored. Shopify also has **Sync now** (an ad-hoc pull for the last 24 hours, 7 days, 30 days or any dates you choose, up to 90 days) and **Run on a schedule** (every day, or every week on a chosen day, at a time of day in your time zone). The application checks every minute and pulls recent orders and refunds when a run is due, showing the next run and the last result. A schedule counts from when it is saved and never backfills moments already past. Each run covers a window of two periods (at least a day, at most a week), and already-loaded orders are skipped. Set `NIMBUS_SCHEDULER=0` to turn the in-app scheduler off, for example when an external cron does the job |
 | **Batch runs** tab   | Last 10 runs: business date, status, started, loaded, matched, cases, trigger, error            |
 | **Source feeds** tab | Freshness per profile, and recent deliveries with records, processed, quarantined, latest error |
 | **Quarantine** tab   | Up to 10 most recent held records with source, record id and reason                             |
@@ -340,7 +341,6 @@ Two tabs, both feeding the audit controls. Totals and rules are defined and appr
 
 | Tab                 | What it holds                                                                                                                                                                             |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Foundation data** | Reference lists by category: Store, Register, Cashier, Tender, Item, BankAccount, GLAccount, TaxCode, BusinessCalendar. Each entry has a code, name, active flag and free-form attributes |
 | **Totals & rules**  | Total definitions (name, aggregation, source system, transaction types, tender, level), with a preview, and the audit rules                                                               |
 | **GL mapping**      | General-ledger cross-references and a journal preview                                                                                                                                     |
 
@@ -461,7 +461,8 @@ Administrators pass any check that lists a role.
 | `NIMBUS_AGENT_MAX_COST_USD`                      | Spend cap per investigation                                                          | 0.50                            |
 | `NIMBUS_ARCHIVE_DIR`                             | Retention archive location                                                           | `/app/archives`                 |
 | `NIMBUS_EXPORT_DIR`                              | File-drop export location                                                            | set in`exports.py`              |
-| `NIMBUS_SINK_SECRET`                             | Signing secret for the test webhook receiver                                         | `demo-secret`                   |
+| `NIMBUS_ENABLE_TEST_SINK`                        | Enables the built-in test receiver in development/test only                          | true in local Compose            |
+| `NIMBUS_SINK_SECRET`                             | Signing secret for the development/test webhook receiver                             | `demo-secret` in local Compose   |
 | `SHOPIFY_STORE_URL`                              | Enables Shopify in the batch and sync                                                | none                            |
 | `SHOPIFY_ACCESS_TOKEN`                           | Shopify Admin API token (preferred). Or`SHOPIFY_API_KEY` plus `SHOPIFY_API_PASSWORD` | none                            |
 | `SHOPIFY_STORE_ID`                               | `store_id` stamped on Shopify records                                                | `SHOPIFY-MAIN`                  |

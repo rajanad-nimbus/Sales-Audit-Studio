@@ -72,7 +72,6 @@ curl -X POST http://localhost:8001/api/ingest/shopify/sync \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
-    "store_id": "SHOPIFY-MAIN",
     "created_at_min": "2024-01-15T00:00:00Z",
     "created_at_max": "2024-01-16T00:00:00Z"
   }'
@@ -313,7 +312,7 @@ Shopify sync completed: 0 canonical_created
 2. **Fetch Data**
 
    ```
-   POST /api/ingest/shopify/sync with store_id and date range
+   POST /api/ingest/shopify/sync with the requested date range; records are stamped with the configured `SHOPIFY_STORE_ID`
    ```
 
 3. **Ingest & Validate**
