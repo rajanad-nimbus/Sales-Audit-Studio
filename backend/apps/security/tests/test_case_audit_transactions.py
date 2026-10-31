@@ -14,6 +14,16 @@ from schemas import CaseCreate, CaseUpdate
 USER = {"user": "finance@example.test", "role": "finance"}
 
 
+async def perform_case_change(operation, db):
+    if operation == "create":
+        return await main.create_case(
+            CaseCreate(case_type="test", business_date="2026-10-01", store_id="S1"),
+            db,
+            USER,
+        )
+    return await main.update_case("c1", CaseUpdate(assigned_to="analyst"), db, USER)
+
+
 @pytest.mark.parametrize("operation", ["create", "update"])
 @pytest.mark.parametrize("audit_fails", [False, True])
 def test_case_change_and_audit_commit_together(operation, audit_fails):
@@ -35,19 +45,12 @@ def test_case_change_and_audit_commit_together(operation, audit_fails):
                 if audit_fails:
                     event.listen(AuditEvent, "before_insert", fail_audit)
                 try:
-                    async def change():
-                        if operation == "create":
-                            return await main.create_case(
-                                CaseCreate(case_type="test", business_date="2026-10-01", store_id="S1"), db, USER
-                            )
-                        return await main.update_case("c1", CaseUpdate(assigned_to="analyst"), db, USER)
-
                     if audit_fails:
                         with pytest.raises(RuntimeError, match="audit unavailable"):
-                            await change()
+                            await perform_case_change(operation, db)
                         await db.rollback()
                     else:
-                        await change()
+                        await perform_case_change(operation, db)
                 finally:
                     if audit_fails:
                         event.remove(AuditEvent, "before_insert", fail_audit)
