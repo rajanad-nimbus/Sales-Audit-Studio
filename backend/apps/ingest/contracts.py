@@ -80,12 +80,20 @@ def validate_profile_mapping(value: dict[str, str] | None) -> dict[str, str] | N
 
 
 def parse_csv_delivery(csv_data: str, mapping: dict[str, str] | None = None) -> list[dict[str, str | None]]:
-    """Parse at most the configured record cap, applying mappings without duplicating the raw row set."""
+    """Parse a structurally unambiguous CSV within the configured record cap."""
     rows = []
+    reader = csv.DictReader(io.StringIO(csv_data))
+    headers = reader.fieldnames
+    if not headers or any(not header.strip() for header in headers):
+        raise ValueError("CSV must contain non-empty column headers")
+    if len(headers) != len(set(headers)):
+        raise ValueError("CSV column headers must be unique")
     try:
-        for index, row in enumerate(csv.DictReader(io.StringIO(csv_data))):
+        for index, row in enumerate(reader):
             if index >= MAX_DELIVERY_RECORDS:
                 raise ValueError(f"CSV exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit")
+            if None in row:
+                raise ValueError(f"CSV row {index + 2} has more fields than its header")
             rows.append(
                 {canonical: row.get(source_column) for canonical, source_column in mapping.items()}
                 if mapping else row
