@@ -3,6 +3,7 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime, timezone
 from decimal import InvalidOperation
 
@@ -34,6 +35,169 @@ STRING_FIELD_LIMITS = {
     "payment_reference": 255,
     "settlement_reference": 255,
 }
+
+
+@dataclass(slots=True)
+class IngestResult:
+    """Accumulated persistence effects for one source delivery."""
+    stats: dict[str, int] = dataclass_field(default_factory=lambda: {
+        "received": 0, "archived": 0, "duplicates_skipped": 0,
+        "quarantined": 0, "canonical_created": 0,
+    })
+    changed_days: set[tuple[str, str]] = dataclass_field(default_factory=set)
+    return_reference_keys: set[tuple[str, str]] = dataclass_field(default_factory=set)
+
+
+@dataclass(slots=True)
+class PreparedRecord:
+    """Validated and serialized delivery record ready for transactional persistence."""
+    record: dict
+    payload: bytes
+    digest: str
+    record_id: str
+    parsed: dict | None
+    parse_error: str | None
+
+
+def prepare_record(source: str, record: dict) -> PreparedRecord:
+    """Serialize, identify, and validate one incoming record without database access."""
+    payload = json.dumps(record, sort_keys=True, default=str).encode()
+    identity = shopify_ingest.identity_payload(record) if source == "Shopify" else record
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
+    supplied_id = record.get("source_record_id")
+    record_id = (supplied_id if isinstance(supplied_id, str) and supplied_id.strip()
+                 and len(supplied_id) <= STRING_FIELD_LIMITS["source_record_id"]
+                 else f"unknown-{digest[:12]}")
+    parsed, parse_error = None, None
+    try:
+        parsed = parse(source, record)
+        if not parsed.get("manifest"):
+            parsed["settlement_date"] = parse_settlement_date(record, parsed["ts"])
+    except ValueError as exc:
+        parse_error = str(exc)
+    return PreparedRecord(record, payload, digest, record_id, parsed, parse_error)
+
+
+def parse_settlement_date(record: dict, event_timestamp: datetime) -> str:
+    """Normalize an optional settlement date, defaulting to the event's UTC date."""
+    settled_on = record.get("settled_on")
+    try:
+        if settled_on in (None, ""):
+            return event_timestamp.date().isoformat()
+        return datetime.fromisoformat(str(settled_on).replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        raise ValueError("settled_on is not ISO-8601") from None
+
+
+async def lock_delivery_store_days(db, prepared: list[PreparedRecord]):
+    """Lock valid store days in deterministic order before delivery persistence."""
+    keys = {
+        (prepared_record.record.get("store_id"), prepared_record.parsed["ts"].date().isoformat())
+        for prepared_record in prepared
+        if prepared_record.parsed
+        and isinstance(prepared_record.record.get("store_id"), str)
+        and prepared_record.record.get("store_id")
+    }
+    return await lock_store_days(db, keys)
+
+
+async def load_prior_record_hashes(
+    db, source: str, prepared: list[PreparedRecord],
+) -> dict[str, set[str]]:
+    """Lock record identities and load existing payload hashes in bounded queries."""
+    record_ids = {prepared_record.record_id for prepared_record in prepared}
+    await lock_source_record_identities(db, source, record_ids)
+    prior_hashes: dict[str, set[str]] = defaultdict(set)
+    ordered_ids = sorted(record_ids)
+    for offset in range(0, len(ordered_ids), 500):
+        result = await db.execute(select(SourceRecord.source_record_id, SourceRecord.payload_hash).where(
+            SourceRecord.source_system == source,
+            SourceRecord.source_record_id.in_(ordered_ids[offset:offset + 500])))
+        for record_id, digest in result.all():
+            prior_hashes[record_id].add(digest)
+    return prior_hashes
+
+
+def persist_prepared_records(
+    db, source, delivery_id, prepared: list[PreparedRecord], prior_hashes, days,
+) -> IngestResult:
+    """Apply idempotency, archive accepted records, and create canonical transactions."""
+    result = IngestResult()
+    for prepared_record in prepared:
+        record = prepared_record.record
+        record_id = prepared_record.record_id
+        digest = prepared_record.digest
+        result.stats["received"] += 1
+        prior = prior_hashes[record_id]
+        if digest in prior:
+            result.stats["duplicates_skipped"] += 1
+            continue
+        archived = archive_source_record(db, source, delivery_id, prepared_record, prior)
+        if archived is None:
+            result.stats["quarantined"] += 1
+            continue
+        source_record, parsed = archived
+        result.stats["archived"] += 1
+        store_id = record.get("store_id")
+        day_key = (store_id, parsed["ts"].date().isoformat()) if isinstance(store_id, str) else None
+        if day_key in days:
+            result.changed_days.add(day_key)
+        if parsed.get("manifest"):
+            continue
+        transaction = create_canonical_transaction(db, source, record, parsed, source_record)
+        collect_return_reference(result.return_reference_keys, record, transaction)
+        source_record.status, source_record.extracted_at = "Processed", utcnow()
+        result.stats["canonical_created"] += 1
+    return result
+
+
+def archive_source_record(db, source, delivery_id, prepared_record: PreparedRecord, prior):
+    """Archive one new payload or record a quarantine reason, returning parsed valid data."""
+    reason = None
+    parsed = prepared_record.parsed
+    if prior:
+        reason, parsed = "Conflicting resubmission: same record id, different payload", None
+    elif prepared_record.parse_error is not None:
+        reason, parsed = prepared_record.parse_error, None
+    source_record = SourceRecord(
+        id=str(uuid.uuid4()), source_system=source,
+        source_version="1.0", source_record_id=prepared_record.record_id,
+        delivery_id=delivery_id, payload=prepared_record.payload,
+        payload_hash=prepared_record.digest, received_at=utcnow(),
+        source_event_time=parsed["ts"] if parsed else utcnow(),
+        status="Quarantined" if reason else "Archived", quarantine_reason=reason)
+    db.add(source_record)
+    prior.add(prepared_record.digest)
+    return None if reason else (source_record, parsed)
+
+
+def create_canonical_transaction(db, source, record, parsed, source_record):
+    """Create a canonical transaction and persist its validated transaction details."""
+    timestamp = parsed["ts"]
+    transaction = CanonicalTransaction(
+        id=str(uuid.uuid4()), business_date=timestamp.date().isoformat(), transaction_date=timestamp,
+        event_timestamp=timestamp, processing_timestamp=utcnow(),
+        settlement_date=parsed["settlement_date"], transaction_type=record["record_type"],
+        source_lineage=LINEAGE[source], currency=record.get("currency", "USD"),
+        signed_amount=SIGN[record["record_type"]] * parsed["amount"], store_id=record["store_id"],
+        register_id=record.get("register_id"), cashier_id=record.get("cashier_id"),
+        channel_id=record.get("channel_id") or "store", tender_type=record.get("tender_type"),
+        payment_reference=record.get("payment_reference"),
+        settlement_reference=record.get("settlement_reference"), source_record_id=source_record.id,
+        reconciliation_status="Unmatched", disposition="Open")
+    db.add(transaction)
+    store_detail(db, transaction, parsed.get("detail"))
+    return transaction
+
+
+def collect_return_reference(reference_keys, record, transaction) -> None:
+    """Collect references needed to link newly ingested sales and returns."""
+    if record["record_type"] == "Sale":
+        for reference in (record.get("source_record_id"), record.get("payment_reference")):
+            if isinstance(reference, str) and reference:
+                reference_keys.add((transaction.store_id, reference))
+    elif record["record_type"] == "Return" and transaction.original_reference:
+        reference_keys.add((transaction.store_id, transaction.original_reference))
 
 
 async def lock_source_record_identities(db, source: str, record_ids: set[str]) -> None:
@@ -212,112 +376,11 @@ async def link_returns(db, reference_keys: set[tuple[str, str]]) -> int:
 
 
 async def ingest(db, source: str, delivery_id: str, records: list[dict]) -> dict:
-    stats = {"received": 0, "archived": 0, "duplicates_skipped": 0, "quarantined": 0, "canonical_created": 0}
-    prepared = []
-    record_ids = set()
-    for record in records:
-        payload = json.dumps(record, sort_keys=True, default=str).encode()
-        identity = shopify_ingest.identity_payload(record) if source == "Shopify" else record
-        digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
-        supplied_record_id = record.get("source_record_id")
-        record_id = (supplied_record_id if isinstance(supplied_record_id, str)
-                     and supplied_record_id.strip()
-                     and len(supplied_record_id) <= STRING_FIELD_LIMITS["source_record_id"]
-                     else f"unknown-{digest[:12]}")
-        parsed, parse_error = None, None
-        try:
-            parsed = parse(source, record)
-            if not parsed.get("manifest"):
-                settled_on = record.get("settled_on")
-                try:
-                    parsed["settlement_date"] = (
-                        datetime.fromisoformat(str(settled_on).replace("Z", "+00:00")).date().isoformat()
-                        if settled_on not in (None, "") else parsed["ts"].date().isoformat()
-                    )
-                except ValueError:
-                    raise ValueError("settled_on is not ISO-8601") from None
-        except ValueError as exc:
-            parse_error = str(exc)
-        prepared.append((record, payload, digest, record_id, parsed, parse_error))
-        record_ids.add(record_id)
-
-    # Lock store days in a deterministic order before writing any records in this delivery.
-    keys = set()
-    for record, _, _, _, parsed_record, _ in prepared:
-        store = record.get("store_id")
-        if parsed_record and isinstance(store, str) and store:
-            keys.add((store, parsed_record["ts"].date().isoformat()))
-    days = await lock_store_days(db, keys)
-
-    # Recheck identities after acquiring store-day locks so concurrent re-deliveries
-    # and cross-date replays observe rows committed by the transaction ahead of them.
-    await lock_source_record_identities(db, source, record_ids)
-    prior_hashes: dict[str, set[str]] = defaultdict(set)
-    sorted_ids = sorted(record_ids)
-    for offset in range(0, len(sorted_ids), 500):
-        rows = (await db.execute(select(SourceRecord.source_record_id, SourceRecord.payload_hash).where(
-            SourceRecord.source_system == source,
-            SourceRecord.source_record_id.in_(sorted_ids[offset:offset + 500])))).all()
-        for record_id, digest in rows:
-            prior_hashes[record_id].add(digest)
-
-    changed_days = set()
-    return_reference_keys: set[tuple[str, str]] = set()
-    for rec, payload, digest, srid, parsed_record, parse_error in prepared:
-        stats["received"] += 1
-        prior = prior_hashes[srid]
-        if digest in prior:
-            stats["duplicates_skipped"] += 1
-            continue
-
-        status, reason, parsed = "Archived", None, None
-        if prior:
-            status, reason = "Quarantined", "Conflicting resubmission: same record id, different payload"
-        elif parse_error is not None:
-            status, reason = "Quarantined", parse_error
-        else:
-            parsed = parsed_record
-
-        sr = SourceRecord(
-            id=str(uuid.uuid4()), source_system=source, source_version="1.0", source_record_id=srid,
-            delivery_id=delivery_id, payload=payload, payload_hash=digest, received_at=utcnow(),
-            source_event_time=parsed["ts"] if parsed else utcnow(), status=status, quarantine_reason=reason)
-        db.add(sr)
-        prior.add(digest)
-        if status == "Quarantined":
-            stats["quarantined"] += 1
-            continue
-        store = rec.get("store_id")
-        day_key = (store, parsed["ts"].date().isoformat()) if isinstance(store, str) else None
-        day = days.get(day_key)
-        if day and day_key not in changed_days:
-            changed_days.add(day_key)
-        stats["archived"] += 1
-        if parsed.get("manifest"):
-            continue
-
-        ts, bd = parsed["ts"], parsed["ts"].date().isoformat()
-        tx = CanonicalTransaction(
-            id=str(uuid.uuid4()), business_date=bd, transaction_date=ts, event_timestamp=ts,
-            processing_timestamp=utcnow(), settlement_date=parsed["settlement_date"],
-            transaction_type=rec["record_type"], source_lineage=LINEAGE[source],
-            currency=rec.get("currency", "USD"), signed_amount=SIGN[rec["record_type"]] * parsed["amount"],
-            store_id=rec["store_id"], register_id=rec.get("register_id"), cashier_id=rec.get("cashier_id"),
-            channel_id=rec.get("channel_id") or "store",
-            tender_type=rec.get("tender_type"), payment_reference=rec.get("payment_reference"),
-            settlement_reference=rec.get("settlement_reference"),
-            source_record_id=sr.id, reconciliation_status="Unmatched", disposition="Open")
-        db.add(tx)
-        store_detail(db, tx, parsed.get("detail"))
-        if rec["record_type"] == "Sale":
-            for reference in (rec.get("source_record_id"), rec.get("payment_reference")):
-                if isinstance(reference, str) and reference:
-                    return_reference_keys.add((tx.store_id, reference))
-        elif rec["record_type"] == "Return" and tx.original_reference:
-            return_reference_keys.add((tx.store_id, tx.original_reference))
-        sr.status, sr.extracted_at = "Processed", utcnow()
-        stats["canonical_created"] += 1
-    await invalidate_totals_many(db, [days[key] for key in sorted(changed_days)], "ingest")
+    prepared = [prepare_record(source, record) for record in records]
+    days = await lock_delivery_store_days(db, prepared)
+    prior_hashes = await load_prior_record_hashes(db, source, prepared)
+    result = persist_prepared_records(db, source, delivery_id, prepared, prior_hashes, days)
+    await invalidate_totals_many(db, [days[key] for key in sorted(result.changed_days)], "ingest")
     await db.flush()
-    stats["returns_linked"] = await link_returns(db, return_reference_keys)
-    return stats
+    result.stats["returns_linked"] = await link_returns(db, result.return_reference_keys)
+    return result.stats
