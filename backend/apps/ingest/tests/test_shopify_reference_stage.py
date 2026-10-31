@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.shopify import reference_sync
+from apps.ingest.shopify import routes as shopify_routes
 from models import Base, FoundationReference, ShopifyReferenceStage, ShopifyReferenceSyncState
 
 _engines = []
@@ -131,6 +132,62 @@ def test_stage_cleanup_error_does_not_mask_original_failure(monkeypatch):
             with pytest.raises(shopify_adapter.ShopifyAPIError, match="catalog unavailable"):
                 await reference_sync.stage(BrokenCatalog(), db, "broken-sync", "SHOPIFY-MAIN")
     run(go())
+
+
+def test_reference_route_stages_in_an_isolated_session(monkeypatch):
+    class RequestSession:
+        commits = 0
+
+        async def commit(self):
+            self.commits += 1
+
+        async def rollback(self):
+            raise AssertionError("request transaction should not be rolled back")
+
+    class StagingSession:
+        pass
+
+    class StagingContext:
+        async def __aenter__(self):
+            return staging_session
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class Adapter:
+        async def close(self):
+            pass
+
+    request_session = RequestSession()
+    staging_session = StagingSession()
+    observed = {}
+
+    async def require_allowed(*_args, **_kwargs):
+        return None
+
+    async def stage(_adapter, db, *_args):
+        observed["stage_session"] = db
+        return {"generation": 1, "duplicates": 0}
+
+    async def apply(db, *_args):
+        observed["apply_session"] = db
+        return {"created": 0, "updated": 0, "deactivated": 0, "superseded": False}
+
+    monkeypatch.setattr(shopify_routes, "async_session", StagingContext)
+    monkeypatch.setattr(shopify_routes.shopify_adapter, "ShopifyAdapter", Adapter)
+    monkeypatch.setattr(shopify_routes.source_settings, "require_allowed", require_allowed)
+    monkeypatch.setattr(shopify_routes.reference_sync, "stage", stage)
+    monkeypatch.setattr(shopify_routes.reference_sync, "apply", apply)
+    monkeypatch.setattr(shopify_routes, "audit", lambda *_args, **_kwargs: None)
+
+    async def go():
+        await shopify_routes.sync_reference(request_session, {"user": "test"})
+
+    run(go())
+
+    assert observed["stage_session"] is staging_session
+    assert observed["apply_session"] is request_session
+    assert request_session.commits == 1
 
 
 def test_duplicate_skus_keep_first_staged_variant(monkeypatch):

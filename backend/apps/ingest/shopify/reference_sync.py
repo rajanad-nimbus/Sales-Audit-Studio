@@ -117,9 +117,8 @@ async def _flush_stage(
 
 
 async def discard(db: AsyncSession, sync_id: str) -> None:
-    """Delete an incomplete or already-applied staging snapshot."""
+    """Delete an incomplete or already-applied staging snapshot in the caller's transaction."""
     await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.sync_id == sync_id))
-    await db.commit()
 
 
 async def stage(adapter, db: AsyncSession, sync_id: str, store_code: str) -> dict:
@@ -141,7 +140,9 @@ async def stage(adapter, db: AsyncSession, sync_id: str, store_code: str) -> dic
         await db.rollback()
         try:
             await discard(db, sync_id)
+            await db.commit()
         except Exception:
+            await db.rollback()
             logger.exception("Could not discard failed Shopify reference stage %s", sync_id)
         raise
 

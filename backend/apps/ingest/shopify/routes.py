@@ -19,7 +19,7 @@ from apps.ingest import source_settings
 from apps.ingest.shopify import reference_sync
 from apps.request_body import read_limited_body
 from apps.security.authentication import require_role
-from database import get_db
+from database import async_session, get_db
 from model_base import utcnow
 from apps.ingest.models import SourceRecord
 from integrations.ontology.nimbus import audit
@@ -124,7 +124,8 @@ async def sync_reference(
     sync_id = str(uuid.uuid4())
     adapter = shopify_adapter.ShopifyAdapter()
     try:
-        staged = await reference_sync.stage(adapter, db, sync_id, store_code)
+        async with async_session() as staging_db:
+            staged = await reference_sync.stage(adapter, staging_db, sync_id, store_code)
     except shopify_adapter.ShopifyAPIError as e:
         raise HTTPException(
             status_code=502,
@@ -151,7 +152,9 @@ async def sync_reference(
     except Exception:
         await db.rollback()
         try:
-            await reference_sync.discard(db, sync_id)
+            async with async_session() as cleanup_db:
+                await reference_sync.discard(cleanup_db, sync_id)
+                await cleanup_db.commit()
         except Exception:
             logger.exception("Could not discard failed Shopify reference stage %s", sync_id)
         raise
