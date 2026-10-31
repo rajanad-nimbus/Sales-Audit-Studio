@@ -20,6 +20,8 @@ from apps.cases.models import (
     Exception as CaseException,
 )
 
+EXCEPTION_COPY_PAGE_SIZE = 500
+
 
 async def create_follow_up(db: AsyncSession, case_id: str, user: dict) -> Case:
     parent = await lock_root_case(db, case_id, user)
@@ -130,8 +132,8 @@ async def refresh_existing_follow_up(
 
 async def create_child_case(db: AsyncSession, parent: Case, user: dict) -> Case:
     """Copy exception context to a new case without mutating closed history."""
-    originals = (await db.execute(select(CaseException).where(CaseException.case_id == parent.id))).scalars().all()
-    if not originals:
+    first_page = await load_exception_copy_page(db, parent.id, None)
+    if not first_page:
         raise HTTPException(status_code=409, detail="Closed case has no exceptions to review")
     child = Case(id=str(uuid.uuid4()), case_number=generate_case_number(parent.business_date),
                  status="Open", case_type=parent.case_type, business_date=parent.business_date, store_id=parent.store_id,
@@ -140,13 +142,17 @@ async def create_child_case(db: AsyncSession, parent: Case, user: dict) -> Case:
                  priority=parent.priority, sla_due_at=sla_due(parent.priority))
     db.add(child)
     await db.flush()
-    for original in originals:
-        db.add(CaseException(id=str(uuid.uuid4()), case_id=child.id, exception_type=original.exception_type,
-            exception_family=original.exception_family, source_system=original.source_system,
-            detection_origin=original.detection_origin, detection_rule_id=original.detection_rule_id,
-            exception_amount=original.exception_amount, estimated_exposure=original.estimated_exposure,
-            severity=original.severity, confidence=original.confidence, close_impact=original.close_impact,
-            close_blocker_reason=original.close_blocker_reason, status="Open"))
+    originals = first_page
+    while originals:
+        for original in originals:
+            db.add(CaseException(id=str(uuid.uuid4()), case_id=child.id, exception_type=original.exception_type,
+                exception_family=original.exception_family, source_system=original.source_system,
+                detection_origin=original.detection_origin, detection_rule_id=original.detection_rule_id,
+                exception_amount=original.exception_amount, estimated_exposure=original.estimated_exposure,
+                severity=original.severity, confidence=original.confidence, close_impact=original.close_impact,
+                close_blocker_reason=original.close_blocker_reason, status="Open"))
+        await db.flush()
+        originals = await load_exception_copy_page(db, parent.id, originals[-1].id)
     creation_state = (await db.execute(select(AuditEvent.after_state).where(
         AuditEvent.case_id == parent.id, AuditEvent.event_type == "CASE_CREATED"
     ).order_by(AuditEvent.created_at.asc(), AuditEvent.id).limit(1))).scalar_one_or_none()
@@ -156,3 +162,15 @@ async def create_child_case(db: AsyncSession, parent: Case, user: dict) -> Case:
     audit(db, "CASE_CREATED", child.id, "Case", child.id, "Follow-up to a corrected closed case",
           actor=user["user"], after={"parent_case_id": parent.id, "transaction_ids": transaction_ids})
     return child
+
+
+async def load_exception_copy_page(
+    db: AsyncSession, parent_id: str, last_id: str | None
+) -> list[CaseException]:
+    """Read a stable, bounded page of immutable parent exception context."""
+    query = select(CaseException).where(CaseException.case_id == parent_id)
+    if last_id is not None:
+        query = query.where(CaseException.id > last_id)
+    return list((await db.execute(
+        query.order_by(CaseException.id).limit(EXCEPTION_COPY_PAGE_SIZE)
+    )).scalars().all())

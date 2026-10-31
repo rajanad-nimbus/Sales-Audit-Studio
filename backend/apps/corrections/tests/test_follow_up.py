@@ -2,11 +2,11 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.corrections.follow_up import create_follow_up
+from apps.corrections.follow_up import create_child_case, create_follow_up
 from apps.corrections.follow_up import load_follow_up_state, parent_lineage_events
 from apps.corrections.reconciliation import linked_cases
 from apps.exports.routes import build, tracking_page
@@ -213,6 +213,49 @@ def test_evidence_invalidation_supersedes_recommendations_in_one_batched_update(
                 }
                 assert len(statements) == 1
                 assert [case.status for case in cases] == ["Open", "Open", "Closed"]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_follow_up_copies_large_exception_history_in_bounded_pages():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                parent = Case(id="large-parent", case_number="P-LARGE", status="Closed",
+                              case_type="Mismatch", business_date="2026-10-01", store_id="S1")
+                db.add(parent)
+                db.add_all([
+                    CaseException(id=f"exception-{index:04}", case_id=parent.id,
+                                  exception_type="Mismatch", exception_family="test",
+                                  source_system="POS", detection_origin="test", detection_rule_id="rule",
+                                  exception_amount=10, estimated_exposure=10, severity="High",
+                                  confidence="High", close_impact="Yes")
+                    for index in range(1_101)
+                ])
+                await db.flush()
+                queries = []
+
+                def capture(_connection, _cursor, statement, parameters, _context, _executemany):
+                    if "from exceptions" in statement.lower() and "exceptions.case_id" in statement.lower():
+                        queries.append((statement, parameters))
+
+                event.listen(engine.sync_engine, "before_cursor_execute", capture)
+                try:
+                    child = await create_child_case(db, parent, {"user": "reviewer"})
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", capture)
+
+                copied_count = (await db.execute(
+                    select(func.count()).select_from(CaseException).where(CaseException.case_id == child.id)
+                )).scalar_one()
+                assert copied_count == 1_101
+                assert len(queries) == 4
+                assert all(500 in parameters for _statement, parameters in queries)
         finally:
             await engine.dispose()
 
