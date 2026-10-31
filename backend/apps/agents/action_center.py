@@ -74,45 +74,102 @@ def as_utc(value: datetime) -> datetime:
 
 def apply(stmt, f: Filters, user: dict, skip: str | None = None):
     now = datetime.now(timezone.utc)
-    conds = []
-    csv_ = lambda v: [x.strip() for x in v.split(",") if x.strip()]
+    conditions = (
+        *_text_filter_conditions(f, user, skip),
+        *_amount_date_conditions(f),
+        *_schedule_conditions(f, now),
+    )
+    stmt = stmt.where(*conditions) if conditions else stmt
+    return scope.restrict(stmt, user, Case.store_id)
+
+
+def _text_filter_conditions(f: Filters, user: dict, skip: str | None) -> list:
+    conditions = []
     if f.q:
-        conds.append(or_(contains_literal(Case.case_number, f.q),
-                         contains_literal(Case.store_id, f.q),
-                         contains_literal(Case.case_type, f.q)))
+        conditions.append(or_(contains_literal(Case.case_number, f.q),
+                              contains_literal(Case.store_id, f.q),
+                              contains_literal(Case.case_type, f.q)))
     if f.stage and skip != "stage" and f.stage in STAGES:
-        conds.append(Case.status.in_(STAGES[f.stage]))
+        conditions.append(Case.status.in_(STAGES[f.stage]))
     if f.status and skip != "status":
-        conds.append(Case.status.in_(csv_(f.status)))
+        conditions.append(Case.status.in_(_csv_values(f.status)))
     if f.case_type and skip != "case_type":
-        conds.append(Case.case_type.in_(csv_(f.case_type)))
+        conditions.append(Case.case_type.in_(_csv_values(f.case_type)))
     if f.store and skip != "store":
-        conds.append(Case.store_id.in_(csv_(f.store)))
+        conditions.append(Case.store_id.in_(_csv_values(f.store)))
     if f.priority and skip != "priority":
-        conds.append(Case.priority.in_(csv_(f.priority)))
+        conditions.append(Case.priority.in_(_csv_values(f.priority)))
     if f.assignee:
         if f.assignee == "unassigned":
-            conds.append(Case.assigned_to.is_(None))
+            conditions.append(Case.assigned_to.is_(None))
         else:
-            conds.append(Case.assigned_to == (me_name(user) if f.assignee == "me" else f.assignee))
+            conditions.append(Case.assigned_to == (me_name(user) if f.assignee == "me" else f.assignee))
+    return conditions
+
+
+def _csv_values(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _amount_date_conditions(f: Filters) -> list:
+    conditions = []
     if f.min_amount is not None:
-        conds.append(Case.total_exception_amount >= f.min_amount)
+        conditions.append(Case.total_exception_amount >= f.min_amount)
     if f.max_amount is not None:
-        conds.append(Case.total_exception_amount <= f.max_amount)
+        conditions.append(Case.total_exception_amount <= f.max_amount)
     if f.date_from:
-        conds.append(Case.business_date >= f.date_from)
+        conditions.append(Case.business_date >= f.date_from)
     if f.date_to:
-        conds.append(Case.business_date <= f.date_to)
+        conditions.append(Case.business_date <= f.date_to)
+    return conditions
+
+
+def _schedule_conditions(f: Filters, now: datetime) -> list:
+    conditions = []
     if f.sla == "breached":
-        conds.append(and_(Case.status != "Closed", Case.sla_due_at < now))
+        conditions.append(and_(Case.status != "Closed", Case.sla_due_at < now))
     elif f.sla == "at_risk":
-        conds.append(and_(Case.status != "Closed", Case.sla_due_at >= now, Case.sla_due_at < now + timedelta(hours=8)))
+        conditions.append(and_(Case.status != "Closed", Case.sla_due_at >= now,
+                               Case.sla_due_at < now + timedelta(hours=8)))
     if f.snoozed == "only":
-        conds.append(Case.snoozed_until > now)
+        conditions.append(Case.snoozed_until > now)
     elif f.snoozed != "all":
-        conds.append(or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now))
-    stmt = stmt.where(*conds) if conds else stmt
-    return scope.restrict(stmt, user, Case.store_id)
+        conditions.append(or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now))
+    return conditions
+
+
+def _validate_text_filters(values: dict[str, str | None]) -> None:
+    for field, value in values.items():
+        if value is None:
+            continue
+        parts = _csv_values(value)
+        if field in FILTER_VALUE_LENGTHS:
+            max_length = FILTER_VALUE_LENGTHS[field]
+            if len(parts) > MAX_FILTER_VALUES or any(len(item) > max_length for item in parts):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field} supports at most {MAX_FILTER_VALUES} values of {max_length} characters",
+                )
+        elif len(value) > 255:
+            raise HTTPException(status_code=422, detail=f"{field} must be at most 255 characters")
+
+
+def _validate_filter_options(stage: str | None, sla: str | None, snoozed: str | None) -> None:
+    if stage not in (None, "", *STAGES):
+        raise HTTPException(status_code=422, detail=f"stage must be one of: {', '.join(STAGES)}")
+    if sla not in (None, "", "breached", "at_risk"):
+        raise HTTPException(status_code=422, detail="sla must be breached or at_risk")
+    if snoozed not in (None, "", "only", "all"):
+        raise HTTPException(status_code=422, detail="snoozed must be only or all")
+
+
+def _validate_amount_filters(min_amount: float | None, max_amount: float | None) -> None:
+    if min_amount is not None and not math.isfinite(min_amount):
+        raise HTTPException(status_code=422, detail="min_amount must be a finite number")
+    if max_amount is not None and not math.isfinite(max_amount):
+        raise HTTPException(status_code=422, detail="max_amount must be a finite number")
+    if min_amount is not None and max_amount is not None and min_amount > max_amount:
+        raise HTTPException(status_code=422, detail="min_amount must not exceed max_amount")
 
 
 def filters(q: str | None = None, stage: str | None = None, status: str | None = None, case_type: str | None = None,
@@ -121,7 +178,7 @@ def filters(q: str | None = None, stage: str | None = None, status: str | None =
             date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
             date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
             sla: str | None = None, snoozed: str | None = None) -> Filters:
-    for field, value in {
+    _validate_text_filters({
         "q": q,
         "stage": stage,
         "status": status,
@@ -131,35 +188,13 @@ def filters(q: str | None = None, stage: str | None = None, status: str | None =
         "assignee": assignee,
         "sla": sla,
         "snoozed": snoozed,
-    }.items():
-        if value is None:
-            continue
-        values = [item.strip() for item in value.split(",") if item.strip()]
-        if field in FILTER_VALUE_LENGTHS:
-            max_length = FILTER_VALUE_LENGTHS[field]
-            if len(values) > MAX_FILTER_VALUES or any(len(item) > max_length for item in values):
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"{field} supports at most {MAX_FILTER_VALUES} values of {max_length} characters",
-                )
-        elif len(value) > 255:
-            raise HTTPException(status_code=422, detail=f"{field} must be at most 255 characters")
+    })
     date_from = _validated_filter_date(date_from, "date_from")
     date_to = _validated_filter_date(date_to, "date_to")
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="date_from must not be after date_to")
-    if stage not in (None, "", *STAGES):
-        raise HTTPException(status_code=422, detail=f"stage must be one of: {', '.join(STAGES)}")
-    if sla not in (None, "", "breached", "at_risk"):
-        raise HTTPException(status_code=422, detail="sla must be breached or at_risk")
-    if snoozed not in (None, "", "only", "all"):
-        raise HTTPException(status_code=422, detail="snoozed must be only or all")
-    if min_amount is not None and not math.isfinite(min_amount):
-        raise HTTPException(status_code=422, detail="min_amount must be a finite number")
-    if max_amount is not None and not math.isfinite(max_amount):
-        raise HTTPException(status_code=422, detail="max_amount must be a finite number")
-    if min_amount is not None and max_amount is not None and min_amount > max_amount:
-        raise HTTPException(status_code=422, detail="min_amount must not exceed max_amount")
+    _validate_filter_options(stage, sla, snoozed)
+    _validate_amount_filters(min_amount, max_amount)
     return Filters(
         q=q, stage=stage, status=status, case_type=case_type, store=store,
         priority=priority, assignee=assignee, min_amount=min_amount, max_amount=max_amount,
