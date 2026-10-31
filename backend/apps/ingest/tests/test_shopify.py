@@ -148,6 +148,45 @@ def test_fetch_products_rejects_malformed_collection_response(monkeypatch):
         asyncio.run(consume())
 
 
+def test_fetch_orders_rejects_malformed_collection_response(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+
+    async def request_full(*_args, **_kwargs):
+        return {"unexpected": []}, {}
+
+    monkeypatch.setattr(adapter, "_request_full", request_full)
+
+    async def consume():
+        return [order async for order in adapter.fetch_orders()]
+
+    with pytest.raises(sa.ShopifyAPIError, match="invalid orders response"):
+        asyncio.run(consume())
+
+
+def test_fetch_refunds_rejects_malformed_collection_response(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+
+    async def request(*_args, **_kwargs):
+        return {"refunds": None}
+
+    monkeypatch.setattr(adapter, "_request", request)
+
+    with pytest.raises(sa.ShopifyAPIError, match="invalid refunds response"):
+        asyncio.run(adapter.fetch_refunds("order-1"))
+
+
+def test_fetch_order_transactions_rejects_malformed_collection_response(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+
+    async def request(*_args, **_kwargs):
+        return {"transactions": ["not-an-object"]}
+
+    monkeypatch.setattr(adapter, "_request", request)
+
+    with pytest.raises(sa.ShopifyAPIError, match="invalid transactions response"):
+        asyncio.run(adapter.fetch_order_transactions("order-1"))
+
+
 def test_refund_amount_prefers_transactions():
     refund = {"transactions": [{"kind": "refund", "status": "success", "amount": "12.50"},
                                {"kind": "refund", "status": "failure", "amount": "99"}],

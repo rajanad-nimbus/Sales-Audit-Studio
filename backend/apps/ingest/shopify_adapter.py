@@ -207,7 +207,7 @@ class ShopifyAdapter:
 
         while True:
             data, headers = await self._request_full("GET", "/orders.json", params=params)
-            for order in data.get("orders", []):
+            for order in self._collection_page(data, "orders", "orders"):
                 yield order
 
             next_params = pagination.next_params(headers, params)
@@ -265,7 +265,7 @@ class ShopifyAdapter:
             f"/orders/{order_id}/refunds.json",
             params={"fields": "id,order_id,created_at,note,refund_line_items,transactions"},
         )
-        return data.get("refunds", [])
+        return self._collection_page(data, "refunds", "refunds")
 
     async def fetch_order_transactions(self, order_id: str) -> list[dict]:
         """Fetch payment transactions for an order (captures, authorizations)."""
@@ -274,7 +274,7 @@ class ShopifyAdapter:
             f"/orders/{order_id}/transactions.json",
             params={"fields": "id,type,kind,amount,currency,created_at,message"},
         )
-        return data.get("transactions", [])
+        return self._collection_page(data, "transactions", "transactions")
 
     def verify_webhook_signature(self, body: bytes, signature: str) -> bool:
         """Verify Shopify webhook HMAC-SHA256 signature."""
