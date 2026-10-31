@@ -13,7 +13,7 @@ from database import get_db
 from integrations.ontology import nimbus
 from integrations.ontology.ontology_integration import integration as ontology_integration
 from apps.cases.models import Case, Exception as DBException, Finding, HumanDecision, Recommendation
-from schemas import (ExceptionCreate, Exception as ExceptionSchema, FindingCreate, Finding as FindingSchema,
+from apps.cases.schemas import (ExceptionCreate, Exception as ExceptionSchema, FindingCreate, Finding as FindingSchema,
                      HumanDecisionCreate, HumanDecision as HumanDecisionSchema, RecommendationCreate,
                      Recommendation as RecommendationSchema)
 

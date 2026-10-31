@@ -20,7 +20,7 @@ from apps.ingest.models import SourceRecord
 from model_base import utcnow
 from apps.cases.models import (Case, CaseNote, EvidenceRequest, EvidenceSnapshot,
                                 Exception as DBException, Recommendation)
-from schemas import EvidenceOverride, EvidenceProvide, EvidenceReject, EvidenceRequestCreate, CaseNoteCreate
+from apps.cases.schemas import EvidenceOverride, EvidenceProvide, EvidenceReject, EvidenceRequestCreate, CaseNoteCreate
 
 router = APIRouter()
 MAX_CASE_HISTORY_ITEMS = 200

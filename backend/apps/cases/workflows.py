@@ -19,7 +19,7 @@ from model_base import utcnow
 from apps.cases.models import PolicyEvaluation
 from apps.cases.models import (Case, EvidenceSnapshot, Exception as DBException,
                                 ValidationObligation, Workflow)
-from schemas import Recommendation as RecommendationSchema, ValidationRunRequest
+from apps.cases.schemas import Recommendation as RecommendationSchema, ValidationRunRequest
 
 router = APIRouter()
 

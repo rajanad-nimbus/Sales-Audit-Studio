@@ -14,7 +14,7 @@ from auth import require_role
 from apps.search import contains_literal
 from database import get_db
 from apps.audit.models import AuditEvent
-from schemas import AuditEventSchema
+from apps.audit.schemas import AuditEventSchema
 
 router = APIRouter(prefix="/api/audit")
 MAX_EXPORT_EVENTS = 100000

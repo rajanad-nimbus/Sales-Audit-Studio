@@ -18,7 +18,7 @@ from database import get_db
 from integrations.ontology import nimbus
 from apps.audit.models import AuditEvent
 from apps.cases.models import Case, Exception as DBException, Finding, HumanDecision, Recommendation
-from schemas import CaseAmountReview, CaseCreate, CaseDetailResponse, Case as CaseSchema, CaseUpdate
+from apps.cases.schemas import CaseAmountReview, CaseCreate, CaseDetailResponse, Case as CaseSchema, CaseUpdate
 
 router = APIRouter()
 MAX_CASE_DETAIL_ITEMS = 200
