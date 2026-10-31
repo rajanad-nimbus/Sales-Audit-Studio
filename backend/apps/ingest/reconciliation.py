@@ -226,107 +226,143 @@ async def reconcile_shopify(db, txns, flag):
     current_amounts = await effective_amounts(db, shopify)
     refunds = [t for t in shopify if t.transaction_type == "Refund"]
     await close_paid_orders(db, [t for t in shopify if t.transaction_type == "Order"])
+    by_order = group_shopify_refunds(refunds)
+    group_amounts = current_shopify_refund_amounts(by_order, current_amounts)
+    flag_unmatched_shopify_refunds(by_order, group_amounts, flag)
+    through_dates = shopify_refund_through_dates(by_order)
+    orders_by_key, historical_refund_totals = await load_shopify_order_context(db, through_dates)
+    order_amounts = await effective_amounts(db, list(orders_by_key.values()))
+    for key, group in by_order.items():
+        reconcile_shopify_refund_group(
+            key, group, group_amounts, historical_refund_totals,
+            orders_by_key, order_amounts, flag,
+        )
 
+
+def group_shopify_refunds(refunds):
+    """Group refunds by the full store, currency, and order identity."""
     by_order = defaultdict(list)
-    for r in refunds:
-        by_order[(r.store_id, r.currency, r.payment_reference)].append(r)
+    for refund in refunds:
+        by_order[(refund.store_id, refund.currency, refund.payment_reference)].append(refund)
+    return by_order
 
-    group_amounts = {
+
+def current_shopify_refund_amounts(by_order, current_amounts):
+    """Calculate amounts for the current reconciliation batch."""
+    return {
         key: sum((abs(current_amounts[refund.id]) for refund in group), Decimal("0"))
         for key, group in by_order.items()
     }
+
+
+def flag_unmatched_shopify_refunds(by_order, group_amounts, flag):
+    """Flag refunds that lack the order reference required for matching."""
     for key, group in by_order.items():
         if not key[2]:
             flag("SHOPIFY_UNMATCHED_REFUND", group_amounts[key], *group)
 
-    through_dates = {
+
+def shopify_refund_through_dates(by_order):
+    """Return the latest included business date for each referenced order."""
+    return {
         key: max(refund.business_date for refund in group)
         for key, group in by_order.items()
         if key[2]
     }
-    order_keys = list(through_dates)
+
+
+async def load_shopify_order_context(db, through_dates):
+    """Fetch earliest matching orders and bounded historical refund totals."""
     orders_by_key = {}
     historical_refund_totals: dict[tuple[str, str, str], Decimal] = defaultdict(Decimal)
+    order_keys = list(through_dates)
     for offset in range(0, len(order_keys), SHOPIFY_ORDER_KEY_BATCH_SIZE):
         key_batch = order_keys[offset:offset + SHOPIFY_ORDER_KEY_BATCH_SIZE]
-        key_filter = tuple_(
-            CanonicalTransaction.store_id,
-            CanonicalTransaction.currency,
-            CanonicalTransaction.payment_reference,
-        ).in_(key_batch)
-
-        # Preserve earliest-event selection while fetching keys in a batch. IDs are
-        # only a deterministic tie-breaker; their lexical order is not chronological.
-        ranked_orders = select(
-            CanonicalTransaction.id.label("id"),
-            func.row_number().over(
-                partition_by=(
-                    CanonicalTransaction.store_id,
-                    CanonicalTransaction.currency,
-                    CanonicalTransaction.payment_reference,
-                ),
-                order_by=(CanonicalTransaction.event_timestamp, CanonicalTransaction.id),
-            ).label("order_rank"),
-        ).where(
-            CanonicalTransaction.source_lineage == LINEAGE["Shopify"],
-            CanonicalTransaction.transaction_type == "Order",
-            key_filter,
-        ).subquery()
-        orders = (await db.execute(
-            select(CanonicalTransaction).join(
-                ranked_orders, CanonicalTransaction.id == ranked_orders.c.id
-            ).where(ranked_orders.c.order_rank == 1).order_by(CanonicalTransaction.id).with_for_update()
-            .execution_options(populate_existing=True)
-        )).scalars().all()
+        orders = await load_earliest_shopify_orders(db, key_batch)
         orders_by_key.update({
             (order.store_id, order.currency, order.payment_reference): order
             for order in orders
         })
+        await accumulate_shopify_refund_history(db, key_batch, through_dates, historical_refund_totals)
+    return orders_by_key, historical_refund_totals
 
-        historical_refund_query = select(CanonicalTransaction).where(
-            CanonicalTransaction.source_lineage == LINEAGE["Shopify"],
-            CanonicalTransaction.transaction_type == "Refund",
-            or_(*(
-                and_(
-                    CanonicalTransaction.store_id == store,
-                    CanonicalTransaction.currency == currency,
-                    CanonicalTransaction.payment_reference == reference,
-                    CanonicalTransaction.business_date <= through_dates[(store, currency, reference)],
-                )
-                for store, currency, reference in key_batch
-            )),
-        )
-        await accumulate_reconciliation_amounts(
-            db,
-            historical_refund_query,
-            lambda refund: (refund.store_id, refund.currency, refund.payment_reference),
-            historical_refund_totals,
-            max_groups=MAX_RECONCILIATION_TRANSACTIONS,
-        )
 
-    order_amounts = await effective_amounts(db, list(orders_by_key.values()))
-    for key, group in by_order.items():
-        if not key[2]:
-            continue
-        refunded = group_amounts[key]
-        order = orders_by_key.get(key)
-        if not order:
-            flag("SHOPIFY_UNMATCHED_REFUND", refunded, *group)
-            continue
-        if order.reconciliation_status == "Manually Matched":
-            flag("SHOPIFY_REFUND_MANUAL_REVIEW", refunded, *group)
-            continue
+async def load_earliest_shopify_orders(db, key_batch):
+    """Lock the earliest event-time order for every requested identity."""
+    key_filter = tuple_(
+        CanonicalTransaction.store_id,
+        CanonicalTransaction.currency,
+        CanonicalTransaction.payment_reference,
+    ).in_(key_batch)
+    ranked_orders = select(
+        CanonicalTransaction.id.label("id"),
+        func.row_number().over(
+            partition_by=(
+                CanonicalTransaction.store_id,
+                CanonicalTransaction.currency,
+                CanonicalTransaction.payment_reference,
+            ),
+            order_by=(CanonicalTransaction.event_timestamp, CanonicalTransaction.id),
+        ).label("order_rank"),
+    ).where(
+        CanonicalTransaction.source_lineage == LINEAGE["Shopify"],
+        CanonicalTransaction.transaction_type == "Order",
+        key_filter,
+    ).subquery()
+    return (await db.execute(
+        select(CanonicalTransaction).join(
+            ranked_orders, CanonicalTransaction.id == ranked_orders.c.id
+        ).where(ranked_orders.c.order_rank == 1).order_by(CanonicalTransaction.id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalars().all()
 
-        # Include prior refunds, but never later business days when replaying a historical day.
-        refunded = abs(historical_refund_totals[key])
-        order_amount = abs(order_amounts[order.id])
-        if refunded > order_amount:
-            flag("SHOPIFY_OVERAGE_REFUND", refunded - order_amount, *group, order)
-        elif refunded < order_amount:
-            flag("SHOPIFY_PARTIAL_REFUND", refunded, *group, order)
-        else:
-            for transaction in (*group, order):
-                transaction.reconciliation_status, transaction.disposition = "Matched", "Closed"
+
+async def accumulate_shopify_refund_history(db, key_batch, through_dates, totals):
+    """Accumulate historical refunds through the current reconciliation dates."""
+    historical_refund_query = select(CanonicalTransaction).where(
+        CanonicalTransaction.source_lineage == LINEAGE["Shopify"],
+        CanonicalTransaction.transaction_type == "Refund",
+        or_(*(
+            and_(
+                CanonicalTransaction.store_id == store,
+                CanonicalTransaction.currency == currency,
+                CanonicalTransaction.payment_reference == reference,
+                CanonicalTransaction.business_date <= through_dates[(store, currency, reference)],
+            )
+            for store, currency, reference in key_batch
+        )),
+    )
+    await accumulate_reconciliation_amounts(
+        db,
+        historical_refund_query,
+        lambda refund: (refund.store_id, refund.currency, refund.payment_reference),
+        totals,
+        max_groups=MAX_RECONCILIATION_TRANSACTIONS,
+    )
+
+
+def reconcile_shopify_refund_group(key, group, group_amounts, history, orders, order_amounts, flag):
+    """Apply matching, manual-review, partial, and overage decisions for one order."""
+    if not key[2]:
+        return
+    refunded_in_batch = group_amounts[key]
+    order = orders.get(key)
+    if not order:
+        flag("SHOPIFY_UNMATCHED_REFUND", refunded_in_batch, *group)
+        return
+    if order.reconciliation_status == "Manually Matched":
+        flag("SHOPIFY_REFUND_MANUAL_REVIEW", refunded_in_batch, *group)
+        return
+    # Exclude later refund dates when replaying an earlier reconciliation day.
+    refunded_total = abs(history[key])
+    order_amount = abs(order_amounts[order.id])
+    if refunded_total > order_amount:
+        flag("SHOPIFY_OVERAGE_REFUND", refunded_total - order_amount, *group, order)
+    elif refunded_total < order_amount:
+        flag("SHOPIFY_PARTIAL_REFUND", refunded_total, *group, order)
+    else:
+        for transaction in (*group, order):
+            transaction.reconciliation_status, transaction.disposition = "Matched", "Closed"
 
 
 async def close_paid_orders(db, orders):
