@@ -1,7 +1,7 @@
 """Evaluate combined definitions against their explicitly referenced revisions."""
 from decimal import Decimal
 
-from models import AuditTotalDefinition
+from apps.totals.models import AuditTotalDefinition
 
 
 def calculate_combined(

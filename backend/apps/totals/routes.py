@@ -15,7 +15,7 @@ from apps.totals.currency import single_currency
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from auth import require_role
 from database import get_db
-from models import AuditTotalDefinition, SalesAuditErrorDefinition
+from apps.totals.models import AuditTotalDefinition, SalesAuditErrorDefinition
 from .domain import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
