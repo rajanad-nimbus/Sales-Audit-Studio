@@ -84,10 +84,17 @@ async def prepare_export(db: AsyncSession, conds: list, format: str) -> tuple[in
 
 
 def csv_line(values: list) -> str:
-    """Encode a row with the CSV writer's quoting and escaping rules."""
+    """Encode a row safely for CSV consumers, including spreadsheet applications."""
     buffer = io.StringIO()
-    csv.writer(buffer).writerow(values)
+    csv.writer(buffer).writerow([spreadsheet_safe_cell(value) for value in values])
     return buffer.getvalue()
+
+
+def spreadsheet_safe_cell(value):
+    """Prevent untrusted text from becoming a spreadsheet formula when exported."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
 
 
 async def generate_csv(db: AsyncSession, conds: list, head_seq: int):

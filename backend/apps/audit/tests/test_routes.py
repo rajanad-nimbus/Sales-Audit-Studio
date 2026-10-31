@@ -1,4 +1,6 @@
 import asyncio
+import csv
+import io
 import json
 from datetime import datetime, timezone
 
@@ -11,6 +13,14 @@ from apps.security import authentication as auth
 from apps.audit import routes
 from database import get_db
 from models import AuditEvent, Base
+
+
+def test_csv_export_neutralizes_spreadsheet_formulas():
+    cells = ["=1+1", " +SUM(A1:A2)", "-2+3", "@SUM(A1)", "ordinary text", 42]
+
+    exported = next(csv.reader(io.StringIO(routes.csv_line(cells))))
+
+    assert exported == ["'=1+1", "' +SUM(A1:A2)", "'-2+3", "'@SUM(A1)", "ordinary text", "42"]
 
 
 def test_date_filters_include_last_second_and_exports_never_silently_truncate(monkeypatch):
