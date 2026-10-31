@@ -163,7 +163,7 @@ async def deliver_webhook(
         batch.status = "Sent"
     else:
         batch.status = "Failed"
-        batch.error = f"HTTP {response.status_code}: {response.text[:200]}"
+        batch.error = f"HTTP {response.status_code}"
 
 
 def response_reference(response: httpx.Response) -> str | None:

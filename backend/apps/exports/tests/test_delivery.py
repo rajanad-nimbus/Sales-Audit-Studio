@@ -60,6 +60,31 @@ def test_webhook_sends_body_and_metadata_signatures(monkeypatch):
     assert headers["X-Nimbus-Envelope-Signature"] == routes.sign_envelope("secret", batch.dataset, batch.idempotency_key, body)
 
 
+def test_webhook_failure_does_not_persist_receiver_response_body(monkeypatch):
+    destination, batch = make_delivery()
+    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": "secret"}
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def post(self, *_args, **_kwargs):
+            return type("Response", (), {"status_code": 500, "text": "secret payload echoed by receiver"})()
+
+    monkeypatch.setattr(routes.httpx, "AsyncClient", Client)
+    asyncio.run(routes.deliver(destination, batch))
+
+    assert batch.status == "Failed"
+    assert batch.error == "HTTP 500"
+    assert "secret payload" not in batch.error
+
+
 @pytest.mark.parametrize("response_body", [ValueError("invalid JSON"), ["unexpected", "JSON"]])
 def test_webhook_acknowledges_success_even_when_response_reference_is_unusable(monkeypatch, response_body):
     destination, batch = make_delivery()
