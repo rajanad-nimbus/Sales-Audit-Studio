@@ -78,9 +78,10 @@ def test_api_error_propagates():
         await server.start_server()
         try:
             adapter = sa.ShopifyAdapter(store_url=f"http://{server.host}:{server.port}", access_token="x")
-            with pytest.raises(sa.ShopifyAPIError, match="401"):
+            with pytest.raises(sa.ShopifyAPIError, match="401") as error:
                 async for _ in adapter.fetch_orders():
                     pass
+            assert "bad token" not in str(error.value)
             await adapter.close()
         finally:
             await server.close()

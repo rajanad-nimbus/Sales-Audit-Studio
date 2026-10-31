@@ -163,8 +163,7 @@ class ShopifyAdapter:
                         raise ShopifyAPIError(f"{last_error} after {self.max_retries} attempts")
 
                     if resp.status >= 400:
-                        text = await resp.text()
-                        raise ShopifyAPIError(f"Status {resp.status}: {text}")
+                        raise ShopifyAPIError(f"Shopify API returned HTTP {resp.status}")
 
                     return await _read_response_json(resp), dict(resp.headers)
             except (asyncio.TimeoutError, aiohttp.ClientError) as e:
