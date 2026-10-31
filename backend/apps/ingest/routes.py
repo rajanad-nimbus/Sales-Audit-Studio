@@ -1,15 +1,9 @@
-import csv
-import io
 import uuid
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
-import re
-from typing import Annotated, Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-import json
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import case, func, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +11,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.database_errors import violates_unique_constraint
 from apps.security import scope
 from apps.ingest import reconciliation
+from apps.ingest.contracts import (
+    CsvIngestRequest,
+    IngestRequest,
+    ManualMatchRequest,
+    ReconciliationPolicyRequest,
+    SourceFeedProfilePatch,
+    SourceFeedProfileRequest,
+    SourceSettingPatch,
+    json_payload_size,  # noqa: F401 - preserve the existing import path
+    parse_csv_delivery,
+    schedule_window_hours,
+    validate_profile_mapping,  # noqa: F401 - preserve the existing import path
+)
 from apps.ingest import service as ingest
 from apps.ingest.common import VALID_TYPES
 from apps.ingest.simulation import simulate_feed
 from apps.ingest import source_settings
 from apps.ingest.shopify import scheduler
-from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 from apps.ingest.manifests import validate_business_date
 from apps.totals.currency import validate_currency
 from integrations.ontology.nimbus import audit
@@ -35,151 +41,6 @@ from apps.ingest.models import (ReconciliationMatch, ReconciliationPolicy,
 
 router = APIRouter()
 
-
-def json_payload_size(value, limit: int) -> int:
-    """Count compact UTF-8 JSON bytes without building a second full serialized payload."""
-    encoder = json.JSONEncoder(separators=(",", ":"), ensure_ascii=False)
-    size = 0
-    for chunk in encoder.iterencode(value):
-        size += len(chunk.encode("utf-8"))
-        if size > limit:
-            return size
-    return size
-
-
-class IngestRequest(BaseModel):
-    source_system: str = Field(min_length=1, max_length=50)
-    delivery_id: str = Field(min_length=1, max_length=255)
-    records: list[dict] = Field(max_length=MAX_DELIVERY_RECORDS)
-
-    @field_validator("source_system", "delivery_id")
-    @classmethod
-    def reject_blank_identifiers(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be blank")
-        return value
-
-    @model_validator(mode="after")
-    def enforce_payload_size(self):
-        if json_payload_size(self.records, MAX_DELIVERY_BYTES) > MAX_DELIVERY_BYTES:
-            raise ValueError(f"Delivery payload exceeds {MAX_DELIVERY_BYTES} bytes")
-        return self
-
-
-class CsvIngestRequest(BaseModel):
-    source_system: str = Field(min_length=1, max_length=50)
-    delivery_id: str = Field(min_length=1, max_length=255)
-    csv_data: str = Field(max_length=MAX_DELIVERY_BYTES)
-    profile_id: str | None = None
-
-    @field_validator("source_system", "delivery_id")
-    @classmethod
-    def reject_blank_identifiers(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be blank")
-        return value
-
-    @model_validator(mode="after")
-    def enforce_payload_size(self):
-        if len(self.csv_data.encode("utf-8")) > MAX_DELIVERY_BYTES:
-            raise ValueError(f"CSV payload exceeds {MAX_DELIVERY_BYTES} bytes")
-        return self
-
-
-def validate_profile_mapping(value: dict[str, str] | None) -> dict[str, str] | None:
-    if value is None:
-        return None
-    normalized = {}
-    for canonical, source_column in value.items():
-        target, source = canonical.strip(), source_column.strip()
-        if not target or not source:
-            raise ValueError("Column mapping keys and values must not be blank")
-        if len(target) > 100 or len(source) > 100:
-            raise ValueError("Column mapping keys and values must be at most 100 characters")
-        if target in normalized:
-            raise ValueError("Column mapping keys must remain unique after trimming")
-        normalized[target] = source
-    return normalized
-
-
-def parse_csv_delivery(csv_data: str, mapping: dict[str, str] | None = None) -> list[dict[str, str | None]]:
-    """Parse at most the configured record cap, applying mappings without duplicating the raw row set."""
-    rows = []
-    try:
-        for index, row in enumerate(csv.DictReader(io.StringIO(csv_data))):
-            if index >= MAX_DELIVERY_RECORDS:
-                raise ValueError(f"CSV exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit")
-            rows.append(
-                {canonical: row.get(source_column) for canonical, source_column in mapping.items()}
-                if mapping else row
-            )
-    except csv.Error as exc:
-        raise ValueError(f"Invalid CSV: {exc}") from exc
-    if not rows:
-        raise ValueError("CSV contains no data rows")
-    return rows
-
-
-class SourceFeedProfileRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    source_system: str = Field(min_length=1, max_length=32)
-    schedule: str | None = Field(default=None, max_length=128)
-    column_mapping: dict[str, str] = Field(default_factory=dict, max_length=100)
-    enabled: bool = True
-
-    @field_validator("name")
-    @classmethod
-    def normalize_profile_name(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("Profile name cannot be blank")
-        return normalized
-
-    @field_validator("schedule")
-    @classmethod
-    def normalize_schedule(cls, value: str | None) -> str | None:
-        return value.strip() or None if value is not None else None
-
-    @field_validator("column_mapping")
-    @classmethod
-    def validate_column_mapping(cls, value: dict[str, str]) -> dict[str, str]:
-        return validate_profile_mapping(value) or {}
-
-
-class SourceFeedProfilePatch(BaseModel):
-    schedule: str | None = Field(default=None, max_length=128)
-    column_mapping: dict[str, str] | None = Field(default=None, max_length=100)
-    enabled: bool | None = None
-
-    @field_validator("schedule")
-    @classmethod
-    def normalize_schedule(cls, value: str | None) -> str | None:
-        return value.strip() or None if value is not None else None
-
-    @field_validator("column_mapping")
-    @classmethod
-    def validate_column_mapping(cls, value: dict[str, str] | None) -> dict[str, str] | None:
-        return validate_profile_mapping(value)
-
-    @model_validator(mode="after")
-    def reject_null_mapping(self):
-        if "column_mapping" in self.model_fields_set and self.column_mapping is None:
-            raise ValueError("column_mapping must be an object when provided")
-        return self
-
-
-class ReconciliationPolicyRequest(BaseModel):
-    amount_tolerance: Decimal = Decimal("0")
-    amount_tolerance_currency: str = "USD"
-    settlement_day_tolerance: int = 0
-    gap_min_count: int = 10
-    gap_share: Decimal = Decimal("0.1")
-
-
-class ManualMatchRequest(BaseModel):
-    transaction_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(min_length=2, max_length=100)
-    match_type: str = Field(default="Manual Match", min_length=1, max_length=50)
-    rationale: str = Field(min_length=1, max_length=2000)
 
 
 def profile_view(profile: SourceFeedProfile) -> dict:
@@ -202,20 +63,6 @@ def _is_active_reconciliation_policy_conflict(exc: IntegrityError) -> bool:
         constraint_names={"uq_reconciliation_policies_one_active"},
         sqlite_messages={"UNIQUE constraint failed: reconciliation_policies.active"},
     )
-
-
-def schedule_window_hours(schedule: str | None) -> int | None:
-    """Interpret a small, explicit cadence vocabulary without guessing cron syntax."""
-    value = (schedule or "").strip().lower()
-    if not value:
-        return None
-    if "hour" in value:
-        return 2
-    if "daily" in value or "day" in value:
-        return 26
-    if "weekly" in value or "week" in value:
-        return 8 * 24
-    return None
 
 
 @router.get("/api/ingest/profiles")
@@ -431,33 +278,6 @@ async def reject_manual_match(match_id: str, db: AsyncSession = Depends(get_db),
         .returning(ReconciliationMatch.id))).scalar_one_or_none()
     if not claimed: raise HTTPException(status_code=409, detail="Match was already reviewed")
     audit(db, "MANUAL_MATCH_REJECTED", None, "ReconciliationMatch", match.id, "Manual reconciliation match rejected", actor=match.reviewed_by); await db.commit(); return {"id": match.id, "status": match.status}
-
-
-class SourceSettingPatch(BaseModel):
-    enabled: bool | None = None
-    in_daily_batch: bool | None = None
-    manual_sync: bool | None = None
-    sync_frequency: Literal["off", "daily", "weekly"] | None = None
-    sync_time: str | None = None          # HH:MM, 24 hour
-    sync_weekday: int | None = Field(default=None, ge=0, le=6)   # 0 = Monday
-    sync_timezone: str | None = Field(default=None, max_length=64)
-
-    @field_validator("sync_time")
-    @classmethod
-    def valid_time(cls, v):
-        if v is not None and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", v):
-            raise ValueError("sync_time must be HH:MM in 24 hour time")
-        return v
-
-    @field_validator("sync_timezone")
-    @classmethod
-    def known_zone(cls, v):
-        if v is not None:
-            try:
-                ZoneInfo(v)
-            except (ZoneInfoNotFoundError, ValueError) as exc:
-                raise ValueError("sync_timezone must be an IANA time zone such as Europe/London") from exc
-        return v
 
 
 @router.get("/api/ingest/sources")

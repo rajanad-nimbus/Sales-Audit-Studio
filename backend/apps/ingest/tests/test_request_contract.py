@@ -1,7 +1,10 @@
 import pytest
 from pydantic import ValidationError
 
-from apps.ingest.routes import CsvIngestRequest, IngestRequest
+from apps.ingest import contracts
+
+CsvIngestRequest = contracts.CsvIngestRequest
+IngestRequest = contracts.IngestRequest
 
 
 @pytest.mark.parametrize("model, values", [
@@ -27,15 +30,11 @@ def test_ingest_requests_accept_database_sized_identifiers():
 
 
 def test_json_payload_size_counts_utf8_without_exceeding_limit():
-    from apps.ingest.routes import json_payload_size
-
-    assert json_payload_size([{"name": "café"}], 100) == len('[{"name":"café"}]'.encode("utf-8"))
-    assert json_payload_size([{"name": "café"}], 5) > 5
+    assert contracts.json_payload_size([{"name": "café"}], 100) == len('[{"name":"café"}]'.encode("utf-8"))
+    assert contracts.json_payload_size([{"name": "café"}], 5) > 5
 
 
 def test_ingest_request_rejects_payload_over_delivery_limit(monkeypatch):
-    from apps.ingest import routes
-
-    monkeypatch.setattr(routes, "MAX_DELIVERY_BYTES", 8)
+    monkeypatch.setattr(contracts, "MAX_DELIVERY_BYTES", 8)
     with pytest.raises(ValidationError, match="Delivery payload exceeds"):
         IngestRequest(source_system="POS", delivery_id="delivery", records=[{"value": "long"}])
