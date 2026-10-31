@@ -81,7 +81,9 @@ def test_facets_lists_what_exists():
         async with Session() as db:
             f = await rt.facets(db=db, _=USER)
             assert f["stores"] == ["S1", "S2"] and f["sources"] == ["Bank", "POS", "Processor"]
+            assert f["types"] == ["Deposit", "Sale"] and f["tenders"] == ["Card", "Cash"]
             assert f["statuses"] == ["Exception", "Matched"] and f["date_min"] == "2026-10-01" and f["date_max"] == "2026-10-02"
+            assert f["detail_statuses"] == ["No detail"]
     run(go())
 
 

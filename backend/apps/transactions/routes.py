@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import aliased
-from sqlalchemy import String, case as sql_case, cast, func, or_, select
+from sqlalchemy import String, case as sql_case, cast, func, literal, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
@@ -132,16 +132,30 @@ async def list_transactions(store_id: Annotated[str | None, Query(min_length=1, 
 
 @router.get("/facets")
 async def facets(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("analyst", "finance", "it", "auditor"))):
-    async def distinct(col, joined=False):
-        stmt = select(col).select_from(CanonicalTransaction).outerjoin(
-            SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id).where(col.is_not(None)).distinct().order_by(col)
-        stmt = scope.restrict(stmt, _, CanonicalTransaction.store_id)
-        return (await db.execute(stmt)).scalars().all()
+    facet_columns = {
+        "stores": CanonicalTransaction.store_id,
+        "sources": SourceRecord.source_system,
+        "types": CanonicalTransaction.transaction_type,
+        "tenders": CanonicalTransaction.tender_type,
+        "statuses": CanonicalTransaction.reconciliation_status,
+        "detail_statuses": CanonicalTransaction.detail_status,
+    }
+    facet_queries = []
+    for name, column in facet_columns.items():
+        query = select(literal(name).label("name"), cast(column, String).label("value"))
+        query = query.select_from(CanonicalTransaction).outerjoin(
+            SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id,
+        ).where(column.is_not(None))
+        facet_queries.append(scope.restrict(query, _, CanonicalTransaction.store_id))
+    facet_values = union(*facet_queries).subquery()
+    facet_rows = (await db.execute(select(facet_values.c.name, facet_values.c.value))).all()
+    # Sort the one UNION result per facet without issuing one DISTINCT query per column.
+    facets_by_name = {name: [] for name in facet_columns}
+    for name, value in sorted(facet_rows):
+        facets_by_name[name].append(value)
     date_query = scope.restrict(select(func.min(CanonicalTransaction.business_date), func.max(CanonicalTransaction.business_date)), _, CanonicalTransaction.store_id)
     lo, hi = (await db.execute(date_query)).one()
-    return {"stores": await distinct(CanonicalTransaction.store_id), "sources": await distinct(SourceRecord.source_system),
-            "types": await distinct(CanonicalTransaction.transaction_type), "tenders": await distinct(CanonicalTransaction.tender_type),
-            "statuses": await distinct(CanonicalTransaction.reconciliation_status), "detail_statuses": await distinct(CanonicalTransaction.detail_status),
+    return {**facets_by_name,
             "date_min": lo, "date_max": hi}
 
 
