@@ -169,64 +169,100 @@ GLOBAL_FOLLOWUPS = ["What needs my decision?", "Give me a summary", "Which conne
 
 def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
     m = msg.lower().strip()
-    sc = ctx.get("selected_case")
-
     if re.fullmatch(r"(hi|hello|hey|help|what can you do\??|who are you\??)[!. ]*", m):
-        return reply("I'm the **Nimbus Assistant**. I explain what is in your data and point you to the right controls. I can't approve, execute or change anything.",
-                     ["**Cases and exposure**: what needs a decision, the biggest exposure, SLA status",
-                      "**Evidence and findings**: why a case happened and how complete the evidence is",
-                      "**Policy and decisions**: what the policy gate decided and what approving would do",
-                      "**Definitions**: evidence needed and known causes for each exception type",
-                      "**Operations**: connector health, the daily batch, recent activity"],
-                     "Select a case, or mention one by number (for example ZA-20261005-0004).", followups=GLOBAL_FOLLOWUPS)
+        return help_response()
+    clarification = clarify_vague_case_reference(m, ctx)
+    if clarification is not None:
+        return clarification
+    return dispatch_context_answer(m, ctx, ctx.get("selected_case"), persona)
 
-    if not sc and VAGUE.search(m) and re.search(r"\b(why|exposure|evidence|next|status|approve|should|finding)\b", m):
-        nd = ctx["needs_decision"][:4]
-        return reply("**Which case do you mean?** I don't have one selected, and your question refers to a specific case.",
-                     [f"{c['case_number']}: {c['type']} at {c['store']}, {money(c['amount'], c.get('currency'))}" for c in nd] or ["No cases are awaiting a decision right now."],
-                     "Select a case in the Command Center or Action Center, or mention its number.",
-                     sources=[_needs_src(c) for c in nd], followups=GLOBAL_FOLLOWUPS)
 
-    if sc:
-        case_response = answer_selected_case(m, sc)
-        if case_response is not None:
-            return case_response
+def help_response() -> dict:
+    """Describe the assistant's supported read-only capabilities."""
+    return reply("I'm the **Nimbus Assistant**. I explain what is in your data and point you to the right controls. I can't approve, execute or change anything.",
+                 ["**Cases and exposure**: what needs a decision, the biggest exposure, SLA status",
+                  "**Evidence and findings**: why a case happened and how complete the evidence is",
+                  "**Policy and decisions**: what the policy gate decided and what approving would do",
+                  "**Definitions**: evidence needed and known causes for each exception type",
+                  "**Operations**: connector health, the daily batch, recent activity"],
+                 "Select a case, or mention one by number (for example ZA-20261005-0004).",
+                 followups=GLOBAL_FOLLOWUPS)
 
-    key, od = _ont_match(m)
-    if key:
-        return reply(f"**{od['label']}** (`{key}`) is a {od['family'].lower()} exception.",
-                     [f"Required evidence: {', '.join(od['evidence'])}", f"Known causes: {', '.join(od['known_causes'])}",
-                      f"Typical disposition: {od['disposition'][0]} via {od['disposition'][1]}",
-                      f"Financial exposure: {'none by default' if od['exposure'] == 'zero' else 'equal to the exception amount'}"],
-                     None, [{"type": "ontology", "label": ontology.ONTOLOGY_VERSION, "href": None}],
-                     ["What evidence does a missing refund need?", "Give me a summary"])
 
-    decision_answer = answer_decision_queue(m, ctx, persona)
-    if decision_answer is not None:
-        return decision_answer
-    exposure_answer = answer_largest_exposure(m, ctx)
-    if exposure_answer is not None:
-        return exposure_answer
-    if re.search(r"connector|health|feed|integration", m):
-        ks = ctx["connectors"]
-        bad = [k for k in ks if k["state"] != "Healthy"]
-        return reply(f"**{len(ks) - len(bad)} of {len(ks)} connectors are healthy.**" if ks else "**No connectors are registered yet.**",
-                     [f"{k['name']}: {k['state']} ({k['mode']})" for k in ks],
-                     "Configure the source adapters before enabling automated connector controls." if bad else None,
-                     followups=GLOBAL_FOLLOWUPS)
-    if re.search(r"batch|nightly|daily|data as of|fresh|stale", m):
-        b = ctx.get("last_batch")
-        return reply(f"**Last successful batch: business date {b['business_date']}.**" if b else "**The daily batch has not run yet.**",
-                     [f"Finished {b['finished_at'][:16]}", f"Cases raised: {b['cases_created']}"] if b else None,
-                     "Transactions sync once a day; cases appear when the batch finishes.", followups=GLOBAL_FOLLOWUPS)
-    if re.search(r"recent|activity|happened|latest|audit", m):
-        ra = ctx["recent_activity"][:5]
-        return reply("**Latest activity:**" if ra else "**No activity yet.**", [f"{x['actor']}: {x['what']}" for x in ra],
-                     "See the Audit Trail for the full, verified record.", followups=GLOBAL_FOLLOWUPS)
-    summary_answer = answer_portfolio_summary(m, ctx)
-    if summary_answer is not None:
-        return summary_answer
+def clarify_vague_case_reference(message: str, context: dict) -> dict | None:
+    """Ask which case is meant when a case-specific question has no selection."""
+    if context.get("selected_case") or not VAGUE.search(message) or not re.search(
+        r"\b(why|exposure|evidence|next|status|approve|should|finding)\b", message,
+    ):
+        return None
+    cases = context["needs_decision"][:4]
+    bullets = ([f"{case['case_number']}: {case['type']} at {case['store']}, "
+                f"{money(case['amount'], case.get('currency'))}" for case in cases]
+               or ["No cases are awaiting a decision right now."])
+    return reply("**Which case do you mean?** I don't have one selected, and your question refers to a specific case.",
+                 bullets, "Select a case in the Command Center or Action Center, or mention its number.",
+                 sources=[_needs_src(case) for case in cases], followups=GLOBAL_FOLLOWUPS)
 
+
+def dispatch_context_answer(message: str, context: dict, selected_case: dict | None, persona: str) -> dict:
+    """Route a normalized message through ordered, grounded answer handlers."""
+    handlers = [
+        lambda: answer_selected_case(message, selected_case) if selected_case else None,
+        lambda: answer_ontology_definition(message),
+        lambda: answer_decision_queue(message, context, persona),
+        lambda: answer_largest_exposure(message, context),
+        lambda: answer_connector_health(message, context),
+        lambda: answer_batch_status(message, context),
+        lambda: answer_recent_activity(message, context),
+        lambda: answer_portfolio_summary(message, context),
+    ]
+    for handler in handlers:
+        answer = handler()
+        if answer is not None:
+            return answer
+    return unsupported_response()
+
+
+def answer_connector_health(message: str, context: dict) -> dict | None:
+    """Report connector health and configuration state when requested."""
+    if not re.search(r"connector|health|feed|integration", message):
+        return None
+    connectors = context["connectors"]
+    unhealthy = [connector for connector in connectors if connector["state"] != "Healthy"]
+    headline = (f"**{len(connectors) - len(unhealthy)} of {len(connectors)} connectors are healthy.**"
+                if connectors else "**No connectors are registered yet.**")
+    bullets = [f"{item['name']}: {item['state']} ({item['mode']})" for item in connectors]
+    next_step = ("Configure the source adapters before enabling automated connector controls."
+                 if unhealthy else None)
+    return reply(headline, bullets, next_step, followups=GLOBAL_FOLLOWUPS)
+
+
+def answer_batch_status(message: str, context: dict) -> dict | None:
+    """Report the latest successful batch when requested."""
+    if not re.search(r"batch|nightly|daily|data as of|fresh|stale", message):
+        return None
+    batch = context.get("last_batch")
+    headline = (f"**Last successful batch: business date {batch['business_date']}.**"
+                if batch else "**The daily batch has not run yet.**")
+    bullets = ([f"Finished {batch['finished_at'][:16]}", f"Cases raised: {batch['cases_created']}"]
+               if batch else None)
+    return reply(headline, bullets, "Transactions sync once a day; cases appear when the batch finishes."
+                 if batch else None, followups=GLOBAL_FOLLOWUPS)
+
+
+def answer_recent_activity(message: str, context: dict) -> dict | None:
+    """Report a short audit activity summary when requested."""
+    if not re.search(r"recent|activity|happened|latest|audit", message):
+        return None
+    activity = context["recent_activity"][:5]
+    headline = "**Latest activity:**" if activity else "**No activity yet.**"
+    bullets = [f"{item['actor']}: {item['what']}" for item in activity]
+    return reply(headline, bullets, "See the Audit Trail for the full, verified record.",
+                 followups=GLOBAL_FOLLOWUPS)
+
+
+def unsupported_response() -> dict:
+    """Return guidance for requests outside the grounded answer set."""
     return reply("**I can't answer that from the data I have.**",
                  ["Try: what needs my decision, a summary, the biggest exposure, connector health, the daily batch, or recent activity.",
                   "For a case: why it happened, its exposure, the evidence, the policy decision, or what to do next.",
@@ -254,6 +290,22 @@ def answer_decision_queue(message: str, context: dict, persona: str) -> dict | N
                for case in cases[:5]] + additional
     return reply(headline, bullets, "Review the cases in the Action Center." if cases else None,
                  [_needs_src(case) for case in cases[:5]], GLOBAL_FOLLOWUPS)
+
+
+def answer_ontology_definition(message: str) -> dict | None:
+    """Explain recognized exception types from the versioned ontology."""
+    key, definition = _ont_match(message)
+    if not key:
+        return None
+    exposure = "none by default" if definition["exposure"] == "zero" else "equal to the exception amount"
+    bullets = [f"Required evidence: {', '.join(definition['evidence'])}",
+               f"Known causes: {', '.join(definition['known_causes'])}",
+               f"Typical disposition: {definition['disposition'][0]} via {definition['disposition'][1]}",
+               f"Financial exposure: {exposure}"]
+    return reply(f"**{definition['label']}** (`{key}`) is a {definition['family'].lower()} exception.",
+                 bullets, None,
+                 [{"type": "ontology", "label": ontology.ONTOLOGY_VERSION, "href": None}],
+                 ["What evidence does a missing refund need?", "Give me a summary"])
 
 
 def answer_largest_exposure(message: str, context: dict) -> dict | None:
