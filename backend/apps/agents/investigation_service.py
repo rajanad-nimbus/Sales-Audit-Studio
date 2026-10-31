@@ -190,6 +190,63 @@ class InvestigationEvidenceCache:
         return self._store_day_totals[key]
 
 
+async def _investigation_narrative(
+    db: AsyncSession,
+    case: Case,
+    exceptions: list[DBException],
+    use_agent: bool,
+    ontology_context: dict,
+    exception_definition: dict | None,
+) -> str | None:
+    if exception_definition is None:
+        return None
+
+    config = await agent_settings.load(db)
+    narrative = None
+    if use_agent and config["investigator_enabled"]:
+        run = await investigator.run(
+            db,
+            case,
+            exceptions,
+            exception_definition["label"],
+            exception_definition["known_causes"],
+            model=config["model"],
+            enabled_tools=config["tools"],
+            ontology_context=ontology_context,
+        )
+        if run:
+            nimbus.audit(
+                db,
+                "AGENT_RUN",
+                case.id,
+                "Case",
+                case.id,
+                "Investigation agent run" + (" failed" if not run["result"] else ""),
+                actor="investigation-agent",
+                after={
+                    **run["trace"],
+                    "result": run["result"],
+                    "ontology_context": {
+                        key: ontology_context[key] for key in ("source", "ontology")
+                    },
+                },
+            )
+            if run["result"]:
+                narrative = investigator.render(run["result"])
+
+    if narrative:
+        return narrative
+    narrative = await llm.narrate(
+        exception_definition["label"],
+        str(case.total_exception_amount),
+        exception_definition["evidence"],
+        exception_definition["known_causes"],
+    )
+    if narrative:
+        return f"[LLM-drafted; figures and authority are deterministic] {narrative}"
+    return None
+
+
 async def run_investigation(
     db: AsyncSession,
     case: Case,
@@ -203,27 +260,13 @@ async def run_investigation(
         raise HTTPException(status_code=409, detail="Case amounts require finance review before investigation")
     from integrations.ontology.ontology_integration import integration
     await integration.refresh()
-    context = integration.context()
-    od = ontology.get(exceptions[0].exception_type)
-    narrative = None
-    if od:
-        cfg = await agent_settings.load(db)
-        if use_agent and cfg["investigator_enabled"]:
-            run = await investigator.run(db, case, exceptions, od["label"], od["known_causes"],
-                                         model=cfg["model"], enabled_tools=cfg["tools"], ontology_context=context)
-            if run:
-                nimbus.audit(db, "AGENT_RUN", case.id, "Case", case.id,
-                             "Investigation agent run" + (" failed" if not run["result"] else ""),
-                             actor="investigation-agent", after={**run["trace"], "result": run["result"],
-                                    "ontology_context": {k: context[k] for k in ("source", "ontology")}})
-                if run["result"]:
-                    narrative = investigator.render(run["result"])
-        if not narrative:
-            narrative = await llm.narrate(od["label"], str(case.total_exception_amount), od["evidence"], od["known_causes"])
-            if narrative:
-                narrative = f"[LLM-drafted; figures and authority are deterministic] {narrative}"
+    ontology_context = integration.context()
+    exception_definition = ontology.get(exceptions[0].exception_type)
+    narrative = await _investigation_narrative(
+        db, case, exceptions, use_agent, ontology_context, exception_definition,
+    )
     evidence_cache = evidence_cache or InvestigationEvidenceCache(db)
-    required = od["evidence"] if od else ontology.DEFAULT_EVIDENCE
+    required = exception_definition["evidence"] if exception_definition else ontology.DEFAULT_EVIDENCE
     rows = await evidence_cache.source_rows(case, required)
     totals = await evidence_cache.store_day_totals(case)
     etype = exceptions[0].exception_type if exceptions else None
