@@ -39,6 +39,7 @@ DATASETS = {
     "audit_events": (AuditEvent, AuditEvent.created_at),
 }
 MAX_RETENTION_BATCH = 5000
+MAX_RETENTION_ARCHIVE_BYTES = 64 * 1024 * 1024
 
 
 class RetentionArchiveWriter:
@@ -50,19 +51,29 @@ class RetentionArchiveWriter:
         self.archive = None
         self.digest = hashlib.sha256()
         self.record_count = 0
+        self.bytes_written = 0
 
     def __enter__(self):
         return self
 
-    def write(self, row: dict) -> None:
+    def write(self, row: dict) -> bool:
+        contents = (json.dumps(row, sort_keys=True) + "\n").encode()
+        if self.bytes_written + len(contents) > MAX_RETENTION_ARCHIVE_BYTES:
+            if self.record_count == 0:
+                raise HTTPException(
+                    status_code=413,
+                    detail="A retention record exceeds the per-run archive size limit",
+                )
+            return False
         if self.archive is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.archive = tempfile.NamedTemporaryFile(dir=self.path.parent, prefix=".retention-", delete=False)
             self.temporary_path = Path(self.archive.name)
-        contents = (json.dumps(row, sort_keys=True) + "\n").encode()
         self.archive.write(contents)
         self.digest.update(contents)
         self.record_count += 1
+        self.bytes_written += len(contents)
+        return True
 
     def __exit__(self, exc_type, exc, traceback):
         try:
@@ -100,7 +111,8 @@ async def stream_retention_rows(db: AsyncSession, query, path: Path | None) -> t
             if len(record_ids) == MAX_RETENTION_BATCH:
                 return True
             if archive:
-                archive.write(serialise_row(row._mapping))
+                if not archive.write(serialise_row(row._mapping)):
+                    return True
                 record_ids.append(row._mapping["id"])
             else:
                 record_ids.append(row[0])
@@ -169,21 +181,27 @@ async def ensure_retention_records_are_unreferenced(db: AsyncSession, dataset: s
         )
 
 
-async def archive_retention_candidates(db: AsyncSession, dataset: str, model, timestamp, record_ids: list[str], expected_count: int):
+async def archive_retention_candidates(
+    db: AsyncSession,
+    dataset: str,
+    model,
+    timestamp,
+    record_ids: list[str],
+) -> tuple[Path, str, list[str], bool]:
     """Archive the selected records and verify the archive matches its locked batch."""
     archive_dir = Path(os.getenv("NIMBUS_ARCHIVE_DIR", "/app/archives")) / dataset
     archive_path = archive_dir / f"{utcnow().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.jsonl"
     columns = list(model.__table__.columns)
     archive_query = select(*columns).where(model.id.in_(record_ids)).order_by(timestamp, model.id)
-    archived_ids, archive_hash, archived_count, _ = await stream_retention_rows(
+    archived_ids, archive_hash, archived_count, has_more = await stream_retention_rows(
         db, archive_query, archive_path
     )
-    if archived_ids != record_ids[:len(archived_ids)] or archived_count != expected_count:
+    if archived_ids != record_ids[:len(archived_ids)] or archived_count != len(archived_ids):
         raise HTTPException(
             status_code=409,
             detail="Retention candidates changed while preparing the archive; retry the operation",
         )
-    return archive_path, archive_hash
+    return archive_path, archive_hash, archived_ids, has_more
 
 
 async def purge_retention_candidates(db: AsyncSession, model, record_ids: list[str]) -> int:
@@ -357,7 +375,9 @@ async def execute_retention(
         raise HTTPException(status_code=409, detail="Configure retention policy before running it")
     model, timestamp = DATASETS[dataset]
     cutoff = utcnow() - timedelta(days=policy.retain_days)
-    record_ids, _, eligible_count, has_more = await retention_candidates(db, model, timestamp, cutoff)
+    candidate_ids, _, eligible_count, has_more = await retention_candidates(
+        db, model, timestamp, cutoff
+    )
     run = RetentionRun(
         id=str(uuid.uuid4()),
         dataset=dataset,
@@ -368,19 +388,29 @@ async def execute_retention(
         status="Succeeded",
         performed_by=user["user"] or "ontology.user",
     )
-    if not record_ids:
+    if not candidate_ids:
         db.add(run)
         audit_retention_run(db, run, dataset)
         await db.commit()
         return {"run_id": run.id, "eligible_records": 0, "message": "No records eligible"}
-    if body.confirm_purge:
-        await ensure_retention_records_are_unreferenced(db, dataset, record_ids)
     archive_path = None
     archive_hash = None
     if policy.archive_before_purge:
-        archive_path, archive_hash = await archive_retention_candidates(
-            db, dataset, model, timestamp, record_ids, eligible_count
+        archive_path, archive_hash, record_ids, archive_has_more = await archive_retention_candidates(
+            db, dataset, model, timestamp, candidate_ids
         )
+        eligible_count = len(record_ids)
+        has_more = has_more or archive_has_more
+    else:
+        record_ids = candidate_ids
+    run.eligible_records = eligible_count
+    if body.confirm_purge:
+        try:
+            await ensure_retention_records_are_unreferenced(db, dataset, record_ids)
+        except HTTPException:
+            if archive_path is not None:
+                archive_path.unlink(missing_ok=True)
+            raise
     if archive_path is not None:
         run.archived_records = eligible_count
         run.archive_location = str(archive_path)

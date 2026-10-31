@@ -103,6 +103,68 @@ def test_retention_processes_a_deterministic_bounded_batch(monkeypatch):
     asyncio.run(run())
 
 
+def test_retention_archive_byte_limit_purges_only_archived_records(tmp_path, monkeypatch):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        old = utcnow() - timedelta(days=45)
+        monkeypatch.setenv("NIMBUS_ARCHIVE_DIR", str(tmp_path))
+        try:
+            async with Session() as db:
+                db.add(RetentionPolicy(
+                    id="policy", dataset="source_records", retain_days=30,
+                    archive_before_purge=True, updated_by="it",
+                ))
+                for identifier in ("src-1", "src-2", "src-3"):
+                    db.add(SourceRecord(
+                        id=identifier,
+                        source_system="POS",
+                        source_version="1",
+                        source_record_id=identifier,
+                        delivery_id="delivery",
+                        payload=b"{}",
+                        payload_hash="0" * 64,
+                        received_at=old,
+                        source_event_time=old,
+                        status="Processed",
+                        created_at=old,
+                    ))
+                await db.commit()
+
+                candidate = (
+                    await db.execute(
+                        select(*SourceRecord.__table__.columns)
+                        .where(SourceRecord.id == "src-1")
+                    )
+                ).first()
+                serialized_size = len(
+                    (json.dumps(serialise_row(candidate._mapping), sort_keys=True) + "\n").encode()
+                )
+                monkeypatch.setattr(
+                    "apps.operations.routes.MAX_RETENTION_ARCHIVE_BYTES",
+                    serialized_size + 1,
+                )
+
+                result = await execute_retention(
+                    "source_records", RetentionRunBody(confirm_purge=True), db, {"user": "it.user"}
+                )
+
+                assert result["eligible_records"] == result["archived_records"] == 1
+                assert result["purged_records"] == 1
+                assert result["more_eligible"] is True
+                remaining = (await db.execute(select(SourceRecord.id))).scalars().all()
+                assert remaining == ["src-2", "src-3"]
+                with open(result["archive_location"]) as archive_file:
+                    rows = [json.loads(line) for line in archive_file]
+                assert [row["id"] for row in rows] == ["src-1"]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_empty_retention_run_is_written_to_audit_log():
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
