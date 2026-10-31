@@ -111,7 +111,8 @@ async def chat_via_agent_sdk(system: str, history: list[dict], message: str, que
                     final = None if m.is_error else m.result
             return (final or "".join(parts)).strip() or None
         return await asyncio.wait_for(collect(), CHAT_TIMEOUT_S)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Optional Agent SDK chat failed (%s)", type(exc).__name__)
         return None
 
 

@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 from apps.agents import investigator, llm
 
@@ -32,6 +32,28 @@ def configure_fake_provider(monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(AsyncAnthropic=FakeAnthropicClient))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+
+def test_agent_sdk_failure_is_logged_without_exposing_error_details(monkeypatch, caplog):
+    sdk = ModuleType("claude_agent_sdk")
+    sdk.AssistantMessage = type("AssistantMessage", (), {})
+    sdk.ClaudeAgentOptions = lambda **values: SimpleNamespace(**values)
+    sdk.ResultMessage = type("ResultMessage", (), {})
+    sdk.TextBlock = type("TextBlock", (), {})
+    sdk.query = lambda **_values: None
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", sdk)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-token")
+
+    async def failing_query(**_kwargs):
+        if False:
+            yield None
+        raise RuntimeError("sensitive provider detail")
+
+    result = asyncio.run(llm.chat_via_agent_sdk("system", [], "message", query_fn=failing_query))
+
+    assert result is None
+    assert "Optional Agent SDK chat failed (RuntimeError)" in caplog.text
+    assert "sensitive provider detail" not in caplog.text
 
 
 def test_chat_and_narration_close_owned_api_clients(monkeypatch):
