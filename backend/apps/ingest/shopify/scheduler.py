@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, text, update
+from sqlalchemy import text, update
 
 from apps.ingest import service as ingest
 from apps.ingest import source_settings
@@ -115,7 +115,7 @@ async def _claim(session_factory, now: datetime) -> tuple[datetime, datetime] | 
         got = (await db.execute(text("SELECT pg_try_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": LOCK_KEY})).scalar()
         if not got or not source_settings.shopify_configured():
             return None
-        row = (await db.execute(select(SourceSetting).where(SourceSetting.source_system == SOURCE))).scalar_one_or_none()
+        row = await source_settings.lock_source_settings(db, SOURCE)
         if not scheduled(row):
             return None
         if row.last_scheduled_run_at is None:   # a schedule counts from when it was set, never backfills
@@ -148,12 +148,7 @@ async def _record_outcome(db, claimed_at: datetime, status: str, message: str) -
 
 async def _lock_enabled_source(db) -> None:
     """Serialize the final enabled check with source-setting updates through ingest commit."""
-    row = (await db.execute(
-        select(SourceSetting)
-        .where(SourceSetting.source_system == SOURCE)
-        .with_for_update(read=True)
-        .execution_options(populate_existing=True)
-    )).scalar_one_or_none()
+    row = await source_settings.lock_source_settings(db, SOURCE, shared=True)
     if row is not None and not row.enabled:
         raise SourceDisabledDuringSync("Shopify was switched off while the scheduled sync was fetching data")
 

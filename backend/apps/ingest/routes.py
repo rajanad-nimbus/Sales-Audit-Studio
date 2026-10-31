@@ -302,7 +302,7 @@ async def update_source(source_system: str, body: SourceSettingPatch, db: AsyncS
                         user: dict = Depends(require_role("it"))):
     if source_system not in source_settings.SOURCES:
         raise HTTPException(status_code=404, detail=f"Unknown source. Choose one of {list(source_settings.SOURCES)}")
-    row = (await db.execute(select(SourceSetting).where(SourceSetting.source_system == source_system))).scalar_one_or_none()
+    row = await source_settings.lock_source_settings(db, source_system)
     if row is None:
         row = SourceSetting(source_system=source_system, **source_settings.effective(source_system, None))
         db.add(row)

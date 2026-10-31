@@ -82,6 +82,13 @@ async def sync_shopify(
             detail=f"Failed to fetch from Shopify: {shopify_adapter.safe_failure_message(e)}",
         ) from e
 
+    setting = await source_settings.lock_source_settings(db, "Shopify", shared=True)
+    state = source_settings.effective("Shopify", setting)
+    if not state["enabled"]:
+        raise HTTPException(status_code=409, detail="Shopify was switched off while the sync was fetching data")
+    if not state["manual_sync"]:
+        raise HTTPException(status_code=409, detail="Manual sync was switched off while Shopify was fetching data")
+
     delivery_id = f"SHOPIFY-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
 
     try:

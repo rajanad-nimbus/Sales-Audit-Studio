@@ -104,12 +104,49 @@ def test_manual_sync_fetches_and_stamps_configured_store(monkeypatch):
     monkeypatch.setattr(routes_shopify.shopify_adapter, "fetch_shopify_feed", fetch)
     monkeypatch.setattr(routes_shopify.ingest, "ingest", ingest_records)
     monkeypatch.setattr(routes_shopify.source_settings, "require_allowed", allowed)
+    monkeypatch.setattr(routes_shopify.source_settings, "lock_source_settings", lambda *_args, **_kwargs: asyncio.sleep(0, result=None))
 
     result = asyncio.run(routes_shopify.sync_shopify(
         routes_shopify.ShopifySyncRequest(), FakeDb(), {"user": "finance"}
     ))
     assert result.status == "success"
     assert seen == {"store_id": "CONFIGURED-STORE", "record_store_ids": []}
+
+
+def test_manual_sync_rechecks_source_settings_before_ingest(monkeypatch):
+    class FakeDb:
+        pass
+
+    async def fetch(*_args, **_kwargs):
+        return {"Shopify": []}
+
+    async def allowed(*_args, **_kwargs):
+        return None
+
+    async def disabled_during_fetch(*_args, **_kwargs):
+        return object()
+
+    ingested = False
+
+    async def ingest_records(*_args, **_kwargs):
+        nonlocal ingested
+        ingested = True
+        return {}
+
+    monkeypatch.setattr(routes_shopify.shopify_adapter, "fetch_shopify_feed", fetch)
+    monkeypatch.setattr(routes_shopify.source_settings, "require_allowed", allowed)
+    monkeypatch.setattr(routes_shopify.source_settings, "lock_source_settings", disabled_during_fetch)
+    monkeypatch.setattr(routes_shopify.source_settings, "effective", lambda *_args: {"enabled": False})
+    monkeypatch.setattr(routes_shopify.ingest, "ingest", ingest_records)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(routes_shopify.sync_shopify(
+            routes_shopify.ShopifySyncRequest(), FakeDb(), {"user": "finance"}
+        ))
+
+    assert error.value.status_code == 409
+    assert "switched off" in error.value.detail
+    assert not ingested
 
 
 def test_manual_sync_does_not_return_database_exception_details(monkeypatch):
@@ -134,6 +171,7 @@ def test_manual_sync_does_not_return_database_exception_details(monkeypatch):
     monkeypatch.setattr(routes_shopify.shopify_adapter, "fetch_shopify_feed", fetch)
     monkeypatch.setattr(routes_shopify.ingest, "ingest", reject_ingest)
     monkeypatch.setattr(routes_shopify.source_settings, "require_allowed", allowed)
+    monkeypatch.setattr(routes_shopify.source_settings, "lock_source_settings", lambda *_args, **_kwargs: asyncio.sleep(0, result=None))
     db = FakeDb()
 
     with pytest.raises(HTTPException) as error:

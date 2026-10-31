@@ -9,7 +9,7 @@ A source with no row behaves as it always did.
 import os
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.ingest.common import VALID_TYPES
@@ -17,6 +17,18 @@ from apps.ingest.models import SourceSetting
 
 SOURCES = ("POS", "POSControl", "Processor", "Bank", "ERP", "Shopify")
 PULLED = {"Shopify"}   # sources Nimbus fetches itself; the rest are delivered to it
+
+
+async def lock_source_settings(db: AsyncSession, source: str, *, shared: bool = False) -> SourceSetting | None:
+    """Serialize setting changes and ingestion admission, including when no row exists yet."""
+    if db.get_bind().dialect.name == "postgresql":
+        lock_function = "pg_advisory_xact_lock_shared" if shared else "pg_advisory_xact_lock"
+        await db.execute(
+            text(f"SELECT {lock_function}(hashtextextended(:key, 0))"),
+            {"key": f"source-setting:{source}"},
+        )
+    query = select(SourceSetting).where(SourceSetting.source_system == source).with_for_update(read=shared)
+    return (await db.execute(query.execution_options(populate_existing=True))).scalar_one_or_none()
 
 
 def shopify_configured() -> bool:
