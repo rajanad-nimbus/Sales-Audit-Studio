@@ -1,12 +1,26 @@
 import asyncio
 from datetime import timedelta
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.operations import batch
 from models import AuditEvent, Base, BatchRun, utcnow
+
+
+def test_batch_feed_size_validation_counts_utf8_and_enforces_limit(monkeypatch):
+    feeds = {"POS": [{"source_record_id": "sale", "note": "é"}]}
+    size = batch.json_payload_size(feeds, 10_000)
+    monkeypatch.setattr(batch, "MAX_DELIVERY_BYTES", size)
+
+    assert batch.RunRequest(feeds=feeds).feeds == feeds
+
+    monkeypatch.setattr(batch, "MAX_DELIVERY_BYTES", size - 1)
+    with pytest.raises(ValidationError, match="Batch payload exceeds"):
+        batch.RunRequest(feeds=feeds)
 
 
 def test_successful_batch_remains_successful_if_investigation_fails(monkeypatch, caplog):

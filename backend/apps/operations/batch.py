@@ -1,7 +1,6 @@
 """Daily transaction-log batch: load the day's feeds, then reconcile. Entry point for a scheduler (cron)."""
 
 import logging
-import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -16,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.agents import agent_settings, investigation_service
 from apps.database_errors import violates_unique_constraint
 from apps.ingest import reconciliation
+from apps.ingest.contracts import json_payload_size
 from apps.ingest import service as ingest
 from apps.ingest.common import VALID_TYPES
 from apps.ingest.simulation import simulate_feed
@@ -346,9 +346,7 @@ class RunRequest(BaseModel):
         record_count = sum(len(records) for records in self.feeds.values())
         if record_count > MAX_DELIVERY_RECORDS:
             raise ValueError(f"Batch exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit")
-        size = len(
-            json.dumps(self.feeds, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        )
+        size = json_payload_size(self.feeds, MAX_DELIVERY_BYTES)
         if size > MAX_DELIVERY_BYTES:
             raise ValueError(f"Batch payload exceeds {MAX_DELIVERY_BYTES} bytes")
         return self
