@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.assistant.chat import CASE_CONTEXT_RECORD_LIMIT, build_context, case_context
-from models import Base, Case, Exception as DBException
+from models import AuditEvent, Base, Case, Exception as DBException
 
 
 def test_case_context_bounds_child_records_and_marks_truncation():
@@ -88,6 +88,55 @@ def test_build_context_batches_mentioned_case_lookups_and_preserves_order():
                 assert [case["case_number"] for case in context["mentioned_cases"]] == [
                     "ZA-AAAA-0003", "ZA-AAAA-0001", "ZA-AAAA-0002",
                 ]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_recent_activity_selects_only_context_fields_and_respects_store_scope():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add(Case(
+                    id="case-1", case_number="CASE-1", case_type="Test",
+                    business_date="2026-10-31", store_id="S1",
+                ))
+                db.add(AuditEvent(
+                    id="event-1", event_type="CASE_UPDATED", actor="finance@example.test",
+                    object_type="Case", object_id="case-1", case_id="case-1",
+                    action_description="Case reviewed", after_state={"large": "unused" * 1000},
+                ))
+                await db.commit()
+
+                activity_queries = []
+
+                def capture_activity_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+                    normalized = statement.lower()
+                    if "from audit_events" in normalized and "limit" in normalized:
+                        activity_queries.append(normalized)
+
+                event.listen(engine.sync_engine, "before_cursor_execute", capture_activity_query)
+                try:
+                    context = await build_context(
+                        db, None, user={
+                            "user": "finance@example.test", "role": "finance",
+                            "store_scoped": True, "stores": ["S1"],
+                        },
+                    )
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", capture_activity_query)
+
+                assert context["recent_activity"] == [{
+                    "actor": "finance@example.test", "what": "Case reviewed", "case_id": "case-1",
+                }]
+                assert len(activity_queries) == 1
+                assert "audit_events.after_state" not in activity_queries[0]
+                assert "audit_events.actor" in activity_queries[0]
+                assert "audit_events.action_description" in activity_queries[0]
         finally:
             await engine.dispose()
 

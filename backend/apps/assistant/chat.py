@@ -94,6 +94,13 @@ async def build_context(db, case_id: str | None, message: str = "", user: dict |
         Case.store_id,
     ).order_by(Case.total_exposure.desc(), Case.id).limit(8))).scalars().all()
     batch = (await db.execute(select(BatchRun).where(BatchRun.status == "Succeeded").order_by(BatchRun.finished_at.desc()).limit(1))).scalars().first()
+    activity_query = select(AuditEvent.actor, AuditEvent.action_description, AuditEvent.case_id)
+    if scope.scoped(user):
+        activity_query = activity_query.join(Case, Case.id == AuditEvent.case_id)
+        activity_query = scope.restrict(activity_query, user, Case.store_id)
+    activity_rows = (await db.execute(
+        activity_query.order_by(AuditEvent.created_at.desc()).limit(6)
+    )).all()
     ctx = {
         "cases_by_status": by_status,
         "stale_amount_cases": stale_count,
@@ -106,10 +113,10 @@ async def build_context(db, case_id: str | None, message: str = "", user: dict |
         "connectors": [{"name": k.name, "state": k.state, "mode": k.mode} for k in (await db.execute(select(Connector))).scalars().all()],
         "last_batch": {"business_date": batch.business_date, "finished_at": str(batch.finished_at),
                        "cases_created": batch.cases_created} if batch else None,
-        "recent_activity": [{"actor": a.actor, "what": a.action_description, "case_id": a.case_id} for a in
-                            (await db.execute(scope.restrict(select(AuditEvent).join(Case, Case.id == AuditEvent.case_id), user, Case.store_id)
-                             .order_by(AuditEvent.created_at.desc()).limit(6) if scope.scoped(user) else
-                             select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(6))).scalars().all()],
+        "recent_activity": [
+            {"actor": actor, "what": description, "case_id": case_id}
+            for actor, description, case_id in activity_rows
+        ],
     }
     references = list(dict.fromkeys(match.upper() for match in CASE_REF.findall(message or "")))
     mentioned = []
