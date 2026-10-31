@@ -352,10 +352,37 @@ def test_webhook_signature_and_ingest(monkeypatch):
             assert bad.status_code == 401
             ok = await c.post(url, content=body, headers={"X-Shopify-Hmac-SHA256": sig, "X-Shopify-Topic": "orders/create"})
             assert ok.status_code == 200 and ok.json()["canonical_created"] == 1
+            replay = await c.post(url, content=body, headers={"X-Shopify-Hmac-SHA256": sig, "X-Shopify-Topic": "orders/create"})
+            assert replay.status_code == 200 and replay.json()["canonical_created"] == 0
             ign = await c.post(url, content=body, headers={"X-Shopify-Hmac-SHA256": sig, "X-Shopify-Topic": "products/update"})
             assert ign.json()["status"] == "ignored"
         async with Session() as db:
-            assert len((await db.execute(select(SourceRecord))).scalars().all()) == 1
+            rows = (await db.execute(select(SourceRecord))).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].delivery_id.startswith("SHOPIFY-WH-")
+    run(go())
+
+
+def test_webhook_preserves_long_shopify_delivery_id(monkeypatch):
+    monkeypatch.setenv("SHOPIFY_WEBHOOK_SECRET", "s3cret")
+    delivery_id = "shopify-delivery-" + "x" * 80
+    body = json.dumps({"id": 78, "created_at": "2024-01-15T10:00:00Z", "total_price": "10.00",
+                       "currency": "USD", "financial_status": "paid"}).encode()
+    sig = base64.b64encode(hmac.new(b"s3cret", body, hashlib.sha256).digest()).decode()
+
+    async def go():
+        Session = await make_session()
+        async with webhook_client(Session) as client:
+            response = await client.post(
+                "/api/ingest/shopify/webhook",
+                content=body,
+                headers={"X-Shopify-Hmac-SHA256": sig, "X-Shopify-Topic": "orders/create",
+                         "X-Shopify-Webhook-Id": delivery_id},
+            )
+            assert response.status_code == 200
+        async with Session() as db:
+            row = (await db.execute(select(SourceRecord))).scalar_one()
+            assert row.delivery_id == delivery_id
     run(go())
 
 

@@ -1,4 +1,5 @@
 """REST endpoints for Shopify integration."""
+import hashlib
 import json
 import logging
 import os
@@ -176,10 +177,13 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     except (KeyError, TypeError) as e:
         raise HTTPException(status_code=400, detail=f"Malformed {topic} payload: {e}")
 
-    delivery_id = (request.headers.get("X-Shopify-Webhook-Id") or f"SHOPIFY-WH-{uuid.uuid4().hex[:12]}")[:36]  # audit object_id is 36 chars
+    delivery_id = request.headers.get("X-Shopify-Webhook-Id")
+    if not delivery_id:
+        delivery_id = f"SHOPIFY-WH-{hashlib.sha256(body).hexdigest()}"
+    audit_id = delivery_id if len(delivery_id) <= 36 else str(uuid.uuid5(uuid.NAMESPACE_URL, delivery_id))
     try:
         stats = await ingest.ingest(db, "Shopify", delivery_id, [record])
-        audit(db, "SHOPIFY_WEBHOOK_RECEIVED", None, "ShopifyWebhook", delivery_id,
+        audit(db, "SHOPIFY_WEBHOOK_RECEIVED", None, "ShopifyWebhook", audit_id,
               f"Webhook {topic} for {record['source_record_id']}: {stats['canonical_created']} created, "
               f"{stats['quarantined']} quarantined", actor="shopify-webhook")
         await db.commit()
