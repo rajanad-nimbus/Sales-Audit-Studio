@@ -407,6 +407,40 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         for recommendation in recommendations:
             recommendations_by_case.setdefault(recommendation.case_id, recommendation)
 
+    pending_workflows_by_case: dict[str, Workflow] = {}
+    incomplete_obligations_by_case: dict[str, ValidationObligation] = {}
+    if req.action == "advance" and cases:
+        resolving_case_ids = [case.id for case in cases if case.status == "Resolving"]
+        if resolving_case_ids:
+            pending_workflows = (await db.execute(
+                select(Workflow).where(
+                    Workflow.case_id.in_(resolving_case_ids), Workflow.state == "Pending",
+                ).order_by(Workflow.case_id, Workflow.created_at, Workflow.id)
+            )).scalars()
+            for workflow in pending_workflows:
+                pending_workflows_by_case.setdefault(workflow.case_id, workflow)
+
+        validation_case_ids = [case.id for case in cases if case.status == "Pending Validation"]
+        if validation_case_ids:
+            obligations = (await db.execute(
+                select(ValidationObligation).where(
+                    ValidationObligation.case_id.in_(validation_case_ids),
+                    ValidationObligation.status != "Complete",
+                ).order_by(ValidationObligation.case_id, ValidationObligation.created_at, ValidationObligation.id)
+            )).scalars()
+            for obligation in obligations:
+                incomplete_obligations_by_case.setdefault(obligation.case_id, obligation)
+
+    validation_workflows: dict[str, Workflow] = {}
+    obligation_workflow_ids = {obligation.workflow_id for obligation in incomplete_obligations_by_case.values()}
+    if req.action == "advance" and obligation_workflow_ids:
+        validation_workflows = {
+            workflow.id: workflow
+            for workflow in (await db.execute(
+                select(Workflow).where(Workflow.id.in_(obligation_workflow_ids))
+            )).scalars()
+        }
+
     approved_rule_codes = None
     ok, skipped = 0, []
     evidence_cache = investigation_service.InvestigationEvidenceCache(db)
@@ -457,14 +491,15 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
             ok += 1
         elif a == "advance":
             if c.status == "Resolving":
-                wf = (await db.execute(select(Workflow).where(Workflow.case_id == c.id, Workflow.state == "Pending"))).scalars().first()
+                wf = pending_workflows_by_case.get(c.id)
                 if wf: nimbus.resolve(db, c, wf); ok += 1
                 else: skip(c, "no pending workflow")
             elif c.status == "Pending Validation":
-                ob = (await db.execute(select(ValidationObligation).where(
-                    ValidationObligation.case_id == c.id, ValidationObligation.status != "Complete"))).scalars().first()
+                ob = incomplete_obligations_by_case.get(c.id)
                 if ob:
-                    wf = (await db.execute(select(Workflow).where(Workflow.id == ob.workflow_id))).scalar_one()
+                    wf = validation_workflows.get(ob.workflow_id)
+                    if wf is None:
+                        raise HTTPException(status_code=409, detail="Validation workflow no longer exists")
                     # A bulk transition never substitutes for fresh validation evidence.
                     nimbus.validate(db, c, wf, ob, [])
                     skip(c, "validation waiting: fresh source evidence required, validate individually")

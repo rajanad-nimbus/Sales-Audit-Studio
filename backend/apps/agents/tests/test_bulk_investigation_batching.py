@@ -7,7 +7,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.agents import action_center
-from models import Base, Case, Exception as DBException, Recommendation
+from models import (
+    Base,
+    Case,
+    Exception as DBException,
+    Recommendation,
+    ValidationObligation,
+    Workflow,
+)
 
 
 def test_bulk_investigation_fetches_exceptions_once_and_groups_them_by_case(monkeypatch):
@@ -139,6 +146,117 @@ def test_bulk_approval_batches_recommendations_and_refreshes_ontology_once(monke
                 assert result["ok"] == 3
                 assert recommendation_queries == 1
                 assert refresh_calls == 1
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_bulk_advance_batches_workflows_and_selects_oldest_pending_records(monkeypatch):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                case_states = {
+                    "resolving-1": "Resolving",
+                    "resolving-2": "Resolving",
+                    "validating-1": "Pending Validation",
+                    "validating-2": "Pending Validation",
+                }
+                for case_id, status in case_states.items():
+                    db.add(Case(
+                        id=case_id,
+                        case_number=case_id.upper(),
+                        case_type="test",
+                        business_date="2026-10-01",
+                        store_id="S1",
+                        status=status,
+                    ))
+                await db.flush()
+
+                for case_id in case_states:
+                    recommendation_id = f"rec-{case_id}"
+                    db.add(Recommendation(
+                        id=recommendation_id,
+                        case_id=case_id,
+                        investigation_id=f"inv-{case_id}",
+                        disposition_type="Correction",
+                        action_class="test",
+                        expected_workflow="review",
+                        financial_impact=Decimal("0"),
+                        confidence="High",
+                    ))
+                    await db.flush()
+                    workflow_ids = {
+                        "resolving-1": ["wf-r1-z", "wf-r1-a"],
+                        "resolving-2": ["wf-r2"],
+                        "validating-1": ["wf-v1-a", "wf-v1-z"],
+                        "validating-2": ["wf-v2"],
+                    }[case_id]
+                    for workflow_id in workflow_ids:
+                        db.add(Workflow(
+                            id=workflow_id,
+                            case_id=case_id,
+                            recommendation_id=recommendation_id,
+                            workflow_type="Correction",
+                            state="Pending",
+                            definition_version="v1",
+                            current_step="Awaiting action",
+                        ))
+                    if case_id.startswith("validating"):
+                        for workflow_id in workflow_ids:
+                            obligation_id = workflow_id.replace("wf-", "ob-")
+                            db.add(ValidationObligation(
+                                id=obligation_id,
+                                case_id=case_id,
+                                workflow_id=workflow_id,
+                                expected_observation="Updated source record",
+                                due_window_hours=24,
+                                verification_rule="Fresh source evidence",
+                            ))
+                await db.commit()
+
+                resolved = []
+                validated = []
+
+                def fake_resolve(_db, case, workflow):
+                    resolved.append((case.id, workflow.id))
+
+                def fake_validate(_db, case, workflow, obligation, evidence):
+                    validated.append((case.id, workflow.id, obligation.id, evidence))
+
+                monkeypatch.setattr(action_center.nimbus, "resolve", fake_resolve)
+                monkeypatch.setattr(action_center.nimbus, "validate", fake_validate)
+                workflow_queries = 0
+                obligation_queries = 0
+
+                def count_transition_queries(_connection, _cursor, statement, _parameters, _context, _executemany):
+                    nonlocal workflow_queries, obligation_queries
+                    normalized = statement.upper()
+                    workflow_queries += "FROM WORKFLOWS" in normalized
+                    obligation_queries += "FROM VALIDATION_OBLIGATIONS" in normalized
+
+                event.listen(engine.sync_engine, "before_cursor_execute", count_transition_queries)
+                try:
+                    result = await action_center.bulk(
+                        action_center.BulkRequest(
+                            action="advance", ids=list(case_states),
+                        ),
+                        db,
+                        {"user": "finance", "role": "finance"},
+                    )
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", count_transition_queries)
+
+                assert result["ok"] == 2 and result["skipped_count"] == 2
+                assert workflow_queries == 2 and obligation_queries == 1
+                assert resolved == [("resolving-1", "wf-r1-z"), ("resolving-2", "wf-r2")]
+                assert validated == [
+                    ("validating-1", "wf-v1-a", "ob-v1-a", []),
+                    ("validating-2", "wf-v2", "ob-v2", []),
+                ]
         finally:
             await engine.dispose()
 
