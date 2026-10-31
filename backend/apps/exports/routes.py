@@ -1,13 +1,7 @@
 """Downstream export: destinations, incremental idempotent batches, signed delivery, acknowledgment tracking."""
-import csv
-import asyncio
 import hashlib
-import hmac
-import io
-import json
 import os
 import re
-import tempfile
 import uuid
 from datetime import timedelta, timezone
 from pathlib import Path
@@ -26,6 +20,13 @@ from database import get_db
 from apps.audit.models import AuditEvent
 from model_base import utcnow
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem, TestSinkReceipt
+from apps.exports.delivery import (
+    deliver as perform_delivery,
+    render as render,
+    sign as sign,
+    sign_envelope as sign_envelope,
+    valid_signature as valid_signature,
+)
 from apps.exports.schemas import (
     AckIn,
     DestIn,
@@ -75,16 +76,6 @@ async def require_test_sink_enabled() -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
-def sign(secret: str, body: bytes) -> str:
-    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-
-
-def sign_envelope(secret: str, dataset: str, idempotency_key: str, body: bytes) -> str:
-    """Sign canonical delivery metadata and the payload digest (protocol v1)."""
-    message = f"nimbus-export-v1\n{dataset}\n{idempotency_key}\n{hashlib.sha256(body).hexdigest()}".encode("ascii")
-    return "sha256=" + hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
-
-
 def _is_duplicate_destination_name(exc: IntegrityError) -> bool:
     return violates_unique_constraint(
         exc,
@@ -113,10 +104,6 @@ def _is_sink_receipt_conflict(exc: IntegrityError) -> bool:
     )
 
 
-def valid_signature(actual: str | None, expected: str) -> bool:
-    return bool(actual and re.fullmatch(r"sha256=[0-9a-f]{64}", actual) and hmac.compare_digest(actual, expected))
-
-
 def dest_view(d: ExportDestination) -> dict:
     cfg = dict(d.config or {})
     if "secret" in cfg:
@@ -134,115 +121,21 @@ def batch_view(b: ExportBatch, dest_name: str | None = None) -> dict:
             "attempt_started_at": b.attempt_started_at}
 
 
-async def mark_delivered(db, batch_id: str) -> None:
-    await db.execute(update(ExportItem).where(ExportItem.batch_id == batch_id, ExportItem.state == "Pending")
-                     .values(state="Delivered", delivered_at=utcnow()))
+async def deliver(
+    destination: ExportDestination,
+    batch: ExportBatch,
+    client: httpx.AsyncClient | None = None,
+) -> None:
+    """Run delivery using the configured export root and shared HTTP client."""
+    await perform_delivery(destination, batch, client, EXPORT_DIR)
 
 
-def render(dest: ExportDestination, dataset: str, records: list[dict], head: str | None, key: str, summary: dict | None = None) -> bytes:
-    if dest.format == "csv":
-        buf = io.StringIO()
-        if records:
-            w = csv.DictWriter(buf, fieldnames=list(records[0].keys()))
-            w.writeheader()
-            w.writerows(records)
-        return buf.getvalue().encode()
-    return json.dumps({"schema_version": "1.0", "dataset": dataset, "destination": dest.name, "idempotency_key": key,
-                       "generated_at": utcnow().isoformat(), "audit_head_hash": head, "count": len(records),
-                       **({"summary": summary} if summary else {}), "records": records}, default=str, indent=1).encode()
-
-
-def write_file_delivery(dest: ExportDestination, batch: ExportBatch, body: bytes) -> str:
-    """Publish the checksum first and atomically expose the complete payload last."""
-    folder_name = re.sub(r"[^A-Za-z0-9_.-]", "_", dest.name)
-    if folder_name in {"", ".", ".."}:
-        raise ValueError("Invalid destination directory name")
-    root = EXPORT_DIR.resolve()
-    folder = (root / folder_name).resolve()
-    if not folder.is_relative_to(root) or folder == root:
-        raise ValueError("Destination directory is outside the export root")
-    folder.mkdir(parents=True, exist_ok=True)
-    name = f"{batch.dataset}-{batch.id}.{dest.format}"
-    temporary_paths = []
-    try:
-        for suffix, contents in ((".sha256", f"{batch.payload_hash}  {name}\n".encode()), ("", body)):
-            with tempfile.NamedTemporaryFile(dir=folder, prefix=".nimbus-", delete=False) as temporary:
-                temporary_paths.append(Path(temporary.name))
-                temporary.write(contents)
-            os.replace(temporary_paths[-1], folder / (name + suffix))
-        return str(folder / name)
-    finally:
-        for temporary_path in temporary_paths:
-            temporary_path.unlink(missing_ok=True)
-
-
-async def deliver(dest: ExportDestination, b: ExportBatch, client: httpx.AsyncClient | None = None) -> None:
-    try:
-        body = verified_export_body(b)
-        if dest.kind == "webhook":
-            await deliver_webhook(dest, b, body, client)
-        else:
-            await deliver_file(dest, b, body)
-        if b.status in ("Sent", "Acknowledged"):
-            b.sent_at, b.error = utcnow(), None
-    except Exception as e:
-        b.status, b.error = "Failed", f"{type(e).__name__}: {str(e)[:200]}"
-
-
-def verified_export_body(batch: ExportBatch) -> bytes:
-    """Return the persisted payload only if its digest matches the immutable batch."""
-    if batch.payload is None or not batch.payload_hash:
-        raise ValueError("Export payload or hash is missing")
-    body = batch.payload.encode()
-    digest = hashlib.sha256(body).hexdigest()
-    if not hmac.compare_digest(digest, batch.payload_hash):
-        raise ValueError("Export payload does not match its recorded hash")
-    return body
-
-
-async def deliver_webhook(destination: ExportDestination, batch: ExportBatch, body: bytes,
-                          client: httpx.AsyncClient | None) -> None:
-    """Send a signed webhook and map receiver responses onto batch state."""
-    config = destination.config or {}
-    secret = config.get("secret", "")
-    headers = {
-        "Content-Type": "text/csv" if destination.format == "csv" else "application/json",
-        "X-Nimbus-Idempotency-Key": batch.idempotency_key,
-        "X-Nimbus-Dataset": batch.dataset,
-        "X-Nimbus-Signature": sign(secret, body),
-        "X-Nimbus-Envelope-Signature": sign_envelope(
-            secret, batch.dataset, batch.idempotency_key, body),
-    }
-    if client is None:
-        async with httpx.AsyncClient(timeout=15) as owned_client:
-            response = await owned_client.post(config["url"], content=body, headers=headers)
-    else:
-        response = await client.post(config["url"], content=body, headers=headers)
-    batch.response_code = response.status_code
-    if response.status_code in (200, 201):
-        batch.status, batch.acked_at = "Acknowledged", utcnow()
-        batch.response_ref = response_reference(response)
-    elif response.status_code == 202:
-        batch.status = "Sent"
-    else:
-        batch.status, batch.error = "Failed", f"HTTP {response.status_code}: {response.text[:200]}"
-
-
-def response_reference(response: httpx.Response) -> str | None:
-    """Extract a bounded receiver reference from a successful JSON response."""
-    try:
-        response_body = response.json()
-    except ValueError:
-        return None
-    if not isinstance(response_body, dict):
-        return None
-    return str(response_body.get("reference", ""))[:255] or None
-
-
-async def deliver_file(destination: ExportDestination, batch: ExportBatch, body: bytes) -> None:
-    """Publish a verified payload and checksum through atomic file replacement."""
-    batch.response_ref = await asyncio.to_thread(write_file_delivery, destination, batch, body)
-    batch.status = "Sent"
+async def mark_delivered(db: AsyncSession, batch_id: str) -> None:
+    await db.execute(
+        update(ExportItem)
+        .where(ExportItem.batch_id == batch_id, ExportItem.state == "Pending")
+        .values(state="Delivered", delivered_at=utcnow())
+    )
 
 
 async def finish_delivery(db: AsyncSession, batch: ExportBatch, dest_name: str, *, retrying: bool) -> dict:
