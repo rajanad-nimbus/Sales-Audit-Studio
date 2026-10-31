@@ -163,6 +163,22 @@ def test_webhook_acknowledges_success_even_when_response_reference_is_unusable(m
     assert batch.response_ref is None
 
 
+@pytest.mark.parametrize("status_code", [200, 201, 204, 207])
+def test_webhook_acknowledges_successful_responses_without_pending_work(monkeypatch, status_code):
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+
+    class Client:
+        async def post(self, *_args, **_kwargs):
+            return type("Response", (), {"status_code": status_code, "json": lambda _self: {}})()
+
+    asyncio.run(routes.deliver(destination, batch, Client()))
+
+    assert batch.status == "Acknowledged"
+    assert batch.acked_at is not None
+
+
 @pytest.mark.parametrize("secret", [None, "", " " * 32, "too-short"])
 def test_webhook_with_invalid_persisted_secret_fails_closed(monkeypatch, secret):
     destination, batch = make_delivery()

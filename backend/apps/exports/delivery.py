@@ -193,7 +193,7 @@ async def deliver_webhook(
     else:
         response = await client.post(config["url"], content=body, headers=headers)
     batch.response_code = response.status_code
-    if response.status_code in (200, 201):
+    if 200 <= response.status_code < 300 and response.status_code != 202:
         batch.status, batch.acked_at = "Acknowledged", utcnow()
         batch.response_ref = response_reference(response)
     elif response.status_code == 202:
