@@ -259,6 +259,7 @@ async def tracking_page(
                     state_order,
                     rows.c.business_date,
                     rows.c.record_ref,
+                    rows.c.object_id,
                 )
                 .offset((page - 1) * page_size)
                 .limit(page_size)
