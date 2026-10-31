@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -15,7 +16,7 @@ from apps.cash.routes import (
     expected_cash_deposit,
     record_deposit,
 )
-from models import Base, CanonicalTransaction, StoreDay
+from models import AuditEvent, Base, CanonicalTransaction, StoreDay
 
 
 def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_register_wide():
@@ -79,6 +80,19 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                 assert deposit["expected_amount"] == Decimal("30.00")
                 assert deposit["variance_amount"] == Decimal("0.00")
                 assert deposit["status"] == "Balanced"
+                events = (await db.execute(
+                    select(AuditEvent).where(
+                        AuditEvent.object_id.in_([cashier_one["id"], cashier_two["id"], register["id"], deposit["id"]])
+                    )
+                )).scalars().all()
+                assert {event.event_type for event in events} == {
+                    "CASH_CONTROL_DECLARED",
+                    "CASH_DEPOSIT_RECORDED",
+                }
+                deposit_event = next(event for event in events if event.object_id == deposit["id"])
+                assert deposit_event.actor == finance["user"]
+                assert deposit_event.after_state["deposited_amount"] == "30.00"
+                assert deposit_event.after_state["status"] == "Balanced"
         finally:
             await engine.dispose()
 
@@ -109,6 +123,10 @@ def test_duplicate_deposit_reference_is_conflict():
 
                 assert error.value.status_code == 409
                 assert error.value.detail == "Deposit reference already exists"
+                audit_rows = (await db.execute(
+                    select(AuditEvent).where(AuditEvent.event_type == "CASH_DEPOSIT_RECORDED")
+                )).scalars().all()
+                assert len(audit_rows) == 1
         finally:
             await engine.dispose()
 

@@ -17,6 +17,7 @@ from apps.security.authentication import require_role
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from apps.cash.models import CashControl, CashDeposit
+from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/cash-controls", tags=["Cash office"])
 DEFAULT_PAGE_SIZE = 100
@@ -202,7 +203,33 @@ async def declare_cash(body: CashControlBody, db: AsyncSession = Depends(get_db)
     if min(body.declared_cash, body.paid_out, body.safe_drop) < 0: raise HTTPException(status_code=422, detail="Cash amounts must be non-negative")
     await require_writable_store_day(db, body.store_id, body.business_date)
     row = CashControl(id=str(uuid.uuid4()), **body.model_dump(), declared_by=user["user"] or "ontology.user")
-    db.add(row); await db.flush(); await calculate(db, row); await db.commit(); await db.refresh(row)
+    db.add(row)
+    await db.flush()
+    await calculate(db, row)
+    audit(
+        db,
+        "CASH_CONTROL_DECLARED",
+        None,
+        "CashControl",
+        row.id,
+        f"Cash control declared for {row.store_id}/{row.business_date}",
+        actor=row.declared_by,
+        after={
+            "store_id": row.store_id,
+            "business_date": row.business_date,
+            "register_id": row.register_id,
+            "cashier_id": row.cashier_id,
+            "tender_type": row.tender_type,
+            "declared_cash": str(row.declared_cash),
+            "paid_out": str(row.paid_out),
+            "safe_drop": str(row.safe_drop),
+            "expected_amount": str(row.expected_amount),
+            "variance_amount": str(row.variance_amount),
+            "status": row.status,
+        },
+    )
+    await db.commit()
+    await db.refresh(row)
     return view(row)
 
 @router.get("/deposits")
@@ -262,7 +289,26 @@ async def record_deposit(body: CashDepositBody, db: AsyncSession = Depends(get_d
     variance = expected - body.deposited_amount
     row = CashDeposit(id=str(uuid.uuid4()), **body.model_dump(), expected_amount=expected, variance_amount=variance, status="Balanced" if variance == 0 else "Over/Short", recorded_by=user["user"] or "ontology.user")
     db.add(row)
-    try: await db.commit()
+    audit(
+        db,
+        "CASH_DEPOSIT_RECORDED",
+        None,
+        "CashDeposit",
+        row.id,
+        f"Cash deposit recorded for {row.store_id}/{row.business_date}",
+        actor=row.recorded_by,
+        after={
+            "store_id": row.store_id,
+            "business_date": row.business_date,
+            "deposit_reference": row.deposit_reference,
+            "deposited_amount": str(row.deposited_amount),
+            "expected_amount": str(row.expected_amount),
+            "variance_amount": str(row.variance_amount),
+            "status": row.status,
+        },
+    )
+    try:
+        await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         if _is_duplicate_deposit_reference(exc):
