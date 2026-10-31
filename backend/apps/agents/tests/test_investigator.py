@@ -398,6 +398,65 @@ def test_agent_supported_ignores_malformed_result_shapes():
     assert not agent_supported({"hypotheses": [None, "unexpected"]})
 
 
+def test_eligible_endpoint_returns_bounded_highest_exposure_cases(monkeypatch):
+    async def go():
+        from apps.agents import routes
+
+        Session, _case, _exc, _ids = await seed()
+        now = datetime.now(timezone.utc)
+        monkeypatch.setattr(routes, "MAX_ELIGIBLE_CASES", 1)
+        async with Session() as db:
+            first = await db.get(Case, "c1")
+            first.status = "In Review"
+            first.evidence_completeness = 100
+            first.total_exception_amount = Decimal("40")
+            first.total_exposure = Decimal("100")
+            first.currency = "USD"
+            db.add(Case(
+                id="c2",
+                case_number="CASE-2",
+                case_type="Timing",
+                business_date="2026-10-01",
+                store_id="S1",
+                status="In Review",
+                evidence_completeness=100,
+                total_exception_amount=Decimal("30"),
+                total_exposure=Decimal("200"),
+                currency="USD",
+            ))
+            for case_id in ("c1", "c2"):
+                db.add(Recommendation(
+                    id=f"recommendation-{case_id}",
+                    case_id=case_id,
+                    investigation_id=f"investigation-{case_id}",
+                    disposition_type="Timing",
+                    action_class="test",
+                    expected_workflow="review",
+                    financial_impact=Decimal("0"),
+                    confidence="High",
+                ))
+                db.add(AuditEvent(
+                    id=f"run-{case_id}",
+                    event_type="AGENT_RUN",
+                    actor="investigation-agent",
+                    object_type="Case",
+                    object_id=case_id,
+                    case_id=case_id,
+                    action_description="Agent supported a grounded timing finding",
+                    after_state={"result": {"hypotheses": [{"verdict": "supported", "cited_ids": ["source"]}]}},
+                    created_at=now,
+                ))
+            await db.commit()
+
+            result = await routes.eligible_cases(db, {"role": "finance"})
+
+            assert result["count"] == 2
+            assert result["truncated"] is True
+            assert [case["case_id"] for case in result["cases"]] == ["c2"]
+
+    run(go())
+
+
 def test_eligibility_requires_all_permit_conditions_and_grounded_finding():
     from decimal import Decimal as D
     from apps.agents.routes import eligible

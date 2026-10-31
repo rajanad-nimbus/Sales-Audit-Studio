@@ -19,6 +19,7 @@ from apps.cases.models import (
 )
 
 router = APIRouter(prefix="/api/agent")
+MAX_ELIGIBLE_CASES = 100
 
 
 def agent_supported(result: dict | None) -> bool:
@@ -146,13 +147,6 @@ async def eligible_cases(db: AsyncSession = Depends(get_db), _: dict = Depends(r
             order_by=(AuditEvent.created_at.desc(), AuditEvent.id.desc()),
         ).label("row_number"),
     ).where(AuditEvent.event_type == "AGENT_RUN", AuditEvent.case_id.in_(review_cases)).subquery()
-    run_rows = (await db.execute(select(ranked_runs.c.case_id, ranked_runs.c.after_state)
-                                 .where(ranked_runs.c.row_number == 1))).all()
-    runs = {case_id: (state or {}).get("result") for case_id, state in run_rows}
-    if not runs:
-        return {"count": 0, "cases": [],
-                "how_to_approve": "POST /api/action-center/bulk with action=approve and these case ids"}
-
     ranked_recommendations = select(
         Recommendation.id.label("recommendation_id"),
         Recommendation.case_id.label("case_id"),
@@ -165,11 +159,33 @@ async def eligible_cases(db: AsyncSession = Depends(get_db), _: dict = Depends(r
         ranked_recommendations,
         (ranked_recommendations.c.case_id == Case.id) & (ranked_recommendations.c.row_number == 1),
     ).join(Recommendation, Recommendation.id == ranked_recommendations.c.recommendation_id).where(
-        Case.status == "In Review", Case.id.in_(runs))
-    rows = (await db.execute(scope.restrict(query, _, Case.store_id))).all()
-    out = [{"case_id": c.id, "case_number": c.case_number, "amount": str(c.total_exception_amount), "currency": c.currency,
-            "disposition": r.disposition_type} for c, r in rows if eligible(c, r, runs[c.id])]
-    return {"count": len(out), "cases": out,
+        Case.status == "In Review",
+    ).join(
+        ranked_runs,
+        (ranked_runs.c.case_id == Case.id) & (ranked_runs.c.row_number == 1),
+    ).add_columns(ranked_runs.c.after_state).order_by(
+        Case.total_exposure.desc(), Case.id,
+    )
+    result = await db.stream(scope.restrict(query, _, Case.store_id).execution_options(yield_per=500))
+    out = []
+    eligible_count = 0
+    try:
+        async for case, recommendation, state in result:
+            agent_result = state.get("result") if isinstance(state, dict) else None
+            if not eligible(case, recommendation, agent_result):
+                continue
+            eligible_count += 1
+            if len(out) < MAX_ELIGIBLE_CASES:
+                out.append({
+                    "case_id": case.id,
+                    "case_number": case.case_number,
+                    "amount": str(case.total_exception_amount),
+                    "currency": case.currency,
+                    "disposition": recommendation.disposition_type,
+                })
+    finally:
+        await result.close()
+    return {"count": eligible_count, "cases": out, "truncated": eligible_count > len(out),
             "how_to_approve": "POST /api/action-center/bulk with action=approve and these case ids"}
 
 
