@@ -14,6 +14,25 @@ from apps.exports import routes
 from models import Base, Case, ExportBatch, ExportDestination, TestSinkReceipt as SinkReceipt
 
 
+def test_finance_destination_view_redacts_webhook_url_credentials():
+    destination = ExportDestination(
+        id="destination", name="ERP", kind="webhook", format="json",
+        config={
+            "url": "https://username:password@erp.example.com/inbound/token?api_key=private",
+            "secret": "signing-secret",
+        },
+    )
+
+    finance_view = routes.dest_view(destination)
+    it_view = routes.dest_view(destination, reveal_url=True)
+
+    assert finance_view["config"] == {
+        "url": "https://erp.example.com", "secret": "••••••",
+    }
+    assert it_view["config"]["url"] == destination.config["url"]
+    assert it_view["config"]["secret"] == "••••••"
+
+
 def request_for(body: bytes) -> Request:
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}

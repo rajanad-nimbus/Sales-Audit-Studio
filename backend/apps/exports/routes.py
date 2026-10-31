@@ -6,6 +6,7 @@ import uuid
 from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -109,11 +110,27 @@ def _is_sink_receipt_conflict(exc: IntegrityError) -> bool:
     )
 
 
-def dest_view(d: ExportDestination) -> dict:
+def dest_view(d: ExportDestination, *, reveal_url: bool = False) -> dict:
     cfg = dict(d.config or {})
     if "secret" in cfg:
         cfg["secret"] = "••••••" if cfg["secret"] else ""
+    if cfg.get("url") and not reveal_url:
+        cfg["url"] = webhook_origin(str(cfg["url"]))
     return {"id": d.id, "name": d.name, "kind": d.kind, "config": cfg, "format": d.format, "enabled": d.enabled}
+
+
+def webhook_origin(url: str) -> str:
+    """Expose only the webhook origin when the caller cannot manage destination credentials."""
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        if parsed.scheme not in {"http", "https"} or not hostname:
+            return "Webhook configured"
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        port = f":{parsed.port}" if parsed.port is not None else ""
+    except ValueError:
+        return "Webhook configured"
+    return f"{parsed.scheme}://{host}{port}"
 
 
 def batch_view(b: ExportBatch, dest_name: str | None = None) -> dict:
@@ -198,9 +215,10 @@ async def ensure_defaults(db):
 
 
 @router.get("/destinations")
-async def list_destinations(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
+async def list_destinations(db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
     await ensure_defaults(db)
-    return [dest_view(d) for d in (await db.execute(select(ExportDestination).order_by(ExportDestination.name))).scalars().all()]
+    reveal_url = user["role"] in {"it", "admin"}
+    return [dest_view(d, reveal_url=reveal_url) for d in (await db.execute(select(ExportDestination).order_by(ExportDestination.name))).scalars().all()]
 
 
 @router.post("/destinations")
@@ -221,7 +239,7 @@ async def create_destination(body: DestIn, db: AsyncSession = Depends(get_db), u
         if _is_duplicate_destination_name(exc):
             raise HTTPException(status_code=409, detail="A destination with that name exists") from exc
         raise
-    return dest_view(d)
+    return dest_view(d, reveal_url=True)
 
 
 @router.post("/destinations/{dest_id}/toggle")
@@ -233,7 +251,7 @@ async def toggle_destination(dest_id: str, db: AsyncSession = Depends(get_db), u
     audit(db, "EXPORT_DESTINATION_TOGGLED", None, "ExportDestination", d.id, f"'{d.name}' {'enabled' if d.enabled else 'disabled'}",
           actor=user["user"] or "demo.user")
     await db.commit()
-    return dest_view(d)
+    return dest_view(d, reveal_url=True)
 
 
 @router.post("/run")
