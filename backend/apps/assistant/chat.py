@@ -1,8 +1,9 @@
 """Grounded assistant: answers come from live data (cases, evidence, policy, ontology, connectors, batch, audit). Read-only."""
 import re
+from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from apps.security import scope
 from integrations.ontology import ontology
@@ -63,6 +64,8 @@ async def case_context(db, c: Case) -> dict:
 
 async def build_context(db, case_id: str | None, message: str = "", user: dict | None = None) -> dict:
     user = user or {}
+    now = datetime.now(timezone.utc)
+    decision_visible = or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now)
     by_status = dict((await db.execute(scope.restrict(select(Case.status, func.count()).group_by(Case.status), user, Case.store_id))).all())
     amounts = (await db.execute(scope.restrict(select(Case.currency, func.sum(Case.total_exception_amount),
         func.sum(Case.total_exposure)).where(Case.status != "Closed", Case.amount_needs_review.is_(False)).group_by(Case.currency), user, Case.store_id))).all()
@@ -70,13 +73,16 @@ async def build_context(db, case_id: str | None, message: str = "", user: dict |
         Case.status != "Closed", Case.amount_needs_review.is_(True)), user, Case.store_id))).scalar() or 0
     decision_counts = (await db.execute(scope.restrict(
         select(Case.currency, func.count())
-        .where(Case.status == "In Review")
+        .where(Case.status == "In Review", decision_visible)
         .group_by(Case.currency),
         user,
         Case.store_id,
     ))).all()
-    needs = (await db.execute(scope.restrict(select(Case).where(Case.status == "In Review"), user, Case.store_id)
-                              .order_by(Case.total_exposure.desc()).limit(8))).scalars().all()
+    needs = (await db.execute(scope.restrict(
+        select(Case).where(Case.status == "In Review", decision_visible),
+        user,
+        Case.store_id,
+    ).order_by(Case.total_exposure.desc(), Case.id).limit(8))).scalars().all()
     batch = (await db.execute(select(BatchRun).where(BatchRun.status == "Succeeded").order_by(BatchRun.finished_at.desc()).limit(1))).scalars().first()
     ctx = {
         "cases_by_status": by_status,

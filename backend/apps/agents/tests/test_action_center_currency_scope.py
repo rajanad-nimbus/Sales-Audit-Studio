@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -102,10 +103,12 @@ def test_assistant_counts_all_decisions_and_checks_currency_beyond_context_limit
                     Case(
                         id=f"case-{index}", case_number=f"CASE-{index}", case_type="Test",
                         business_date="2026-10-01", store_id="S1", status="In Review",
-                        currency="USD" if index < 8 else "EUR",
+                        currency="USD" if index < 8 else "EUR" if index < 10 else "CAD",
                         total_exposure=Decimal(100 - index),
+                        snoozed_until=(datetime.now(timezone.utc) + timedelta(days=1)
+                                       if index in (8, 10) else None),
                     )
-                    for index in range(10)
+                    for index in range(11)
                 ])
                 await db.commit()
 
@@ -114,10 +117,10 @@ def test_assistant_counts_all_decisions_and_checks_currency_beyond_context_limit
                 decision_answer = chat.rule_answer("What needs my decision?", context)["answer"]
                 largest_answer = chat.rule_answer("What is the biggest exposure?", context)["answer"]
 
-                assert context["needs_decision_count"] == 10
+                assert context["needs_decision_count"] == 9
                 assert len(context["needs_decision"]) == 8
                 assert set(context["needs_decision_currencies"]) == {"USD", "EUR"}
-                assert "10 case(s) are waiting" in decision_answer
+                assert "9 case(s) are waiting" in decision_answer
                 assert "cannot be ranked across different or unknown currencies" in largest_answer
         finally:
             await engine.dispose()
