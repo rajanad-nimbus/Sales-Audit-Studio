@@ -319,45 +319,56 @@ class BulkRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_action_parameters(self):
-        allowed_params = {
-            "assign": {"assignee"},
-            "priority": {"priority"},
-            "snooze": {"hours"},
-        }.get(self.action, set())
-        unexpected_params = self.params.keys() - allowed_params
-        if unexpected_params:
-            raise ValueError(f"unsupported parameters for {self.action}: {', '.join(sorted(unexpected_params))}")
-
-        if self.action == "snooze":
-            hours = self.params.get("hours", 24)
-            try:
-                valid_hours = (
-                    not isinstance(hours, bool)
-                    and isinstance(hours, (int, float))
-                    and math.isfinite(float(hours))
-                    and 0 < hours <= 8760
-                )
-            except (OverflowError, ValueError):
-                valid_hours = False
-            if not valid_hours:
-                raise ValueError("snooze hours must be greater than zero and no more than one year")
-        if self.action == "assign":
-            assignee = self.params.get("assignee", "me")
-            if not isinstance(assignee, str) or not assignee.strip() or len(assignee) > 255:
-                raise ValueError("assignee must be a nonempty string of at most 255 characters")
-        if self.action == "priority":
-            priority = self.params.get("priority")
-            if not isinstance(priority, str) or priority not in nimbus.SLA_HOURS:
-                raise ValueError("priority must be a supported priority")
+        _validate_bulk_action_params(self.action, self.params)
         if self.select_all is not None:
-            for key, value in self.select_all.items():
-                if key not in FILTER_FIELDS:
-                    raise ValueError(f"unsupported select_all filter: {key}")
-                if len(key) > 50 or (isinstance(value, str) and len(value) > 500):
-                    raise ValueError("select_all filter keys and values exceed the supported length")
-                if value is not None and not isinstance(value, str):
-                    raise ValueError(f"select_all filter {key} must be a string")
+            _validate_select_all_filters(self.select_all)
         return self
+
+
+def _validate_bulk_action_params(action: str, params: dict) -> None:
+    allowed_params = {
+        "assign": {"assignee"},
+        "priority": {"priority"},
+        "snooze": {"hours"},
+    }.get(action, set())
+    unexpected_params = params.keys() - allowed_params
+    if unexpected_params:
+        raise ValueError(f"unsupported parameters for {action}: {', '.join(sorted(unexpected_params))}")
+
+    if action == "snooze":
+        _validate_snooze_hours(params.get("hours", 24))
+    elif action == "assign":
+        assignee = params.get("assignee", "me")
+        if not isinstance(assignee, str) or not assignee.strip() or len(assignee) > 255:
+            raise ValueError("assignee must be a nonempty string of at most 255 characters")
+    elif action == "priority":
+        priority = params.get("priority")
+        if not isinstance(priority, str) or priority not in nimbus.SLA_HOURS:
+            raise ValueError("priority must be a supported priority")
+
+
+def _validate_snooze_hours(hours: object) -> None:
+    try:
+        valid = (
+            not isinstance(hours, bool)
+            and isinstance(hours, (int, float))
+            and math.isfinite(float(hours))
+            and 0 < hours <= 8760
+        )
+    except (OverflowError, ValueError):
+        valid = False
+    if not valid:
+        raise ValueError("snooze hours must be greater than zero and no more than one year")
+
+
+def _validate_select_all_filters(filters: dict[str, object]) -> None:
+    for key, value in filters.items():
+        if key not in FILTER_FIELDS:
+            raise ValueError(f"unsupported select_all filter: {key}")
+        if len(key) > 50 or (isinstance(value, str) and len(value) > 500):
+            raise ValueError("select_all filter keys and values exceed the supported length")
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"select_all filter {key} must be a string")
 
 
 @router.post("/bulk")
