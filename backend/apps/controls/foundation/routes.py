@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
+from apps.database_errors import violates_unique_constraint
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from database import get_db
 from models import FoundationReference, utcnow
@@ -24,6 +25,14 @@ class ReferenceBody(BaseModel):
 def view(row: FoundationReference):
     return {"id": row.id, "category": row.category, "code": row.code, "name": row.name,
             "active": row.active, "attributes": row.attributes, "updated_by": row.updated_by, "updated_at": row.updated_at}
+
+
+def _is_duplicate_reference_code(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"uq_foundation_reference_category_code"},
+        sqlite_messages={"UNIQUE constraint failed: foundation_references.category, foundation_references.code"},
+    )
 
 @router.get("")
 async def list_references(
@@ -73,7 +82,9 @@ async def create_reference(body: ReferenceBody, db: AsyncSession = Depends(get_d
     try: await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Reference code already exists in this category") from exc
+        if _is_duplicate_reference_code(exc):
+            raise HTTPException(status_code=409, detail="Reference code already exists in this category") from exc
+        raise
     await db.refresh(row); return view(row)
 
 @router.put("/{reference_id}")
@@ -90,4 +101,12 @@ async def update_reference(reference_id: str, body: ReferenceBody, db: AsyncSess
         stores = ({row.code} if row.category == "Store" else set()) | ({body.code.strip()} if body.category == "Store" else set())
         await invalidate_configuration(db, actor=user["user"] or "ontology.user", reason="Store location traits changed", stores=stores)
     row.category, row.code, row.name, row.active, row.attributes, row.updated_by, row.updated_at = body.category, body.code.strip(), body.name.strip(), body.active, body.attributes, user["user"] or "ontology.user", utcnow()
-    await db.commit(); await db.refresh(row); return view(row)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if _is_duplicate_reference_code(exc):
+            raise HTTPException(status_code=409, detail="Reference code already exists in this category") from exc
+        raise
+    await db.refresh(row)
+    return view(row)
