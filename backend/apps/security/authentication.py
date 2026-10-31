@@ -53,7 +53,15 @@ async def current_user(request: Request, authorization: str | None = Header(defa
         return verified_user
     if not ONTOLOGY_AUTH_URL:
         raise HTTPException(status_code=503, detail="Ontology authentication is not configured")
-    headers = {}
+    headers = identity_request_headers(request, authorization)
+    response = await fetch_verified_identity(request, headers)
+    identity = parse_identity_response(response)
+    return normalize_identity(identity, request)
+
+
+def identity_request_headers(request: Request, authorization: str | None) -> dict[str, str]:
+    """Choose the explicitly supplied bearer token or shared Ontology session cookie."""
+    headers: dict[str, str] = {}
     if authorization and authorization.lower().startswith("bearer "):
         headers["Authorization"] = authorization
     elif session := request.cookies.get("app_session_id"):
@@ -63,6 +71,11 @@ async def current_user(request: Request, authorization: str | None = Header(defa
     else:
         raise HTTPException(status_code=401, detail="Sign in through Ontology Studio or provide its bearer token",
                             headers={"WWW-Authenticate": "Bearer"})
+    return headers
+
+
+async def fetch_verified_identity(request: Request, headers: dict[str, str]) -> httpx.Response:
+    """Call the configured identity endpoint using the app-scoped pooled client when available."""
     try:
         app = request.scope.get("app")
         client = getattr(getattr(app, "state", None), "identity_http_client", None)
@@ -78,33 +91,54 @@ async def current_user(request: Request, authorization: str | None = Header(defa
                             headers={"WWW-Authenticate": "Bearer"})
     if response.status_code != 200:
         raise HTTPException(status_code=503, detail="Ontology authentication service could not verify the token")
+    return response
+
+
+def parse_identity_response(response: httpx.Response) -> dict:
+    """Validate upstream status and extract its user object."""
+    if response.status_code in (401, 403):
+        raise HTTPException(status_code=401, detail="Invalid or expired Ontology Studio token",
+                            headers={"WWW-Authenticate": "Bearer"})
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail="Ontology authentication service could not verify the token")
     try:
         identity = response.json()["user"]
         if not isinstance(identity, dict):
             raise TypeError("Ontology user must be an object")
-        ontology_role = str(identity.get("role") or "").lower()
-        real_role = _role_map().get(ontology_role, "viewer")
-        role = real_role
-        # Only a real admin may act as another role; the header is ignored for everyone else.
-        asked = (request.headers.get("x-impersonate-role") or "").lower()
-        if real_role == "admin" and asked in IMPERSONABLE:
-            role = asked
-        # Row-level scope. A store manager sees only assigned stores. An admin acting as one chooses the stores to simulate,
-        # because Ontology holds no assignment for the admin. None means unrestricted.
-        stores = None
-        if role == "store_manager":
-            if real_role == "admin":
-                stores = [s.strip() for s in (request.headers.get("x-impersonate-stores") or "").split(",") if s.strip()]
-            else:
-                stores = stores_from_identity(identity)
-        email = identity.get("email") or identity.get("username") or identity.get("open_id")
-        return {"user": email,   # the stable identifier recorded in audit trails; never the display name
-                "name": display_name(identity, email),
-                "role": role, "real_role": real_role, "impersonating": role != real_role,
-                "ontology_role": ontology_role, "ontology_user_id": identity.get("id"),
-                "store_scoped": role == "store_manager", "stores": stores}
     except (ValueError, KeyError, TypeError):
         raise HTTPException(status_code=503, detail="Ontology authentication response was invalid")
+    return identity
+
+
+def normalize_identity(identity: dict, request: Request) -> dict:
+    """Map verified Ontology identity, permitted impersonation, and store scope."""
+    ontology_role = str(identity.get("role") or "").lower()
+    real_role = _role_map().get(ontology_role, "viewer")
+    requested_role = (request.headers.get("x-impersonate-role") or "").lower()
+    role = requested_role if real_role == "admin" and requested_role in IMPERSONABLE else real_role
+    stores = resolve_identity_stores(identity, request, real_role, role)
+    email = identity.get("email") or identity.get("username") or identity.get("open_id")
+    return {
+        "user": email,
+        "name": display_name(identity, email),
+        "role": role,
+        "real_role": real_role,
+        "impersonating": role != real_role,
+        "ontology_role": ontology_role,
+        "ontology_user_id": identity.get("id"),
+        "store_scoped": role == "store_manager",
+        "stores": stores,
+    }
+
+
+def resolve_identity_stores(identity: dict, request: Request, real_role: str, role: str) -> list[str] | None:
+    """Resolve assigned stores, requiring admins to explicitly scope simulated store managers."""
+    if role != "store_manager":
+        return None
+    if real_role == "admin":
+        return [store.strip() for store in
+                (request.headers.get("x-impersonate-stores") or "").split(",") if store.strip()]
+    return stores_from_identity(identity)
 
 
 def role_allowed(role: str, roles: tuple[str, ...], method: str, path: str) -> bool:
