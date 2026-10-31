@@ -353,10 +353,12 @@ async def load_pending_return_page(db, batch_keys, last_id: str, page_size: int)
 async def link_return_page(db, pending: list[CanonicalTransaction]) -> int:
     """Stream candidate sales and link each pending return to the earliest match."""
     returns_by_reference: dict[tuple[str, str], list[CanonicalTransaction]] = defaultdict(list)
+    remaining = 0
     for return_transaction in pending:
-        if return_transaction.original_reference:
+        if return_transaction.original_transaction_id is None and return_transaction.original_reference:
             key = (return_transaction.store_id, return_transaction.original_reference)
             returns_by_reference[key].append(return_transaction)
+            remaining += 1
     conditions = [
         and_(
             CanonicalTransaction.store_id == store_id,
@@ -384,6 +386,11 @@ async def link_return_page(db, pending: list[CanonicalTransaction]) -> int:
                     if return_transaction.original_transaction_id is None:
                         return_transaction.original_transaction_id = sale.id
                         linked += 1
+                        remaining -= 1
+                if remaining == 0:
+                    break
+            if remaining == 0:
+                break
     finally:
         await candidates.close()
     return linked
