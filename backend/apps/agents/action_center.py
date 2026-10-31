@@ -387,6 +387,15 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
     if heavy and len(cases) > HEAVY_LIMIT:
         cases, truncated = cases[:HEAVY_LIMIT], True
 
+    exceptions_by_case: dict[str, list[DBException]] = {}
+    if req.action == "investigate" and cases:
+        exception_rows = (await db.execute(
+            select(DBException).where(DBException.case_id.in_([case.id for case in cases]))
+            .order_by(DBException.case_id, DBException.created_at, DBException.id)
+        )).scalars()
+        for exception in exception_rows:
+            exceptions_by_case.setdefault(exception.case_id, []).append(exception)
+
     ok, skipped = 0, []
     evidence_cache = investigation_service.InvestigationEvidenceCache(db)
     skip = lambda c, why: skipped.append({"case_number": c.case_number, "reason": why})
@@ -409,7 +418,7 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         elif a == "investigate":
             if c.amount_needs_review: skip(c, "case amounts require finance review"); continue
             if c.status not in ("Open", "In Investigation"): skip(c, f"already {c.status}"); continue
-            excs = (await db.execute(select(DBException).where(DBException.case_id == c.id))).scalars().all()
+            excs = exceptions_by_case.get(c.id, [])
             if not excs: skip(c, "no exception records to investigate"); continue
             await investigation_service.run_investigation(db, c, excs, evidence_cache=evidence_cache); ok += 1
         elif a in ("approve", "escalate"):
