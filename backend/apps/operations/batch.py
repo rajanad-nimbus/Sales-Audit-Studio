@@ -402,6 +402,7 @@ async def status(db: AsyncSession = Depends(get_db)):
             "data_as_of": as_of,
             "last_success": None,
             "last_run": status_view(last),
+            "last_failed": bool(last and last.status == "Failed"),
         }
     finished_at = ok.finished_at
     if finished_at.tzinfo is None:

@@ -58,3 +58,34 @@ def test_batch_status_does_not_expose_run_errors_or_source_counts():
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_batch_status_reports_first_run_failure_without_prior_success():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                db.add(
+                    BatchRun(
+                        id="first-run",
+                        business_date="2026-10-01",
+                        status="Failed",
+                        error="source unavailable",
+                    )
+                )
+                await db.commit()
+
+                result = await status(db)
+
+                assert result["freshness"] == "never"
+                assert result["last_success"] is None
+                assert result["last_failed"] is True
+                assert result["last_run"]["status"] == "Failed"
+                assert "error" not in result["last_run"]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
