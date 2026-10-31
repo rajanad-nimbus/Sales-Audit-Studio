@@ -16,35 +16,33 @@ from typing import Annotated, Literal
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import String, cast, delete, func, insert, or_, select, tuple_, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from apps.security.authentication import require_role
 from apps.database_errors import violates_unique_constraint
 from apps.request_body import read_limited_body
 from database import get_db
 from apps.audit.models import AuditEvent
-from apps.cases.models import (
-    Case,
-    HumanDecision,
-    Recommendation,
-    ValidationObligation,
-)
 from model_base import utcnow
-from apps.exports.eligibility import completed_case_evidence, verified_adjustment_evidence
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem, TestSinkReceipt
+from apps.exports.selection import (
+    MAX_BATCH,
+    SCOPES,
+    build,
+    classify_backpost as classify_backpost,
+    closed_case_context as closed_case_context,
+    head_hash,
+    prior_exported_days as prior_exported_days,
+    summarize,
+)
 from apps.exports.tracking import TRACK_STATES, tracking_page
 from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/exports")
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))
-MAX_BATCH = 5000
 MAX_SINK_BODY_BYTES = 25 * 1024 * 1024
-SQLITE_BIND_BATCH_SIZE = 300
-POSTGRES_BIND_PARAMETER_BUDGET = 30_000
-PRIOR_DAY_KEY_COLUMNS = 2
 DATASETS = {
     "resolutions": "Closed, validated cases with decision, disposition and validation result",
     "adjustments": "Approved financial adjustments from validated cases (journal lines for ERP/GL)",
@@ -130,184 +128,9 @@ def batch_view(b: ExportBatch, dest_name: str | None = None) -> dict:
             "attempt_started_at": b.attempt_started_at}
 
 
-async def head_hash(db) -> str | None:
-    return (await db.execute(select(AuditEvent.hash).order_by(AuditEvent.seq.desc()).limit(1))).scalar()
-
-
-SCOPES = ("all", "current", "backposts")
-
-
-def classify_backpost(store_id: str, business_date: str, closed_date: str, prior: dict) -> tuple[bool, str | None, list[str]]:
-    """Is this record a back-post, and why?
-
-    A back-post belongs to a business day that has already ended or already been exported to this destination, so
-    the receiver must post it to that original day or period and not to the day it arrived.
-    """
-    batches = prior.get((store_id, business_date), [])
-    if batches:
-        return True, "Late addition to a business day already exported", batches
-    if closed_date > business_date:
-        return True, "Resolved after the business date ended", []
-    return False, None, []
-
-
-async def prior_exported_days(db, dest_id: str, dataset: str, cases: list[Case] | None = None) -> dict:
-    """(store_id, business_date) -> short ids of earlier delivered batches that already covered that day."""
-    query = (
-        select(Case.store_id, Case.business_date, ExportBatch.id)
-        .select_from(ExportItem)
-        .join(ExportBatch, ExportBatch.id == ExportItem.batch_id)
-        .join(Case, Case.id == ExportItem.object_id)
-        .where(ExportItem.destination_id == dest_id, ExportItem.dataset == dataset,
-               ExportItem.state == "Delivered", ExportBatch.status.in_(["Sent", "Acknowledged"])).distinct())
-    keys = sorted({(case.store_id, case.business_date) for case in cases}) if cases is not None else None
-    rows = []
-    if keys is None:
-        rows = (await db.execute(query)).all()
-    else:
-        parameter_budget = (
-            POSTGRES_BIND_PARAMETER_BUDGET
-            if db.get_bind().dialect.name == "postgresql"
-            else SQLITE_BIND_BATCH_SIZE * PRIOR_DAY_KEY_COLUMNS
-        )
-        batch_size = max(1, parameter_budget // PRIOR_DAY_KEY_COLUMNS)
-        for offset in range(0, len(keys), batch_size):
-            key_batch = keys[offset : offset + batch_size]
-            rows.extend(
-                (
-                    await db.execute(
-                        query.where(tuple_(Case.store_id, Case.business_date).in_(key_batch))
-                    )
-                ).all()
-            )
-    out: dict = {}
-    for store_id, business_date, batch_id in rows:
-        out.setdefault((store_id, business_date), []).append(batch_id[:8])
-    return {k: sorted(v) for k, v in out.items()}
-
-
-def summarize(records: list[dict]) -> dict:
-    back = [r for r in records if r.get("backpost")]
-    return {"current": len(records) - len(back), "backposted": len(back),
-            "business_dates": sorted({r["business_date"] for r in back if r.get("business_date")})}
-
-
 async def mark_delivered(db, batch_id: str) -> None:
     await db.execute(update(ExportItem).where(ExportItem.batch_id == batch_id, ExportItem.state == "Pending")
                      .values(state="Delivered", delivered_at=utcnow()))
-
-
-async def closed_case_context(db, cases: list[Case], positive_recommendations: bool = False) -> dict:
-    ids = [c.id for c in cases]
-    if not ids:
-        return {"recs": {}, "decs": {}, "vals": {}, "refs": {}}
-
-    batch_size = (
-        POSTGRES_BIND_PARAMETER_BUDGET
-        if db.get_bind().dialect.name == "postgresql"
-        else SQLITE_BIND_BATCH_SIZE
-    )
-    evidence_query = verified_adjustment_evidence() if positive_recommendations else completed_case_evidence()
-    recs, decs, vals, refs = {}, {}, {}, {}
-    for offset in range(0, len(ids), batch_size):
-        case_ids = ids[offset : offset + batch_size]
-        ranked_evidence = evidence_query.where(Recommendation.case_id.in_(case_ids)).add_columns(
-            func.row_number().over(
-                partition_by=Recommendation.case_id,
-                order_by=(Recommendation.created_at.desc(), Recommendation.id.desc(),
-                          HumanDecision.created_at.desc(), HumanDecision.id.desc(),
-                          ValidationObligation.created_at.desc(), ValidationObligation.id.desc()),
-            ).label("case_rank")
-        ).subquery()
-        recommendation = aliased(Recommendation, ranked_evidence)
-        decision = aliased(HumanDecision, ranked_evidence)
-        obligation = aliased(ValidationObligation, ranked_evidence)
-        evidence = (await db.execute(select(recommendation, decision, obligation).where(
-            ranked_evidence.c.case_rank == 1,
-        ))).all()
-        recs.update({r.case_id: r for r, _, _ in evidence})
-        decs.update({r.case_id: d for r, d, _ in evidence})
-        vals.update({r.case_id: v for r, _, v in evidence})
-
-        latest_event_ids = select(
-            AuditEvent.id.label("id"),
-            func.row_number().over(
-                partition_by=AuditEvent.case_id,
-                order_by=(AuditEvent.seq.desc(), AuditEvent.id.desc()),
-            ).label("case_rank"),
-        ).where(AuditEvent.case_id.in_(case_ids)).subquery()
-        latest_events = (await db.execute(select(AuditEvent).join(
-            latest_event_ids, AuditEvent.id == latest_event_ids.c.id,
-        ).where(latest_event_ids.c.case_rank == 1))).scalars().all()
-        refs.update({event.case_id: event.hash for event in latest_events})
-    return {"recs": recs, "decs": decs, "vals": vals, "refs": refs}
-
-
-async def build(db, dest: ExportDestination, dataset: str, scope: str = "all", *, lock_cases: bool = False) -> tuple[list[dict], list[tuple[str, str]], int | None, int | None]:
-    """Returns (records, [(object_id, version)], range_from, range_to)."""
-    if dataset == "audit":
-        last = (await db.execute(select(func.max(ExportBatch.range_to)).where(
-            ExportBatch.destination_id == dest.id, ExportBatch.dataset == "audit",
-            ExportBatch.status.in_(["Sent", "Acknowledged"])))).scalar() or 0
-        rows = (await db.execute(select(AuditEvent).where(AuditEvent.seq > last).order_by(AuditEvent.seq).limit(MAX_BATCH))).scalars().all()
-        recs = [{"seq": e.seq, "timestamp": e.created_at.isoformat(), "event_type": e.event_type, "actor": e.actor,
-                 "object_type": e.object_type, "object_id": e.object_id, "case_id": e.case_id,
-                 "description": e.action_description, "prev_hash": e.prev_hash, "hash": e.hash} for e in rows]
-        return recs, [], (rows[0].seq if rows else None), (rows[-1].seq if rows else None)
-
-    reserved = select(ExportItem.id).where(
-        ExportItem.destination_id == dest.id, ExportItem.dataset == dataset, ExportItem.object_id == Case.id
-    ).exists()
-    query = select(Case).where(Case.status == "Closed", Case.amount_needs_review.is_(False), ~reserved)
-    if scope != "all":
-        exported_case = aliased(Case)
-        previously_exported = (select(ExportItem.id).select_from(ExportItem)
-            .join(ExportBatch, ExportBatch.id == ExportItem.batch_id)
-            .join(exported_case, exported_case.id == ExportItem.object_id)
-            .where(ExportItem.destination_id == dest.id, ExportItem.dataset == dataset,
-                   ExportItem.state == "Delivered", ExportBatch.status.in_(["Sent", "Acknowledged"]),
-                   exported_case.store_id == Case.store_id, exported_case.business_date == Case.business_date)
-            .exists())
-        backpost = or_(cast(func.date(Case.updated_at), String) > Case.business_date, previously_exported)
-        query = query.where(backpost if scope == "backposts" else ~backpost)
-    if dataset == "adjustments":
-        verified = verified_adjustment_evidence().where(Recommendation.case_id == Case.id).exists()
-        query = query.where(verified)
-    if lock_cases:
-        # Hold selected case rows until their export reservations are committed.
-        # Skipping locked rows avoids blocking or deadlocking correction workflows.
-        query = query.with_for_update(of=Case, skip_locked=True).execution_options(populate_existing=True)
-    cases = (await db.execute(query.order_by(Case.updated_at, Case.id).limit(MAX_BATCH))).scalars().all()
-    ctx = await closed_case_context(db, cases, positive_recommendations=dataset == "adjustments")
-    prior = await prior_exported_days(db, dest.id, dataset, cases)
-    recs, items = [], []
-    for c in cases:
-        rec, dec, val = ctx["recs"].get(c.id), ctx["decs"].get(c.id), ctx["vals"].get(c.id)
-        closed_date = c.updated_at.date().isoformat()
-        is_back, why, prior_batches = classify_backpost(c.store_id, c.business_date, closed_date, prior)
-        flags = {"backpost": is_back, "backpost_reason": why, "prior_batches": ";".join(prior_batches) or None}
-        if dataset == "resolutions":
-            recs.append({"case_number": c.case_number, "business_date": c.business_date, "store_id": c.store_id,
-                         "case_type": c.case_type, "exception_amount": str(c.total_exception_amount),
-                         "estimated_exposure": str(c.total_exposure), "currency": c.currency,
-                         "disposition": rec.disposition_type if rec else None, "action_class": rec.action_class if rec else None,
-                         "decided_by": dec.actor if dec else None, "decided_at": dec.created_at.isoformat() if dec else None,
-                         "validation_result": val.verification_result if val else None,
-                         "closed_at": c.updated_at.isoformat(), "posting_date": closed_date,
-                         "audit_reference": ctx["refs"].get(c.id), **flags})
-        else:
-            if not rec or not val or rec.financial_impact <= 0:
-                continue
-            if not c.currency:
-                raise HTTPException(status_code=422, detail=f"Case {c.case_number} has no currency; financial export cannot proceed")
-            recs.append({"journal_id": f"NIM-{c.case_number}", "posting_date": c.updated_at.date().isoformat(),
-                         "business_date": c.business_date, "store_id": c.store_id, "currency": c.currency,
-                         "amount": str(rec.financial_impact), "adjustment_type": rec.disposition_type,
-                         "reason": c.case_type, "reference": c.case_number, "approved_by": dec.actor if dec else None,
-                         "validated": True, "audit_reference": ctx["refs"].get(c.id), **flags})
-        items.append((c.id, "v1", {"record_ref": recs[-1].get("case_number") or recs[-1].get("journal_id"),
-                                   "store_id": c.store_id, "business_date": c.business_date, "backpost": is_back}))
-    return recs, items, None, None
 
 
 def render(dest: ExportDestination, dataset: str, records: list[dict], head: str | None, key: str, summary: dict | None = None) -> bytes:
