@@ -339,43 +339,72 @@ def write_file_delivery(dest: ExportDestination, batch: ExportBatch, body: bytes
 
 
 async def deliver(dest: ExportDestination, b: ExportBatch, client: httpx.AsyncClient | None = None) -> None:
-    cfg = dest.config or {}
     try:
-        if b.payload is None or not b.payload_hash:
-            raise ValueError("Export payload or hash is missing")
-        body = b.payload.encode()
-        if not hmac.compare_digest(hashlib.sha256(body).hexdigest(), b.payload_hash):
-            raise ValueError("Export payload does not match its recorded hash")
+        body = verified_export_body(b)
         if dest.kind == "webhook":
-            headers = {"Content-Type": "text/csv" if dest.format == "csv" else "application/json",
-                       "X-Nimbus-Idempotency-Key": b.idempotency_key, "X-Nimbus-Dataset": b.dataset,
-                       "X-Nimbus-Signature": sign(cfg.get("secret", ""), body),
-                       "X-Nimbus-Envelope-Signature": sign_envelope(cfg.get("secret", ""), b.dataset, b.idempotency_key, body)}
-            if client is None:
-                async with httpx.AsyncClient(timeout=15) as owned_client:
-                    r = await owned_client.post(cfg["url"], content=body, headers=headers)
-            else:
-                r = await client.post(cfg["url"], content=body, headers=headers)
-            b.response_code = r.status_code
-            if r.status_code in (200, 201):
-                b.status, b.acked_at = "Acknowledged", utcnow()
-                try:
-                    response_body = r.json()
-                except ValueError:
-                    response_body = None
-                if isinstance(response_body, dict):
-                    b.response_ref = str(response_body.get("reference", ""))[:255] or None
-            elif r.status_code == 202:
-                b.status = "Sent"
-            else:
-                b.status, b.error = "Failed", f"HTTP {r.status_code}: {r.text[:200]}"
+            await deliver_webhook(dest, b, body, client)
         else:
-            b.response_ref = await asyncio.to_thread(write_file_delivery, dest, b, body)
-            b.status = "Sent"
+            await deliver_file(dest, b, body)
         if b.status in ("Sent", "Acknowledged"):
             b.sent_at, b.error = utcnow(), None
     except Exception as e:
         b.status, b.error = "Failed", f"{type(e).__name__}: {str(e)[:200]}"
+
+
+def verified_export_body(batch: ExportBatch) -> bytes:
+    """Return the persisted payload only if its digest matches the immutable batch."""
+    if batch.payload is None or not batch.payload_hash:
+        raise ValueError("Export payload or hash is missing")
+    body = batch.payload.encode()
+    digest = hashlib.sha256(body).hexdigest()
+    if not hmac.compare_digest(digest, batch.payload_hash):
+        raise ValueError("Export payload does not match its recorded hash")
+    return body
+
+
+async def deliver_webhook(destination: ExportDestination, batch: ExportBatch, body: bytes,
+                          client: httpx.AsyncClient | None) -> None:
+    """Send a signed webhook and map receiver responses onto batch state."""
+    config = destination.config or {}
+    secret = config.get("secret", "")
+    headers = {
+        "Content-Type": "text/csv" if destination.format == "csv" else "application/json",
+        "X-Nimbus-Idempotency-Key": batch.idempotency_key,
+        "X-Nimbus-Dataset": batch.dataset,
+        "X-Nimbus-Signature": sign(secret, body),
+        "X-Nimbus-Envelope-Signature": sign_envelope(
+            secret, batch.dataset, batch.idempotency_key, body),
+    }
+    if client is None:
+        async with httpx.AsyncClient(timeout=15) as owned_client:
+            response = await owned_client.post(config["url"], content=body, headers=headers)
+    else:
+        response = await client.post(config["url"], content=body, headers=headers)
+    batch.response_code = response.status_code
+    if response.status_code in (200, 201):
+        batch.status, batch.acked_at = "Acknowledged", utcnow()
+        batch.response_ref = response_reference(response)
+    elif response.status_code == 202:
+        batch.status = "Sent"
+    else:
+        batch.status, batch.error = "Failed", f"HTTP {response.status_code}: {response.text[:200]}"
+
+
+def response_reference(response: httpx.Response) -> str | None:
+    """Extract a bounded receiver reference from a successful JSON response."""
+    try:
+        response_body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(response_body, dict):
+        return None
+    return str(response_body.get("reference", ""))[:255] or None
+
+
+async def deliver_file(destination: ExportDestination, batch: ExportBatch, body: bytes) -> None:
+    """Publish a verified payload and checksum through atomic file replacement."""
+    batch.response_ref = await asyncio.to_thread(write_file_delivery, destination, batch, body)
+    batch.status = "Sent"
 
 
 async def finish_delivery(db: AsyncSession, batch: ExportBatch, dest_name: str, *, retrying: bool) -> dict:
