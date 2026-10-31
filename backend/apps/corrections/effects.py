@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from apps.transactions.detail import MAX_MONEY, cent_value
-from models import CanonicalTransaction, TransactionAdjustment, TransactionTax
+from models import CanonicalTransaction, TransactionTax
+from apps.corrections.models import TransactionAdjustment
 
 
 def _approved_value(adjustment: TransactionAdjustment, allowed_fields: set[str]) -> tuple[str, Decimal]:
