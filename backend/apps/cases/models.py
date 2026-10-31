@@ -29,6 +29,8 @@ class Exception(Base):
     status: Mapped[str] = mapped_column(String(50), default="Open", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+    __table_args__ = (Index("ix_exceptions_case_id_id", "case_id", "id"),)
+
 
 class Case(Base):
     """Groups related exceptions and orchestrates resolution"""
