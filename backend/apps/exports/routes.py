@@ -42,7 +42,7 @@ router = APIRouter(prefix="/api/exports")
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))
 MAX_BATCH = 5000
 MAX_SINK_BODY_BYTES = 25 * 1024 * 1024
-SQLITE_PRIOR_DAY_BATCH_SIZE = 300
+SQLITE_BIND_BATCH_SIZE = 300
 POSTGRES_BIND_PARAMETER_BUDGET = 30_000
 PRIOR_DAY_KEY_COLUMNS = 2
 DATASETS = {
@@ -168,7 +168,7 @@ async def prior_exported_days(db, dest_id: str, dataset: str, cases: list[Case] 
         parameter_budget = (
             POSTGRES_BIND_PARAMETER_BUDGET
             if db.get_bind().dialect.name == "postgresql"
-            else SQLITE_PRIOR_DAY_BATCH_SIZE * PRIOR_DAY_KEY_COLUMNS
+            else SQLITE_BIND_BATCH_SIZE * PRIOR_DAY_KEY_COLUMNS
         )
         batch_size = max(1, parameter_budget // PRIOR_DAY_KEY_COLUMNS)
         for offset in range(0, len(keys), batch_size):
@@ -202,35 +202,44 @@ async def closed_case_context(db, cases: list[Case], positive_recommendations: b
     if not ids:
         return {"recs": {}, "decs": {}, "vals": {}, "refs": {}}
 
+    batch_size = (
+        POSTGRES_BIND_PARAMETER_BUDGET
+        if db.get_bind().dialect.name == "postgresql"
+        else SQLITE_BIND_BATCH_SIZE
+    )
     evidence_query = verified_adjustment_evidence() if positive_recommendations else completed_case_evidence()
-    ranked_evidence = evidence_query.where(Recommendation.case_id.in_(ids)).add_columns(
-        func.row_number().over(
-            partition_by=Recommendation.case_id,
-            order_by=(Recommendation.created_at.desc(), Recommendation.id.desc(),
-                      HumanDecision.created_at.desc(), HumanDecision.id.desc(),
-                      ValidationObligation.created_at.desc(), ValidationObligation.id.desc()),
-        ).label("case_rank")
-    ).subquery()
-    recommendation = aliased(Recommendation, ranked_evidence)
-    decision = aliased(HumanDecision, ranked_evidence)
-    obligation = aliased(ValidationObligation, ranked_evidence)
-    evidence = (await db.execute(select(recommendation, decision, obligation).where(
-        ranked_evidence.c.case_rank == 1,
-    ))).all()
-    recs = {r.case_id: r for r, _, _ in evidence}
-    decs = {r.case_id: d for r, d, _ in evidence}
-    vals = {r.case_id: v for r, _, v in evidence}
-    latest_event_ids = select(
-        AuditEvent.id.label("id"),
-        func.row_number().over(
-            partition_by=AuditEvent.case_id,
-            order_by=(AuditEvent.seq.desc(), AuditEvent.id.desc()),
-        ).label("case_rank"),
-    ).where(AuditEvent.case_id.in_(ids)).subquery()
-    latest_events = (await db.execute(select(AuditEvent).join(
-        latest_event_ids, AuditEvent.id == latest_event_ids.c.id,
-    ).where(latest_event_ids.c.case_rank == 1))).scalars().all()
-    refs = {event.case_id: event.hash for event in latest_events}
+    recs, decs, vals, refs = {}, {}, {}, {}
+    for offset in range(0, len(ids), batch_size):
+        case_ids = ids[offset : offset + batch_size]
+        ranked_evidence = evidence_query.where(Recommendation.case_id.in_(case_ids)).add_columns(
+            func.row_number().over(
+                partition_by=Recommendation.case_id,
+                order_by=(Recommendation.created_at.desc(), Recommendation.id.desc(),
+                          HumanDecision.created_at.desc(), HumanDecision.id.desc(),
+                          ValidationObligation.created_at.desc(), ValidationObligation.id.desc()),
+            ).label("case_rank")
+        ).subquery()
+        recommendation = aliased(Recommendation, ranked_evidence)
+        decision = aliased(HumanDecision, ranked_evidence)
+        obligation = aliased(ValidationObligation, ranked_evidence)
+        evidence = (await db.execute(select(recommendation, decision, obligation).where(
+            ranked_evidence.c.case_rank == 1,
+        ))).all()
+        recs.update({r.case_id: r for r, _, _ in evidence})
+        decs.update({r.case_id: d for r, d, _ in evidence})
+        vals.update({r.case_id: v for r, _, v in evidence})
+
+        latest_event_ids = select(
+            AuditEvent.id.label("id"),
+            func.row_number().over(
+                partition_by=AuditEvent.case_id,
+                order_by=(AuditEvent.seq.desc(), AuditEvent.id.desc()),
+            ).label("case_rank"),
+        ).where(AuditEvent.case_id.in_(case_ids)).subquery()
+        latest_events = (await db.execute(select(AuditEvent).join(
+            latest_event_ids, AuditEvent.id == latest_event_ids.c.id,
+        ).where(latest_event_ids.c.case_rank == 1))).scalars().all()
+        refs.update({event.case_id: event.hash for event in latest_events})
     return {"recs": recs, "decs": decs, "vals": vals, "refs": refs}
 
 
