@@ -16,7 +16,7 @@ from apps.cash.routes import (
     expected_cash_deposit,
     record_deposit,
 )
-from models import AuditEvent, Base, CanonicalTransaction, StoreDay
+from models import AuditEvent, Base, CanonicalTransaction, CashDeposit, StoreDay
 
 
 def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_register_wide():
@@ -89,12 +89,18 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                     store_id="S1", business_date="2026-10-01", register_id="R2",
                     cashier_id="C3", declared_cash=Decimal("5.00"),
                 ), db, finance)
+                deposit_row = await db.get(CashDeposit, deposit["id"])
+                assert deposit_row.expected_amount == Decimal("35.00")
+                assert deposit_row.variance_amount == Decimal("5.00")
+                assert deposit_row.status == "Over/Short"
                 query_count = len(cash_scope_queries)
                 assert await expected_cash_deposit(db, "S1", "2026-10-01") == Decimal("35.00")
                 assert len(cash_scope_queries) - query_count == 1
                 store_wide = await declare_cash(CashControlBody(
                     store_id="S1", business_date="2026-10-01", declared_cash=Decimal("40.00"),
                 ), db, finance)
+                assert deposit_row.expected_amount == Decimal("40.00")
+                assert deposit_row.variance_amount == Decimal("10.00")
                 query_count = len(cash_scope_queries)
                 assert await expected_cash_deposit(db, "S1", "2026-10-01") == Decimal("40.00")
                 assert len(cash_scope_queries) - query_count == 1
@@ -117,11 +123,22 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                 assert {event.event_type for event in events} == {
                     "CASH_CONTROL_DECLARED",
                     "CASH_DEPOSIT_RECORDED",
+                    "CASH_DEPOSIT_RECONCILED",
                 }
-                deposit_event = next(event for event in events if event.object_id == deposit["id"])
+                deposit_event = next(
+                    event for event in events
+                    if event.object_id == deposit["id"] and event.event_type == "CASH_DEPOSIT_RECORDED"
+                )
                 assert deposit_event.actor == finance["user"]
                 assert deposit_event.after_state["deposited_amount"] == "30.00"
                 assert deposit_event.after_state["status"] == "Balanced"
+                reconciliation_events = [
+                    event for event in events
+                    if event.object_id == deposit["id"] and event.event_type == "CASH_DEPOSIT_RECONCILED"
+                ]
+                assert len(reconciliation_events) == 2
+                assert reconciliation_events[-1].after_state["expected_amount"] == "40.00"
+                assert reconciliation_events[-1].after_state["status"] == "Over/Short"
         finally:
             await engine.dispose()
 

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.corrections.effects import sum_effective_amounts
 from apps.store_days.freshness import lock_store_day
 from apps.transactions.models import CanonicalTransaction
-from apps.cash.models import CashControl
+from apps.cash.models import CashControl, CashDeposit
 
 
 async def calculate_declaration(db: AsyncSession, declaration: CashControl) -> None:
@@ -74,6 +74,35 @@ async def expected_cash_deposit(
         if cashier_id is not None and (register_id is None or register_id not in register_totals)
     ]
     return sum(register_totals.values(), Decimal("0")) + sum(cashier_totals, Decimal("0"))
+
+
+async def refresh_cash_deposits(
+    db: AsyncSession,
+    store_id: str,
+    business_date: str,
+) -> list[CashDeposit]:
+    """Reconcile recorded deposits to the latest cash declarations for an open day."""
+    deposits = (await db.execute(
+        select(CashDeposit)
+        .where(CashDeposit.store_id == store_id, CashDeposit.business_date == business_date)
+        .order_by(CashDeposit.id)
+        .with_for_update()
+    )).scalars().all()
+    if not deposits:
+        return []
+
+    expected = await expected_cash_deposit(db, store_id, business_date)
+    changed = []
+    for deposit in deposits:
+        variance = expected - deposit.deposited_amount
+        status = "Balanced" if variance == 0 else "Over/Short"
+        if (deposit.expected_amount, deposit.variance_amount, deposit.status) == (expected, variance, status):
+            continue
+        deposit.expected_amount = expected
+        deposit.variance_amount = variance
+        deposit.status = status
+        changed.append(deposit)
+    return changed
 
 
 async def require_writable_store_day(

@@ -18,6 +18,7 @@ from apps.cash.schemas import CashControlBody, CashDepositBody
 from apps.cash.service import (
     calculate_declaration,
     expected_cash_deposit,
+    refresh_cash_deposits,
     require_writable_store_day,
 )
 from integrations.ontology.nimbus import audit
@@ -116,6 +117,25 @@ async def declare_cash(
     db.add(row)
     await db.flush()
     await calculate_declaration(db, row)
+    if row.tender_type == "Cash":
+        refreshed_deposits = await refresh_cash_deposits(db, row.store_id, row.business_date)
+        for deposit in refreshed_deposits:
+            audit(
+                db,
+                "CASH_DEPOSIT_RECONCILED",
+                None,
+                "CashDeposit",
+                deposit.id,
+                f"Cash deposit reconciled after a declaration for {row.store_id}/{row.business_date}",
+                actor=row.declared_by,
+                after={
+                    "deposit_reference": deposit.deposit_reference,
+                    "deposited_amount": str(deposit.deposited_amount),
+                    "expected_amount": str(deposit.expected_amount),
+                    "variance_amount": str(deposit.variance_amount),
+                    "status": deposit.status,
+                },
+            )
     audit(
         db,
         "CASH_CONTROL_DECLARED",
