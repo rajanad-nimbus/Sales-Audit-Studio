@@ -53,6 +53,20 @@ async def lock_source_record_identities(db, source: str, record_ids: set[str]) -
 def parse(source: str, rec: dict) -> dict:
     if source not in VALID_TYPES:
         raise ValueError(f"unknown source_system {source}")
+    validate_source_identifiers(rec)
+    validate_currency(rec.get("currency", "USD"))
+    if source == "POSControl":
+        return parse_manifest(rec)
+    cashier = rec.get("cashier_id")
+    if cashier is not None and not cashier.strip():
+        raise ValueError("cashier_id must not be blank")
+    if source == "Shopify":
+        return shopify_ingest.parse(rec)
+    return parse_transaction(source, rec)
+
+
+def validate_source_identifiers(rec: dict) -> None:
+    """Validate required and optional identifier fields against database constraints."""
     for field in ("source_record_id", "store_id"):
         value = rec.get(field)
         if (not isinstance(value, str) or not value.strip() or value != value.strip()
@@ -65,40 +79,40 @@ def parse(source: str, rec: dict) -> dict:
         value = rec.get(field)
         if value is not None and (not isinstance(value, str) or len(value) > max_length):
             raise ValueError(f"{field} must be a string of at most {max_length} characters")
-    validate_currency(rec.get("currency", "USD"))
-    if source == "POSControl":
-        need = ["source_record_id", "business_date", "store_id", "declared_count", "declared_total"]
-        missing = [k for k in need if rec.get(k) in (None, "")]
-        if missing:
-            raise ValueError(f"missing fields: {', '.join(missing)}")
-        try:
-            raw_count = rec["declared_count"]
-            if isinstance(raw_count, bool):
+
+
+def parse_manifest(rec: dict) -> dict:
+    """Validate a POS control manifest and return its canonical values."""
+    need = ["source_record_id", "business_date", "store_id", "declared_count", "declared_total"]
+    missing = [key for key in need if rec.get(key) in (None, "")]
+    if missing:
+        raise ValueError(f"missing fields: {', '.join(missing)}")
+    try:
+        raw_count = rec["declared_count"]
+        if isinstance(raw_count, bool):
+            raise ValueError("declared_count must be a non-negative integer")
+        if isinstance(raw_count, str):
+            if not raw_count.isdecimal():
                 raise ValueError("declared_count must be a non-negative integer")
-            if isinstance(raw_count, str):
-                if not raw_count.isdecimal():
-                    raise ValueError("declared_count must be a non-negative integer")
-                count = int(raw_count)
-            elif isinstance(raw_count, int):
-                count = raw_count
-            else:
-                raise ValueError("declared_count must be a non-negative integer")
-            if not 0 <= count <= 2**63 - 1:
-                raise ValueError("declared_count must be a non-negative 64-bit integer")
-            business_date = validate_business_date(rec["business_date"])
-            total = transaction_detail.cent_value(rec["declared_total"], "declared_total")
-            if abs(total) > transaction_detail.MAX_MONEY:
-                raise ValueError("invalid manifest values")
-            return {"manifest": True, "count": count,
-                    "total": total,
-                    "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00")}
-        except (ValueError, TypeError, InvalidOperation, OverflowError):
+            count = int(raw_count)
+        elif isinstance(raw_count, int):
+            count = raw_count
+        else:
+            raise ValueError("declared_count must be a non-negative integer")
+        if not 0 <= count <= 2**63 - 1:
+            raise ValueError("declared_count must be a non-negative 64-bit integer")
+        business_date = validate_business_date(rec["business_date"])
+        total = transaction_detail.cent_value(rec["declared_total"], "declared_total")
+        if abs(total) > transaction_detail.MAX_MONEY:
             raise ValueError("invalid manifest values")
-    cashier = rec.get("cashier_id")
-    if cashier is not None and not cashier.strip():
-        raise ValueError("cashier_id must not be blank")
-    if source == "Shopify":
-        return shopify_ingest.parse(rec)
+        return {"manifest": True, "count": count, "total": total,
+                "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00")}
+    except (ValueError, TypeError, InvalidOperation, OverflowError):
+        raise ValueError("invalid manifest values")
+
+
+def parse_transaction(source: str, rec: dict) -> dict:
+    """Validate a POS-family transaction and parse its amount, timestamp, and details."""
     missing = [k for k in REQUIRED if rec.get(k) in (None, "")]
     if missing:
         raise ValueError(f"missing fields: {', '.join(missing)}")
