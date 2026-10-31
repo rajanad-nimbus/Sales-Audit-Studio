@@ -2,7 +2,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import or_, select, true
+from sqlalchemy import or_, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -60,12 +60,20 @@ async def linked_cases(db: AsyncSession, transaction: CanonicalTransaction) -> l
 
 
 async def invalidate_case_evidence(db: AsyncSession, cases: list[Case], adjustment_id: str, actor: str) -> None:
+    case_ids = list(dict.fromkeys(case.id for case in cases if case.status != "Closed"))
+    for offset in range(0, len(case_ids), 500):
+        await db.execute(
+            update(Recommendation)
+            .where(
+                Recommendation.case_id.in_(case_ids[offset:offset + 500]),
+                Recommendation.status == "Proposed",
+            )
+            .values(status="Superseded")
+        )
+
     for case in cases:
         case.amount_needs_review = True
         if case.status != "Closed":
-            for recommendation in (await db.execute(select(Recommendation).where(
-                Recommendation.case_id == case.id, Recommendation.status == "Proposed"))).scalars().all():
-                recommendation.status = "Superseded"
             if case.status in {"In Review", "In Investigation"}:
                 case.status = "Open"
             case.investigation_status = "Pending"

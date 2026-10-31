@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -11,7 +11,8 @@ from apps.corrections.follow_up import load_follow_up_state, parent_lineage_even
 from apps.corrections.reconciliation import linked_cases
 from apps.exports.routes import build, tracking_page
 from integrations.ontology.nimbus import audit
-from models import AuditEvent, Base, Case, Exception as CaseException, ExportDestination
+from models import AuditEvent, Base, Case, Exception as CaseException, ExportDestination, Recommendation
+from apps.corrections.reconciliation import invalidate_case_evidence
 
 
 def test_closed_case_follow_up_is_scoped_idempotent_and_preserves_history():
@@ -153,6 +154,53 @@ def test_linked_cases_lock_parent_before_follow_up_even_when_ids_sort_oppositely
                 assert [case.id for case in cases] == ["z-parent", "a-child"]
         finally:
             await engine.dispose()
+    asyncio.run(run())
+
+
+def test_evidence_invalidation_supersedes_recommendations_in_one_batched_update():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                cases = [
+                    Case(id=f"case-{index}", case_number=f"C-{index}", status=status,
+                         case_type="Mismatch", business_date="2026-10-01", store_id="S1")
+                    for index, status in enumerate(("In Review", "Open", "Closed"))
+                ]
+                db.add_all(cases)
+                db.add_all([
+                    Recommendation(id=f"recommendation-{index}", case_id=case.id,
+                                   investigation_id="investigation", disposition_type="Review",
+                                   action_class="Manual", expected_workflow="Review", confidence="High")
+                    for index, case in enumerate(cases)
+                ])
+                await db.commit()
+                statements = []
+
+                def capture(_connection, _cursor, statement, _parameters, _context, _executemany):
+                    if statement.lstrip().lower().startswith("update recommendations"):
+                        statements.append(statement)
+
+                event.listen(engine.sync_engine, "before_cursor_execute", capture)
+                try:
+                    await invalidate_case_evidence(db, cases, "adjustment", "reviewer")
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", capture)
+
+                statuses = {
+                    recommendation.case_id: recommendation.status
+                    for recommendation in (await db.execute(select(Recommendation))).scalars()
+                }
+                assert statuses == {
+                    "case-0": "Superseded", "case-1": "Superseded", "case-2": "Proposed"
+                }
+                assert len(statements) == 1
+                assert [case.status for case in cases] == ["Open", "Open", "Closed"]
+        finally:
+            await engine.dispose()
+
     asyncio.run(run())
 
 
