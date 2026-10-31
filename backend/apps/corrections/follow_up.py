@@ -1,5 +1,6 @@
 """Create auditable follow-up cases without changing closed case history."""
 import uuid
+from dataclasses import dataclass
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -16,8 +17,27 @@ from apps.cases.models import (
 
 
 async def create_follow_up(db: AsyncSession, case_id: str, user: dict) -> Case:
-    # Follow-ups share one lineage. Start at the original case so that opening a
-    # later closed follow-up cannot create a parallel case for the same correction.
+    parent = await lock_root_case(db, case_id, user)
+    events = await parent_lineage_events(db, parent.id)
+    state = await load_follow_up_state(db, events)
+    if state.children and not state.pending_event_ids:
+        return state.children[0]
+    if not state.pending_event_ids:
+        raise HTTPException(status_code=409, detail="No new correction requires a follow-up")
+    if state.children:
+        child = state.children[0]
+        await refresh_existing_follow_up(db, child, events, state.pending_event_ids, user)
+    else:
+        child = await create_child_case(db, parent, events, user)
+    audit(db, "CASE_FOLLOW_UP_LINKED", parent.id, "Case", child.id, "Correction linked to follow-up case",
+          actor=user["user"], after={"follow_up_id": child.id, "stale_event_ids": state.pending_event_ids})
+    await db.commit()
+    await db.refresh(child)
+    return child
+
+
+async def lock_root_case(db: AsyncSession, case_id: str, user: dict) -> Case:
+    """Resolve a follow-up lineage to its original case and lock that root."""
     seen: set[str] = set()
     while True:
         if case_id in seen:
@@ -46,8 +66,23 @@ async def create_follow_up(db: AsyncSession, case_id: str, user: dict) -> Case:
     if parent.status != "Closed" or not parent.amount_needs_review:
         raise HTTPException(status_code=409, detail="Only a closed case with stale amounts needs a follow-up")
 
-    events = (await db.execute(select(AuditEvent).where(AuditEvent.case_id == parent.id,
+    return parent
+
+
+async def parent_lineage_events(db: AsyncSession, parent_id: str) -> list[AuditEvent]:
+    """Load creation, invalidation, and follow-up events for the root case."""
+    return (await db.execute(select(AuditEvent).where(AuditEvent.case_id == parent_id,
         AuditEvent.event_type.in_(["CASE_CREATED", "CASE_EVIDENCE_STALE", "CASE_FOLLOW_UP_LINKED"])))).scalars().all()
+
+
+@dataclass
+class FollowUpState:
+    pending_event_ids: list[str]
+    children: list[Case]
+
+
+async def load_follow_up_state(db: AsyncSession, events: list[AuditEvent]) -> FollowUpState:
+    """Find stale events not already handled and lock the active child, if any."""
     stale_ids = {event.id for event in events if event.event_type == "CASE_EVIDENCE_STALE"}
     links = [event for event in events if event.event_type == "CASE_FOLLOW_UP_LINKED"]
     handled = {item for event in links for item in (event.after_state or {}).get("stale_event_ids", [])}
@@ -66,43 +101,43 @@ async def create_follow_up(db: AsyncSession, case_id: str, user: dict) -> Case:
                     .order_by(Case.id).with_for_update())).scalars().all()) if child_ids else []
     if len(children) > 1:
         raise HTTPException(status_code=409, detail="Multiple active follow-ups require manual investigation")
-    if children and not pending:
-        return children[0]
-    if not pending:
-        raise HTTPException(status_code=409, detail="No new correction requires a follow-up")
-    if children:
-        child = children[0]
-        if child.status in {"Resolving", "Pending Validation"}:
-            raise HTTPException(status_code=409, detail="Follow-up has an active workflow")
-        from apps.corrections.reconciliation import invalidate_case_evidence
+    return FollowUpState(pending, children)
 
-        for event in events:
-            if event.id in pending:
-                await invalidate_case_evidence(db, [child], event.object_id, user["user"])
-    else:
-        originals = (await db.execute(select(CaseException).where(CaseException.case_id == parent.id))).scalars().all()
-        if not originals:
-            raise HTTPException(status_code=409, detail="Closed case has no exceptions to review")
-        child = Case(id=str(uuid.uuid4()), case_number=generate_case_number(parent.business_date),
-                     status="Open", case_type=parent.case_type, business_date=parent.business_date, store_id=parent.store_id,
-                     currency=parent.currency, amount_needs_review=True, total_exception_amount=parent.total_exception_amount,
-                     total_exposure=parent.total_exposure, investigation_status="Pending", evidence_completeness=0,
-                     priority=parent.priority, sla_due_at=sla_due(parent.priority))
-        db.add(child)
-        await db.flush()
-        for original in originals:
-            db.add(CaseException(id=str(uuid.uuid4()), case_id=child.id, exception_type=original.exception_type,
-                exception_family=original.exception_family, source_system=original.source_system,
-                detection_origin=original.detection_origin, detection_rule_id=original.detection_rule_id,
-                exception_amount=original.exception_amount, estimated_exposure=original.estimated_exposure,
-                severity=original.severity, confidence=original.confidence, close_impact=original.close_impact,
-                close_blocker_reason=original.close_blocker_reason, status="Open"))
-        transaction_ids = sorted({item for event in events if event.event_type == "CASE_CREATED"
-                                  for item in (event.after_state or {}).get("transaction_ids", []) if isinstance(item, str)})
-        audit(db, "CASE_CREATED", child.id, "Case", child.id, "Follow-up to a corrected closed case",
-              actor=user["user"], after={"parent_case_id": parent.id, "transaction_ids": transaction_ids})
-    audit(db, "CASE_FOLLOW_UP_LINKED", parent.id, "Case", child.id, "Correction linked to follow-up case",
-          actor=user["user"], after={"follow_up_id": child.id, "stale_event_ids": pending})
-    await db.commit()
-    await db.refresh(child)
+
+async def refresh_existing_follow_up(
+    db: AsyncSession, child: Case, events: list[AuditEvent], pending: list[str], user: dict
+) -> None:
+    """Invalidate existing child evidence for newly stale parent corrections."""
+    if child.status in {"Resolving", "Pending Validation"}:
+        raise HTTPException(status_code=409, detail="Follow-up has an active workflow")
+    from apps.corrections.reconciliation import invalidate_case_evidence
+
+    for event in events:
+        if event.id in pending:
+            await invalidate_case_evidence(db, [child], event.object_id, user["user"])
+
+
+async def create_child_case(db: AsyncSession, parent: Case, events: list[AuditEvent], user: dict) -> Case:
+    """Copy exception context to a new case without mutating closed history."""
+    originals = (await db.execute(select(CaseException).where(CaseException.case_id == parent.id))).scalars().all()
+    if not originals:
+        raise HTTPException(status_code=409, detail="Closed case has no exceptions to review")
+    child = Case(id=str(uuid.uuid4()), case_number=generate_case_number(parent.business_date),
+                 status="Open", case_type=parent.case_type, business_date=parent.business_date, store_id=parent.store_id,
+                 currency=parent.currency, amount_needs_review=True, total_exception_amount=parent.total_exception_amount,
+                 total_exposure=parent.total_exposure, investigation_status="Pending", evidence_completeness=0,
+                 priority=parent.priority, sla_due_at=sla_due(parent.priority))
+    db.add(child)
+    await db.flush()
+    for original in originals:
+        db.add(CaseException(id=str(uuid.uuid4()), case_id=child.id, exception_type=original.exception_type,
+            exception_family=original.exception_family, source_system=original.source_system,
+            detection_origin=original.detection_origin, detection_rule_id=original.detection_rule_id,
+            exception_amount=original.exception_amount, estimated_exposure=original.estimated_exposure,
+            severity=original.severity, confidence=original.confidence, close_impact=original.close_impact,
+            close_blocker_reason=original.close_blocker_reason, status="Open"))
+    transaction_ids = sorted({item for event in events if event.event_type == "CASE_CREATED"
+                              for item in (event.after_state or {}).get("transaction_ids", []) if isinstance(item, str)})
+    audit(db, "CASE_CREATED", child.id, "Case", child.id, "Follow-up to a corrected closed case",
+          actor=user["user"], after={"parent_case_id": parent.id, "transaction_ids": transaction_ids})
     return child
