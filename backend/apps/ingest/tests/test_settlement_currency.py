@@ -70,6 +70,61 @@ def test_reconciliation_cases_do_not_sum_different_currencies():
     asyncio.run(run())
 
 
+def test_daily_bank_control_includes_previously_matched_deposits():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                common = {
+                    "business_date": "2026-10-01",
+                    "transaction_date": timestamp,
+                    "event_timestamp": timestamp,
+                    "processing_timestamp": timestamp,
+                    "settlement_date": "2026-10-01",
+                    "currency": "USD",
+                    "store_id": "S1",
+                    "channel_id": "store",
+                    "settlement_reference": None,
+                }
+                processor = CanonicalTransaction(
+                    id="processor", transaction_type="Capture",
+                    source_lineage=service.LINEAGE["Processor"], reconciliation_status="Matched",
+                    signed_amount=Decimal("100.00"), **common,
+                )
+                previously_matched = CanonicalTransaction(
+                    id="bank-matched", transaction_type="Deposit",
+                    source_lineage=service.LINEAGE["Bank"], reconciliation_status="Matched",
+                    signed_amount=Decimal("40.00"), **common,
+                )
+                newly_arrived = CanonicalTransaction(
+                    id="bank-unmatched", transaction_type="Deposit",
+                    source_lineage=service.LINEAGE["Bank"], reconciliation_status="Unmatched",
+                    signed_amount=Decimal("60.00"), **common,
+                )
+                db.add_all([processor, previously_matched, newly_arrived])
+                await db.flush()
+
+                findings = []
+                await reconciliation.run_settlement_controls(
+                    db, [newly_arrived], lambda *args: findings.append(args)
+                )
+
+                assert findings == []
+                assert (previously_matched.reconciliation_status, previously_matched.disposition) == (
+                    "Matched", "Closed"
+                )
+                assert (newly_arrived.reconciliation_status, newly_arrived.disposition) == (
+                    "Matched", "Closed"
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_referenced_settlement_controls_batch_exact_scopes():
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)

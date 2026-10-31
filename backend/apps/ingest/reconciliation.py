@@ -5,7 +5,7 @@ from decimal import Decimal
 import json
 import uuid
 
-from sqlalchemy import and_, func, or_, select, text, tuple_
+from sqlalchemy import and_, func, or_, select, text, tuple_, update
 
 from apps.cases.identifiers import generate_case_number
 from apps.corrections.effects import effective_amounts
@@ -574,7 +574,10 @@ async def reconcile_daily_feed(
     db, feed, basis, variance_code, missing_code, add, amount_tolerance, tolerance_currency
 ):
     """Compare unreferenced bank or ERP totals with matched source transactions."""
-    actual, expected, feed_by_scope = await collect_daily_feed_amounts(db, feed, basis)
+    actual, expected = await collect_daily_feed_amounts(db, feed, basis)
+    feed_lineage = feed[0].source_lineage
+    unreferenced_only = all(row.settlement_reference is None for row in feed)
+    scope_statuses = {}
     for key in expected.keys() | actual.keys():
         store, currency, business_date = key
         expected_amount, feed_amount = expected.get(key, Decimal("0")), actual.get(key)
@@ -586,22 +589,34 @@ async def reconcile_daily_feed(
         balanced = abs(expected_amount - feed_amount) <= tolerance
         if not balanced:
             add(variance_code, store, business_date, abs(expected_amount - feed_amount), currency)
-        for row in feed_by_scope[key]:
-            row.reconciliation_status, row.disposition = (
-                ("Matched", "Closed") if balanced else ("Exception", "Awaiting")
-            )
+        scope_statuses[key] = "Matched" if balanced else "Exception"
+
+    await update_daily_feed_statuses(db, feed_lineage, scope_statuses, unreferenced_only)
+    for row in feed:
+        status = scope_statuses.get((row.store_id, row.currency, row.business_date))
+        if status:
+            row.reconciliation_status = status
+            row.disposition = "Closed" if status == "Matched" else "Awaiting"
 
 
 async def collect_daily_feed_amounts(db, feed, basis):
     """Aggregate actual feed values and matched source values in bounded scope batches."""
     actual, expected = defaultdict(Decimal), defaultdict(Decimal)
-    feed_by_scope = defaultdict(list)
-    feed_amounts = await effective_amounts(db, feed)
     scopes = sorted({(row.store_id, row.currency, row.business_date) for row in feed})
-    for row in feed:
-        key = (row.store_id, row.currency, row.business_date)
-        actual[key] += feed_amounts[row.id]
-        feed_by_scope[key].append(row)
+    feed_query = select(CanonicalTransaction).where(
+        CanonicalTransaction.source_lineage == feed[0].source_lineage,
+        tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
+               CanonicalTransaction.business_date).in_(scopes),
+    )
+    if all(row.settlement_reference is None for row in feed):
+        feed_query = feed_query.where(CanonicalTransaction.settlement_reference.is_(None))
+    await accumulate_reconciliation_amounts(
+        db,
+        feed_query,
+        lambda row: (row.store_id, row.currency, row.business_date),
+        actual,
+        max_groups=MAX_SETTLEMENT_GROUPS,
+    )
 
     # Restrict reads to represented feed scopes and keep all-dates scans bounded.
     for offset in range(0, len(scopes), 250):
@@ -619,7 +634,43 @@ async def collect_daily_feed_amounts(db, feed, basis):
             expected,
             max_groups=MAX_SETTLEMENT_GROUPS,
         )
-    return actual, expected, feed_by_scope
+    return actual, expected
+
+
+async def update_daily_feed_statuses(db, feed_lineage, scope_statuses, unreferenced_only):
+    """Update every feed row represented by the recalculated daily scopes in bounded batches."""
+    scopes_by_status = defaultdict(list)
+    for scope, status in scope_statuses.items():
+        scopes_by_status[status].append(scope)
+
+    for status, scopes in scopes_by_status.items():
+        disposition = "Closed" if status == "Matched" else "Awaiting"
+        for offset in range(0, len(scopes), COMPOSITE_SCOPE_BATCH_SIZE):
+            scope_batch = scopes[offset:offset + COMPOSITE_SCOPE_BATCH_SIZE]
+            statement = update(CanonicalTransaction).where(
+                CanonicalTransaction.source_lineage == feed_lineage,
+                tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
+                       CanonicalTransaction.business_date).in_(scope_batch),
+                CanonicalTransaction.reconciliation_status.in_(
+                    ("Unmatched", "Matched", "Exception")
+                ),
+            )
+            if unreferenced_only:
+                statement = statement.where(CanonicalTransaction.settlement_reference.is_(None))
+            await db.execute(statement.values(
+                reconciliation_status=status,
+                disposition=disposition,
+            ).execution_options(synchronize_session=False))
+            for row in db.identity_map.values():
+                if (
+                    isinstance(row, CanonicalTransaction)
+                    and row.source_lineage == feed_lineage
+                    and (row.store_id, row.currency, row.business_date) in scope_batch
+                    and (not unreferenced_only or row.settlement_reference is None)
+                    and row.reconciliation_status in ("Unmatched", "Matched", "Exception")
+                ):
+                    row.reconciliation_status = status
+                    row.disposition = disposition
 
 
 async def accumulate_reconciliation_amounts(db, query, key_for, totals, *, max_groups: int) -> None:
