@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.security.authentication import AUTH_ENABLED, require_role
 from database import get_db
-from integrations.ontology import ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
 from apps.ingest.models import SourceRecord
 from apps.system.models import Connector
@@ -58,9 +57,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     return {
         "status": "healthy",
         "database": "healthy",
-        "auth_enabled": AUTH_ENABLED,
-        "ontology": ontology.ONTOLOGY_VERSION,
-        "ontology_integration": ontology_integration.status(),
     }
 
 
