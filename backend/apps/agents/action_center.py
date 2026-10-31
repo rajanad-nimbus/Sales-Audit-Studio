@@ -2,7 +2,6 @@
 import csv
 import io
 import math
-import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Literal
@@ -13,20 +12,16 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.agents import investigation_service
+from apps.agents import bulk_actions
+from apps.agents.bulk_actions import BULK_LIMIT, HEAVY_LIMIT
 from apps.search import contains_literal
 from apps.security import scope
 from integrations.ontology import nimbus
-from integrations.ontology.ontology_integration import integration as ontology_integration
 from apps.security.authentication import require_role
 from database import get_db
 from apps.cases.models import (
     Case,
-    Exception as DBException,
     HumanDecision,
-    Recommendation,
-    Workflow,
-    ValidationObligation,
 )
 
 router = APIRouter(prefix="/api/action-center")
@@ -37,9 +32,6 @@ STAGES = {
     "progress": ["Open", "In Investigation", "Resolving", "Pending Validation"],
     "done": ["Closed", "Escalated"],
 }
-BULK_LIMIT = 1000          # max cases touched per bulk call
-HEAVY_LIMIT = 200          # max cases for agent-driven bulk actions
-BULK_APPROVE_MAX_IMPACT = 5000  # bulk approval refuses larger financial movements
 EXPORT_BATCH_SIZE = 1000
 MAX_ACTION_CENTER_EXPORT_CASES = 50_000
 MAX_FILTER_VALUES = 100
@@ -204,18 +196,6 @@ def row(c: Case, now: datetime) -> dict:
             "evidence": c.evidence_completeness, "investigation_status": c.investigation_status, "assigned_to": c.assigned_to,
             "sla_due_at": c.sla_due_at, "sla_state": sla_state(c, now), "snoozed_until": c.snoozed_until,
             "age_hours": int((now - as_utc(c.created_at)).total_seconds() // 3600)}
-
-
-def first_record_per_case(model, case_ids: list[str], *conditions):
-    """Select only each case's earliest matching child record in the database."""
-    ranked = select(
-        model.id.label("record_id"),
-        func.row_number().over(
-            partition_by=model.case_id,
-            order_by=(model.created_at, model.id),
-        ).label("row_number"),
-    ).where(model.case_id.in_(case_ids), *conditions).subquery()
-    return select(model).join(ranked, model.id == ranked.c.record_id).where(ranked.c.row_number == 1)
 
 
 @router.get("/cases")
@@ -396,143 +376,21 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         truncated = False
     else:
         raise HTTPException(status_code=400, detail="Provide ids or select_all")
-    cases = list((await db.execute(stmt.order_by(Case.id).with_for_update().execution_options(populate_existing=True))).scalars().all())
+    cases = list((await db.execute(
+        stmt.order_by(Case.id).with_for_update().execution_options(populate_existing=True)
+    )).scalars().all())
     if req.ids:
         for case in cases:
             scope.require_store(user, case.store_id)
     if req.select_all is not None and len(cases) > BULK_LIMIT:
         cases, truncated = cases[:BULK_LIMIT], True
 
-    heavy = req.action in ("investigate", "approve", "escalate", "advance")
+    heavy = req.action in {"investigate", "approve", "escalate", "advance"}
     if heavy and len(cases) > HEAVY_LIMIT:
         cases, truncated = cases[:HEAVY_LIMIT], True
-
-    exceptions_by_case: dict[str, list[DBException]] = {}
-    if req.action == "investigate" and cases:
-        exception_rows = (await db.execute(
-            select(DBException).where(DBException.case_id.in_([case.id for case in cases]))
-            .order_by(DBException.case_id, DBException.created_at, DBException.id)
-        )).scalars()
-        for exception in exception_rows:
-            exceptions_by_case.setdefault(exception.case_id, []).append(exception)
-
-    recommendations_by_case: dict[str, Recommendation] = {}
-    if req.action in ("approve", "escalate") and cases:
-        recommendations = (await db.execute(
-            select(Recommendation).where(
-                Recommendation.case_id.in_([case.id for case in cases]),
-                Recommendation.status == "Proposed",
-            ).order_by(Recommendation.case_id, Recommendation.created_at.desc(), Recommendation.id.desc())
-        )).scalars()
-        for recommendation in recommendations:
-            recommendations_by_case.setdefault(recommendation.case_id, recommendation)
-
-    pending_workflows_by_case: dict[str, Workflow] = {}
-    incomplete_obligations_by_case: dict[str, ValidationObligation] = {}
-    if req.action == "advance" and cases:
-        resolving_case_ids = [case.id for case in cases if case.status == "Resolving"]
-        if resolving_case_ids:
-            pending_workflows = (await db.execute(
-                first_record_per_case(Workflow, resolving_case_ids, Workflow.state == "Pending")
-            )).scalars()
-            for workflow in pending_workflows:
-                pending_workflows_by_case[workflow.case_id] = workflow
-
-        validation_case_ids = [case.id for case in cases if case.status == "Pending Validation"]
-        if validation_case_ids:
-            obligations = (await db.execute(
-                first_record_per_case(
-                    ValidationObligation,
-                    validation_case_ids,
-                    ValidationObligation.status != "Complete",
-                )
-            )).scalars()
-            for obligation in obligations:
-                incomplete_obligations_by_case[obligation.case_id] = obligation
-
-    validation_workflows: dict[str, Workflow] = {}
-    obligation_workflow_ids = {obligation.workflow_id for obligation in incomplete_obligations_by_case.values()}
-    if req.action == "advance" and obligation_workflow_ids:
-        validation_workflows = {
-            workflow.id: workflow
-            for workflow in (await db.execute(
-                select(Workflow).where(Workflow.id.in_(obligation_workflow_ids))
-            )).scalars()
-        }
-
-    approved_rule_codes = None
-    ok, skipped = 0, []
-    evidence_cache = investigation_service.InvestigationEvidenceCache(db)
-    skip = lambda c, why: skipped.append({"case_number": c.case_number, "reason": why})
-    now = datetime.now(timezone.utc)
-
-    for c in cases:
-        a = req.action
-        if a == "assign":
-            c.assigned_to = actor if req.params.get("assignee", "me") == "me" else req.params["assignee"]; ok += 1
-        elif a == "unassign":
-            c.assigned_to = None; ok += 1
-        elif a == "priority":
-            p = req.params.get("priority")
-            if p not in nimbus.SLA_HOURS: skip(c, "invalid priority"); continue
-            c.priority = p; c.sla_due_at = nimbus.sla_due(p); ok += 1
-        elif a == "snooze":
-            c.snoozed_until = now + timedelta(hours=float(req.params.get("hours", 24))); ok += 1
-        elif a == "unsnooze":
-            c.snoozed_until = None; ok += 1
-        elif a == "investigate":
-            if c.amount_needs_review: skip(c, "case amounts require finance review"); continue
-            if c.status not in ("Open", "In Investigation"): skip(c, f"already {c.status}"); continue
-            excs = exceptions_by_case.get(c.id, [])
-            if not excs: skip(c, "no exception records to investigate"); continue
-            await investigation_service.run_investigation(db, c, excs, evidence_cache=evidence_cache); ok += 1
-        elif a in ("approve", "escalate"):
-            if user["role"] not in ("finance", "admin"): skip(c, "requires finance role"); continue
-            if c.status != "In Review": skip(c, f"not awaiting decision ({c.status})"); continue
-            rec = recommendations_by_case.get(c.id)
-            if not rec: skip(c, "no open recommendation"); continue
-            if a == "approve":
-                if rec.financial_impact != 0 and c.currency != nimbus.THRESHOLD_CURRENCY:
-                    skip(c, "bulk financial limit is in USD; review this currency individually"); continue
-                if abs(rec.financial_impact) > BULK_APPROVE_MAX_IMPACT:
-                    skip(c, f"financial movement above bulk limit ({BULK_APPROVE_MAX_IMPACT}); review individually"); continue
-                if approved_rule_codes is None:
-                    approved_rule_codes = await ontology_integration.refresh()
-                if nimbus.evaluate_policy(db, c, rec, approved_rule_codes).outcome == "RequestEvidence":
-                    skip(c, "policy: evidence incomplete"); continue
-                rec.status = "Approved"; nimbus.start_workflow(db, c, rec)
-                decision = "Approved"
-            else:
-                rec.status, c.status, decision = "Escalated", "Escalated", "Escalated"
-            db.add(HumanDecision(id=str(uuid.uuid4()), case_id=c.id, recommendation_id=rec.id, decision_type="Finance",
-                                 decision=decision, actor=actor, authority_check="Bulk"))
-            nimbus.audit(db, "HUMAN_DECISION", c.id, "Recommendation", rec.id, f"{decision} by {actor} (bulk)", actor=actor)
-            ok += 1
-        elif a == "advance":
-            if c.status == "Resolving":
-                wf = pending_workflows_by_case.get(c.id)
-                if wf: nimbus.resolve(db, c, wf); ok += 1
-                else: skip(c, "no pending workflow")
-            elif c.status == "Pending Validation":
-                ob = incomplete_obligations_by_case.get(c.id)
-                if ob:
-                    wf = validation_workflows.get(ob.workflow_id)
-                    if wf is None:
-                        raise HTTPException(status_code=409, detail="Validation workflow no longer exists")
-                    # A bulk transition never substitutes for fresh validation evidence.
-                    nimbus.validate(db, c, wf, ob, [])
-                    skip(c, "validation waiting: fresh source evidence required, validate individually")
-                else: skip(c, "nothing to validate")
-            else: skip(c, f"nothing to advance ({c.status})")
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown action {a}")
-
-    nimbus.audit(db, "BULK_ACTION", None, "Case", "bulk", f"{actor} ran '{req.action}' on {len(cases)} case(s): {ok} ok, {len(skipped)} skipped",
-                 actor=actor, after={"action": req.action, "params": req.params})
-    await db.commit()
-    return {"action": req.action, "requested": len(cases), "ok": ok, "skipped_count": len(skipped),
-            "skipped": skipped[:50], "truncated": truncated,
-            "limits": {"bulk": BULK_LIMIT, "agent_actions": HEAVY_LIMIT, "approve_max_financial_movement": BULK_APPROVE_MAX_IMPACT}}
+    return await bulk_actions.execute_bulk_action(
+        db, req.action, req.params, cases, user, actor, truncated,
+    )
 
 
 @router.get("/export.csv")

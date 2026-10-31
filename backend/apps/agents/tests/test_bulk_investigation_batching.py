@@ -7,7 +7,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.agents import action_center
+from apps.agents import action_center, bulk_actions
 from models import (
     Base,
     Case,
@@ -54,7 +54,7 @@ def test_bulk_investigation_fetches_exceptions_once_and_groups_them_by_case(monk
                 async def fake_investigation(_db, case, exceptions, **_kwargs):
                     received.append((case.id, [exception.id for exception in exceptions]))
 
-                monkeypatch.setattr(action_center.investigation_service, "run_investigation", fake_investigation)
+                monkeypatch.setattr(bulk_actions.investigation_service, "run_investigation", fake_investigation)
                 exception_queries = 0
 
                 def count_exception_queries(_connection, _cursor, statement, _parameters, _context, _executemany):
@@ -123,7 +123,7 @@ def test_bulk_approval_batches_recommendations_and_refreshes_ontology_once(monke
                     refresh_calls += 1
                     return frozenset()
 
-                monkeypatch.setattr(action_center.ontology_integration, "refresh", refresh_ontology)
+                monkeypatch.setattr(bulk_actions.ontology_integration, "refresh", refresh_ontology)
                 monkeypatch.setattr(action_center.nimbus, "start_workflow", lambda *_args: None)
                 recommendation_queries = 0
 
