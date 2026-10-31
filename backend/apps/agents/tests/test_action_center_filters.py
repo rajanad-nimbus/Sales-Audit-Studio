@@ -91,10 +91,44 @@ def test_action_center_rejects_invalid_query_options(params):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"stage": "unknown"},
+        {"sla": "late"},
+        {"snoozed": "yes"},
+        {"min_amount": "NaN"},
+        {"max_amount": "Infinity"},
+        {"min_amount": "20", "max_amount": "10"},
+    ],
+)
+def test_action_center_rejects_unsupported_or_inconsistent_filters(params):
+    async def run():
+        app = FastAPI()
+        app.include_router(router)
+
+        async def identity():
+            return {"user": "finance@example.test", "role": "finance"}
+
+        async def unused_database():
+            yield None
+
+        app.dependency_overrides[auth.current_user] = identity
+        app.dependency_overrides[get_db] = unused_database
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.get("/api/action-center/cases", params=params)
+        assert response.status_code == 422
+
+    asyncio.run(run())
+
+
 def test_action_center_accepts_supported_filter_values():
     from apps.agents.action_center import filters
 
-    assert filters(store="STORE-1").store == "STORE-1"
+    supported = filters(store="STORE-1", stage="open", sla="at_risk", snoozed="only", min_amount=1, max_amount=10)
+    assert supported.store == "STORE-1" and supported.stage == "open"
 
 
 @pytest.mark.parametrize(

@@ -148,6 +148,18 @@ def filters(q: str | None = None, stage: str | None = None, status: str | None =
     date_to = _validated_filter_date(date_to, "date_to")
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="date_from must not be after date_to")
+    if stage not in (None, "", *STAGES):
+        raise HTTPException(status_code=422, detail=f"stage must be one of: {', '.join(STAGES)}")
+    if sla not in (None, "", "breached", "at_risk"):
+        raise HTTPException(status_code=422, detail="sla must be breached or at_risk")
+    if snoozed not in (None, "", "only", "all"):
+        raise HTTPException(status_code=422, detail="snoozed must be only or all")
+    if min_amount is not None and not math.isfinite(min_amount):
+        raise HTTPException(status_code=422, detail="min_amount must be a finite number")
+    if max_amount is not None and not math.isfinite(max_amount):
+        raise HTTPException(status_code=422, detail="max_amount must be a finite number")
+    if min_amount is not None and max_amount is not None and min_amount > max_amount:
+        raise HTTPException(status_code=422, detail="min_amount must not exceed max_amount")
     return Filters(
         q=q, stage=stage, status=status, case_type=case_type, store=store,
         priority=priority, assignee=assignee, min_amount=min_amount, max_amount=max_amount,
