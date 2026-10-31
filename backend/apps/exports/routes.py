@@ -11,11 +11,10 @@ import tempfile
 import uuid
 from datetime import timedelta, timezone
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +26,13 @@ from database import get_db
 from apps.audit.models import AuditEvent
 from model_base import utcnow
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem, TestSinkReceipt
+from apps.exports.schemas import (
+    AckIn,
+    DestIn,
+    FailedExportResolution,
+    InterruptedExportRecovery,
+    RunIn,
+)
 from apps.exports.selection import (
     MAX_BATCH,
     SCOPES,
@@ -259,15 +265,6 @@ async def finish_delivery(db: AsyncSession, batch: ExportBatch, dest_name: str, 
     return batch_view(batch, dest_name)
 
 
-class DestIn(BaseModel):
-    name: str
-    kind: str
-    format: str = "json"
-    url: str | None = None
-    secret: str | None = None
-    directory: str | None = None
-
-
 @router.get("/datasets")
 async def datasets(_: dict = Depends(require_role("finance", "it"))):
     return [{"key": k, "description": v} for k, v in DATASETS.items()]
@@ -326,13 +323,6 @@ async def toggle_destination(dest_id: str, db: AsyncSession = Depends(get_db), u
           actor=user["user"] or "demo.user")
     await db.commit()
     return dest_view(d)
-
-
-class RunIn(BaseModel):
-    destination_id: str
-    dataset: str
-    dry_run: bool = False
-    scope: str = "all"   # all | current | backposts. Back-posts are records for an earlier or already-exported business day.
 
 
 @router.post("/run")
@@ -486,16 +476,6 @@ async def retry(batch_id: str, db: AsyncSession = Depends(get_db), user: dict = 
     return await finish_delivery(db, b, dest.name, retrying=True)
 
 
-class FailedExportResolution(BaseModel):
-    outcome: Literal["received", "not_received"]
-    evidence: str
-
-
-class InterruptedExportRecovery(BaseModel):
-    worker_stopped: bool
-    evidence: str
-
-
 @router.post("/batches/{batch_id}/recover")
 async def recover_interrupted_batch(batch_id: str, body: InterruptedExportRecovery,
                                     db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("it"))):
@@ -607,10 +587,6 @@ async def tracking(destination_id: str, dataset: str,
     summary, items, total = await tracking_page(db, destination_id, dataset, state, q, page, page_size)
     return {"kind": "records", "summary": summary, "items": items,
             "total": total, "page": page, "pages": max(1, -(-total // page_size))}
-
-
-class AckIn(BaseModel):
-    reference: str | None = Field(default=None, max_length=255)
 
 
 @router.post("/batches/{batch_id}/ack")
