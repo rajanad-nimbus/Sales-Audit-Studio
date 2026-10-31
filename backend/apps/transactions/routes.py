@@ -16,8 +16,10 @@ from database import get_db
 from apps.search import contains_literal
 from apps.transactions import detail as detail_math
 from apps.security import scope
-from models import (AuditEvent, CanonicalTransaction, Case, SourceRecord, TransactionAdjustment, TransactionDiscount, TransactionLine,
-                    TransactionTax, TransactionTender)
+from models import AuditEvent, Case, SourceRecord, TransactionAdjustment
+from apps.transactions.models import (
+    CanonicalTransaction, TransactionDiscount, TransactionLine, TransactionTax, TransactionTender,
+)
 
 router = APIRouter(prefix="/api/transactions", tags=["Transactions"])
 MAX_PAYLOAD_CHARS = 8000
