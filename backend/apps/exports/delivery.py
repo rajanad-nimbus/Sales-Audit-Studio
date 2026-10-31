@@ -141,6 +141,7 @@ def safe_delivery_error(error: Exception) -> str:
             "Destination directory is outside the export root",
             "Export payload or hash is missing",
             "Export payload does not match its recorded hash",
+            "Webhook signing secret is missing or too short",
         }
         return str(error) if str(error) in safe_messages else "Export payload or destination is invalid"
     return "Delivery failed"
@@ -174,7 +175,9 @@ async def deliver_webhook(
 ) -> None:
     """Send a signed webhook and map receiver responses onto batch state."""
     config = destination.config or {}
-    secret = config.get("secret", "")
+    secret = config.get("secret")
+    if not isinstance(secret, str) or len(secret.strip()) < 32:
+        raise ValueError("Webhook signing secret is missing or too short")
     headers = {
         "Content-Type": "text/csv" if destination.format == "csv" else "application/json",
         "X-Nimbus-Idempotency-Key": batch.idempotency_key,

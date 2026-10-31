@@ -8,6 +8,8 @@ from apps.exports import routes
 from apps.exports.delivery import render
 from models import ExportBatch, ExportDestination
 
+WEBHOOK_SECRET = "s" * 32
+
 
 def make_delivery(name="ERP"):
     payload = '{"records": [1]}'
@@ -51,7 +53,7 @@ def test_file_delivery_is_stable_across_retries(tmp_path, monkeypatch):
 
 def test_webhook_sends_body_and_metadata_signatures(monkeypatch):
     destination, batch = make_delivery()
-    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": "secret"}
+    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
     captured = {}
 
     class Client:
@@ -72,13 +74,13 @@ def test_webhook_sends_body_and_metadata_signatures(monkeypatch):
     asyncio.run(routes.deliver(destination, batch))
     assert batch.status == "Sent"
     headers, body = captured["headers"], captured["body"]
-    assert headers["X-Nimbus-Signature"] == routes.sign("secret", body)
-    assert headers["X-Nimbus-Envelope-Signature"] == routes.sign_envelope("secret", batch.dataset, batch.idempotency_key, body)
+    assert headers["X-Nimbus-Signature"] == routes.sign(WEBHOOK_SECRET, body)
+    assert headers["X-Nimbus-Envelope-Signature"] == routes.sign_envelope(WEBHOOK_SECRET, batch.dataset, batch.idempotency_key, body)
 
 
 def test_webhook_failure_does_not_persist_receiver_response_body(monkeypatch):
     destination, batch = make_delivery()
-    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": "secret"}
+    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
 
     class Client:
         def __init__(self, **_kwargs):
@@ -106,7 +108,7 @@ def test_webhook_transport_error_does_not_persist_url_credentials(monkeypatch):
     destination.kind = "webhook"
     destination.config = {
         "url": "https://receiver.example/path?token=top-secret",
-        "secret": "secret",
+        "secret": WEBHOOK_SECRET,
     }
 
     class Client:
@@ -134,7 +136,7 @@ def test_webhook_transport_error_does_not_persist_url_credentials(monkeypatch):
 @pytest.mark.parametrize("response_body", [ValueError("invalid JSON"), ["unexpected", "JSON"]])
 def test_webhook_acknowledges_success_even_when_response_reference_is_unusable(monkeypatch, response_body):
     destination, batch = make_delivery()
-    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": "secret"}
+    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
 
     class Client:
         def __init__(self, **_kwargs):
@@ -159,6 +161,24 @@ def test_webhook_acknowledges_success_even_when_response_reference_is_unusable(m
 
     assert batch.status == "Acknowledged"
     assert batch.response_ref is None
+
+
+@pytest.mark.parametrize("secret", [None, "", " " * 32, "too-short"])
+def test_webhook_with_invalid_persisted_secret_fails_closed(monkeypatch, secret):
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": secret}
+
+    async def unexpected_post(*_args, **_kwargs):
+        pytest.fail("webhook must not be sent with an invalid signing secret")
+
+    class Client:
+        post = unexpected_post
+
+    asyncio.run(routes.deliver(destination, batch, Client()))
+
+    assert batch.status == "Failed"
+    assert batch.error == "Webhook signing secret is missing or too short"
 
 
 def test_envelope_signature_interoperability_vector():

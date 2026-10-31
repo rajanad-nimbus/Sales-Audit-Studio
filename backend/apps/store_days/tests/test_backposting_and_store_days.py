@@ -288,7 +288,7 @@ def test_pos_control_variance_blocks_closure_and_is_displayed():
 
 # ---- Export tracking: what was exported, what is waiting, what is not eligible, and why ---------------------------
 def _setup_dest(db, kind="file", url=None):
-    cfg = {} if kind == "file" else {"url": url, "secret": "s"}
+    cfg = {} if kind == "file" else {"url": url, "secret": "s" * 32}
     d = ExportDestination(id="d1", name="ERP", kind=kind, format="json", config=cfg)
     db.add(d)
     return d

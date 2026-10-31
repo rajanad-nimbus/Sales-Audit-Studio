@@ -71,7 +71,7 @@ def sink_secret() -> str:
     configured = os.getenv("NIMBUS_SINK_SECRET")
     if configured:
         return configured
-    return "demo-secret" if test_sink_enabled() else ""
+    return "nimbus-local-test-sink-secret-32chars" if test_sink_enabled() else ""
 
 
 SINK_SECRET = sink_secret()
