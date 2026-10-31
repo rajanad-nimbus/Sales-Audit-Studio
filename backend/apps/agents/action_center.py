@@ -199,6 +199,18 @@ def row(c: Case, now: datetime) -> dict:
             "age_hours": int((now - as_utc(c.created_at)).total_seconds() // 3600)}
 
 
+def first_record_per_case(model, case_ids: list[str], *conditions):
+    """Select only each case's earliest matching child record in the database."""
+    ranked = select(
+        model.id.label("record_id"),
+        func.row_number().over(
+            partition_by=model.case_id,
+            order_by=(model.created_at, model.id),
+        ).label("row_number"),
+    ).where(model.case_id.in_(case_ids), *conditions).subquery()
+    return select(model).join(ranked, model.id == ranked.c.record_id).where(ranked.c.row_number == 1)
+
+
 @router.get("/cases")
 async def list_cases(f: Filters = Depends(filters),
                      sort: Literal["sla", "exposure", "amount", "age", "store", "type", "date",
@@ -414,23 +426,22 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         resolving_case_ids = [case.id for case in cases if case.status == "Resolving"]
         if resolving_case_ids:
             pending_workflows = (await db.execute(
-                select(Workflow).where(
-                    Workflow.case_id.in_(resolving_case_ids), Workflow.state == "Pending",
-                ).order_by(Workflow.case_id, Workflow.created_at, Workflow.id)
+                first_record_per_case(Workflow, resolving_case_ids, Workflow.state == "Pending")
             )).scalars()
             for workflow in pending_workflows:
-                pending_workflows_by_case.setdefault(workflow.case_id, workflow)
+                pending_workflows_by_case[workflow.case_id] = workflow
 
         validation_case_ids = [case.id for case in cases if case.status == "Pending Validation"]
         if validation_case_ids:
             obligations = (await db.execute(
-                select(ValidationObligation).where(
-                    ValidationObligation.case_id.in_(validation_case_ids),
+                first_record_per_case(
+                    ValidationObligation,
+                    validation_case_ids,
                     ValidationObligation.status != "Complete",
-                ).order_by(ValidationObligation.case_id, ValidationObligation.created_at, ValidationObligation.id)
+                )
             )).scalars()
             for obligation in obligations:
-                incomplete_obligations_by_case.setdefault(obligation.case_id, obligation)
+                incomplete_obligations_by_case[obligation.case_id] = obligation
 
     validation_workflows: dict[str, Workflow] = {}
     obligation_workflow_ids = {obligation.workflow_id for obligation in incomplete_obligations_by_case.values()}

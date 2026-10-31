@@ -235,12 +235,14 @@ def test_bulk_advance_batches_workflows_and_selects_oldest_pending_records(monke
                 monkeypatch.setattr(action_center.nimbus, "validate", fake_validate)
                 workflow_queries = 0
                 obligation_queries = 0
+                bounded_child_queries = 0
 
                 def count_transition_queries(_connection, _cursor, statement, _parameters, _context, _executemany):
-                    nonlocal workflow_queries, obligation_queries
+                    nonlocal workflow_queries, obligation_queries, bounded_child_queries
                     normalized = statement.upper()
                     workflow_queries += "FROM WORKFLOWS" in normalized
                     obligation_queries += "FROM VALIDATION_OBLIGATIONS" in normalized
+                    bounded_child_queries += "ROW_NUMBER() OVER" in normalized
 
                 event.listen(engine.sync_engine, "before_cursor_execute", count_transition_queries)
                 try:
@@ -256,6 +258,7 @@ def test_bulk_advance_batches_workflows_and_selects_oldest_pending_records(monke
 
                 assert result["ok"] == 2 and result["skipped_count"] == 2
                 assert workflow_queries == 2 and obligation_queries == 1
+                assert bounded_child_queries == 2
                 assert resolved == [("resolving-1", "wf-r1-z"), ("resolving-2", "wf-r2")]
                 assert validated == [
                     ("validating-1", "wf-v1-a", "ob-v1-a", []),
