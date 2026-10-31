@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,6 +112,58 @@ async def calculate(db: AsyncSession, row: CashControl):
     row.status = "Balanced" if row.variance_amount == 0 else "Over/Short"
 
 
+async def expected_cash_deposit(db: AsyncSession, store_id: str, business_date: str) -> Decimal:
+    """Sum the most detailed non-overlapping cash declarations for a store day."""
+    day_scope = (
+        CashControl.store_id == store_id,
+        CashControl.business_date == business_date,
+        CashControl.tender_type == "Cash",
+    )
+    amount = CashControl.declared_cash + CashControl.safe_drop
+
+    store_total = (
+        await db.execute(
+            select(func.sum(amount)).where(
+                *day_scope,
+                CashControl.register_id.is_(None),
+                CashControl.cashier_id.is_(None),
+            )
+        )
+    ).scalar_one()
+    if store_total is not None:
+        return store_total
+
+    register_rows = (
+        await db.execute(
+            select(CashControl.register_id, func.sum(amount))
+            .where(
+                *day_scope,
+                CashControl.register_id.is_not(None),
+                CashControl.cashier_id.is_(None),
+            )
+            .group_by(CashControl.register_id)
+        )
+    ).all()
+    register_totals = {register_id: total for register_id, total in register_rows}
+
+    cashier_query = select(func.sum(amount)).where(
+        *day_scope,
+        CashControl.cashier_id.is_not(None),
+    )
+    if register_totals:
+        cashier_query = cashier_query.where(
+            or_(
+                CashControl.register_id.is_(None),
+                and_(
+                    CashControl.register_id.is_not(None),
+                    CashControl.register_id.not_in(register_totals),
+                ),
+            )
+        )
+    cashier_total = (await db.execute(cashier_query)).scalar_one() or Decimal("0")
+    return sum(register_totals.values(), Decimal("0")) + cashier_total
+
+
 async def require_writable_store_day(db: AsyncSession, store_id: str, business_date: str) -> None:
     """Require an explicitly opened, non-closed store day for cash-office writes."""
     day = await lock_store_day(db, store_id, business_date)
@@ -206,12 +258,7 @@ async def record_deposit(body: CashDepositBody, db: AsyncSession = Depends(get_d
     scope.require_store(user, body.store_id)
     if body.deposited_amount < 0 or not body.deposit_reference.strip(): raise HTTPException(status_code=422, detail="Deposit amount must be non-negative and reference is required")
     await require_writable_store_day(db, body.store_id, body.business_date)
-    expected_query = select(func.coalesce(func.sum(CashControl.declared_cash + CashControl.safe_drop), 0)).where(
-        CashControl.store_id == body.store_id,
-        CashControl.business_date == body.business_date,
-        CashControl.tender_type == "Cash",
-    )
-    expected = (await db.execute(expected_query)).scalar_one()
+    expected = await expected_cash_deposit(db, body.store_id, body.business_date)
     variance = expected - body.deposited_amount
     row = CashDeposit(id=str(uuid.uuid4()), **body.model_dump(), expected_amount=expected, variance_amount=variance, status="Balanced" if variance == 0 else "Over/Short", recorded_by=user["user"] or "ontology.user")
     db.add(row)

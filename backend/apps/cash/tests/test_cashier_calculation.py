@@ -8,7 +8,13 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.cash.routes import CashControlBody, CashDepositBody, declare_cash, record_deposit
+from apps.cash.routes import (
+    CashControlBody,
+    CashDepositBody,
+    declare_cash,
+    expected_cash_deposit,
+    record_deposit,
+)
 from models import Base, CanonicalTransaction, StoreDay
 
 
@@ -56,15 +62,23 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                     store_id="S1", business_date="2026-10-01", register_id="R1",
                     cashier_id="C2", declared_cash=Decimal("20.00"),
                 ), db, finance)
+                assert await expected_cash_deposit(db, "S1", "2026-10-01") == Decimal("30.00")
                 register = await declare_cash(CashControlBody(
                     store_id="S1", business_date="2026-10-01", register_id="R1",
                     declared_cash=Decimal("30.00"),
+                ), db, finance)
+                deposit = await record_deposit(CashDepositBody(
+                    store_id="S1", business_date="2026-10-01",
+                    deposit_reference="BANK-REF-1", deposited_amount=Decimal("30.00"),
                 ), db, finance)
 
                 assert cashier_one["expected_amount"] == Decimal("10.00")
                 assert cashier_two["expected_amount"] == Decimal("20.00")
                 assert register["expected_amount"] == Decimal("30.00")
                 assert all(item["status"] == "Balanced" for item in (cashier_one, cashier_two, register))
+                assert deposit["expected_amount"] == Decimal("30.00")
+                assert deposit["variance_amount"] == Decimal("0.00")
+                assert deposit["status"] == "Balanced"
         finally:
             await engine.dispose()
 
