@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from apps.database_errors import violates_unique_constraint
 from auth import require_role
 from database import get_db
 from models import AuditTotalDefinition, ConfiguredAuditRule
@@ -35,6 +36,16 @@ class RuleBody(BaseModel):
     def normalize_owner(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
 def view(row: ConfiguredAuditRule): return {"id": row.id, "name": row.name, "total_name": row.total_name, "threshold": row.threshold, "threshold_currency": row.threshold_currency, "severity": row.severity, "owner": row.owner, "enabled": row.enabled, "updated_by": row.updated_by, "updated_at": row.updated_at}
+
+
+def _is_duplicate_rule_name(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"configured_audit_rules_name_key"},
+        sqlite_messages={"UNIQUE constraint failed: configured_audit_rules.name"},
+    )
+
+
 @router.get("")
 async def list_rules(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))): return [view(row) for row in (await db.execute(select(ConfiguredAuditRule).order_by(ConfiguredAuditRule.name))).scalars().all()]
 @router.post("")
@@ -63,5 +74,7 @@ async def create_rule(body: RuleBody, db: AsyncSession = Depends(get_db), user: 
     try: await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Rule name already exists") from exc
+        if _is_duplicate_rule_name(exc):
+            raise HTTPException(status_code=409, detail="Rule name already exists") from exc
+        raise
     return view(row)
