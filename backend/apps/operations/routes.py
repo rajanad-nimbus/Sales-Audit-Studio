@@ -188,6 +188,20 @@ async def purge_retention_candidates(db: AsyncSession, model, record_ids: list[s
     return result.rowcount or 0
 
 
+def audit_retention_run(db: AsyncSession, run: RetentionRun, dataset: str) -> None:
+    """Record every completed retention run, including runs with no eligible data."""
+    audit(
+        db,
+        "RETENTION_RUN",
+        None,
+        "RetentionRun",
+        run.id,
+        f"Retention {dataset}: archived {run.archived_records}, purged {run.purged_records}",
+        actor=run.performed_by,
+        after={"archive_hash": run.archive_hash},
+    )
+
+
 class RetentionBody(BaseModel):
     retain_days: int
     archive_before_purge: bool = True
@@ -235,7 +249,10 @@ async def execute_retention(dataset: str, body: RetentionRunBody, db: AsyncSessi
     record_ids, _, eligible_count, has_more = await retention_candidates(db, model, timestamp, cutoff)
     run = RetentionRun(id=str(uuid.uuid4()), dataset=dataset, retain_days=policy.retain_days, eligible_records=eligible_count, archived_records=0, purged_records=0, status="Succeeded", performed_by=user["user"] or "ontology.user")
     if not record_ids:
-        db.add(run); await db.commit(); return {"run_id":run.id,"eligible_records":0,"message":"No records eligible"}
+        db.add(run)
+        audit_retention_run(db, run, dataset)
+        await db.commit()
+        return {"run_id": run.id, "eligible_records": 0, "message": "No records eligible"}
     if body.confirm_purge:
         await ensure_retention_records_are_unreferenced(db, dataset, record_ids)
     archive_path = None
@@ -249,6 +266,6 @@ async def execute_retention(dataset: str, body: RetentionRunBody, db: AsyncSessi
     if body.confirm_purge:
         run.purged_records = await purge_retention_candidates(db, model, record_ids)
     db.add(run)
-    audit(db, "RETENTION_RUN", None, "RetentionRun", run.id, f"Retention {dataset}: archived {run.archived_records}, purged {run.purged_records}", actor=run.performed_by, after={"archive_hash":run.archive_hash})
+    audit_retention_run(db, run, dataset)
     await db.commit()
     return {"run_id":run.id,"eligible_records":eligible_count,"archived_records":run.archived_records,"purged_records":run.purged_records,"archive_location":run.archive_location,"archive_hash":run.archive_hash,"purge_confirmed":body.confirm_purge,"more_eligible":has_more}

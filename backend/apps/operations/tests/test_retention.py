@@ -103,6 +103,38 @@ def test_retention_processes_a_deterministic_bounded_batch(monkeypatch):
     asyncio.run(run())
 
 
+def test_empty_retention_run_is_written_to_audit_log():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with Session() as db:
+                db.add(RetentionPolicy(
+                    id="policy", dataset="source_records", retain_days=30,
+                    archive_before_purge=False, updated_by="it",
+                ))
+                await db.commit()
+
+                result = await execute_retention(
+                    "source_records", RetentionRunBody(confirm_purge=False), db, {"user": "it.user"}
+                )
+
+                audit_event = (await db.execute(
+                    select(AuditEvent).where(AuditEvent.event_type == "RETENTION_RUN")
+                )).scalar_one()
+                assert result["eligible_records"] == 0
+                assert audit_event.object_type == "RetentionRun"
+                assert audit_event.object_id == result["run_id"]
+                assert audit_event.actor == "it.user"
+                assert "archived 0, purged 0" in audit_event.action_description
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_retention_refuses_to_purge_transactions_with_referenced_details(tmp_path, monkeypatch):
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
