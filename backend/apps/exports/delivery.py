@@ -112,6 +112,25 @@ def verified_export_body(batch: ExportBatch) -> bytes:
     return body
 
 
+def safe_delivery_error(error: Exception) -> str:
+    """Return a useful failure category without persisting URLs, paths, or remote text."""
+    if isinstance(error, httpx.TimeoutException):
+        return "Webhook request timed out"
+    if isinstance(error, httpx.HTTPError):
+        return "Webhook request failed"
+    if isinstance(error, OSError):
+        return "File delivery failed"
+    if isinstance(error, ValueError):
+        safe_messages = {
+            "Invalid destination directory name",
+            "Destination directory is outside the export root",
+            "Export payload or hash is missing",
+            "Export payload does not match its recorded hash",
+        }
+        return str(error) if str(error) in safe_messages else "Export payload or destination is invalid"
+    return "Delivery failed"
+
+
 async def deliver(
     destination: ExportDestination,
     batch: ExportBatch,
@@ -129,7 +148,7 @@ async def deliver(
             batch.sent_at, batch.error = utcnow(), None
     except Exception as exc:
         batch.status = "Failed"
-        batch.error = f"{type(exc).__name__}: {str(exc)[:200]}"
+        batch.error = safe_delivery_error(exc)
 
 
 async def deliver_webhook(
