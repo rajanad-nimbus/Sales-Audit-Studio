@@ -6,6 +6,7 @@ continues with its built-in deterministic controls.
 """
 import os
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import httpx
@@ -19,6 +20,37 @@ RULE_CODES = frozenset({
     "NSA-BANK-RECONCILIATION", "NSA-GL-RECONCILIATION", "NSA-STALE-EVIDENCE",
     "NSA-ACTION-IDEMPOTENCY", "NSA-CLOSE-ELIGIBILITY", "NSA-APPROVAL-AUTHORITY",
 })
+MAX_ONTOLOGY_RESPONSE_BYTES = 2 * 1024 * 1024
+ONTOLOGY_RESPONSE_CHUNK_BYTES = 64 * 1024
+
+
+async def read_json_response(response: httpx.Response) -> dict:
+    """Read and decode one Ontology page without buffering an unbounded response."""
+    content_length = response.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError as exc:
+            raise ValueError("Ontology response has an invalid content length") from exc
+        if declared_length < 0 or declared_length > MAX_ONTOLOGY_RESPONSE_BYTES:
+            raise ValueError(
+                f"Ontology response exceeds the {MAX_ONTOLOGY_RESPONSE_BYTES:,}-byte limit"
+            )
+
+    body = bytearray()
+    async for chunk in response.aiter_bytes(ONTOLOGY_RESPONSE_CHUNK_BYTES):
+        if len(body) + len(chunk) > MAX_ONTOLOGY_RESPONSE_BYTES:
+            raise ValueError(
+                f"Ontology response exceeds the {MAX_ONTOLOGY_RESPONSE_BYTES:,}-byte limit"
+            )
+        body.extend(chunk)
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("Ontology response is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Ontology response must be a JSON object")
+    return payload
 
 
 class OntologyIntegration:
@@ -119,9 +151,11 @@ class OntologyIntegration:
                     params["releaseId"] = release["releaseId"]
                 if cursor:
                     params["cursor"] = cursor
-                response = await client.get(f"{base}/{section}", headers=headers, params=params)
-                response.raise_for_status()
-                payload = response.json()
+                async with client.stream(
+                    "GET", f"{base}/{section}", headers=headers, params=params
+                ) as response:
+                    response.raise_for_status()
+                    payload = await read_json_response(response)
                 meta = self._release(payload)
                 if release and any(meta.get(k) != release.get(k) for k in
                                    ("workspaceId", "releaseId", "contentHash", "releaseHash", "version")):

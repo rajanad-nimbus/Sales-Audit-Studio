@@ -80,6 +80,40 @@ def test_invalid_refresh_discards_previous_active_context(failure):
     asyncio.run(go())
 
 
+@pytest.mark.parametrize("declared_length", [True, False])
+def test_oversized_ontology_page_is_rejected_before_full_buffering(monkeypatch, declared_length):
+    read_chunks = []
+
+    class ChunkedBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            read_chunks.append(1)
+            yield b"x" * 12
+            read_chunks.append(2)
+            yield b"y" * 12
+
+        async def aclose(self):
+            pass
+
+    async def go():
+        monkeypatch.setattr("integrations.ontology.ontology_integration.MAX_ONTOLOGY_RESPONSE_BYTES", 16)
+
+        def oversized(_request):
+            return httpx.Response(
+                200,
+                content=b"x" * 17 if declared_length else None,
+                stream=None if declared_length else ChunkedBody(),
+            )
+
+        integration = OntologyIntegration()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(oversized)) as client:
+            assert await integration.refresh(client) == frozenset()
+        assert integration.status()["last_error"] == "Ontology context refresh failed: ValueError"
+        assert not integration.context()["definitions"]
+        assert read_chunks == ([] if declared_length else [1, 2])
+
+    asyncio.run(go())
+
+
 def test_unconfigured_is_explicit_fallback(monkeypatch):
     monkeypatch.delenv("NIMBUS_ONTOLOGY_API_KEY")
     integration = OntologyIntegration()
