@@ -2,11 +2,12 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from apps.corrections.effects import effective_amounts
-from apps.cases.lineage import case_creation_mentions_transaction
+from apps.cases.lineage import case_creation_mentions_transaction, case_transaction_ids_table
 from apps.transactions.detail import card_amount
 from integrations.ontology.nimbus import audit
 from apps.audit.models import AuditEvent
@@ -73,26 +74,30 @@ async def related_exception_ids(db: AsyncSession, transaction: CanonicalTransact
         return {transaction.id}
     if transaction.source_lineage not in {"pos-map-v1", "processor-map-v1"}:
         return {transaction.id}
-    events = (await db.execute(select(AuditEvent).join(Case, Case.id == AuditEvent.case_id).where(
-        Case.store_id == transaction.store_id, AuditEvent.event_type == "CASE_CREATED",
-        case_creation_mentions_transaction(db, transaction.id)))).scalars().all()
-    linked = set()
-    for event in events:
-        state = event.after_state
-        if not isinstance(state, dict):
-            continue
-        ids = state.get("transaction_ids", [])
-        if isinstance(ids, list) and transaction.id in ids:
-            linked.update(item for item in ids if isinstance(item, str))
-    if not linked:
-        return {transaction.id}
-    rows = (await db.execute(select(CanonicalTransaction.id).where(
-        CanonicalTransaction.id.in_(linked), CanonicalTransaction.store_id == transaction.store_id,
-        CanonicalTransaction.currency == transaction.currency,
-        CanonicalTransaction.payment_reference == transaction.payment_reference,
-        CanonicalTransaction.transaction_type == counterpart,
-        CanonicalTransaction.source_lineage == ("processor-map-v1" if transaction.source_lineage == "pos-map-v1" else "pos-map-v1"),
-    ))).scalars().all()
+    created_event = aliased(AuditEvent)
+    transaction_ids = case_transaction_ids_table(db, created_event)
+    linked_counterparts = (
+        select(CanonicalTransaction.id)
+        .select_from(created_event)
+        .join(transaction_ids, true())
+        .join(Case, Case.id == created_event.case_id)
+        .join(CanonicalTransaction, CanonicalTransaction.id == transaction_ids.c.value)
+        .where(
+            Case.store_id == transaction.store_id,
+            created_event.event_type == "CASE_CREATED",
+            case_creation_mentions_transaction(db, transaction.id, created_event),
+            CanonicalTransaction.store_id == transaction.store_id,
+            CanonicalTransaction.currency == transaction.currency,
+            CanonicalTransaction.payment_reference == transaction.payment_reference,
+            CanonicalTransaction.transaction_type == counterpart,
+            CanonicalTransaction.source_lineage == (
+                "processor-map-v1" if transaction.source_lineage == "pos-map-v1" else "pos-map-v1"
+            ),
+        )
+        .distinct()
+        .limit(2)
+    )
+    rows = (await db.execute(linked_counterparts)).scalars().all()
     return {transaction.id, *rows}
 
 

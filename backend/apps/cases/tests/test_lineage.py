@@ -47,7 +47,8 @@ def test_postgres_case_lineage_pages_through_json_array_rows():
     event = aliased(AuditEvent)
     transaction_ids = case_transaction_ids_table(PostgreSQLSession(), event)
     statement = select(event.id).select_from(event).join(transaction_ids, true()).where(
-        case_creation_has_transactions(PostgreSQLSession(), event)
+        case_creation_has_transactions(PostgreSQLSession(), event),
+        case_creation_mentions_transaction(PostgreSQLSession(), "transaction-123", event),
     )
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)

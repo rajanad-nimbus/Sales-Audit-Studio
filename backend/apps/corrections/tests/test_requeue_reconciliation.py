@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -42,6 +42,75 @@ def test_non_object_case_evidence_does_not_break_correction_link_lookup():
                 await db.commit()
 
                 assert await related_exception_ids(db, transaction) == {transaction.id}
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_related_correction_pair_uses_database_lineage_for_large_cases():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                common = {
+                    "business_date": "2026-10-01",
+                    "transaction_date": timestamp,
+                    "event_timestamp": timestamp,
+                    "processing_timestamp": timestamp,
+                    "settlement_date": "2026-10-01",
+                    "currency": "USD",
+                    "signed_amount": 10,
+                    "store_id": "S1",
+                    "channel_id": "store",
+                    "payment_reference": "PAYMENT-1",
+                    "reconciliation_status": "Exception",
+                }
+                target = CanonicalTransaction(
+                    id="target", transaction_type="Sale", source_lineage="pos-map-v1", **common
+                )
+                counterpart = CanonicalTransaction(
+                    id="counterpart", transaction_type="Capture",
+                    source_lineage="processor-map-v1", **common,
+                )
+                case = Case(
+                    id="large-case", case_number="CASE-LARGE", case_type="Amount mismatch",
+                    business_date="2026-10-01", store_id="S1",
+                )
+                transaction_ids = ["target", "counterpart", *(f"unrelated-{i}" for i in range(1200))]
+                db.add_all([target, counterpart, case])
+                await db.flush()
+                case_created = AuditEvent(
+                    id="large-case-created", event_type="CASE_CREATED", actor="system",
+                    object_type="Case", object_id=case.id, case_id=case.id,
+                    action_description="Large reconciliation case",
+                    after_state={"transaction_ids": transaction_ids},
+                )
+                db.add(case_created)
+                await db.flush()
+
+                statements = []
+
+                def capture_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+                    if "json_each" in statement.lower():
+                        statements.append(statement)
+
+                event.listen(engine.sync_engine, "before_cursor_execute", capture_query)
+                try:
+                    linked = await related_exception_ids(db, target)
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", capture_query)
+
+                assert linked == {"target", "counterpart"}
+                assert len(statements) == 1
+                assert " IN (" not in statements[0].upper()
+
+                case_created.after_state = {"transaction_ids": ["target-suffix", "counterpart"]}
+                await db.flush()
+                assert await related_exception_ids(db, target) == {"target"}
         finally:
             await engine.dispose()
 
