@@ -30,9 +30,9 @@ import {
 export default function ActivityPage() {
   const [latest, setLatest] = useState<Evt[]>([]);
   const [older, setOlder] = useState<Evt[]>([]);
-  const [total, setTotal] = useState(0);
-  const [nextPage, setNextPage] = useState(2);
-  const [pages, setPages] = useState(1);
+  const olderRef = useRef<Evt[]>([]);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [onlyAlerts, setOnlyAlerts] = useState(false);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
@@ -64,14 +64,16 @@ export default function ActivityPage() {
 
   const load = useCallback(async () => {
     try {
-      const ev = await api.get('/api/audit/page?page_size=200');
+      const ev = await api.get('/api/audit/recent?limit=200');
       const items: Evt[] = ev.data.items.map((e: any) => ({
         ...e,
         action_description: e.description,
       }));
       setLatest(items);
-      setTotal(ev.data.total);
-      setPages(ev.data.pages);
+      if (!olderRef.current.length) {
+        setNextCursor(ev.data.next_before_seq);
+        setHasMore(ev.data.has_more);
+      }
       // Briefly highlight events that arrived since the last refresh (not on first load).
       const ids = new Set(items.map((e) => e.id));
       if (known.current) {
@@ -91,14 +93,18 @@ export default function ActivityPage() {
     }
   }, []);
   const loadOlder = async () => {
+    if (nextCursor === null) return;
     setLoadingMore(true);
     try {
-      const { data } = await api.get(`/api/audit/page?page_size=200&page=${nextPage}`);
-      setOlder((o) => [
-        ...o,
-        ...data.items.map((e: any) => ({ ...e, action_description: e.description })),
-      ]);
-      setNextPage((n) => n + 1);
+      const { data } = await api.get(`/api/audit/recent?limit=200&before_seq=${nextCursor}`);
+      const page: Evt[] = data.items.map((e: any) => ({ ...e, action_description: e.description }));
+      setOlder((existing) => {
+        const appended = [...existing, ...page];
+        olderRef.current = appended;
+        return appended;
+      });
+      setNextCursor(data.next_before_seq);
+      setHasMore(data.has_more);
     } catch {
       toast('Could not load older events.', 'error');
     } finally {
@@ -264,8 +270,7 @@ export default function ActivityPage() {
             </Button>
           )}
           <span className="toolbar-count">
-            {shown.length.toLocaleString()} of {total.toLocaleString()} events
-            {events.length < total ? ` (${events.length.toLocaleString()} loaded)` : ''}
+            {events.length.toLocaleString()} events loaded
           </span>
         </div>
 
@@ -291,7 +296,7 @@ export default function ActivityPage() {
                 Clear filters
               </Button>
             )}
-            {events.length > 0 && filtered && events.length < total && (
+            {events.length > 0 && filtered && hasMore && (
               <Button
                 size="sm"
 
@@ -429,11 +434,10 @@ export default function ActivityPage() {
           ))
         )}
 
-        {loaded && events.length < total && nextPage <= pages && (
+        {loaded && hasMore && (
           <div className="act-more">
             <span className="hint">
-              Showing the newest {events.length.toLocaleString()} of {total.toLocaleString()}{' '}
-              events.
+              Showing {events.length.toLocaleString()} events; older events are available.
             </span>
             <Button disabled={loadingMore} onClick={loadOlder}>
               {loadingMore ? 'Loading…' : 'Load older events'}

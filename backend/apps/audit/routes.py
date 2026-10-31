@@ -158,6 +158,29 @@ async def list_recent_events(
     return rows
 
 
+@router.get("/recent")
+async def recent_events(
+    limit: int = Query(200, ge=1, le=500),
+    before_seq: int | None = Query(None, ge=1),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """Return a bounded newest-first page without scanning the full audit trail for counts."""
+    query = select(AuditEvent)
+    if before_seq is not None:
+        query = query.where(AuditEvent.seq < before_seq)
+    rows = list((await db.execute(
+        query.order_by(AuditEvent.seq.desc()).limit(limit + 1)
+    )).scalars().all())
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [event(row) for row in rows],
+        "has_more": has_more,
+        "next_before_seq": rows[-1].seq if has_more and rows else None,
+    }
+
+
 def conditions(event_type, actor, case_id, date_from, date_to, q):
     conds = []
     if date_from and date_to and date_from > date_to:

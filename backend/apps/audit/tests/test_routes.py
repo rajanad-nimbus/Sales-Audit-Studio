@@ -143,3 +143,41 @@ def test_recent_audit_order_uses_chain_sequence_not_wall_clock():
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_recent_audit_keyset_pages_are_bounded_and_stable():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add_all([
+                    AuditEvent(id=f"event-{seq}", seq=seq, created_at=datetime.now(timezone.utc),
+                               event_type="TEST", actor="test", object_type="Test", object_id=str(seq),
+                               action_description=f"event {seq}")
+                    for seq in range(1, 6)
+                ])
+                await db.commit()
+
+                newest = await routes.recent_events(2, None, db, {})
+                assert [row["seq"] for row in newest["items"]] == [5, 4]
+                assert newest["has_more"] is True
+                assert newest["next_before_seq"] == 4
+
+                db.add(AuditEvent(
+                    id="event-6", seq=6, created_at=datetime.now(timezone.utc), event_type="TEST",
+                    actor="test", object_type="Test", object_id="6", action_description="new event",
+                ))
+                await db.commit()
+                older = await routes.recent_events(2, newest["next_before_seq"], db, {})
+                assert [row["seq"] for row in older["items"]] == [3, 2]
+                assert older["has_more"] is True
+                oldest = await routes.recent_events(2, older["next_before_seq"], db, {})
+                assert [row["seq"] for row in oldest["items"]] == [1]
+                assert oldest["has_more"] is False
+                assert oldest["next_before_seq"] is None
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
