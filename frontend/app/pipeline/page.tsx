@@ -4,7 +4,19 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, BatchStatus } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
-import { Alert, Badge, Button, DataTable, EmptyState, PageHeader } from '@/components/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  Field,
+  PageHeader,
+} from '@/components/ui';
+import { useMe } from '@/components/MeProvider';
+import { ShopifySyncCard } from '@/components/ShopifySyncCard';
+import type { Source } from '@/lib/sources';
 
 interface Stats {
   source_records: Record<string, number>;
@@ -48,7 +60,16 @@ interface FeedHealth {
   expected_within_hours: number | null;
   state: 'fresh' | 'overdue' | 'never' | 'unknown' | 'disabled';
 }
-type Tab = 'runs' | 'feeds' | 'quarantine' | 'demo';
+type SourceSwitch = 'enabled' | 'in_daily_batch' | 'manual_sync';
+type Tab = 'sources' | 'runs' | 'feeds' | 'quarantine' | 'demo';
+const SOURCE_NOTES: Record<string, string> = {
+  POS: 'Till sales and returns',
+  POSControl: 'Register control totals',
+  Processor: 'Card captures and refunds',
+  Bank: 'Bank deposits',
+  ERP: 'General-ledger postings',
+  Shopify: 'Online orders and refunds, pulled from Shopify',
+};
 
 const sum = (o: Record<string, number> = {}) => Object.values(o).reduce((a, b) => a + b, 0);
 const n = (v: number) => v.toLocaleString();
@@ -76,6 +97,9 @@ const ago = (h: number | null | undefined) =>
 
 export default function PipelinePage() {
   const toast = useToast();
+  const { me } = useMe();
+  const canManage = !!me && (me.role === 'it' || me.role === 'admin');
+  const [sources, setSources] = useState<Source[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [bstatus, setBstatus] = useState<BatchStatus | null>(null);
@@ -87,17 +111,19 @@ export default function PipelinePage() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [confirmClr, setConfirmClr] = useState(false);
-  const [tab, setTab] = useState<Tab>('runs');
+  const [tab, setTab] = useState<Tab>('sources');
 
   const load = useCallback(async () => {
     try {
-      const [st, r, b, d, f] = await Promise.all([
+      const [st, r, b, d, f, src] = await Promise.all([
         api.get('/api/ingest/stats'),
         api.get('/api/batch/runs?limit=10'),
         api.get('/api/batch/status'),
         api.get('/api/ingest/deliveries?limit=10'),
         api.get('/api/ingest/feed-health'),
+        api.get('/api/ingest/sources'),
       ]);
+      setSources(src.data);
       setStats(st.data);
       setRuns(r.data);
       setBstatus(b.data);
@@ -117,7 +143,7 @@ export default function PipelinePage() {
   }, [load]);
   useEffect(() => {
     const h = window.location.hash.slice(1) as Tab;
-    if (['runs', 'feeds', 'quarantine', 'demo'].includes(h)) setTab(h);
+    if (['sources', 'runs', 'feeds', 'quarantine', 'demo'].includes(h)) setTab(h);
   }, []);
   const pick = (t: Tab) => {
     setTab(t);
@@ -133,6 +159,17 @@ export default function PipelinePage() {
     }
     setBusy(null);
     load();
+  };
+  const setSwitch = async (source: Source, field: SourceSwitch, value: boolean) => {
+    try {
+      const { data } = await api.put(`/api/ingest/sources/${source.source_system}`, {
+        [field]: value,
+      });
+      setSources((all) => all.map((s) => (s.source_system === data.source_system ? data : s)));
+      toast(`${source.source_system} updated.`, 'success');
+    } catch (e) {
+      toast(apiError(e, 'Could not change this source.'), 'error');
+    }
   };
   const runBatch = () =>
     run('batch', async () => {
@@ -189,6 +226,7 @@ export default function PipelinePage() {
     };
 
   const tabs: [Tab, string, number | null, boolean][] = [
+    ['sources', 'Sources', sources.filter((s) => s.enabled).length, false],
     ['runs', 'Batch runs', runs.length, false],
     ['feeds', 'Source feeds', feedHealth.length, overdue > 0],
     ['quarantine', 'Quarantine', quarantined.length, quarantined.length > 0],
@@ -283,6 +321,103 @@ export default function PipelinePage() {
               </button>
             ))}
           </div>
+
+          {tab === 'sources' && (
+            <div className="case-panel">
+              <Card title="Sources">
+                <p className="hint">
+                  Choose which sources Nimbus accepts and how each one brings data in. A source can
+                  join the nightly batch, be synced or uploaded by hand, or both. Changes apply
+                  straight away and are written to the audit trail.
+                  {!canManage && ' Only an IT administrator can change them.'}
+                </p>
+                <DataTable
+                  columns={[
+                    {
+                      key: 'source',
+                      header: 'Source',
+                      primary: true,
+                      render: (s) => (
+                        <>
+                          {s.source_system}
+                          <small className="act-sub" style={{ display: 'block' }}>
+                            {SOURCE_NOTES[s.source_system]}
+                          </small>
+                        </>
+                      ),
+                    },
+                    {
+                      key: 'state',
+                      header: 'Status',
+                      render: (s) =>
+                        !s.enabled ? (
+                          <Badge variant="secondary" size="sm">
+                            Off
+                          </Badge>
+                        ) : s.configured === false ? (
+                          <Badge variant="warning" size="sm">
+                            Not connected
+                          </Badge>
+                        ) : (
+                          <Badge variant="success" size="sm">
+                            On
+                          </Badge>
+                        ),
+                    },
+                    ...(
+                      [
+                        ['enabled', 'Accept data'],
+                        ['in_daily_batch', 'Nightly batch'],
+                        ['manual_sync', 'Manual sync / upload'],
+                      ] as [SourceSwitch, string][]
+                    ).map(([field, header]) => ({
+                      key: field,
+                      header,
+                      render: (s: Source) => (
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          aria-label={`${header} for ${s.source_system}`}
+                          checked={s[field]}
+                          disabled={!canManage || (field !== 'enabled' && !s.enabled)}
+                          onChange={(e) => setSwitch(s, field, e.target.checked)}
+                        />
+                      ),
+                    })),
+                    {
+                      key: 'last',
+                      header: 'Last delivery',
+                      nowrap: true,
+                      render: (s) => (s.last_received_at ? when(s.last_received_at) : 'Never'),
+                    },
+                    {
+                      key: 'held',
+                      header: 'Quarantined',
+                      numeric: true,
+                      render: (s) => n(s.quarantined),
+                    },
+                  ]}
+                  rows={sources}
+                  rowKey={(s) => s.source_system}
+                />
+              </Card>
+              {sources
+                .filter((s) => s.source_system === 'Shopify')
+                .map((s) => (
+                  <ShopifySyncCard
+                    key={s.source_system}
+                    source={s}
+                    canManage={canManage}
+                    onUpdated={(u) =>
+                      setSources((all) =>
+                        all.map((x) => (x.source_system === u.source_system ? u : x))
+                      )
+                    }
+                    onSynced={load}
+                  />
+                ))}
+            </div>
+          )}
 
           {tab === 'runs' && (
             <section className="cc-card">

@@ -12,6 +12,7 @@ import {
   MetricGrid,
   MetricTile,
   PageHeader,
+  Pager,
   Segmented,
   Toolbar,
   Card,
@@ -26,20 +27,44 @@ export default function CorrectionsPage() {
   const router = useRouter();
   const toast = useToast();
   const [rows, setRows] = useState<Adjustment[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('All');
   const [q, setQ] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  useEffect(() => setPage(1), [filter, debouncedQ, pageSize]);
+
   const load = useCallback(async () => {
     try {
-      setRows((await api.get('/api/transaction-adjustments')).data);
+      const response = await api.get('/api/transaction-adjustments', {
+        params: {
+          page,
+          page_size: pageSize,
+          ...(filter !== 'All' ? { status: filter } : {}),
+          ...(debouncedQ ? { q: debouncedQ } : {}),
+        },
+      });
+      setRows(response.data.items);
+      setTotal(response.data.total);
+      setPages(response.data.pages);
+      setStatusCounts(response.data.status_counts);
       setError(null);
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? 'Unable to load correction queue.');
     }
-  }, []);
+  }, [debouncedQ, filter, page, pageSize]);
   useEffect(() => {
     load();
   }, [load]);
@@ -58,19 +83,8 @@ export default function CorrectionsPage() {
   };
 
   const all = rows ?? [];
-  const count = (s: Filter) =>
-    s === 'All' ? all.length : all.filter((x) => x.status === s).length;
-  const needle = q.trim().toLowerCase();
-  const shown = all
-    .filter((r) => filter === 'All' || r.status === filter)
-    .filter(
-      (r) =>
-        !needle ||
-        `${r.adjustment_type} ${r.proposed_by} ${r.rationale} ${r.transaction_id ?? ''} ${describe(r.adjustment_type, r.proposed_values)}`
-          .toLowerCase()
-          .includes(needle)
-    )
-    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const count = (s: Filter) => s === 'All' ? Object.values(statusCounts).reduce((a, b) => a + b, 0) : statusCounts[s] ?? 0;
+  const shown = all;
 
   return (
     <div className="page-container">
@@ -105,7 +119,7 @@ export default function CorrectionsPage() {
           onClick={() => setFilter('Rejected')}
         />
       </MetricGrid>
-      <Card title={`Finance review queue (${shown.length})`}>
+      <Card title={`Finance review queue (${total.toLocaleString()})`}>
         <p className="hint">
           Approve only when the rationale and source evidence support the proposed change. Select a
           row to read the full rationale.
@@ -121,7 +135,7 @@ export default function CorrectionsPage() {
           />
           <Segmented
             value={filter}
-            onChange={setFilter}
+            onChange={(next) => setFilter(next as Filter)}
             options={FILTERS.map((x) => ({
               value: x,
               label: `${x === 'Proposed' ? 'Awaiting review' : x} ${count(x)}`,
@@ -220,11 +234,13 @@ export default function CorrectionsPage() {
               </dd>
             </dl>
           )}
-          emptyTitle={all.length === 0 ? 'No corrections yet' : 'No corrections match'}
+          emptyTitle={count('All') === 0 ? 'No corrections yet' : 'No corrections match'}
           emptyHint={
-            all.length === 0 ? 'Use "New correction" to propose the first one.' : undefined
+            count('All') === 0 ? 'Use "New correction" to propose the first one.' : undefined
           }
         />
+        <Pager page={page} pages={pages} total={total} pageSize={pageSize}
+          onPage={setPage} onPageSize={setPageSize} />
       </Card>
     </div>
   );

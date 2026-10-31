@@ -8,7 +8,14 @@ import { useDataChanged } from '@/lib/sync';
 import { useCanOpen, useMe } from '@/components/MeProvider';
 import { useChat } from '@/components/Chat';
 import { PriorityBadge, StatusBadge, Evidence } from '@/components/CaseTable';
-import { api, ACRow, Case, CaseDetail, Connector, Validation, Workflow, money } from '@/lib/api';
+import {
+  api,
+  ACRow,
+  Case,
+  CaseDetail,
+  Connector,
+  caseMoney,
+} from '@/lib/api';
 import { Alert, Button, MetricGrid, MetricTile, Tabs } from '@/components/ui';
 
 type Persona = 'finance' | 'it';
@@ -46,11 +53,16 @@ export function CommandCenter() {
   const [totals, setTotals] = useState<Record<string, number>>({});
   const [tab, setTab] = useState(0);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  const [kpi, setKpi] = useState({ amount: 0, exposure: 0, decision: 0, closed: 0 });
+  const [kpi, setKpi] = useState<{
+    amount: number | null;
+    exposure: number | null;
+    currency: string | null;
+    staleAmounts: number;
+    decision: number;
+    closed: number;
+  }>({ amount: 0, exposure: 0, currency: null, staleAmounts: 0, decision: 0, closed: 0 });
   const [daily, setDaily] = useState({ prepared: 0, awaitingEvidence: 0 });
   const [connectors, setConnectors] = useState<Connector[]>([]);
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [validations, setValidations] = useState<Validation[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [stageFilter, setStageFilter] = useState<string | null>(null);
@@ -79,7 +91,10 @@ export function CommandCenter() {
       case_type: r.case_type,
       case_number: r.case_number,
       store_id: r.store_id,
+      currency: r.currency,
+      amount_needs_review: r.amount_needs_review,
       total_exception_amount: r.amount,
+      total_exposure: r.exposure,
       evidence_completeness: r.evidence,
       investigation_status: r.investigation_status,
       priority: r.priority,
@@ -97,7 +112,7 @@ export function CommandCenter() {
       const stageQ = stageFilter
         ? `status=${encodeURIComponent(STATUS_OF[stageFilter])}&stage=&sort=exposure&dir=desc`
         : '';
-      const [sm, fc, d, p, dn, st, k, w, v] = await Promise.all([
+      const [sm, fc, d, p, dn, st, k] = await Promise.all([
         api.get('/api/action-center/summary'),
         api.get('/api/action-center/facets?stage='),
         top('stage=decision&sort=exposure&dir=desc', 'decision'),
@@ -105,8 +120,6 @@ export function CommandCenter() {
         top('status=Closed&sort=age&dir=asc', 'done'),
         stageFilter ? top(stageQ, 'stage') : Promise.resolve([] as Case[]),
         api.get('/api/connectors'),
-        api.get('/api/workflows'),
-        api.get('/api/validations'),
       ]);
       const byStatus = Object.fromEntries(
         (fc.data.status as { value: string; count: number }[]).map((x) => [x.value, x.count])
@@ -117,8 +130,10 @@ export function CommandCenter() {
         )
       );
       setKpi({
-        amount: Number(sm.data.open_amount),
-        exposure: Number(sm.data.open_exposure),
+        amount: sm.data.open_amount === null ? null : Number(sm.data.open_amount),
+        exposure: sm.data.open_exposure === null ? null : Number(sm.data.open_exposure),
+        currency: sm.data.currency,
+        staleAmounts: sm.data.stale_amount_cases,
         decision: sm.data.needs_decision,
         closed: sm.data.closed,
       });
@@ -129,8 +144,6 @@ export function CommandCenter() {
       setItems({ decision: d, progress: p, done: dn, stage: st });
       setTotals(tot);
       setConnectors(k.data);
-      setWorkflows(w.data);
-      setValidations(v.data);
       setError(null);
       setLoaded(true);
       setTick((t) => t + 1);
@@ -205,7 +218,9 @@ export function CommandCenter() {
       );
     else if (/exposure|loss|amount|money|impact/.test(q))
       setAnswer(
-        `Exception amount ${money(c.total_exception_amount)}; estimated loss exposure ${money(c.total_exposure)}.${exceptions[0] ? ` Close impact: ${exceptions[0].close_impact}.` : ''}`
+        c.amount_needs_review
+          ? 'Case amounts require Finance review after a correction.'
+          : `Exception amount ${caseMoney(c.total_exception_amount, c.currency)}; estimated loss exposure ${caseMoney(c.total_exposure, c.currency)}.${exceptions[0] ? ` Close impact: ${exceptions[0].close_impact}.` : ''}`
       );
     else if (/next|status|what now|should/.test(q))
       setAnswer(
@@ -246,8 +261,6 @@ export function CommandCenter() {
         ];
 
   const sc = detail?.case;
-  const selWf = workflows.filter((w) => w.case_id === selected);
-  const selVal = validations.filter((v) => v.case_id === selected);
   const rec = detail?.recommendations.find((r) => r.status === 'Proposed');
   const steps = [
     'Detected',
@@ -342,11 +355,31 @@ export function CommandCenter() {
       <MetricGrid>
         <MetricTile
           label="Open exception amount"
-          value={loaded ? money(amount) : <i className="skeleton" />}
+          value={
+            loaded ? (
+              amount === null ? (
+                'Multiple or unknown currencies'
+              ) : (
+                caseMoney(amount, kpi.currency)
+              )
+            ) : (
+              <i className="skeleton" />
+            )
+          }
         />
         <MetricTile
           label="Estimated loss exposure"
-          value={loaded ? money(exposure) : <i className="skeleton" />}
+          value={
+            loaded ? (
+              exposure === null ? (
+                'Multiple or unknown currencies'
+              ) : (
+                caseMoney(exposure, kpi.currency)
+              )
+            ) : (
+              <i className="skeleton" />
+            )
+          }
         />
         <MetricTile
           label="Awaiting your decision"
@@ -357,6 +390,12 @@ export function CommandCenter() {
           value={loaded ? kpi.closed.toLocaleString() : <i className="skeleton" />}
         />
       </MetricGrid>
+      {loaded && kpi.staleAmounts > 0 && (
+        <Alert tone="warning">
+          {kpi.staleAmounts} open case(s) have amounts awaiting review and are excluded from
+          monetary totals.
+        </Alert>
+      )}
 
       <div className="cc-pipeline">
         {STAGES.map((s) => (
@@ -383,34 +422,19 @@ export function CommandCenter() {
       <div className="cc-queues">
         {persona === 'it' && (
           <div className="cc-card">
-            <h3>Connector health</h3>
+            <h3>Connector status</h3>
             {connectors.map((k) => (
               <div key={k.id} className={`cc-conn ${k.state === 'Healthy' ? 'ok' : 'warn'}`}>
-                <i className="dot on" />
+                <i className={`dot ${k.state === 'Healthy' ? 'on' : ''}`} />
                 <div>
                   <b>{k.name}</b>
                   <small>
                     {k.state} · {k.mode}
                   </small>
                 </div>
-                <div className="cc-mini">
-                  <button onClick={() => act(() => api.post(`/api/connectors/${k.id}/retry`))}>
-                    Retry
-                  </button>
-                  <button
-                    onClick={() =>
-                      act(() =>
-                        api.post(
-                          `/api/connectors/${k.id}/${k.state === 'Paused' ? 'resume' : 'pause'}`
-                        )
-                      )
-                    }
-                  >
-                    {k.state === 'Paused' ? 'Resume' : 'Pause'}
-                  </button>
-                </div>
               </div>
             ))}
+            <p className="cc-muted">Live connector adapters are not configured. Use Data Pipeline to review delivered feeds.</p>
           </div>
         )}
         {(() => {
@@ -473,7 +497,11 @@ export function CommandCenter() {
                           <td className="font-medium">{c.case_number}</td>
                           <td>{c.case_type}</td>
                           <td>{c.store_id}</td>
-                          <td className="num">{money(c.total_exception_amount)}</td>
+                          <td className="num">
+                            {c.amount_needs_review
+                              ? 'Review required'
+                              : caseMoney(c.total_exception_amount, c.currency)}
+                          </td>
                           <td className="num">
                             <Evidence pct={c.evidence_completeness} />
                           </td>

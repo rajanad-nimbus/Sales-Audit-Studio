@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Case, money } from '@/lib/api';
+import { Case, caseMoney } from '@/lib/api';
 import { DataTable } from '@/components/ui';
 import type { Column } from '@/components/ui';
 
@@ -66,14 +66,16 @@ const COLUMNS: Column<Case>[] = [
     header: 'Exception',
     sortKey: 'total_exception_amount',
     numeric: true,
-    render: (c) => money(c.total_exception_amount),
+    render: (c) =>
+      c.amount_needs_review ? 'Review required' : caseMoney(c.total_exception_amount, c.currency),
   },
   {
     key: 'total_exposure',
     header: 'Exposure',
     sortKey: 'total_exposure',
     numeric: true,
-    render: (c) => money(c.total_exposure),
+    render: (c) =>
+      c.amount_needs_review ? 'Review required' : caseMoney(c.total_exposure, c.currency),
   },
   {
     key: 'evidence_completeness',

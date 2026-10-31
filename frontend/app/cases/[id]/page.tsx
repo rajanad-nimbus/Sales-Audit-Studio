@@ -15,12 +15,16 @@ import {
   TimelineItem,
   Workflow,
   Validation,
+  ValidationCandidate,
+  ValidationCandidatePage,
   PolicyEval,
   ReconciliationDetail,
+  caseMoney,
   money,
 } from '@/lib/api';
 
 type Tab = 'overview' | 'records' | 'activity';
+type CaseHistorySection = 'exceptions' | 'findings' | 'recommendations' | 'decisions';
 interface Collab {
   notes: { id: string; author: string; body: string; created_at: string }[];
   evidence_requests: {
@@ -91,10 +95,22 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [error, setError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [validations, setValidations] = useState<Validation[]>([]);
+  const [validationCandidates, setValidationCandidates] = useState<Record<string, ValidationCandidate[]>>({});
+  const [validationCandidatePages, setValidationCandidatePages] = useState<Record<string, ValidationCandidatePage>>({});
+  const [selectedValidationSources, setSelectedValidationSources] = useState<Record<string, string[]>>({});
+  const [validationRationales, setValidationRationales] = useState<Record<string, string>>({});
+  const [loadingValidationCandidates, setLoadingValidationCandidates] = useState<Record<string, boolean>>({});
   const [policies, setPolicies] = useState<PolicyEval[]>([]);
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [reconciliation, setReconciliation] = useState<ReconciliationDetail | null>(null);
+  const [loadingMoreRecords, setLoadingMoreRecords] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState<Record<CaseHistorySection, boolean>>({
+    exceptions: false,
+    findings: false,
+    recommendations: false,
+    decisions: false,
+  });
   const [collab, setCollab] = useState<Collab>({ notes: [], evidence_requests: [] });
   const [tab, setTab] = useState<Tab>('overview');
   const [busy, setBusy] = useState(false);
@@ -108,6 +124,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [provideFor, setProvideFor] = useState<string | null>(null); // requirement being answered
   const [provideNote, setProvideNote] = useState('');
   const [provideRef, setProvideRef] = useState('');
+  const [amountReview, setAmountReview] = useState<
+    Record<string, { amount: string; exposure: string }>
+  >({});
+  const [amountReviewReason, setAmountReviewReason] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -124,6 +144,20 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setDetail(d.data);
       setWorkflows(w.data);
       setValidations(v.data);
+      const candidatePages = await Promise.all(v.data
+        .filter((validation: Validation) => validation.status !== 'Complete')
+        .map(async (validation: Validation) => {
+          try {
+            const response = await api.get<ValidationCandidatePage>(
+              `/api/validations/${validation.id}/candidates`
+            );
+            return [validation.id, response.data] as const;
+          } catch {
+            return [validation.id, { items: [], has_more: false, next_cursor: null }] as const;
+          }
+        }));
+      setValidationCandidatePages(Object.fromEntries(candidatePages));
+      setValidationCandidates(Object.fromEntries(candidatePages.map(([validationId, page]) => [validationId, page.items])));
       setPolicies(p.data);
       setEvidence(e.data);
       setTimeline(t.data);
@@ -137,6 +171,50 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     load();
   }, [load]);
+  const loadMoreRecords = async () => {
+    if (!reconciliation?.next_cursor || loadingMoreRecords) return;
+    setLoadingMoreRecords(true);
+    try {
+      const { event_timestamp, transaction_id } = reconciliation.next_cursor;
+      const params = new URLSearchParams({ cursor_timestamp: event_timestamp, cursor_id: transaction_id });
+      const response = await api.get(`/api/cases/${id}/reconciliation?${params}`);
+      setReconciliation((current) => current && ({
+        ...response.data,
+        records: [...current.records, ...response.data.records],
+        sources: [...new Set([...current.sources, ...response.data.sources])],
+      }));
+    } catch (e) {
+      toast(apiError(e, 'Unable to load more source records.'), 'error');
+    } finally {
+      setLoadingMoreRecords(false);
+    }
+  };
+  const loadMoreHistory = async (section: CaseHistorySection) => {
+    if (!detail || loadingHistory[section] || !detail.truncated[section]) return;
+    setLoadingHistory((current) => ({ ...current, [section]: true }));
+    try {
+      const response = await api.get(`/api/cases/${id}/history/${section}`, {
+        params: { cursor_id: detail.next_cursor[section], limit: 200 },
+      });
+      setDetail((current) => {
+        if (!current) return current;
+        const additions = response.data.items;
+        const truncated = { ...current.truncated, [section]: response.data.has_more };
+        const next_cursor = { ...current.next_cursor, [section]: response.data.next_cursor };
+        if (section === 'exceptions')
+          return { ...current, exceptions: [...current.exceptions, ...additions], truncated, next_cursor };
+        if (section === 'findings')
+          return { ...current, findings: [...current.findings, ...additions], truncated, next_cursor };
+        if (section === 'recommendations')
+          return { ...current, recommendations: [...current.recommendations, ...additions], truncated, next_cursor };
+        return { ...current, decisions: [...current.decisions, ...additions], truncated, next_cursor };
+      });
+    } catch (e) {
+      toast(apiError(e, `Unable to load older ${section}.`), 'error');
+    } finally {
+      setLoadingHistory((current) => ({ ...current, [section]: false }));
+    }
+  };
   useEffect(() => {
     const h = window.location.hash.slice(1) as Tab;
     if (h === 'records' || h === 'activity') setTab(h);
@@ -187,8 +265,42 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     act(() => api.post(`/api/cases/${id}/investigate`), 'Investigation finished.');
   const execute = (wfId: string) =>
     act(() => api.post(`/api/workflows/${wfId}/execute`), 'Action executed.');
-  const validate = (vId: string) =>
-    act(() => api.post(`/api/validations/${vId}/run`), 'Validation finished.');
+  const validate = (vId: string) => {
+    const sourceRecordIds = selectedValidationSources[vId] ?? [];
+    const rationale = validationRationales[vId]?.trim() ?? '';
+    if (!sourceRecordIds.length || rationale.length < 10) {
+      toast('Select fresh source records and provide a verification rationale of at least 10 characters.', 'error');
+      return;
+    }
+    return act(
+      () => api.post(`/api/validations/${vId}/run`, { source_record_ids: sourceRecordIds, rationale }),
+      'Validation evidence recorded.'
+    );
+  };
+
+  const loadMoreValidationCandidates = async (validationId: string) => {
+    const cursor = validationCandidatePages[validationId]?.next_cursor;
+    if (!cursor || loadingValidationCandidates[validationId]) return;
+    setLoadingValidationCandidates((current) => ({ ...current, [validationId]: true }));
+    try {
+      const params = new URLSearchParams({
+        cursor_received_at: cursor.received_at,
+        cursor_id: cursor.source_record_id,
+      });
+      const response = await api.get<ValidationCandidatePage>(
+        `/api/validations/${validationId}/candidates?${params}`
+      );
+      setValidationCandidates((current) => ({
+        ...current,
+        [validationId]: [...(current[validationId] ?? []), ...response.data.items],
+      }));
+      setValidationCandidatePages((current) => ({ ...current, [validationId]: response.data }));
+    } catch (e) {
+      toast(apiError(e, 'Unable to load more validation records.'), 'error');
+    } finally {
+      setLoadingValidationCandidates((current) => ({ ...current, [validationId]: false }));
+    }
+  };
   const addNote = async () => {
     if (
       note.trim() &&
@@ -327,11 +439,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   if (!detail) return <SkeletonRows rows={8} label="Loading case" />;
 
   const { case: c, exceptions, findings, recommendations, decisions } = detail;
+  const historyTruncated = Object.values(detail.truncated).some(Boolean);
   const stageIndex = Math.max(0, STAGES.indexOf(c.status));
   const closed = c.status === 'Closed';
   const sla = slaInfo(c.sla_due_at);
   const canInvestigate =
-    !['Resolving', 'Pending Validation', 'Closed'].includes(c.status) && exceptions.length > 0;
+    !['Resolving', 'Pending Validation', 'Closed'].includes(c.status) &&
+    !c.amount_needs_review &&
+    exceptions.length > 0;
   const proposed = recommendations.filter((r) => r.status === 'Proposed');
   const earlier = recommendations.filter((r) => r.status !== 'Proposed');
   const pendingWf = workflows.filter((w) => w.state === 'Pending');
@@ -369,6 +484,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
 
+      {historyTruncated && (
+        <Alert tone="info">
+          This case has extensive history. The detail view is capped at 200 records per affected
+          section.
+        </Alert>
+      )}
+
       <ol className="case-stepper" aria-label="Case progress">
         {STAGES.map((s, i) => (
           <li
@@ -385,11 +507,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       <div className="case-summary">
         <div>
           <small>Exception amount</small>
-          <b>{money(c.total_exception_amount)}</b>
+          <b>{caseMoney(c.total_exception_amount, c.currency)}</b>
         </div>
         <div>
           <small>Estimated exposure</small>
-          <b>{money(c.total_exposure)}</b>
+          <b>{caseMoney(c.total_exposure, c.currency)}</b>
         </div>
         <div>
           <small>Evidence complete</small>
@@ -404,6 +526,121 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           <em>{c.assigned_to || 'Unassigned'}</em>
         </div>
       </div>
+      {c.amount_needs_review && (
+        <Alert tone="warning">
+          The recorded case amounts are historical after a correction and need Finance review before
+          investigation or export.
+          {c.status === 'Closed' && ' This closed case requires a follow-up review.'}
+        </Alert>
+      )}
+      {c.amount_needs_review &&
+        c.status === 'Closed' &&
+        (me?.role === 'finance' || me?.role === 'admin') && (
+          <Button
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const { data } = await api.post(`/api/cases/${id}/follow-up`);
+                router.push(`/cases/${data.id}`);
+              } catch (e) {
+                toast(apiError(e, 'Could not open a follow-up case.'), 'error');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Open follow-up case
+          </Button>
+        )}
+      {c.amount_needs_review &&
+        c.status !== 'Closed' &&
+        (me?.role === 'finance' || me?.role === 'admin') &&
+        exceptions.length > 0 && (
+          <Card>
+            <h2>Review case amounts</h2>
+            <p>
+              Verify each amount against current evidence. Recorded values remain in the audit
+              trail.
+            </p>
+            {exceptions.map((item) => (
+              <div key={item.id} className="profile-form">
+                <span>{item.exception_type}</span>
+                <Field label="Reviewed exception amount">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={amountReview[item.id]?.amount ?? ''}
+                    onChange={(e) =>
+                      setAmountReview({
+                        ...amountReview,
+                        [item.id]: {
+                          amount: e.target.value,
+                          exposure: amountReview[item.id]?.exposure ?? '',
+                        },
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Reviewed exposure">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={amountReview[item.id]?.exposure ?? ''}
+                    onChange={(e) =>
+                      setAmountReview({
+                        ...amountReview,
+                        [item.id]: {
+                          amount: amountReview[item.id]?.amount ?? '',
+                          exposure: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+            ))}
+            <Field label="Review rationale">
+              <input
+                value={amountReviewReason}
+                onChange={(e) => setAmountReviewReason(e.target.value)}
+              />
+            </Field>
+            <Button
+              disabled={
+                busy ||
+                !amountReviewReason.trim() ||
+                exceptions.some(
+                  (item) => !amountReview[item.id]?.amount || !amountReview[item.id]?.exposure
+                )
+              }
+              onClick={async () => {
+                try {
+                  setBusy(true);
+                  await api.post(`/api/cases/${id}/amount-review`, {
+                    rationale: amountReviewReason,
+                    exceptions: exceptions.map((item) => ({
+                      exception_id: item.id,
+                      ...amountReview[item.id],
+                    })),
+                  });
+                  setAmountReview({});
+                  setAmountReviewReason('');
+                  toast('Case amounts reviewed.', 'success');
+                  await load();
+                } catch (e: any) {
+                  setError(e?.response?.data?.detail ?? 'Unable to review case amounts.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Save reviewed amounts
+            </Button>
+          </Card>
+        )}
 
       {/* The one thing to do next */}
       <section className={`next-step ${closed ? 'is-done' : ''}`} aria-labelledby="next-step-h">
@@ -439,7 +676,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </Badge>
                   <p>
                     Confidence {r.confidence}
-                    {r.financial_impact ? ` · Impact ${money(r.financial_impact)}` : ''}
+                    {r.financial_impact
+                      ? ` · Impact ${caseMoney(r.financial_impact, c.currency)}`
+                      : ''}
                   </p>
                   {r.expected_workflow && <p>On approval: {r.expected_workflow}</p>}
                 </div>
@@ -498,8 +737,70 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <div>
                 <b>Validate the outcome</b>
                 <p>Expected: {v.expected_observation}</p>
+                <p className="hint">
+                  Select newly received records that demonstrate the outcome and explain how they verify it.
+                  Unrelated transactions cannot complete validation.
+                </p>
+                {(validationCandidates[v.id] ?? []).length === 0 ? (
+                  <p className="cc-empty">No new source records have arrived for this store day yet.</p>
+                ) : (
+                  <div className="case-stack">
+                    {(validationCandidates[v.id] ?? []).map((candidate) => {
+                      const selected = selectedValidationSources[v.id] ?? [];
+                      const checked = selected.includes(candidate.source_record_id);
+                      return (
+                        <label className="case-note" key={candidate.source_record_id}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!checked && selected.length >= 500}
+                            onChange={() => setSelectedValidationSources((current) => ({
+                              ...current,
+                              [v.id]: checked
+                                ? selected.filter((sourceId) => sourceId !== candidate.source_record_id)
+                                : [...selected, candidate.source_record_id],
+                            }))}
+                          />{' '}
+                          <b>{candidate.source_system} {candidate.transaction_type}</b>
+                          <span>
+                            {money(candidate.amount, candidate.currency)} · {when(candidate.received_at)}
+                            {candidate.payment_reference || candidate.settlement_reference
+                              ? ` · ${candidate.payment_reference || candidate.settlement_reference}`
+                              : ''}
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {validationCandidatePages[v.id]?.has_more && (
+                      <Button
+                        variant="secondary"
+                        disabled={loadingValidationCandidates[v.id]}
+                        onClick={() => loadMoreValidationCandidates(v.id)}
+                      >
+                        {loadingValidationCandidates[v.id] ? 'Loading…' : 'Load more candidate records'}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <label className="field" style={{ display: 'block', marginTop: '.75rem' }}>
+                  Verification rationale
+                  <textarea
+                    rows={2}
+                    value={validationRationales[v.id] ?? ''}
+                    onChange={(event) => setValidationRationales((current) => ({
+                      ...current,
+                      [v.id]: event.target.value,
+                    }))}
+                    placeholder="Explain what in the selected records confirms this workflow succeeded."
+                    style={{ width: '100%', marginTop: 6 }}
+                  />
+                </label>
               </div>
-              <Button variant="primary" disabled={busy} onClick={() => validate(v.id)}>
+              <Button
+                variant="primary"
+                disabled={busy || !(selectedValidationSources[v.id]?.length) || (validationRationales[v.id]?.trim().length ?? 0) < 10}
+                onClick={() => validate(v.id)}
+              >
                 Run validation
               </Button>
             </div>
@@ -580,7 +881,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     key: 'c2',
                     header: 'Amount',
                     numeric: true,
-                    render: (x) => money(x.exception_amount),
+                    render: (x) => caseMoney(x.exception_amount, c.currency),
                   },
                   {
                     key: 'c3',
@@ -597,6 +898,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 rows={exceptions}
                 rowKey={(x) => String(x.id)}
               />
+            )}
+            {detail.truncated.exceptions && (
+              <div className="case-actions">
+                <Button variant="secondary" disabled={loadingHistory.exceptions}
+                  onClick={() => loadMoreHistory('exceptions')}>
+                  {loadingHistory.exceptions ? 'Loading…' : 'Load older exceptions'}
+                </Button>
+              </div>
             )}
           </Card>
 
@@ -615,6 +924,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </li>
                 ))}
               </ul>
+            )}
+            {detail.truncated.findings && (
+              <div className="case-actions">
+                <Button variant="secondary" disabled={loadingHistory.findings}
+                  onClick={() => loadMoreHistory('findings')}>
+                  {loadingHistory.findings ? 'Loading…' : 'Load older findings'}
+                </Button>
+              </div>
             )}
           </Card>
 
@@ -651,6 +968,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </Badge>
                 </div>
               ))}
+              {detail.truncated.recommendations && (
+                <div className="case-actions">
+                  <Button variant="secondary" disabled={loadingHistory.recommendations}
+                    onClick={() => loadMoreHistory('recommendations')}>
+                    {loadingHistory.recommendations ? 'Loading…' : 'Load older recommendations'}
+                  </Button>
+                </div>
+              )}
               {decisions.map((d) => (
                 <div key={d.id} className="indicator">
                   <div style={{ flex: 1 }}>
@@ -666,6 +991,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </span>
                 </div>
               ))}
+              {detail.truncated.decisions && (
+                <div className="case-actions">
+                  <Button variant="secondary" disabled={loadingHistory.decisions}
+                    onClick={() => loadMoreHistory('decisions')}>
+                    {loadingHistory.decisions ? 'Loading…' : 'Load older decisions'}
+                  </Button>
+                </div>
+              )}
               {workflows.map((w) => (
                 <div key={w.id} className="indicator">
                   <div style={{ flex: 1 }}>
@@ -769,6 +1102,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     </tbody>
                   </table>
                 </div>
+                {reconciliation.has_more && (
+                  <div className="case-actions">
+                    <Button variant="secondary" disabled={loadingMoreRecords} onClick={loadMoreRecords}>
+                      {loadingMoreRecords ? 'Loading…' : 'Load more source records'}
+                    </Button>
+                  </div>
+                )}
                 <details className="case-manual" open={matchIds.length > 0}>
                   <summary>
                     Match records manually

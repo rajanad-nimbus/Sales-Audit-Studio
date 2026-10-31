@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ACRow, BatchStatus, compact, money } from '@/lib/api';
+import { api, ACRow, BatchStatus, caseMoney, compact } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useDataChanged } from '@/lib/sync';
 import { Alert, Badge, Button, Segmented } from '@/components/ui';
@@ -44,7 +44,9 @@ interface Summary {
   mine: number;
   snoozed: number;
   open_total: number;
-  open_exposure: string;
+  open_exposure: string | null;
+  currency: string | null;
+  stale_amount_cases: number;
   stores_affected: number;
   closed: number;
   straight_through_rate: number | null;
@@ -53,8 +55,10 @@ interface Summary {
 interface Group {
   key: string;
   count: number;
-  amount: string;
-  exposure: string;
+  amount: string | null;
+  exposure: string | null;
+  currency: string | null;
+  stale_amount_cases: number;
   breached: number;
   oldest_hours: number;
 }
@@ -157,7 +161,7 @@ export default function ActionCenter() {
   } | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [proposed, setProposed] = useState<
-    { case_id: string; case_number: string; amount: string }[]
+    { case_id: string; case_number: string; amount: string; currency: string | null }[]
   >([]);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -286,10 +290,15 @@ export default function ActionCenter() {
   const pageIds = rows.map((r) => r.id);
   const allOnPage = pageIds.length > 0 && pageIds.every((i) => selected.has(i));
   const count = allMatching ? total : selected.size;
-  const selectedExposure = useMemo(
-    () => rows.filter((r) => selected.has(r.id)).reduce((s, r) => s + Number(r.exposure), 0),
-    [rows, selected]
-  );
+  const selectedExposure = useMemo(() => {
+    const chosen = rows.filter((r) => selected.has(r.id));
+    const currencies = new Set(chosen.map((r) => r.currency));
+    return currencies.size === 1 &&
+      chosen[0]?.currency &&
+      !chosen.some((r) => r.amount_needs_review)
+      ? { value: chosen.reduce((s, r) => s + Number(r.exposure), 0), currency: chosen[0].currency }
+      : null;
+  }, [rows, selected]);
 
   const runBulk = async () => {
     if (!confirm) return;
@@ -416,8 +425,10 @@ export default function ActionCenter() {
             )}
             {tile(
               'Open exposure',
-              '$' + compact(Number(summary.open_exposure)),
-              `${compact(summary.open_total)} open · ${summary.stores_affected} stores`
+              summary.open_exposure === null
+                ? 'Multiple or unknown currencies'
+                : caseMoney(summary.open_exposure, summary.currency),
+              `${compact(summary.open_total)} open · ${summary.stores_affected} stores${summary.stale_amount_cases ? ` · ${summary.stale_amount_cases} amounts awaiting review` : ''}`
             )}
             {tile(
               'Straight-through',
@@ -648,7 +659,7 @@ export default function ActionCenter() {
                     <button className="ac-link" onClick={() => openCase(c.case_id)}>
                       {c.case_number}
                     </button>{' '}
-                    {money(c.amount)}
+                    {caseMoney(c.amount, c.currency)}
                   </li>
                 ))}
               </ul>
@@ -674,8 +685,11 @@ export default function ActionCenter() {
         {count > 0 && (
           <div className="ac-bulk">
             <b>{compact(count)} selected</b>
-            {!allMatching && selectedExposure > 0 && (
-              <span>· ${compact(selectedExposure)} exposure on this page</span>
+            {!allMatching && selectedExposure && selectedExposure.value > 0 && (
+              <span>
+                · {caseMoney(selectedExposure.value, selectedExposure.currency)} exposure on this
+                page
+              </span>
             )}
             {!allMatching && allOnPage && total > rows.length && (
               <button className="ac-link" onClick={() => setAllMatching(true)}>
@@ -727,8 +741,20 @@ export default function ActionCenter() {
                   >
                     <td className="font-medium">{g.key}</td>
                     <td>{g.count.toLocaleString()}</td>
-                    <td>{money(g.amount)}</td>
-                    <td>{money(g.exposure)}</td>
+                    <td>
+                      {g.stale_amount_cases
+                        ? 'Review required'
+                        : g.amount === null
+                          ? 'Multiple or unknown currencies'
+                          : caseMoney(g.amount, g.currency)}
+                    </td>
+                    <td>
+                      {g.stale_amount_cases
+                        ? 'Review required'
+                        : g.exposure === null
+                          ? 'Multiple or unknown currencies'
+                          : caseMoney(g.exposure, g.currency)}
+                    </td>
                     <td>
                       {g.breached ? (
                         <Badge variant="error" size="sm">
@@ -809,8 +835,14 @@ export default function ActionCenter() {
                     </td>
                     <td>{r.case_type}</td>
                     <td>{r.store_id}</td>
-                    <td>{money(r.amount)}</td>
-                    <td>{money(r.exposure)}</td>
+                    <td>
+                      {r.amount_needs_review ? 'Review required' : caseMoney(r.amount, r.currency)}
+                    </td>
+                    <td>
+                      {r.amount_needs_review
+                        ? 'Review required'
+                        : caseMoney(r.exposure, r.currency)}
+                    </td>
                     <td>{r.status}</td>
                     <td>{r.assigned_to ?? '-'}</td>
                     <td

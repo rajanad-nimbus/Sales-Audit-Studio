@@ -24,6 +24,8 @@ const toCase = (r: ACRow) =>
     case_number: r.case_number,
     case_type: r.case_type,
     store_id: r.store_id,
+    currency: r.currency,
+    amount_needs_review: r.amount_needs_review,
     status: r.status,
     priority: r.priority,
     total_exception_amount: r.amount,

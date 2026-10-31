@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
 import { Alert, Badge, Button, Card, DataTable, Field, PageHeader, Tabs } from '@/components/ui';
@@ -15,6 +15,7 @@ type Ref = {
   updated_at: string;
 };
 type SyncResult = {
+  status?: string;
   stores: number;
   items: number;
   created: number;
@@ -22,6 +23,11 @@ type SyncResult = {
   deactivated: number;
   skipped_manual: number;
   duplicates: number;
+};
+type FoundationPage = {
+  items: Ref[];
+  total: number;
+  category_counts: Record<string, number>;
 };
 
 /** Each tab shows one or more reference categories. Synced tabs are read-only: Shopify is the source. */
@@ -70,7 +76,7 @@ const GROUPS = [
   },
 ] as const;
 
-const MAX_ROWS = 200;
+const PAGE_SIZE = 200;
 const LABELS: Record<string, string> = {
   Store: 'Store',
   Item: 'Product',
@@ -89,6 +95,11 @@ const sourceOf = (r: Ref) => (r.attributes?.source as string | undefined) ?? 'Ma
 export function FoundationData() {
   const toast = useToast();
   const [refs, setRefs] = useState<Ref[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
+  const [page, setPage] = useState(0);
+  const [refresh, setRefresh] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<string>(GROUPS[0].id);
   const [query, setQuery] = useState('');
@@ -96,34 +107,53 @@ export function FoundationData() {
   const [synced, setSynced] = useState<SyncResult | null>(null);
   const [form, setForm] = useState({ category: '', code: '', name: '' });
 
-  const load = useCallback(async () => {
-    try {
-      setRefs((await api.get('/api/foundation')).data);
-      setError(null);
-    } catch (e) {
-      setError(apiError(e, 'Could not load foundation data.'));
-    }
-  }, []);
-  useEffect(() => {
-    load();
-  }, [load]);
-
   const group = GROUPS.find((g) => g.id === tab) ?? GROUPS[0];
   const category = form.category || group.cats[0];
-  const inGroup = useMemo(
-    () => (refs ?? []).filter((r) => (group.cats as readonly string[]).includes(r.category)),
-    [refs, group]
-  );
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? inGroup.filter((r) => `${r.code} ${r.name}`.toLowerCase().includes(q)) : inGroup;
-  }, [inGroup, query]);
+  const load = useCallback(() => {
+    setPage(0);
+    setRefresh((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (page === 0) setRefs(null);
+      else setLoadingMore(true);
+      try {
+        const { data } = await api.get<FoundationPage>('/api/foundation', {
+          params: {
+            categories: group.cats.join(','),
+            q: query.trim() || undefined,
+            limit: PAGE_SIZE,
+            offset: page * PAGE_SIZE,
+          },
+        });
+        if (cancelled) return;
+        setRefs((current) =>
+          page === 0 ? data.items : [...(current ?? []), ...data.items]
+        );
+        setTotal(data.total);
+        setCategoryCounts(data.category_counts);
+        setError(null);
+      } catch (e) {
+        if (!cancelled) setError(apiError(e, 'Could not load foundation data.'));
+      } finally {
+        if (!cancelled) setLoadingMore(false);
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [group, page, query, refresh]);
+
   const countOf = (cats: readonly string[]) =>
-    (refs ?? []).filter((r) => cats.includes(r.category)).length;
+    cats.reduce((sum, current) => sum + (categoryCounts[current] ?? 0), 0);
 
   const pick = (id: string) => {
     setTab(id);
     setQuery('');
+    setPage(0);
     setForm({ category: '', code: '', name: '' });
   };
   const syncShopify = async () => {
@@ -132,8 +162,13 @@ export function FoundationData() {
     try {
       const { data } = await api.post('/api/ingest/shopify/sync-reference');
       setSynced(data);
-      await load();
-      toast('Shopify stores and products synced.', 'success');
+      load();
+      toast(
+        data.status === 'superseded'
+          ? 'A newer Shopify sync has already been applied.'
+          : 'Shopify stores and products synced.',
+        'success'
+      );
     } catch (e) {
       setError(apiError(e, 'Shopify sync failed. Check the connection in Configuration.'));
     } finally {
@@ -150,7 +185,7 @@ export function FoundationData() {
         attributes: {},
       });
       setForm({ ...form, code: '', name: '' });
-      await load();
+      load();
       toast('Saved.', 'success');
     } catch (e) {
       setError(apiError(e, 'Could not save.'));
@@ -232,12 +267,15 @@ export function FoundationData() {
             </Button>
           </div>
         )}
-        {inGroup.length > 8 && (
+        {countOf(group.cats) > 8 && (
           <input
             aria-label={`Search ${group.label}`}
             placeholder={`Search ${group.label.toLowerCase()} by code or name`}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(0);
+            }}
           />
         )}
         <DataTable
@@ -272,16 +310,19 @@ export function FoundationData() {
               render: (r) => new Date(r.updated_at).toLocaleDateString(),
             },
           ]}
-          rows={refs === null ? null : shown.slice(0, MAX_ROWS)}
+          rows={refs}
           rowKey={(r) => r.id}
           emptyTitle={`No ${group.label.toLowerCase()} yet`}
           emptyHint={
             group.synced ? 'Use "Sync from Shopify" to load them.' : 'Add the first one above.'
           }
         />
-        {shown.length > MAX_ROWS && (
+        {refs && refs.length < total && (
           <p className="hint">
-            Showing the first {MAX_ROWS} of {shown.length}. Use search to narrow the list.
+            Showing {refs.length} of {total} matching record(s).
+            <Button variant="secondary" onClick={() => setPage((current) => current + 1)} disabled={loadingMore}>
+              {loadingMore ? 'Loading…' : 'Load more'}
+            </Button>
           </p>
         )}
       </Card>

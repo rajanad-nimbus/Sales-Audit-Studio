@@ -34,7 +34,11 @@ interface DLine {
 }
 interface DDetail {
   status: 'No detail' | 'Balanced' | 'Unbalanced';
+  line_count: number;
+  lines_truncated: boolean;
   lines: DLine[];
+  discount_count: number;
+  discounts_truncated: boolean;
   discounts: {
     kind: string;
     code: string | null;
@@ -42,6 +46,8 @@ interface DDetail {
     line_no: number | null;
     amount: string;
   }[];
+  tax_count: number;
+  taxes_truncated: boolean;
   taxes: {
     tax_code: string;
     tax_name: string;
@@ -49,6 +55,8 @@ interface DDetail {
     taxable_amount: string;
     tax_amount: string;
   }[];
+  tender_count: number;
+  tenders_truncated: boolean;
   tenders: {
     tender_type: string;
     amount: string;
@@ -68,6 +76,7 @@ interface DDetail {
 }
 interface DReturns {
   is_return: boolean;
+  items_truncated?: boolean;
   original_reference?: string | null;
   reason?: string | null;
   over_returned?: boolean;
@@ -93,7 +102,9 @@ interface DReturns {
     reason: string | null;
     status: string;
     items: { item_code: string; quantity: string }[];
+    items_truncated: boolean;
   }[];
+  returns_truncated?: boolean;
 }
 interface Detail extends Linked {
   detail: DDetail;
@@ -124,6 +135,7 @@ interface Detail extends Linked {
     payload: { text: string | null; truncated: boolean };
   };
   cases: { id: string; case_number: string; case_type: string; status: string; link: string }[];
+  cases_truncated: boolean;
   linked_transactions: Linked[];
   adjustments: {
     id: string;
@@ -133,6 +145,7 @@ interface Detail extends Linked {
     proposed_by: string;
     created_at: string;
   }[];
+  adjustments_truncated: boolean;
 }
 const tone = (s: string) =>
   s === 'Matched' ? 'badge-success' : s === 'Exception' ? 'badge-error' : 'badge-warning';
@@ -188,6 +201,12 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const src = d.source;
   const det = d.detail;
   const isReturn = d.transaction_type === 'Return';
+  const truncatedSections = [
+    det.lines_truncated && `${det.line_count} item lines`,
+    det.discounts_truncated && `${det.discount_count} discounts`,
+    det.taxes_truncated && `${det.tax_count} tax rows`,
+    det.tenders_truncated && `${det.tender_count} tender rows`,
+  ].filter(Boolean);
   const dKind: Record<string, string> = {
     Promotion: 'badge-info',
     Coupon: 'badge-primary',
@@ -237,6 +256,12 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             </span>
           )}
         </h2>
+        {truncatedSections.length > 0 && (
+          <p className="hint">
+            Showing up to 500 rows per detail section. {truncatedSections.join(', ')} are
+            truncated; financial totals and balance checks use all stored rows.
+          </p>
+        )}
         {det.status === 'No detail' ? (
           <p className="cc-empty">
             The feed sent only a total for this transaction, with no items, tax, discounts or
@@ -522,11 +547,20 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               rowKey={(i) => String(i.item_code)}
             />
           )}
+          {d.returns.items_truncated && (
+            <p className="hint">Showing the first 100 item codes. Over-return checks include all items.</p>
+          )}
         </Card>
       )}
       {d.returns && !d.returns.is_return && d.returns.returns && d.returns.returns.length > 0 && (
         <Card className="case-section">
           <h2>Returns against this sale</h2>
+          {(d.returns.returns_truncated || d.returns.returns.some((item) => item.items_truncated)) && (
+            <p className="hint">
+              {d.returns.returns_truncated && 'Showing up to 200 returns. '}
+              {d.returns.returns.some((item) => item.items_truncated) && 'Some returns show only the first 100 item lines.'}
+            </p>
+          )}
           <DataTable
             columns={[
               {
@@ -574,6 +608,9 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         <div className="case-stack">
           <Card className="case-section">
             <h2>Related cases</h2>
+            {d.cases_truncated && (
+              <p className="hint">Showing up to 200 matches, with cases raised from this transaction first. Additional matches are not shown.</p>
+            )}
             {d.cases.length === 0 ? (
               <p className="cc-empty">No case has been raised for this store and day.</p>
             ) : (
@@ -632,6 +669,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           {d.adjustments.length > 0 && (
             <Card className="case-section">
               <h2>Adjustments</h2>
+              {d.adjustments_truncated && <p className="hint">Showing the latest 200 adjustments.</p>}
               {d.adjustments.map((a) => (
                 <div key={a.id} className="indicator">
                   <div style={{ flex: 1 }}>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTheme } from '@/lib/ThemeContext';
 import { useMe } from '@/components/MeProvider';
 import { api } from '@/lib/api';
@@ -36,12 +37,6 @@ const OPTIONS = [
   { value: 'light', label: 'Light', note: 'Bright surfaces, best in daylight.' },
   { value: 'dark', label: 'Dark', note: 'Low-glare navy surfaces.' },
   { value: 'system', label: 'System', note: 'Follow your device setting.' },
-] as const;
-
-const SYNC_RANGES = [
-  { hours: 24, label: 'Last 24 hours' },
-  { hours: 24 * 7, label: 'Last 7 days' },
-  { hours: 24 * 30, label: 'Last 30 days' },
 ] as const;
 
 const SHOPIFY_STATES: Record<string, { label: string; variant: BadgeVariant; note: string }> = {
@@ -112,9 +107,6 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
     hours_since_last_sync: number | null;
   } | null>(null);
   const [shopifyLoaded, setShopifyLoaded] = useState(false);
-  const [shopifyError, setShopifyError] = useState<string | null>(null);
-  const [shopifySyncing, setShopifySyncing] = useState(false);
-  const [syncHours, setSyncHours] = useState<number>(24);
   useEffect(() => {
     setMounted(true);
     const h = window.location.hash.slice(1) as Tab;
@@ -205,25 +197,6 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
       toast('Matching tolerance saved.', 'success');
     } catch (e: any) {
       setIntegrationError(e?.response?.data?.detail ?? 'Could not save reconciliation policy');
-    }
-  };
-  const syncShopify = async () => {
-    try {
-      setShopifySyncing(true);
-      setShopifyError(null);
-      const now = new Date();
-      const from = new Date(now.getTime() - syncHours * 60 * 60 * 1000);
-      await api.post('/api/ingest/shopify/sync', {
-        created_at_min: from.toISOString(),
-        created_at_max: now.toISOString(),
-      });
-      const { data } = await api.get('/api/ingest/shopify/status');
-      setShopifyStatus(data);
-      toast('Shopify sync finished.', 'success');
-    } catch (e: any) {
-      setShopifyError(e?.response?.data?.detail ?? 'Shopify sync failed');
-    } finally {
-      setShopifySyncing(false);
     }
   };
   const setPolicy = (patch: Partial<NonNullable<typeof reconciliationPolicy>>) =>
@@ -333,29 +306,11 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                     set aside. Review them in the Data Pipeline.
                   </Alert>
                 )}
-                {shopifyError && (
-                  <Alert tone="error" onDismiss={() => setShopifyError(null)}>
-                    {shopifyError}
-                  </Alert>
-                )}
-                <div className="form-row">
-                  <Field label="Orders to pull">
-                    <select
-                      value={syncHours}
-                      onChange={(e) => setSyncHours(Number(e.target.value))}
-                      disabled={shopifySyncing}
-                    >
-                      {SYNC_RANGES.map((r) => (
-                        <option key={r.hours} value={r.hours}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Button variant="primary" onClick={syncShopify} disabled={shopifySyncing}>
-                    {shopifySyncing ? 'Syncing…' : 'Sync now'}
-                  </Button>
-                </div>
+                <p className="hint">
+                  This is the connection. To switch Shopify on or off, add it to the nightly batch,
+                  or sync it now, go to <Link href="/pipeline#sources">Data Pipeline, Sources</Link>
+                  .
+                </p>
               </>
             ) : shopifyLoaded ? (
               <Alert tone="warning">

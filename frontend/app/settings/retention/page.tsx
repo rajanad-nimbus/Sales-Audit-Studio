@@ -53,13 +53,16 @@ export default function RetentionPage() {
     try {
       const { data } = await api.get(`/api/operations/retention/${dataset}/preview`);
       setNote(
-        `${dataset}: ${data.eligible_records} records are eligible after ${new Date(data.cutoff).toLocaleDateString()}. This is a preview. Nothing is removed.`
+        data.retention_supported
+          ? `${dataset}: ${data.eligible_records} records are eligible after ${new Date(data.cutoff).toLocaleDateString()}. This is a preview. Nothing is removed.`
+          : `${dataset}: ${data.eligible_records} records match the configured age. Audit events are append-only and hash-chained, so retention cannot archive or remove them.`
       );
     } catch (e) {
       setError(apiError(e, 'Could not preview this policy.'));
     }
   };
   const save = async (p: Policy, days: number) => {
+    if (p.dataset === 'audit_events') return;
     setBusy(true);
     try {
       await api.put(`/api/operations/retention/${p.dataset}`, {
@@ -75,6 +78,7 @@ export default function RetentionPage() {
     }
   };
   const archive = async (p: Policy) => {
+    if (p.dataset === 'audit_events') return;
     setBusy(true);
     try {
       await api.post(`/api/operations/retention/${p.dataset}/run`, { confirm_purge: false });
@@ -115,7 +119,12 @@ export default function RetentionPage() {
         ) : (
           <DataTable
             columns={[
-              { key: 'dataset', header: 'Dataset', primary: true, render: (p) => p.dataset },
+              {
+                key: 'dataset',
+                header: 'Dataset',
+                primary: true,
+                render: (p) => p.dataset === 'audit_events' ? 'audit_events (append-only)' : p.dataset,
+              },
               {
                 key: 'days',
                 header: 'Retain (days)',
@@ -127,6 +136,7 @@ export default function RetentionPage() {
                     min={30}
                     defaultValue={p.retain_days}
                     style={{ width: '6rem' }}
+                    disabled={p.dataset === 'audit_events'}
                     onBlur={(e) => {
                       const d = Number(e.target.value);
                       if (d >= 30 && d !== p.retain_days) save(p, d);
@@ -137,7 +147,7 @@ export default function RetentionPage() {
               {
                 key: 'archive',
                 header: 'Archive first',
-                render: (p) => (p.archive_before_purge ? 'Yes' : 'No'),
+                render: (p) => p.dataset === 'audit_events' ? 'Not applicable' : (p.archive_before_purge ? 'Yes' : 'No'),
               },
               {
                 key: 'actions',
@@ -147,9 +157,13 @@ export default function RetentionPage() {
                     <Button size="sm" onClick={() => preview(p.dataset)}>
                       Preview
                     </Button>
-                    <Button size="sm" disabled={busy} onClick={() => archive(p)}>
-                      Archive eligible
-                    </Button>
+                    {p.dataset === 'audit_events' ? (
+                      <span className="hint">Append-only</span>
+                    ) : (
+                      <Button size="sm" disabled={busy} onClick={() => archive(p)}>
+                        Archive eligible
+                      </Button>
+                    )}
                   </div>
                 ),
               },

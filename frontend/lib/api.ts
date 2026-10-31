@@ -54,6 +54,8 @@ export interface Case {
   case_type: string;
   business_date: string;
   store_id: string;
+  currency: string | null;
+  amount_needs_review: boolean;
   total_exception_amount: string;
   total_exposure: string;
   investigation_status: string;
@@ -125,6 +127,8 @@ export interface ReconciliationDetail {
   message: string;
   sources: string[];
   records: ReconciliationRecord[];
+  has_more: boolean;
+  next_cursor: { event_timestamp: string; transaction_id: string } | null;
 }
 
 export interface CaseDetail {
@@ -133,6 +137,8 @@ export interface CaseDetail {
   findings: Finding[];
   recommendations: Recommendation[];
   decisions: Decision[];
+  truncated: Record<string, boolean>;
+  next_cursor: Record<string, string | null>;
 }
 
 export interface AuditEvent {
@@ -145,8 +151,11 @@ export interface AuditEvent {
   created_at: string;
 }
 
-export const money = (v: string | number) =>
-  Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+export const money = (v: string | number, currency = 'USD') =>
+  Number(v).toLocaleString('en-US', { style: 'currency', currency });
+
+export const caseMoney = (v: string | number, currency: string | null | undefined) =>
+  currency ? money(v, currency) : `${Number(v).toLocaleString('en-US')} (currency unknown)`;
 
 export interface Workflow {
   id: string;
@@ -163,6 +172,24 @@ export interface Validation {
   status: string;
   expected_observation: string;
   verification_result: string | null;
+}
+
+export interface ValidationCandidate {
+  source_record_id: string;
+  transaction_id: string;
+  source_system: string;
+  transaction_type: string;
+  amount: string;
+  currency: string;
+  received_at: string;
+  payment_reference: string | null;
+  settlement_reference: string | null;
+}
+
+export interface ValidationCandidatePage {
+  items: ValidationCandidate[];
+  has_more: boolean;
+  next_cursor: { received_at: string; source_record_id: string } | null;
 }
 
 export interface PolicyEval {
@@ -185,6 +212,8 @@ export interface ACRow {
   case_number: string;
   case_type: string;
   store_id: string;
+  currency: string | null;
+  amount_needs_review: boolean;
   business_date: string;
   status: string;
   priority: string;

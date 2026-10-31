@@ -2,9 +2,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
+import { StoreSelect } from '@/components/StoreSelect';
 import ControlsTable from '@/components/settings/ControlsTable';
-import { Alert, Button, Card, PageHeader, Segmented } from '@/components/ui';
-type Ref = { id: string; category: string; code: string; name: string; active: boolean };
+import { Alert, Button, Card, Tabs } from '@/components/ui';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+const STUDIO = process.env.NEXT_PUBLIC_ONTOLOGY_STUDIO_URL || 'http://localhost:3050';
 type Total = {
   id: string;
   name: string;
@@ -13,12 +15,19 @@ type Total = {
   transaction_types: string[];
   tender_type: string | null;
   level: string;
+  revision: number;
+  active: boolean;
+  rollups: unknown[];
+  calculation_basis: string;
+  combined_total_ids: string[];
+  combined_operator: string | null;
 };
 type Rule = {
   id: string;
   name: string;
   total_name: string;
   threshold: string;
+  threshold_currency: string | null;
   severity: string;
   owner: string | null;
 };
@@ -45,44 +54,17 @@ type RetentionRun = {
   status: string;
   created_at: string;
 };
-const tabs = ['Foundation data', 'Totals & rules', 'GL mapping'] as const;
+const tabs = ['Totals & rules', 'GL mapping'] as const;
 type Tab = (typeof tabs)[number];
-const cats = [
-  'Store',
-  'Register',
-  'Cashier',
-  'Tender',
-  'BankAccount',
-  'GLAccount',
-  'TaxCode',
-  'BusinessCalendar',
-];
 export default function ControlsPage() {
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('Foundation data');
-  const [refs, setRefs] = useState<Ref[]>([]),
-    [totals, setTotals] = useState<Total[]>([]),
+  const [tab, setTab] = useState<Tab>('Totals & rules');
+  const [totals, setTotals] = useState<Total[]>([]),
     [rules, setRules] = useState<Rule[]>([]),
     [maps, setMaps] = useState<GL[]>([]),
     [error, setError] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null);
-  const [ref, setRef] = useState({ category: 'Store', code: '', name: '' }),
-    [total, setTotal] = useState({
-      name: '',
-      aggregation: 'Sum',
-      source_system: 'POS',
-      transaction_types: '',
-      tender_type: '',
-      level: 'Store',
-    }),
-    [rule, setRule] = useState({
-      name: '',
-      total_name: '',
-      threshold: '0',
-      severity: 'Medium',
-      owner: '',
-    }),
-    [gl, setGl] = useState({
+  const [gl, setGl] = useState({
       transaction_type: 'Sale',
       tender_type: '',
       debit_account: '',
@@ -90,6 +72,7 @@ export default function ControlsPage() {
     }),
     [journalStore, setJournalStore] = useState(''),
     [journalDate, setJournalDate] = useState(new Date().toISOString().slice(0, 10)),
+    [journalPage, setJournalPage] = useState(1),
     [journal, setJournal] = useState<{
       lines: {
         transaction_id: string;
@@ -99,16 +82,30 @@ export default function ControlsPage() {
         currency: string;
       }[];
       unmapped_transaction_ids: string[];
+      total_transactions: number;
+      page: number;
+      page_size: number;
+      pages: number;
     } | null>(null);
+  const loadJournal = async (page = 1) => {
+    try {
+      const { data } = await api.get('/api/gl/journal-preview', {
+        params: { store_id: journalStore, business_date: journalDate, page, page_size: 100 },
+      });
+      setJournal(data);
+      setJournalPage(page);
+      setError(null);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? 'Could not generate journal preview.');
+    }
+  };
   const load = useCallback(async () => {
     try {
-      const [a, b, c, d] = await Promise.all([
-        api.get('/api/foundation'),
+      const [b, c, d] = await Promise.all([
         api.get('/api/total-definitions'),
         api.get('/api/audit-rules'),
         api.get('/api/gl/cross-references'),
       ]);
-      setRefs(a.data);
       setTotals(b.data);
       setRules(c.data);
       setMaps(d.data);
@@ -125,41 +122,12 @@ export default function ControlsPage() {
       await action();
       await load();
       toast(message, 'success');
+      return true;
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? 'Unable to save configuration.');
+      return false;
     }
   };
-  const addRef = () =>
-    save(
-      () => api.post('/api/foundation', { ...ref, active: true, attributes: {} }),
-      'Foundation reference saved.'
-    ).then(() => setRef({ ...ref, code: '', name: '' }));
-  const addTotal = () =>
-    save(
-      () =>
-        api.post('/api/total-definitions', {
-          ...total,
-          source_system: total.source_system || null,
-          tender_type: total.tender_type || null,
-          transaction_types: total.transaction_types
-            .split(',')
-            .map((x) => x.trim())
-            .filter(Boolean),
-          active: true,
-        }),
-      'Total definition saved.'
-    ).then(() => setTotal({ ...total, name: '', transaction_types: '', tender_type: '' }));
-  const addRule = () =>
-    save(
-      () =>
-        api.post('/api/audit-rules', {
-          ...rule,
-          threshold: Number(rule.threshold),
-          owner: rule.owner || null,
-          enabled: true,
-        }),
-      'Audit rule saved.'
-    ).then(() => setRule({ ...rule, name: '', total_name: '', threshold: '0', owner: '' }));
   const addGL = () =>
     save(
       () =>
@@ -171,18 +139,15 @@ export default function ControlsPage() {
       'GL mapping saved.'
     ).then(() => setGl({ ...gl, tender_type: '', debit_account: '', credit_account: '' }));
   return (
-    <div className="page-container">
-      <PageHeader
-        title="Controls & reference data"
-        subtitle="Retail reference data and governed controls used when Store Days are recalculated."
+    <SettingsSection
+      title="Totals, rules & GL mapping"
+      description="Governed controls used when Store Days are recalculated. Stores, products and other reference data are under Data & Control → Foundation Data."
+    >
+      <Tabs
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        items={tabs.map((t) => ({ id: t, label: t }))}
       />
-      <div style={{ alignSelf: 'flex-start' }}>
-        <Segmented
-          value={tab}
-          onChange={setTab}
-          options={tabs.map((t) => ({ value: t, label: t }))}
-        />
-      </div>
       {error && (
         <Alert tone="error" onDismiss={() => setError(null)}>
           {error}
@@ -193,169 +158,50 @@ export default function ControlsPage() {
           {notice}
         </Alert>
       )}
-      {tab === 'Foundation data' && (
-        <Card>
-          <h2>Retail foundation data</h2>
-          <p>
-            Maintain the stores, tenders, accounts, and controlled values used by audit workflows.
-          </p>
-          <div className="profile-form">
-            <select
-              value={ref.category}
-              onChange={(e) => setRef({ ...ref, category: e.target.value })}
-            >
-              {cats.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-            <input
-              value={ref.code}
-              onChange={(e) => setRef({ ...ref, code: e.target.value })}
-              placeholder="Code"
-            />
-            <input
-              value={ref.name}
-              onChange={(e) => setRef({ ...ref, name: e.target.value })}
-              placeholder="Name"
-            />
-            <Button
-              variant="primary"
-              size="sm"
-
-              disabled={!ref.code || !ref.name}
-              onClick={addRef}
-            >
-              Add reference
-            </Button>
-          </div>
-          <ControlsTable
-            headers={['Category', 'Code', 'Name', 'Status']}
-            rows={refs.map((x) => [x.category, x.code, x.name, x.active ? 'Active' : 'Inactive'])}
-          />
-        </Card>
-      )}
       {tab === 'Totals & rules' && (
         <>
-          <Card>
-            <h2>Audit total definitions</h2>
+          <Alert
+            tone="info"
+            action={
+              <a className="btn-secondary btn-sm" href={STUDIO} target="_blank" rel="noreferrer">
+                Open Ontology Studio
+              </a>
+            }
+          >
+            Totals and rules are defined and approved in Ontology Studio. Nimbus shows them here
+            read-only and applies the approved versions.
+          </Alert>
+          <Card title="Audit total definitions">
             <p>
               Active definitions are calculated and versioned during Store Day re-totaling. Rules
               reference <b>Configured: [definition name]</b>.
             </p>
-            <div className="profile-form">
-              <input
-                value={total.name}
-                onChange={(e) => setTotal({ ...total, name: e.target.value })}
-                placeholder="Definition name"
-              />
-              <select
-                value={total.aggregation}
-                onChange={(e) => setTotal({ ...total, aggregation: e.target.value })}
-              >
-                <option>Sum</option>
-                <option>Count</option>
-              </select>
-              <select
-                value={total.source_system}
-                onChange={(e) => setTotal({ ...total, source_system: e.target.value })}
-              >
-                <option value="">Any source</option>
-                {['POS', 'POSControl', 'Processor', 'Bank', 'ERP', 'Shopify'].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-              <input
-                value={total.transaction_types}
-                onChange={(e) => setTotal({ ...total, transaction_types: e.target.value })}
-                placeholder="Types: Sale, Return"
-              />
-              <input
-                value={total.tender_type}
-                onChange={(e) => setTotal({ ...total, tender_type: e.target.value })}
-                placeholder="Tender (optional)"
-              />
-              <select
-                value={total.level}
-                onChange={(e) => setTotal({ ...total, level: e.target.value })}
-              >
-                {['Store', 'Register', 'Tender'].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-              <Button variant="primary" size="sm" disabled={!total.name} onClick={addTotal}>
-                Add total
-              </Button>
-            </div>
             <ControlsTable
               headers={['Name', 'Aggregation', 'Source', 'Level', 'Filter']}
               rows={totals.map((x) => [
                 x.name,
-                x.aggregation,
+                x.calculation_basis === 'Combined'
+                  ? `Combined (${x.combined_operator || '?'})`
+                  : x.aggregation,
                 x.source_system || 'Any',
                 x.level,
                 [...x.transaction_types, x.tender_type].filter(Boolean).join(', ') || 'All records',
               ])}
             />
           </Card>
-          <Card>
-            <h2>Threshold rules</h2>
+          <Card title="Threshold rules">
             <p>
               A rule creates an investigation when the absolute target total exceeds the threshold
               on a re-total.
             </p>
-            <div className="profile-form">
-              <input
-                value={rule.name}
-                onChange={(e) => setRule({ ...rule, name: e.target.value })}
-                placeholder="Rule name"
-              />
-              <input
-                list="configured-totals"
-                value={rule.total_name}
-                onChange={(e) => setRule({ ...rule, total_name: e.target.value })}
-                placeholder="Target total"
-              />
-              <datalist id="configured-totals">
-                {totals.map((x) => (
-                  <option key={x.id} value={`Configured: ${x.name}`} />
-                ))}
-              </datalist>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={rule.threshold}
-                onChange={(e) => setRule({ ...rule, threshold: e.target.value })}
-              />
-              <select
-                value={rule.severity}
-                onChange={(e) => setRule({ ...rule, severity: e.target.value })}
-              >
-                {['Low', 'Medium', 'High', 'Critical'].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-              <input
-                value={rule.owner}
-                onChange={(e) => setRule({ ...rule, owner: e.target.value })}
-                placeholder="Owner (optional)"
-              />
-              <Button
-                variant="primary"
-                size="sm"
-
-                disabled={!rule.name || !rule.total_name}
-                onClick={addRule}
-              >
-                Add rule
-              </Button>
-            </div>
             <ControlsTable
               headers={['Rule', 'Target', 'Threshold', 'Severity', 'Owner']}
               rows={rules.map((x) => [
                 x.name,
                 x.total_name,
-                money(x.threshold),
+                x.threshold_currency
+                  ? money(x.threshold, x.threshold_currency)
+                  : `${x.threshold} (count)`,
                 x.severity,
                 x.owner || 'Unassigned',
               ])}
@@ -364,8 +210,7 @@ export default function ControlsPage() {
         </>
       )}
       {tab === 'GL mapping' && (
-        <Card>
-          <h2>GL cross-references</h2>
+        <Card title="GL cross-references">
           <p>
             Use these mappings to generate a read-only journal preview. Unmapped transactions remain
             visible for remediation.
@@ -416,11 +261,7 @@ export default function ControlsPage() {
             Review proposed debits and credits before sending a journal through the ERP integration.
           </p>
           <div className="profile-form">
-            <input
-              value={journalStore}
-              onChange={(e) => setJournalStore(e.target.value)}
-              placeholder="Store ID"
-            />
+            <StoreSelect value={journalStore} onChange={setJournalStore} />
             <input
               type="date"
               value={journalDate}
@@ -430,16 +271,7 @@ export default function ControlsPage() {
               size="sm"
 
               disabled={!journalStore}
-              onClick={async () => {
-                try {
-                  const { data } = await api.get('/api/gl/journal-preview', {
-                    params: { store_id: journalStore, business_date: journalDate },
-                  });
-                  setJournal(data);
-                } catch (e: any) {
-                  setError(e?.response?.data?.detail ?? 'Could not generate journal preview.');
-                }
-              }}
+              onClick={() => void loadJournal(1)}
             >
               Preview journal
             </Button>
@@ -447,16 +279,18 @@ export default function ControlsPage() {
           {journal && (
             <>
               <p className="page-sub">
-                {journal.lines.length} mapped entries · {journal.unmapped_transaction_ids.length}{' '}
-                transactions still need a GL mapping.
+                Page {journal.page} of {journal.pages} · {journal.lines.length} mapped entries and{' '}
+                {journal.unmapped_transaction_ids.length} unmapped transactions on this page ·{' '}
+                {journal.total_transactions.toLocaleString()} transactions total.
               </p>
               <ControlsTable
-                headers={['Transaction', 'Debit', 'Credit', 'Amount']}
+                headers={['Transaction', 'Debit', 'Credit', 'Amount', 'Currency']}
                 rows={journal.lines.map((x) => [
                   x.transaction_id,
                   x.debit_account,
                   x.credit_account,
-                  money(x.amount),
+                  money(x.amount, x.currency),
+                  x.currency,
                 ])}
               />
               {journal.unmapped_transaction_ids.length > 0 && (
@@ -464,10 +298,26 @@ export default function ControlsPage() {
                   Unmapped transaction IDs: {journal.unmapped_transaction_ids.join(', ')}
                 </Alert>
               )}
+              <div className="button-row">
+                <Button
+                  size="sm"
+                  disabled={journalPage <= 1}
+                  onClick={() => void loadJournal(journalPage - 1)}
+                >
+                  Previous page
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={journalPage >= journal.pages}
+                  onClick={() => void loadJournal(journalPage + 1)}
+                >
+                  Next page
+                </Button>
+              </div>
             </>
           )}
         </Card>
       )}
-    </div>
+    </SettingsSection>
   );
 }
