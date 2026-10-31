@@ -1,5 +1,7 @@
 """Invalidate store-day totals and closure evidence after source changes."""
-from sqlalchemy import case, select, text, update
+from collections import defaultdict
+
+from sqlalchemy import case, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from integrations.ontology.nimbus import audit
@@ -23,11 +25,41 @@ async def lock_store_day_identity(db: AsyncSession, store_id: str, business_date
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key})
 
 
+async def lock_store_days(
+    db: AsyncSession,
+    identities: set[tuple[str, str]],
+) -> dict[tuple[str, str], StoreDay]:
+    """Lock a deterministic set of store days with bounded query batches."""
+    ordered_identities = sorted(identities)
+    if not ordered_identities:
+        return {}
+
+    if db.get_bind().dialect.name == "postgresql":
+        lock_keys = [
+            f"store-day:{len(store_id)}:{store_id}:{business_date}"
+            for store_id, business_date in ordered_identities
+        ]
+        await db.execute(text(
+            "SELECT pg_advisory_xact_lock(hashtextextended(lock_key, 0)) "
+            "FROM unnest(CAST(:lock_keys AS text[])) AS lock_rows(lock_key) "
+            "ORDER BY lock_key"
+        ), {"lock_keys": lock_keys})
+
+    days: dict[tuple[str, str], StoreDay] = {}
+    for offset in range(0, len(ordered_identities), 250):
+        identity_batch = ordered_identities[offset:offset + 250]
+        rows = (await db.execute(
+            select(StoreDay).where(
+                tuple_(StoreDay.store_id, StoreDay.business_date).in_(identity_batch)
+            ).order_by(StoreDay.store_id, StoreDay.business_date)
+            .with_for_update().execution_options(populate_existing=True)
+        )).scalars()
+        days.update({(day.store_id, day.business_date): day for day in rows})
+    return days
+
+
 async def lock_store_day(db: AsyncSession, store_id: str, business_date: str) -> StoreDay | None:
-    await lock_store_day_identity(db, store_id, business_date)
-    return (await db.execute(select(StoreDay).where(
-        StoreDay.store_id == store_id, StoreDay.business_date == business_date
-    ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+    return (await lock_store_days(db, {(store_id, business_date)})).get((store_id, business_date))
 
 
 async def invalidate_totals(db: AsyncSession, day: StoreDay, actor: str) -> None:
@@ -43,6 +75,35 @@ async def invalidate_totals(db: AsyncSession, day: StoreDay, actor: str) -> None
     if changed or pending:
         audit(db, "STORE_DAY_SOURCE_CHANGED", None, "StoreDay", day.id,
               "Source data changed; refresh store-day totals and closure evidence", actor=actor)
+
+
+async def invalidate_totals_many(db: AsyncSession, days: list[StoreDay], actor: str) -> None:
+    """Invalidate totals and pending closure requests for many changed days in bounded queries."""
+    ordered_days = sorted({day.id: day for day in days}.values(), key=lambda day: (day.store_id, day.business_date))
+    if not ordered_days:
+        return
+
+    pending_by_day: dict[str, list[StoreDayClosureRequest]] = defaultdict(list)
+    day_ids = [day.id for day in ordered_days]
+    for offset in range(0, len(day_ids), 500):
+        pending_requests = (await db.execute(select(StoreDayClosureRequest).where(
+            StoreDayClosureRequest.store_day_id.in_(day_ids[offset:offset + 500]),
+            StoreDayClosureRequest.status == "Pending",
+        ))).scalars()
+        for request in pending_requests:
+            pending_by_day[request.store_day_id].append(request)
+
+    for day in ordered_days:
+        changed = day.audit_version > 0 and not day.totals_stale
+        if day.audit_version > 0:
+            day.totals_stale = True
+        pending = pending_by_day[day.id]
+        for request in pending:
+            request.status = "Superseded"
+            request.review_reason = "Source data changed; recalculate totals and submit new closure evidence"
+        if changed or pending:
+            audit(db, "STORE_DAY_SOURCE_CHANGED", None, "StoreDay", day.id,
+                  "Source data changed; refresh store-day totals and closure evidence", actor=actor)
 
 
 async def invalidate_configuration(

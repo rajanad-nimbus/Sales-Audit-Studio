@@ -12,7 +12,7 @@ from apps.ingest import shopify_ingest
 from apps.ingest.common import COMPOSITE_SCOPE_BATCH_SIZE, LINEAGE, REQUIRED, SIGN, VALID_TYPES
 from apps.ingest.manifests import validate_business_date
 from apps.totals.currency import validate_currency
-from apps.store_days.freshness import invalidate_totals, lock_store_day
+from apps.store_days.freshness import invalidate_totals_many, lock_store_days
 from apps.transactions import detail as transaction_detail
 from models import (CanonicalTransaction, SourceRecord, TransactionDiscount, TransactionLine,
                     TransactionTax, TransactionTender, utcnow)
@@ -226,11 +226,7 @@ async def ingest(db, source: str, delivery_id: str, records: list[dict]) -> dict
         store = record.get("store_id")
         if parsed_record and isinstance(store, str) and store:
             keys.add((store, parsed_record["ts"].date().isoformat()))
-    days = {}
-    for store, business_date in sorted(keys):
-        day = await lock_store_day(db, store, business_date)
-        if day:
-            days[(store, business_date)] = day
+    days = await lock_store_days(db, keys)
 
     # Recheck identities after acquiring store-day locks so concurrent re-deliveries
     # and cross-date replays observe rows committed by the transaction ahead of them.
@@ -275,7 +271,6 @@ async def ingest(db, source: str, delivery_id: str, records: list[dict]) -> dict
         day = days.get(day_key)
         if day and day_key not in changed_days:
             changed_days.add(day_key)
-            await invalidate_totals(db, day, "ingest")
         stats["archived"] += 1
         if parsed.get("manifest"):
             continue
@@ -301,6 +296,7 @@ async def ingest(db, source: str, delivery_id: str, records: list[dict]) -> dict
             return_reference_keys.add((tx.store_id, tx.original_reference))
         sr.status, sr.extracted_at = "Processed", utcnow()
         stats["canonical_created"] += 1
+    await invalidate_totals_many(db, [days[key] for key in sorted(changed_days)], "ingest")
     await db.flush()
     stats["returns_linked"] = await link_returns(db, return_reference_keys)
     return stats
