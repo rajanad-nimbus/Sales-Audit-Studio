@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.corrections.effects import effective_amounts, effective_taxes
 from apps.totals.combined import calculate_combined
-from models import CanonicalTransaction, FoundationReference
+from models import CanonicalTransaction
+from apps.controls.foundation.models import FoundationReference
 from apps.totals.models import AuditTotalDefinition
 
 TRANSACTION_BATCH_SIZE = 500

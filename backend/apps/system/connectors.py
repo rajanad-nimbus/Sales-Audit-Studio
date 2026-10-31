@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Connector
+from apps.system.models import Connector
 
 DEFAULT_CONNECTORS = ("POS Feed", "Payment Processor", "Bank Feed", "ERP / GL")
 CONNECTOR_NAMESPACE = uuid.UUID("89f4960f-13e6-4f8c-9a0a-3c88ba8cb866")

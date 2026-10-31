@@ -8,7 +8,8 @@ from auth import AUTH_ENABLED, require_role
 from database import get_db
 from integrations.ontology import ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
-from models import Connector, SourceRecord
+from models import SourceRecord
+from apps.system.models import Connector
 
 router = APIRouter()
 

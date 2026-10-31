@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from integrations.ontology import nimbus
 from apps.agents.agent_tools import TOOL_SPECS
-from models import AgentSetting
+from apps.agents.models import AgentSetting
 
 ALLOWED_MODELS = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"]
 TOOL_NAMES = [t["name"] for t in TOOL_SPECS]

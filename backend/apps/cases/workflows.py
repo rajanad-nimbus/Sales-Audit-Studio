@@ -13,7 +13,8 @@ from apps.security import scope
 from auth import require_role
 from database import get_db
 from integrations.ontology import nimbus
-from models import CanonicalTransaction, PolicyEvaluation, SourceRecord, utcnow
+from models import CanonicalTransaction, SourceRecord, utcnow
+from apps.cases.models import PolicyEvaluation
 from apps.cases.models import (Case, EvidenceSnapshot, Exception as DBException,
                                 ValidationObligation, Workflow)
 from schemas import Recommendation as RecommendationSchema, ValidationRunRequest

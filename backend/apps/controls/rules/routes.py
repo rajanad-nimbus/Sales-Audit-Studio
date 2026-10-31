@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.database_errors import violates_unique_constraint
 from auth import require_role
 from database import get_db
-from models import AuditTotalDefinition, ConfiguredAuditRule
+from apps.totals.models import AuditTotalDefinition
+from apps.controls.rules.models import ConfiguredAuditRule
 from apps.totals.currency import validate_currency
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from apps.transactions.detail import MAX_MONEY, cent_value

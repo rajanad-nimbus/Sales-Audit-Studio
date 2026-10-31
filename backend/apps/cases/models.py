@@ -199,3 +199,16 @@ class ValidationObligation(Base):
     status: Mapped[str] = mapped_column(String(50), default="Pending")
     verification_result: Mapped[str | None] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PolicyEvaluation(Base):
+    """Deterministic policy gate result for a recommendation"""
+    __tablename__ = "policy_evaluations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("cases.id"), index=True)
+    recommendation_id: Mapped[str] = mapped_column(String(36), ForeignKey("recommendations.id"))
+    rule_version: Mapped[str] = mapped_column(String(50))
+    outcome: Mapped[str] = mapped_column(String(50))
+    reasons: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

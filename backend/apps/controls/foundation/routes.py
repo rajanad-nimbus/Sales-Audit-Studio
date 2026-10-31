@@ -10,7 +10,8 @@ from auth import require_role
 from apps.database_errors import violates_unique_constraint
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from database import get_db
-from models import FoundationReference, utcnow
+from model_base import utcnow
+from apps.controls.foundation.models import FoundationReference
 
 router = APIRouter(prefix="/api/foundation", tags=["Retail foundation data"])
 VALID_CATEGORIES = {"Store", "Register", "Cashier", "Tender", "Item", "BankAccount", "GLAccount", "TaxCode", "BusinessCalendar"}

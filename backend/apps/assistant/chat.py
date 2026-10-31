@@ -7,8 +7,10 @@ from sqlalchemy import func, or_, select
 
 from apps.security import scope
 from integrations.ontology import ontology
-from models import (AuditEvent, BatchRun, Case, Connector, Exception as DBException, Finding, PolicyEvaluation,
+from models import (AuditEvent, BatchRun, Case, Exception as DBException, Finding,
                     Recommendation, ValidationObligation, Workflow)
+from apps.cases.models import PolicyEvaluation
+from apps.system.models import Connector
 
 CASE_REF = re.compile(r"\b(Z[AS]-[A-Z0-9]{4,8}-?[A-Z0-9]{0,8}(?:-[A-Z0-9]+)?)\b", re.I)
 VAGUE = re.compile(r"\b(this|that|it|the case|here)\b", re.I)

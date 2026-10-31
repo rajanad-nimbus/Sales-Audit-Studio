@@ -8,7 +8,8 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import FoundationReference, utcnow
+from model_base import utcnow
+from apps.controls.foundation.models import FoundationReference
 from apps.ingest.models import ShopifyReferenceStage, ShopifyReferenceSyncState
 
 SOURCE = "Shopify"
