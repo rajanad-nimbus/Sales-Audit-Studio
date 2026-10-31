@@ -40,3 +40,8 @@ def test_csv_parser_rejects_duplicate_or_blank_headers(csv_data):
 def test_csv_parser_rejects_unlabelled_extra_fields():
     with pytest.raises(ValueError, match="row 2 has more fields than its header"):
         contracts.parse_csv_delivery("id,amount\nA,10.00,unexpected\n")
+
+
+def test_csv_parser_rejects_malformed_quoted_fields():
+    with pytest.raises(ValueError, match="Invalid CSV structure"):
+        contracts.parse_csv_delivery('id,amount\nA,"10.00\n')

@@ -82,13 +82,13 @@ def validate_profile_mapping(value: dict[str, str] | None) -> dict[str, str] | N
 def parse_csv_delivery(csv_data: str, mapping: dict[str, str] | None = None) -> list[dict[str, str | None]]:
     """Parse a structurally unambiguous CSV within the configured record cap."""
     rows = []
-    reader = csv.DictReader(io.StringIO(csv_data))
-    headers = reader.fieldnames
-    if not headers or any(not header.strip() for header in headers):
-        raise ValueError("CSV must contain non-empty column headers")
-    if len(headers) != len(set(headers)):
-        raise ValueError("CSV column headers must be unique")
     try:
+        reader = csv.DictReader(io.StringIO(csv_data), strict=True)
+        headers = reader.fieldnames
+        if not headers or any(not header.strip() for header in headers):
+            raise ValueError("CSV must contain non-empty column headers")
+        if len(headers) != len(set(headers)):
+            raise ValueError("CSV column headers must be unique")
         for index, row in enumerate(reader):
             if index >= MAX_DELIVERY_RECORDS:
                 raise ValueError(f"CSV exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit")
@@ -99,7 +99,7 @@ def parse_csv_delivery(csv_data: str, mapping: dict[str, str] | None = None) -> 
                 if mapping else row
             )
     except csv.Error as exc:
-        raise ValueError(f"Invalid CSV: {exc}") from exc
+        raise ValueError(f"Invalid CSV structure: {exc}") from exc
     if not rows:
         raise ValueError("CSV contains no data rows")
     return rows
