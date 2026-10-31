@@ -1,6 +1,4 @@
 """Governed transaction correction proposals and approvals."""
-import hashlib
-import json
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -13,16 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.security.authentication import require_role
 from apps.search import contains_literal
 from apps.security import scope
-from apps.ingest.common import LINEAGE, SIGN, VALID_TYPES
-from apps.store_days.freshness import invalidate_totals, lock_store_day
+from apps.ingest.common import SIGN, VALID_TYPES
 from apps.totals.currency import validate_currency
-from apps.corrections.effects import effective_amounts
-from apps.corrections.reconciliation import invalidate_case_evidence, linked_cases, related_exception_ids, requeue_linked_exceptions
+from apps.corrections.approval import apply_approval_effects, prepare_approval
 from apps.transactions.detail import MAX_MONEY, cent_value, money
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
-from apps.ingest.models import SourceRecord
-from apps.exports.models import ExportItem
 from model_base import utcnow
 from apps.corrections.models import TransactionAdjustment
 from integrations.ontology.nimbus import audit
@@ -224,40 +218,20 @@ async def approve_adjustment(adjustment_id: str, db: AsyncSession = Depends(get_
     adjustment = (await db.execute(select(TransactionAdjustment).where(TransactionAdjustment.id == adjustment_id))).scalar_one_or_none()
     if not adjustment or adjustment.status != "Proposed": raise HTTPException(status_code=409, detail="Proposed adjustment not found")
     validate_adjustment_values(adjustment.adjustment_type, adjustment.proposed_values)
+    missing_transaction = None
     if adjustment.adjustment_type == "MissingTransaction":
-        values = adjustment.proposed_values
-        amount, transaction_type, business_date, event_at, settlement_date = validate_missing_transaction(values)
-        signed = -amount if transaction_type in {"Return", "Refund"} else amount
-        store_id = str(values["store_id"])
-    else:
-        transaction = await db.get(CanonicalTransaction, adjustment.transaction_id)
-        if not transaction:
-            raise HTTPException(status_code=409, detail="Adjustment transaction no longer exists")
-        store_id, business_date = transaction.store_id, transaction.business_date
-    scope.require_store(user, store_id)
-    day = await lock_store_day(db, store_id, business_date)
-    cases = await linked_cases(db, transaction) if adjustment.adjustment_type != "MissingTransaction" else []
-    if any(case.status in {"Resolving", "Pending Validation"} for case in cases):
-        raise HTTPException(status_code=409, detail="A linked case has an active workflow; resolve it before approving this correction")
-    if cases:
-        pending_export = (await db.execute(select(ExportItem.id).where(
-            ExportItem.object_id.in_([case.id for case in cases]),
-            ExportItem.dataset.in_(["resolutions", "adjustments"]), ExportItem.state == "Pending").limit(1))).scalar_one_or_none()
-        if pending_export:
-            raise HTTPException(status_code=409, detail="A linked case has a pending export; retry or cancel the batch before approving this correction")
-    if adjustment.adjustment_type == "Amount":
-        transaction_ids = await related_exception_ids(db, transaction)
-        locked = (await db.execute(select(CanonicalTransaction).where(CanonicalTransaction.id.in_(transaction_ids))
-                  .order_by(CanonicalTransaction.id).with_for_update().execution_options(populate_existing=True))).scalars().all()
-        transaction = next(row for row in locked if row.id == adjustment.transaction_id)
-        current = (await effective_amounts(db, [transaction]))[transaction.id]
-        values = adjustment.proposed_values
-        result = Decimal(str(values["corrected_amount"])) if "corrected_amount" in values else current + Decimal(str(values["amount_delta"]))
-        if abs(result) > MAX_MONEY:
-            raise HTTPException(status_code=422, detail="Adjusted amount exceeds supported monetary precision")
-        expected_sign = SIGN.get(transaction.transaction_type)
-        if expected_sign is None or result * expected_sign < 0:
-            raise HTTPException(status_code=422, detail="Adjusted amount cannot reverse the transaction's financial sign")
+        amount, transaction_type, business_date, event_at, settlement_date = validate_missing_transaction(
+            adjustment.proposed_values
+        )
+        missing_transaction = (
+            amount,
+            transaction_type,
+            business_date,
+            event_at,
+            settlement_date,
+            missing_transaction_source(adjustment.proposed_values),
+        )
+    context = await prepare_approval(db, adjustment, user, missing_transaction)
     claimed = (await db.execute(update(TransactionAdjustment).where(
         TransactionAdjustment.id == adjustment_id, TransactionAdjustment.status == "Proposed"
     ).values(status="Approved", reviewed_by=user["user"] or "ontology.user", reviewed_at=utcnow())
@@ -265,20 +239,7 @@ async def approve_adjustment(adjustment_id: str, db: AsyncSession = Depends(get_
     if claimed is None:
         raise HTTPException(status_code=409, detail="Adjustment was already reviewed")
     await db.refresh(adjustment)
-    await invalidate_case_evidence(db, cases, adjustment.id, user["user"] or "ontology.user")
-    if adjustment.adjustment_type == "Amount":
-        await requeue_linked_exceptions(db, transaction, locked, user["user"] or "ontology.user")
-    if day:
-        await invalidate_totals(db, day, user["user"] or "ontology.user")
-    if adjustment.adjustment_type == "MissingTransaction":
-        source_id = str(uuid.uuid4())
-        payload = json.dumps({"adjustment_id": adjustment.id, "values": values, "rationale": adjustment.rationale}, sort_keys=True, default=str).encode()
-        db.add(SourceRecord(id=source_id, source_system="ManualAdjustment", source_version="1.0", source_record_id=f"adjustment-{adjustment.id}", delivery_id=adjustment.id, payload=payload, payload_hash=hashlib.sha256(payload).hexdigest(), received_at=utcnow(), source_event_time=event_at, status="Processed", extracted_at=utcnow()))
-        await db.flush()
-        transaction_id = str(uuid.uuid4())
-        db.add(CanonicalTransaction(id=transaction_id, business_date=business_date, transaction_date=event_at, event_timestamp=event_at, processing_timestamp=utcnow(), settlement_date=settlement_date, transaction_type=transaction_type, transaction_subtype=None, source_lineage=LINEAGE[missing_transaction_source(values)], currency=str(values.get("currency") or "USD"), signed_amount=signed, quantity=values.get("quantity"), store_id=str(values["store_id"]), register_id=values.get("register_id"), channel_id=str(values.get("channel_id") or "store"), tender_type=values.get("tender_type"), payment_reference=values.get("payment_reference"), settlement_reference=values.get("settlement_reference"), reconciliation_status="Unmatched", source_record_id=source_id, disposition="Open"))
-        await db.flush()
-        adjustment.transaction_id = transaction_id
+    await apply_approval_effects(db, adjustment, context, user["user"] or "ontology.user")
     audit(db, "TRANSACTION_ADJUSTMENT_APPROVED", None, "TransactionAdjustment", adjustment.id, "Transaction adjustment approved", actor=adjustment.reviewed_by, after={"transaction_id": adjustment.transaction_id})
     await db.commit(); return view(adjustment)
 
