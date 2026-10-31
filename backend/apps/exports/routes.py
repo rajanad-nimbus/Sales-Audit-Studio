@@ -42,6 +42,9 @@ router = APIRouter(prefix="/api/exports")
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))
 MAX_BATCH = 5000
 MAX_SINK_BODY_BYTES = 25 * 1024 * 1024
+SQLITE_PRIOR_DAY_BATCH_SIZE = 300
+POSTGRES_BIND_PARAMETER_BUDGET = 30_000
+PRIOR_DAY_KEY_COLUMNS = 2
 DATASETS = {
     "resolutions": "Closed, validated cases with decision, disposition and validation result",
     "adjustments": "Approved financial adjustments from validated cases (journal lines for ERP/GL)",
@@ -162,8 +165,21 @@ async def prior_exported_days(db, dest_id: str, dataset: str, cases: list[Case] 
     if keys is None:
         rows = (await db.execute(query)).all()
     else:
-        for offset in range(0, len(keys), 300):
-            rows.extend((await db.execute(query.where(tuple_(Case.store_id, Case.business_date).in_(keys[offset:offset + 300])))).all())
+        parameter_budget = (
+            POSTGRES_BIND_PARAMETER_BUDGET
+            if db.get_bind().dialect.name == "postgresql"
+            else SQLITE_PRIOR_DAY_BATCH_SIZE * PRIOR_DAY_KEY_COLUMNS
+        )
+        batch_size = max(1, parameter_budget // PRIOR_DAY_KEY_COLUMNS)
+        for offset in range(0, len(keys), batch_size):
+            key_batch = keys[offset : offset + batch_size]
+            rows.extend(
+                (
+                    await db.execute(
+                        query.where(tuple_(Case.store_id, Case.business_date).in_(key_batch))
+                    )
+                ).all()
+            )
     out: dict = {}
     for store_id, business_date, batch_id in rows:
         out.setdefault((store_id, business_date), []).append(batch_id[:8])
