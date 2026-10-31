@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 CENT = Decimal("0.01")
 MAX_MONEY = Decimal("9999999999999.99")
 MAX_QUANTITY = Decimal("999999999.999")
+MAX_DETAIL_ITEMS_PER_TRANSACTION = 10_000
 DISCOUNT_KINDS = ("Promotion", "Coupon", "Voucher", "Manual")
 TENDER_TYPES = ("Card", "Cash", "Voucher", "GiftCard", "StoreCredit", "Other")
 DETAIL_KEYS = ("lines", "discounts", "taxes", "tenders")
@@ -111,6 +112,11 @@ def validate_detail_collections(record: dict) -> None:
     for key in DETAIL_KEYS:
         if record.get(key) is not None and not isinstance(record[key], list):
             raise ValueError(f"{key} must be a list")
+    detail_items = sum(len(record.get(key) or []) for key in DETAIL_KEYS)
+    if detail_items > MAX_DETAIL_ITEMS_PER_TRANSACTION:
+        raise ValueError(
+            f"transaction detail exceeds {MAX_DETAIL_ITEMS_PER_TRANSACTION:,} items"
+        )
 
 
 def normalized_metadata(record: dict, field: str) -> str | None:

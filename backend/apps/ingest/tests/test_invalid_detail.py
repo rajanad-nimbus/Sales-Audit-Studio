@@ -66,6 +66,39 @@ def test_non_string_shopify_status_is_rejected():
         service.parse("Shopify", record)
 
 
+def test_excessive_detail_items_are_quarantined_without_blocking_the_delivery(monkeypatch):
+    monkeypatch.setattr(service.transaction_detail, "MAX_DETAIL_ITEMS_PER_TRANSACTION", 2)
+
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                base = {
+                    "event_time": "2026-10-01T10:00:00Z", "record_type": "Sale",
+                    "amount": "3.00", "store_id": "S1",
+                }
+                result = await service.ingest(db, "POS", "bounded-detail", [
+                    {**base, "source_record_id": "too-many", "lines": [
+                        {"item_code": f"SKU-{index}", "quantity": "1", "unit_price": "1.00"}
+                        for index in range(3)
+                    ]},
+                    {**base, "source_record_id": "valid"},
+                ])
+                records = (await db.execute(
+                    select(SourceRecord).order_by(SourceRecord.source_record_id)
+                )).scalars().all()
+                assert result["quarantined"] == 1
+                assert result["canonical_created"] == 1
+                assert records[0].quarantine_reason == "invalid transaction detail: transaction detail exceeds 2 items"
+                assert records[1].status == "Processed"
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_ingest_validates_each_record_only_once(monkeypatch):
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
