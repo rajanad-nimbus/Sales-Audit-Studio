@@ -304,8 +304,12 @@ async def deliver(dest: ExportDestination, b: ExportBatch, client: httpx.AsyncCl
             b.response_code = r.status_code
             if r.status_code in (200, 201):
                 b.status, b.acked_at = "Acknowledged", utcnow()
-                try: b.response_ref = str(r.json().get("reference", ""))[:255] or None
-                except Exception: pass
+                try:
+                    response_body = r.json()
+                except ValueError:
+                    response_body = None
+                if isinstance(response_body, dict):
+                    b.response_ref = str(response_body.get("reference", ""))[:255] or None
             elif r.status_code == 202:
                 b.status = "Sent"
             else:
