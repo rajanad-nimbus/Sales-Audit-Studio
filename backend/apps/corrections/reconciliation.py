@@ -52,11 +52,14 @@ async def linked_cases(db: AsyncSession, transaction: CanonicalTransaction) -> l
         ready = sorted(case_id for case_id in remaining if parents[case_id] not in remaining)
         if not ready:
             raise ValueError("Cycle in follow-up case lineage")
-        for case_id in ready:
-            case = (await db.execute(select(Case).where(Case.id == case_id).with_for_update()
-                                     .execution_options(populate_existing=True))).scalar_one_or_none()
-            if case:
-                locked[case_id] = case
+        ready_cases = (await db.execute(
+            select(Case)
+            .where(Case.id.in_(ready))
+            .order_by(Case.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )).scalars().all()
+        locked.update((case.id, case) for case in ready_cases)
 
 
 async def invalidate_case_evidence(db: AsyncSession, cases: list[Case], adjustment_id: str, actor: str) -> None:

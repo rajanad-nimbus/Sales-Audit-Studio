@@ -139,7 +139,7 @@ def test_linked_cases_lock_parent_before_follow_up_even_when_ids_sort_oppositely
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                for case_id in ("z-parent", "a-child", "m-malformed-child"):
+                for case_id in ("z-parent", "a-child", "b-child", "m-malformed-child"):
                     db.add(Case(id=case_id, case_number=case_id, status="Closed", case_type="test",
                                 business_date="2026-10-01", store_id="S1"))
                 await db.flush()
@@ -147,11 +147,26 @@ def test_linked_cases_lock_parent_before_follow_up_even_when_ids_sort_oppositely
                       after={"transaction_ids": ["tx"]})
                 audit(db, "CASE_CREATED", "a-child", "Case", "a-child", "created",
                       after={"transaction_ids": ["tx"], "parent_case_id": "z-parent"})
+                audit(db, "CASE_CREATED", "b-child", "Case", "b-child", "created",
+                      after={"transaction_ids": ["tx"], "parent_case_id": "z-parent"})
                 audit(db, "CASE_CREATED", "m-malformed-child", "Case", "m-malformed-child", "legacy",
                       after={"transaction_ids": ["tx"], "parent_case_id": {"legacy": "invalid"}})
                 await db.commit()
-                cases = await linked_cases(db, SimpleNamespace(id="tx", store_id="S1"))
-                assert [case.id for case in cases] == ["z-parent", "a-child"]
+                lock_queries = []
+
+                def capture_lock_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+                    normalized = statement.lower()
+                    if normalized.startswith("select cases.") and "cases.id in" in normalized:
+                        lock_queries.append(statement)
+
+                event.listen(engine.sync_engine, "before_cursor_execute", capture_lock_query)
+                try:
+                    cases = await linked_cases(db, SimpleNamespace(id="tx", store_id="S1"))
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", capture_lock_query)
+                assert [case.id for case in cases] == ["z-parent", "a-child", "b-child"]
+                assert len(lock_queries) == 2
+                assert "IN (?, ?)" in lock_queries[-1]
         finally:
             await engine.dispose()
     asyncio.run(run())
