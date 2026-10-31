@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -30,7 +31,19 @@ def test_summary_groups_and_bulk_respect_store_and_currency():
                                  business_date="2026-10-01", currency="USD", total_exposure=Decimal("500"), amount_needs_review=True)])
                 await db.commit()
                 user = {"user": "finance", "role": "finance", "store_scoped": True, "stores": ["S1"]}
-                summary = await action_center.summary(db, user)
+                summary_selects = 0
+
+                def count_summary_selects(_connection, _cursor, statement, _parameters, _context, _executemany):
+                    nonlocal summary_selects
+                    if statement.lstrip().upper().startswith("SELECT"):
+                        summary_selects += 1
+
+                event.listen(engine.sync_engine, "before_cursor_execute", count_summary_selects)
+                try:
+                    summary = await action_center.summary(db, user)
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", count_summary_selects)
+                assert summary_selects == 4
                 literal_wildcard = await action_center.list_cases(
                     action_center.Filters(q="%"), "sla", "asc", 1, 50, db, user
                 )

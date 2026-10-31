@@ -232,12 +232,24 @@ async def summary(db: AsyncSession = Depends(get_db), user: dict = Depends(requi
     now = datetime.now(timezone.utc)
     live = Case.status != "Closed"
     visible = or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now)
-
-    async def one(*conds, expr=func.count()):
-        stmt = scope.restrict(select(expr).select_from(Case).where(*conds), user, Case.store_id)
-        return (await db.execute(stmt)).scalar() or 0
-
-    closed = await one(Case.status == "Closed")
+    counter_conditions = {
+        "needs_decision": and_(Case.status == "In Review", visible),
+        "agent_prepared": and_(Case.investigation_status == "Ready for Decision", visible),
+        "agent_waiting_evidence": and_(Case.investigation_status == "Awaiting Evidence", visible),
+        "sla_breached": and_(live, Case.sla_due_at < now, visible),
+        "at_risk": and_(live, Case.sla_due_at >= now, Case.sla_due_at < now + timedelta(hours=8), visible),
+        "unassigned": and_(live, Case.assigned_to.is_(None), visible),
+        "mine": and_(live, Case.assigned_to == me_name(user)),
+        "snoozed": and_(live, Case.snoozed_until > now),
+        "open_total": live,
+        "stale_amount_cases": and_(live, Case.amount_needs_review.is_(True)),
+        "closed": Case.status == "Closed",
+    }
+    counter_query = select(*(
+        func.count(case((condition, 1))).label(name)
+        for name, condition in counter_conditions.items()
+    ), func.count(func.distinct(case((live, Case.store_id)))).label("stores_affected")).select_from(Case)
+    counters = (await db.execute(scope.restrict(counter_query, user, Case.store_id))).mappings().one()
     manual_query = select(func.count(func.distinct(HumanDecision.case_id))).join(Case, Case.id == HumanDecision.case_id).where(
         HumanDecision.decision_type.in_(["Finance", "IT"]), Case.status == "Closed")
     manual = (await db.execute(scope.restrict(manual_query, user, Case.store_id))).scalar() or 0
@@ -250,22 +262,13 @@ async def summary(db: AsyncSession = Depends(get_db), user: dict = Depends(requi
                           for currency, amount, exposure in amounts]
     single = amounts[0] if len(amounts) == 1 and amounts[0][0] else None
     return {
-        "needs_decision": await one(Case.status == "In Review", visible),
-        "agent_prepared": await one(Case.investigation_status == "Ready for Decision", visible),
-        "agent_waiting_evidence": await one(Case.investigation_status == "Awaiting Evidence", visible),
-        "sla_breached": await one(live, Case.sla_due_at < now, visible),
-        "at_risk": await one(live, Case.sla_due_at >= now, Case.sla_due_at < now + timedelta(hours=8), visible),
-        "unassigned": await one(live, Case.assigned_to.is_(None), visible),
-        "mine": await one(live, Case.assigned_to == me_name(user)),
-        "snoozed": await one(live, Case.snoozed_until > now),
-        "open_total": await one(live),
+        **{name: counters[name] for name in counter_conditions if name != "closed"},
         "open_exposure": str(single[2]) if single else "0" if not amounts else None,
         "open_amount": str(single[1]) if single else "0" if not amounts else None,
         "currency": single[0] if single else None, "amounts_by_currency": amount_by_currency,
-        "stale_amount_cases": await one(live, Case.amount_needs_review.is_(True)),
-        "stores_affected": await one(live, expr=func.count(func.distinct(Case.store_id))),
-        "closed": closed,
-        "straight_through_rate": round(100 * max(closed - manual, 0) / closed, 1) if closed else None,
+        "stores_affected": counters["stores_affected"],
+        "closed": counters["closed"],
+        "straight_through_rate": round(100 * max(counters["closed"] - manual, 0) / counters["closed"], 1) if counters["closed"] else None,
         "by_day": [{"date": d, "count": n} for d, n in reversed(days)],
     }
 
