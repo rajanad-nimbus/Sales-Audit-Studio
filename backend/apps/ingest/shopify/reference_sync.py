@@ -1,6 +1,7 @@
 """Stage complete Shopify snapshots, then atomically reconcile retail references."""
 import logging
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, tuple_, update, delete
@@ -16,6 +17,32 @@ SOURCE = "Shopify"
 STAGE_BATCH_SIZE = 500
 ORPHAN_RETENTION = timedelta(days=1)
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class StageAccumulator:
+    """Deduplicate one Shopify snapshot and flush references in bounded batches."""
+    db: AsyncSession
+    sync_id: str
+    generation: int
+    pending: dict[tuple[str, str], dict] = field(default_factory=dict)
+    counts: dict[str, int] = field(default_factory=lambda: {
+        "stores": 0, "items": 0, "duplicates": 0,
+    })
+
+    async def add(self, reference: dict) -> None:
+        key = (reference["category"], reference["code"])
+        if key in self.pending:
+            self.counts["duplicates"] += 1
+            return
+        self.pending[key] = reference
+        if len(self.pending) >= STAGE_BATCH_SIZE:
+            await self.flush()
+
+    async def flush(self) -> None:
+        batch_counts = await _flush_stage(self.db, self.sync_id, self.generation, self.pending)
+        for name, value in batch_counts.items():
+            self.counts[name] += value
 
 
 def _clip(value: str, size: int) -> str:
@@ -105,31 +132,11 @@ async def stage(adapter, db: AsyncSession, sync_id: str, store_code: str) -> dic
     cutoff = datetime.now(timezone.utc) - ORPHAN_RETENTION
     await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.created_at < cutoff))
     await db.commit()
-    pending: dict[tuple[str, str], dict] = {}
-    counts = {"stores": 0, "items": 0, "duplicates": 0}
-
-    async def add(ref: dict) -> None:
-        key = (ref["category"], ref["code"])
-        if key in pending:
-            counts["duplicates"] += 1
-            return
-        pending[key] = ref
-        if len(pending) >= STAGE_BATCH_SIZE:
-            batch_counts = await _flush_stage(db, sync_id, generation, pending)
-            for name, value in batch_counts.items():
-                counts[name] += value
-
+    accumulator = StageAccumulator(db, sync_id, generation)
     try:
-        await add(shop_to_store(await adapter.fetch_shop(), store_code))
-        async for location in adapter.fetch_locations():
-            await add(location_to_store(location))
-        async for product in adapter.fetch_products():
-            for item in product_to_items(product):
-                await add(item)
-        batch_counts = await _flush_stage(db, sync_id, generation, pending)
-        for name, value in batch_counts.items():
-            counts[name] += value
-        return {**counts, "generation": generation}
+        await fetch_catalog_into_stage(adapter, store_code, accumulator)
+        await accumulator.flush()
+        return {**accumulator.counts, "generation": generation}
     except Exception:
         await db.rollback()
         try:
@@ -137,6 +144,17 @@ async def stage(adapter, db: AsyncSession, sync_id: str, store_code: str) -> dic
         except Exception:
             logger.exception("Could not discard failed Shopify reference stage %s", sync_id)
         raise
+
+
+async def fetch_catalog_into_stage(adapter, store_code: str, accumulator: StageAccumulator) -> None:
+    """Fetch shop, locations, and products in source order into a staging accumulator."""
+    shop = await adapter.fetch_shop()
+    await accumulator.add(shop_to_store(shop, store_code))
+    async for location in adapter.fetch_locations():
+        await accumulator.add(location_to_store(location))
+    async for product in adapter.fetch_products():
+        for item in product_to_items(product):
+            await accumulator.add(item)
 
 
 async def _apply_staged_rows(db: AsyncSession, sync_id: str, actor: str, counts: dict) -> None:
