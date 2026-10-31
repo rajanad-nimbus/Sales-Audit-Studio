@@ -191,17 +191,21 @@ async def archive_retention_candidates(
     """Archive the selected records and verify the archive matches its locked batch."""
     archive_dir = Path(os.getenv("NIMBUS_ARCHIVE_DIR", "/app/archives")) / dataset
     archive_path = archive_dir / f"{utcnow().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.jsonl"
-    columns = list(model.__table__.columns)
-    archive_query = select(*columns).where(model.id.in_(record_ids)).order_by(timestamp, model.id)
-    archived_ids, archive_hash, archived_count, has_more = await stream_retention_rows(
-        db, archive_query, archive_path
-    )
-    if archived_ids != record_ids[:len(archived_ids)] or archived_count != len(archived_ids):
-        raise HTTPException(
-            status_code=409,
-            detail="Retention candidates changed while preparing the archive; retry the operation",
+    try:
+        columns = list(model.__table__.columns)
+        archive_query = select(*columns).where(model.id.in_(record_ids)).order_by(timestamp, model.id)
+        archived_ids, archive_hash, archived_count, has_more = await stream_retention_rows(
+            db, archive_query, archive_path
         )
-    return archive_path, archive_hash, archived_ids, has_more
+        if archived_ids != record_ids[:len(archived_ids)] or archived_count != len(archived_ids):
+            raise HTTPException(
+                status_code=409,
+                detail="Retention candidates changed while preparing the archive; retry the operation",
+            )
+        return archive_path, archive_hash, archived_ids, has_more
+    except BaseException:
+        archive_path.unlink(missing_ok=True)
+        raise
 
 
 async def purge_retention_candidates(db: AsyncSession, model, record_ids: list[str]) -> int:
@@ -395,31 +399,31 @@ async def execute_retention(
         return {"run_id": run.id, "eligible_records": 0, "message": "No records eligible"}
     archive_path = None
     archive_hash = None
-    if policy.archive_before_purge:
-        archive_path, archive_hash, record_ids, archive_has_more = await archive_retention_candidates(
-            db, dataset, model, timestamp, candidate_ids
-        )
-        eligible_count = len(record_ids)
-        has_more = has_more or archive_has_more
-    else:
-        record_ids = candidate_ids
-    run.eligible_records = eligible_count
-    if body.confirm_purge:
-        try:
+    try:
+        if policy.archive_before_purge:
+            archive_path, archive_hash, record_ids, archive_has_more = await archive_retention_candidates(
+                db, dataset, model, timestamp, candidate_ids
+            )
+            eligible_count = len(record_ids)
+            has_more = has_more or archive_has_more
+        else:
+            record_ids = candidate_ids
+        run.eligible_records = eligible_count
+        if body.confirm_purge:
             await ensure_retention_records_are_unreferenced(db, dataset, record_ids)
-        except HTTPException:
-            if archive_path is not None:
-                archive_path.unlink(missing_ok=True)
-            raise
-    if archive_path is not None:
-        run.archived_records = eligible_count
-        run.archive_location = str(archive_path)
-        run.archive_hash = archive_hash
-    if body.confirm_purge:
-        run.purged_records = await purge_retention_candidates(db, model, record_ids)
-    db.add(run)
-    audit_retention_run(db, run, dataset)
-    await db.commit()
+        if archive_path is not None:
+            run.archived_records = eligible_count
+            run.archive_location = str(archive_path)
+            run.archive_hash = archive_hash
+        if body.confirm_purge:
+            run.purged_records = await purge_retention_candidates(db, model, record_ids)
+        db.add(run)
+        audit_retention_run(db, run, dataset)
+        await db.commit()
+    except BaseException:
+        if archive_path is not None:
+            archive_path.unlink(missing_ok=True)
+        raise
     return {
         "run_id": run.id,
         "eligible_records": eligible_count,

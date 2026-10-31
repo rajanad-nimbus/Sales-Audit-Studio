@@ -165,6 +165,47 @@ def test_retention_archive_byte_limit_purges_only_archived_records(tmp_path, mon
     asyncio.run(run())
 
 
+def test_retention_removes_archive_when_purge_fails(tmp_path, monkeypatch):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setenv("NIMBUS_ARCHIVE_DIR", str(tmp_path))
+
+        async def fail_purge(*args):
+            raise RuntimeError("simulated purge failure")
+
+        monkeypatch.setattr("apps.operations.routes.purge_retention_candidates", fail_purge)
+        try:
+            async with Session() as db:
+                old = utcnow() - timedelta(days=45)
+                db.add(RetentionPolicy(
+                    id="policy", dataset="source_records", retain_days=30,
+                    archive_before_purge=True, updated_by="it",
+                ))
+                db.add(SourceRecord(
+                    id="src-1", source_system="POS", source_version="1",
+                    source_record_id="src-1", delivery_id="delivery", payload=b"{}",
+                    payload_hash="0" * 64, received_at=old, source_event_time=old,
+                    status="Processed", created_at=old,
+                ))
+                await db.commit()
+
+                with pytest.raises(RuntimeError, match="simulated purge failure"):
+                    await execute_retention(
+                        "source_records", RetentionRunBody(confirm_purge=True), db, {"user": "it.user"}
+                    )
+
+                await db.rollback()
+                assert await db.scalar(select(func.count()).select_from(SourceRecord)) == 1
+                assert list(tmp_path.rglob("*.jsonl")) == []
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_empty_retention_run_is_written_to_audit_log():
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
