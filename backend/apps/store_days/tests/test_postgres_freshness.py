@@ -9,11 +9,19 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.ingest.service import ingest
+from apps.ingest.reconciliation import lock_reconciliation
 from apps.store_days.freshness import lock_configuration, lock_store_day
-from apps.store_days.routes import open_store_day_record, retotal_store_day
+from apps.store_days.routes import close_store_day, open_store_day_record, retotal_store_day
 from apps.controls.rules.routes import RuleBody, create_rule
 from apps.totals.routes import TotalDefinitionBody, create_definition
-from models import AuditTotal, AuditTotalDefinition, Base, FoundationReference, StoreDay
+from models import (
+    AuditTotal,
+    AuditTotalDefinition,
+    Base,
+    FoundationReference,
+    StoreDay,
+    StoreDayClosureRequest,
+)
 
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
@@ -110,4 +118,83 @@ def test_ingestion_and_retotal_serialize_in_both_orders():
             async with admin.begin() as connection:
                 await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
             await admin.dispose()
+    asyncio.run(run())
+
+
+def test_store_day_close_waits_for_reconciliation_lock():
+    async def run():
+        schema = "zetsa_test_" + uuid.uuid4().hex
+        admin = create_async_engine(POSTGRES_URL)
+        engine = None
+        try:
+            async with admin.begin() as connection:
+                await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+            engine = create_async_engine(POSTGRES_URL, connect_args={"server_settings": {"search_path": schema}})
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                db.add(StoreDay(
+                    id="close-race",
+                    store_id="S1",
+                    business_date="2026-10-01",
+                    status="Auditing",
+                    audit_version=1,
+                    totals_stale=False,
+                ))
+                db.add_all([
+                    AuditTotal(
+                        id="processor-bank",
+                        store_day_id="close-race",
+                        audit_version=1,
+                        total_name="Processor to Bank Variance",
+                        level="Store",
+                        calculated_amount=0,
+                        declared_amount=0,
+                        variance_amount=0,
+                        currency="USD",
+                    ),
+                    AuditTotal(
+                        id="pos-gl",
+                        store_day_id="close-race",
+                        audit_version=1,
+                        total_name="POS to GL Variance",
+                        level="Store",
+                        calculated_amount=0,
+                        declared_amount=0,
+                        variance_amount=0,
+                        currency="USD",
+                    ),
+                    StoreDayClosureRequest(
+                        id="closure-request",
+                        store_day_id="close-race",
+                        requested_by="finance",
+                        evidence_basis="Reviewed reconciliation totals",
+                        status="Pending",
+                    ),
+                ])
+                await db.commit()
+
+            async with sessions() as reconciliation_owner, sessions() as closer:
+                await lock_reconciliation(reconciliation_owner)
+                task = asyncio.create_task(
+                    close_store_day(
+                        "S1",
+                        "2026-10-01",
+                        closer,
+                        {"user": "finance", "role": "finance"},
+                    )
+                )
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(task), 0.2)
+                await reconciliation_owner.commit()
+                result = await task
+                assert result["status"] == "Closed"
+        finally:
+            if engine:
+                await engine.dispose()
+            async with admin.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            await admin.dispose()
+
     asyncio.run(run())

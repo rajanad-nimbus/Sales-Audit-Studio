@@ -97,6 +97,30 @@ def test_open_store_day_validates_store_date_and_duplicates():
     run(go())
 
 
+def test_store_day_close_acquires_reconciliation_lock_before_loading_day(monkeypatch):
+    calls = []
+
+    async def lock_reconciliation(_db):
+        calls.append("reconciliation lock")
+
+    async def get_day(_db, _store_id, _business_date, *, lock=False):
+        calls.append("store day")
+        raise HTTPException(status_code=404, detail="Store day not found")
+
+    monkeypatch.setattr(sd.reconciliation, "lock_reconciliation", lock_reconciliation)
+    monkeypatch.setattr(sd, "get_day", get_day)
+
+    async def go():
+        with pytest.raises(HTTPException) as error:
+            await sd.close_store_day(
+                "S1", "2026-10-01", object(), {"user": "finance", "role": "finance"}
+            )
+        assert error.value.status_code == 404
+
+    run(go())
+    assert calls == ["reconciliation lock", "store day"]
+
+
 def test_retotal_no_longer_creates_a_missing_store_day():
     async def go():
         Session = await session()

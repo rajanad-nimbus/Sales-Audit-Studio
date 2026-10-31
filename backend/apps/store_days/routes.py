@@ -11,6 +11,7 @@ from sqlalchemy import func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.identifiers import generate_case_number
+from apps.ingest import reconciliation
 from apps.ingest.manifests import iter_manifests, validate_business_date
 from apps.security import scope
 from apps.store_days.freshness import lock_configuration, lock_store_day_identity
@@ -395,6 +396,7 @@ async def create_rule_breach(db, rule, observed: Decimal, store_id: str,
 async def close_store_day(store_id: str, business_date: str, db: AsyncSession = Depends(get_db),
                           user: dict = Depends(require_role("finance"))):
     scope.require_store(user, store_id)
+    await reconciliation.lock_reconciliation(db)
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Store day is already closed")
