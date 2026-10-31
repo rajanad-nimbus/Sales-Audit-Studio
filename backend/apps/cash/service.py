@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.corrections.effects import sum_effective_amounts
 from apps.store_days.freshness import lock_store_day
+from apps.totals.currency import single_currency
 from apps.transactions.models import CanonicalTransaction
 from apps.cash.models import CashControl, CashDeposit
 
 
 async def calculate_declaration(db: AsyncSession, declaration: CashControl) -> None:
     """Reconcile one declaration to effective transaction amounts in its scope."""
+    await ensure_store_day_currency(db, declaration.store_id, declaration.business_date)
     query = select(CanonicalTransaction).where(
         CanonicalTransaction.store_id == declaration.store_id,
         CanonicalTransaction.business_date == declaration.business_date,
@@ -37,6 +39,7 @@ async def expected_cash_deposit(
     business_date: str,
 ) -> Decimal:
     """Sum the most detailed non-overlapping cash declarations for a store day."""
+    await ensure_store_day_currency(db, store_id, business_date)
     day_scope = (
         CashControl.store_id == store_id,
         CashControl.business_date == business_date,
@@ -74,6 +77,26 @@ async def expected_cash_deposit(
         if cashier_id is not None and (register_id is None or register_id not in register_totals)
     ]
     return sum(register_totals.values(), Decimal("0")) + sum(cashier_totals, Decimal("0"))
+
+
+async def ensure_store_day_currency(
+    db: AsyncSession,
+    store_id: str,
+    business_date: str,
+) -> str:
+    """Reject cash calculations when a store day contains incompatible currencies."""
+    currencies = (await db.execute(
+        select(CanonicalTransaction.currency)
+        .where(
+            CanonicalTransaction.store_id == store_id,
+            CanonicalTransaction.business_date == business_date,
+        )
+        .distinct()
+    )).scalars().all()
+    try:
+        return single_currency(currencies)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 async def refresh_cash_deposits(

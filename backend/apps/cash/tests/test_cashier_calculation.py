@@ -16,7 +16,7 @@ from apps.cash.routes import (
     expected_cash_deposit,
     record_deposit,
 )
-from models import AuditEvent, Base, CanonicalTransaction, CashDeposit, StoreDay
+from models import AuditEvent, Base, CanonicalTransaction, CashControl, CashDeposit, StoreDay
 
 
 def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_register_wide():
@@ -173,6 +173,52 @@ def test_duplicate_deposit_reference_is_conflict():
                     select(AuditEvent).where(AuditEvent.event_type == "CASH_DEPOSIT_RECORDED")
                 )).scalars().all()
                 assert len(audit_rows) == 1
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_cash_reconciliation_rejects_mixed_store_day_currencies():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                event_time = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                db.add(StoreDay(
+                    id="day-1", store_id="S1", business_date="2026-10-01", status="Auditing",
+                ))
+                for transaction_id, currency in (("tx-usd", "USD"), ("tx-eur", "EUR")):
+                    db.add(CanonicalTransaction(
+                        id=transaction_id, business_date="2026-10-01", transaction_date=event_time,
+                        event_timestamp=event_time, processing_timestamp=event_time,
+                        settlement_date="2026-10-01", transaction_type="Sale",
+                        source_lineage="pos-map-v1", currency=currency, signed_amount=Decimal("10.00"),
+                        store_id="S1", register_id="R1", channel_id="Store", tender_type="Cash",
+                    ))
+                await db.commit()
+                finance = {"user": "finance@example.test", "role": "finance"}
+
+                with pytest.raises(HTTPException, match="multiple currencies") as declaration_error:
+                    await declare_cash(CashControlBody(
+                        store_id="S1", business_date="2026-10-01", register_id="R1",
+                        declared_cash=Decimal("20.00"),
+                    ), db, finance)
+                assert declaration_error.value.status_code == 409
+                await db.rollback()
+
+                with pytest.raises(HTTPException, match="multiple currencies") as deposit_error:
+                    await record_deposit(CashDepositBody(
+                        store_id="S1", business_date="2026-10-01", deposit_reference="BANK-REF",
+                        deposited_amount=Decimal("20.00"),
+                    ), db, finance)
+                assert deposit_error.value.status_code == 409
+                await db.rollback()
+                assert (await db.execute(select(CashControl))).scalars().all() == []
+                assert (await db.execute(select(CashDeposit))).scalars().all() == []
         finally:
             await engine.dispose()
 
