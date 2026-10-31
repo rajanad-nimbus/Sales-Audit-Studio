@@ -172,8 +172,8 @@ async def mark_delivered(db, batch_id: str) -> None:
                      .values(state="Delivered", delivered_at=utcnow()))
 
 
-def verified_adjustment_evidence():
-    """Return matching approvals and verified workflows for the same recommendation and case."""
+def completed_case_evidence():
+    """Return a recommendation's matching approval, completed workflow, and validation."""
     return (select(Recommendation, HumanDecision, ValidationObligation)
             .join(HumanDecision, (HumanDecision.recommendation_id == Recommendation.id)
                   & (HumanDecision.case_id == Recommendation.case_id))
@@ -181,9 +181,17 @@ def verified_adjustment_evidence():
                   & (Workflow.case_id == Recommendation.case_id))
             .join(ValidationObligation, (ValidationObligation.workflow_id == Workflow.id)
                   & (ValidationObligation.case_id == Recommendation.case_id))
-            .where(Recommendation.status == "Approved", Recommendation.financial_impact > 0,
-                   HumanDecision.decision == "Approved", Workflow.state == "Completed",
-                   ValidationObligation.status == "Complete", ValidationObligation.verification_result == "Verified"))
+            .where(Recommendation.status == "Approved", HumanDecision.decision == "Approved",
+                   Workflow.state == "Completed",
+                   ValidationObligation.status == "Complete"))
+
+
+def verified_adjustment_evidence():
+    """Require the matched completed workflow to have verified financial impact."""
+    return completed_case_evidence().where(
+        Recommendation.financial_impact > 0,
+        ValidationObligation.verification_result == "Verified",
+    )
 
 
 async def closed_case_context(db, cases: list[Case], positive_recommendations: bool = False) -> dict:
@@ -191,34 +199,24 @@ async def closed_case_context(db, cases: list[Case], positive_recommendations: b
     if not ids:
         return {"recs": {}, "decs": {}, "vals": {}, "refs": {}}
 
-    if positive_recommendations:
-        ranked_evidence = verified_adjustment_evidence().where(
-            Recommendation.case_id.in_(ids)
-        ).add_columns(func.row_number().over(
+    evidence_query = verified_adjustment_evidence() if positive_recommendations else completed_case_evidence()
+    ranked_evidence = evidence_query.where(Recommendation.case_id.in_(ids)).add_columns(
+        func.row_number().over(
             partition_by=Recommendation.case_id,
             order_by=(Recommendation.created_at.desc(), Recommendation.id.desc(),
                       HumanDecision.created_at.desc(), HumanDecision.id.desc(),
                       ValidationObligation.created_at.desc(), ValidationObligation.id.desc()),
-        ).label("case_rank")).subquery()
-        recommendation = aliased(Recommendation, ranked_evidence)
-        decision = aliased(HumanDecision, ranked_evidence)
-        obligation = aliased(ValidationObligation, ranked_evidence)
-        evidence = (await db.execute(select(recommendation, decision, obligation).where(
-            ranked_evidence.c.case_rank == 1,
-        ))).all()
-        recs = {r.case_id: r for r, _, _ in evidence}
-        decs = {r.case_id: d for r, d, _ in evidence}
-        vals = {r.case_id: v for r, _, v in evidence}
-    else:
-        recs = await _latest_case_records(
-            db, Recommendation, ids, Recommendation.status == "Approved",
-        )
-        decs = await _latest_case_records(
-            db, HumanDecision, ids, HumanDecision.decision == "Approved",
-        )
-        vals = await _latest_case_records(
-            db, ValidationObligation, ids, ValidationObligation.status == "Complete",
-        )
+        ).label("case_rank")
+    ).subquery()
+    recommendation = aliased(Recommendation, ranked_evidence)
+    decision = aliased(HumanDecision, ranked_evidence)
+    obligation = aliased(ValidationObligation, ranked_evidence)
+    evidence = (await db.execute(select(recommendation, decision, obligation).where(
+        ranked_evidence.c.case_rank == 1,
+    ))).all()
+    recs = {r.case_id: r for r, _, _ in evidence}
+    decs = {r.case_id: d for r, d, _ in evidence}
+    vals = {r.case_id: v for r, _, v in evidence}
     latest_event_ids = select(
         AuditEvent.id.label("id"),
         func.row_number().over(
@@ -231,21 +229,6 @@ async def closed_case_context(db, cases: list[Case], positive_recommendations: b
     ).where(latest_event_ids.c.case_rank == 1))).scalars().all()
     refs = {event.case_id: event.hash for event in latest_events}
     return {"recs": recs, "decs": decs, "vals": vals, "refs": refs}
-
-
-async def _latest_case_records(db, model, case_ids: list[str], *conditions) -> dict:
-    """Fetch one deterministic latest matching row per case, with ranking in the database."""
-    ranked_ids = select(
-        model.id.label("id"),
-        func.row_number().over(
-            partition_by=model.case_id,
-            order_by=(model.created_at.desc(), model.id.desc()),
-        ).label("case_rank"),
-    ).where(model.case_id.in_(case_ids), *conditions).subquery()
-    rows = (await db.execute(select(model).join(
-        ranked_ids, model.id == ranked_ids.c.id,
-    ).where(ranked_ids.c.case_rank == 1))).scalars().all()
-    return {row.case_id: row for row in rows}
 
 
 async def build(db, dest: ExportDestination, dataset: str, scope: str = "all", *, lock_cases: bool = False) -> tuple[list[dict], list[tuple[str, str]], int | None, int | None]:

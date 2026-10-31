@@ -130,11 +130,27 @@ def test_closed_case_context_selects_latest_records_per_case():
                         decision_type="human", decision="Approved", actor=identifier,
                         authority_check="Approved", created_at=created_at,
                     ))
+                    db.add(Workflow(
+                        id=f"w-{identifier}", case_id=case.id, recommendation_id=f"r-{identifier}",
+                        workflow_type="test", state="Completed", definition_version="1", current_step="Closed",
+                        created_at=created_at,
+                    ))
                     db.add(ValidationObligation(
                         id=f"v-{identifier}", case_id=case.id, workflow_id=f"w-{identifier}",
                         status="Complete", verification_result=identifier, expected_observation="test",
                         due_window_hours=1, verification_rule="test", created_at=created_at,
                     ))
+                db.add(Recommendation(
+                    id="r-unvalidated", case_id=case.id, investigation_id="i", status="Approved",
+                    disposition_type="unvalidated", action_class="test", expected_workflow="test",
+                    financial_impact=Decimal("1"), confidence="High",
+                    created_at=datetime(2026, 10, 3, tzinfo=timezone.utc),
+                ))
+                db.add(HumanDecision(
+                    id="h-unvalidated", case_id=case.id, recommendation_id="r-unvalidated",
+                    decision_type="human", decision="Approved", actor="unvalidated",
+                    authority_check="Approved", created_at=datetime(2026, 10, 3, tzinfo=timezone.utc),
+                ))
                 for seq, event_hash in ((1, "old-hash"), (2, "new-hash")):
                     db.add(AuditEvent(
                         id=f"event-{seq}", event_type="CASE_UPDATED", actor="test", object_type="Case",
@@ -148,6 +164,9 @@ def test_closed_case_context_selects_latest_records_per_case():
                 assert context["recs"][case.id].id == "r-new"
                 assert context["decs"][case.id].id == "h-new"
                 assert context["vals"][case.id].id == "v-new"
+                assert context["decs"][case.id].recommendation_id == context["recs"][case.id].id
+                workflow = await db.get(Workflow, context["vals"][case.id].workflow_id)
+                assert workflow.recommendation_id == context["recs"][case.id].id
                 assert context["refs"][case.id] == "new-hash"
         finally:
             await engine.dispose()
