@@ -101,13 +101,23 @@ async def build_context(db, case_id: str | None, message: str = "", user: dict |
                              .order_by(AuditEvent.created_at.desc()).limit(6) if scope.scoped(user) else
                              select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(6))).scalars().all()],
     }
+    references = list(dict.fromkeys(match.upper() for match in CASE_REF.findall(message or "")))
     mentioned = []
-    for ref in dict.fromkeys(m.upper() for m in CASE_REF.findall(message or "")):
-        c = (await db.execute(scope.restrict(select(Case).where(func.upper(Case.case_number) == ref), user, Case.store_id))).scalars().first()
-        if c:
-            mentioned.append(await case_context(db, c))
+    if references:
+        mentioned_rows = (await db.execute(scope.restrict(
+            select(Case).where(func.upper(Case.case_number).in_(references)),
+            user,
+            Case.store_id,
+        ))).scalars().all()
+        cases_by_number = {case.case_number.upper(): case for case in mentioned_rows}
+        for reference in references:
+            case = cases_by_number.get(reference)
+            if case:
+                mentioned.append(await case_context(db, case))
+                if len(mentioned) == 3:
+                    break
     if mentioned:
-        ctx["mentioned_cases"] = mentioned[:3]
+        ctx["mentioned_cases"] = mentioned
     sel = None
     if mentioned:
         sel = mentioned[0]
