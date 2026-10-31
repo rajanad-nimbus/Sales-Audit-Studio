@@ -1,6 +1,6 @@
 """Index transaction IDs recorded on case creation audit events."""
 
-from alembic import op
+from alembic import context, op
 
 
 revision = "0067"
@@ -13,6 +13,8 @@ INDEX_NAME = "ix_audit_case_created_transaction_ids"
 
 
 def upgrade():
+    if context.get_context().dialect.name != "postgresql":
+        return
     with op.get_context().autocommit_block():
         op.execute(
             f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON audit_events "
@@ -22,5 +24,7 @@ def upgrade():
 
 
 def downgrade():
+    if context.get_context().dialect.name != "postgresql":
+        return
     with op.get_context().autocommit_block():
         op.execute(f"DROP INDEX CONCURRENTLY {INDEX_NAME}")
