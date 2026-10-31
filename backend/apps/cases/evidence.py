@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import investigation_service
 from apps.cases.service import locked_scoped_case
+from apps.cases.lineage import case_creation_has_transactions, case_transaction_ids_table
 from apps.security import scope
 from apps.security.authentication import require_role
 from database import get_db
@@ -97,20 +99,36 @@ async def case_reconciliation(case_id: str, db: AsyncSession = Depends(get_db),
     case = (await db.execute(scope.restrict(select(Case).where(Case.id == case_id), user, Case.store_id))).scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-    created = (await db.execute(
-        select(AuditEvent).where(AuditEvent.case_id == case_id, AuditEvent.event_type == "CASE_CREATED")
-        .order_by(AuditEvent.created_at.asc())
-    )).scalars().first()
-    linked_ids = (created.after_state or {}).get("transaction_ids", []) if created else []
-    contextual = not bool(linked_ids)
-    query = select(CanonicalTransaction, SourceRecord).outerjoin(
-        SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id
-    ).where(CanonicalTransaction.store_id == case.store_id)
-    if linked_ids:
-        query = query.where(CanonicalTransaction.id.in_(linked_ids))
+    has_linked_transactions = (await db.execute(
+        select(case_creation_has_transactions(db, AuditEvent))
+        .where(AuditEvent.case_id == case_id, AuditEvent.event_type == "CASE_CREATED")
+        .order_by(AuditEvent.created_at.asc(), AuditEvent.id).limit(1)
+    )).scalar()
+    contextual = not bool(has_linked_transactions)
+    if has_linked_transactions:
+        created_event = aliased(AuditEvent)
+        transaction_ids = case_transaction_ids_table(db, created_event)
+        query = (
+            select(CanonicalTransaction, SourceRecord)
+            .select_from(created_event)
+            .join(transaction_ids, true())
+            .join(CanonicalTransaction, CanonicalTransaction.id == transaction_ids.c.value)
+            .outerjoin(SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id)
+            .where(
+                created_event.case_id == case_id,
+                created_event.event_type == "CASE_CREATED",
+                CanonicalTransaction.store_id == case.store_id,
+            )
+            .distinct()
+        )
     else:
         # Legacy/demo cases cannot claim a causal link; return only relevant context.
-        query = query.where(CanonicalTransaction.business_date == case.business_date)
+        query = select(CanonicalTransaction, SourceRecord).outerjoin(
+            SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id
+        ).where(
+            CanonicalTransaction.store_id == case.store_id,
+            CanonicalTransaction.business_date == case.business_date,
+        )
     if cursor_timestamp is not None and cursor_id is not None:
         query = query.where(or_(
             CanonicalTransaction.event_timestamp > cursor_timestamp,
