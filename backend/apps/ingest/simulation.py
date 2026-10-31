@@ -56,8 +56,15 @@ def simulate_feed(day: str | None = None) -> dict[str, list[dict]]:
                 "store_id": "STORE-007"})
     pos.append(dict(pos[0]))
 
-    # Control manifests declare what each store really sent (the retransmitted 102b is not declared;
-    # the malformed BAD record is, so STORE-007 shows an incomplete feed).
+    manifests = build_control_manifests(pos, day, run)
+
+    bank, erp = build_settlement_feeds(normal, cardnorm, day, run)
+    shopify = build_shopify_feed(day, run)
+    return {"POS": pos, "Processor": proc, "POSControl": manifests, "Bank": bank, "ERP": erp, "Shopify": shopify}
+
+
+def build_control_manifests(pos: list[dict], day: str, run: str) -> list[dict]:
+    """Declare valid source rows while keeping the retransmit uncounted."""
     uniq = {}
     for r in pos:
         if not r["source_record_id"].endswith("102b"):
@@ -70,7 +77,12 @@ def simulate_feed(day: str | None = None) -> dict[str, list[dict]]:
             d[1] += (1 if r["record_type"] == "Sale" else -1) * Decimal(r["amount"])
     manifests = [{"source_record_id": f"MAN-{run}-{s}", "business_date": day, "store_id": s,
                   "declared_count": c, "declared_total": str(t)} for s, (c, t) in declared.items()]
+    return manifests
 
+
+def build_settlement_feeds(normal: list[tuple[str, Decimal]], cardnorm: list[tuple[str, Decimal]],
+                           day: str, run: str) -> tuple[list[dict], list[dict]]:
+    """Build bank deposits and ERP postings with representative variances."""
     net = defaultdict(Decimal)
     for store, amt in normal:
         net[store] += amt
@@ -84,11 +96,14 @@ def simulate_feed(day: str | None = None) -> dict[str, list[dict]]:
     erp = [{"source_record_id": f"ERP-{run}-{s}", "event_time": f"{day}T23:00:00+00:00", "record_type": "Posting",
             "amount": str(v + (Decimal("5.00") if s == "STORE-031" else 0)), "store_id": s}
            for s, v in net.items() if v > 0 and s != "STORE-022"]
-    # Omnichannel simulation: one completed refund and one deliberately partial refund.
-    shopify = [
+    return bank, erp
+
+
+def build_shopify_feed(day: str, run: str) -> list[dict]:
+    """Create one fully refunded and one partially refunded Shopify order."""
+    return [
         {"source_record_id": f"SHP-{run}-ORDER-1", "record_type": "Order", "event_time": f"{day}T11:00:00+00:00", "amount": "85.00", "store_id": "STORE-007", "currency": "USD", "payment_reference": f"ORDER-{run}-1", "order_id": f"ORDER-{run}-1", "financial_status": "paid"},
         {"source_record_id": f"SHP-{run}-REFUND-1", "record_type": "Refund", "event_time": f"{day}T12:00:00+00:00", "amount": "85.00", "store_id": "STORE-007", "currency": "USD", "payment_reference": f"ORDER-{run}-1", "order_id": f"ORDER-{run}-1", "refund_id": f"REFUND-{run}-1"},
         {"source_record_id": f"SHP-{run}-ORDER-2", "record_type": "Order", "event_time": f"{day}T13:00:00+00:00", "amount": "120.00", "store_id": "STORE-022", "currency": "USD", "payment_reference": f"ORDER-{run}-2", "order_id": f"ORDER-{run}-2", "financial_status": "paid"},
         {"source_record_id": f"SHP-{run}-REFUND-2", "record_type": "Refund", "event_time": f"{day}T14:00:00+00:00", "amount": "50.00", "store_id": "STORE-022", "currency": "USD", "payment_reference": f"ORDER-{run}-2", "order_id": f"ORDER-{run}-2", "refund_id": f"REFUND-{run}-2"},
     ]
-    return {"POS": pos, "Processor": proc, "POSControl": manifests, "Bank": bank, "ERP": erp, "Shopify": shopify}
