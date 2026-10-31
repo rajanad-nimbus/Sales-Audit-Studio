@@ -620,7 +620,10 @@ async def run_reconciliation(business_date: Annotated[str, Query(min_length=10, 
 
 
 @router.get("/api/ingest/stats")
-async def ingest_stats(db: AsyncSession = Depends(get_db)):
+async def ingest_stats(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("analyst", "it", "auditor")),
+):
     src = (await db.execute(select(SourceRecord.status, func.count()).group_by(SourceRecord.status))).all()
     txn = (await db.execute(select(CanonicalTransaction.reconciliation_status, func.count())
                             .group_by(CanonicalTransaction.reconciliation_status))).all()

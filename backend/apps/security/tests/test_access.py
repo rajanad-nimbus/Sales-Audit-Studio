@@ -74,6 +74,7 @@ def test_the_route_walk_actually_sees_the_api():
     assert len(declared) > 60                                    # a walk that finds nothing would pass every check below
     assert declared[("GET", "/api/exports/batches")] == ("finance", "it")
     assert ("GET", "/api/transactions") in declared and ("GET", "/api/store-days") in declared
+    assert declared[("GET", "/api/ingest/stats")] == ("analyst", "it", "auditor")
 
 
 def test_a_screen_never_shows_to_a_role_whose_own_data_calls_would_be_refused():
