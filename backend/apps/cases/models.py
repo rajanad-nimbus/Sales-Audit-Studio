@@ -143,6 +143,7 @@ class Recommendation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
+        Index("ix_recommendations_case_created_id", "case_id", "created_at", "id"),
         Index(
             "uq_recommendations_one_proposed_per_case",
             "case_id",

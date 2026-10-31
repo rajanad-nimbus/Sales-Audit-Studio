@@ -159,7 +159,7 @@ async def eligible_cases(db: AsyncSession = Depends(get_db), _: dict = Depends(r
             partition_by=Recommendation.case_id,
             order_by=(Recommendation.created_at.desc(), Recommendation.id.desc()),
         ).label("row_number"),
-    ).subquery()
+    ).where(Recommendation.case_id.in_(review_cases)).subquery()
     query = select(Case, Recommendation).join(
         ranked_recommendations,
         (ranked_recommendations.c.case_id == Case.id) & (ranked_recommendations.c.row_number == 1),
