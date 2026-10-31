@@ -519,6 +519,10 @@ class CashControl(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
+    __table_args__ = (
+        Index("ix_cash_controls_store_date_tender", "store_id", "business_date", "tender_type"),
+    )
+
 
 class CashDeposit(Base):
     """Banked cash deposit reconciled to declared cash controls."""
@@ -534,6 +538,10 @@ class CashDeposit(Base):
     status: Mapped[str] = mapped_column(String(24), default="Recorded")
     recorded_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_cash_deposits_store_date", "store_id", "business_date"),
+    )
 
 
 class TransactionAdjustment(Base):
