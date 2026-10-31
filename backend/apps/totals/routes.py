@@ -8,6 +8,7 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from apps.security import scope
+from apps.database_errors import violates_unique_constraint
 from apps.ingest.manifests import validate_business_date
 from apps.totals.calculation import calculate_store_day, dependencies_for_preview, effective_definitions, store_location_traits
 from apps.totals.currency import single_currency
@@ -91,6 +92,16 @@ def view(row: AuditTotalDefinition) -> dict[str, object]:
     return serialize_definition(row)
 
 
+def _is_duplicate_total_revision(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"ix_audit_total_definitions_name_revision"},
+        sqlite_messages={
+            "UNIQUE constraint failed: audit_total_definitions.name, audit_total_definitions.revision"
+        },
+    )
+
+
 async def validate_combined_references(body: TotalDefinitionBody, db: AsyncSession, *, name: str) -> None:
     if body.calculation_basis != "Combined":
         return
@@ -130,7 +141,9 @@ async def create_definition(body: TotalDefinitionBody, db: AsyncSession = Depend
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="A total definition revision already exists") from exc
+        if _is_duplicate_total_revision(exc):
+            raise HTTPException(status_code=409, detail="A total definition revision already exists") from exc
+        raise
     return view(row)
 
 @router.get("/{definition_id}/revisions")
@@ -161,7 +174,9 @@ async def update_definition(definition_id: str, body: TotalDefinitionBody, db: A
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="A total definition revision already exists") from exc
+        if _is_duplicate_total_revision(exc):
+            raise HTTPException(status_code=409, detail="A total definition revision already exists") from exc
+        raise
     return view(row)
 
 @router.get("/errors")
