@@ -347,10 +347,12 @@ async def close_store_day(store_id: str, business_date: str, db: AsyncSession = 
         raise HTTPException(status_code=422, detail="Cannot close: totals are stale; re-total the store day")
     if "current reconciliation totals are missing" in blockers:
         raise HTTPException(status_code=422, detail="Cannot close: current reconciliation totals are missing")
-    open_cases = (await db.execute(select(Case.id).where(Case.store_id == store_id, Case.business_date == business_date,
-                                                           Case.status.not_in(("Closed",))))).scalars().all()
-    if open_cases:
-        raise HTTPException(status_code=422, detail=f"Cannot close: {len(open_cases)} case(s) remain open")
+    open_case_count = (await db.execute(select(func.count()).select_from(Case).where(
+        Case.store_id == store_id, Case.business_date == business_date,
+        Case.status.not_in(("Closed",)),
+    ))).scalar_one()
+    if open_case_count:
+        raise HTTPException(status_code=422, detail=f"Cannot close: {open_case_count} case(s) remain open")
     if "unresolved reconciliation variance" in blockers:
         raise HTTPException(status_code=422, detail="Cannot close: reconciliation totals still have a variance")
     request = (await db.execute(select(StoreDayClosureRequest).where(StoreDayClosureRequest.store_day_id == day.id, StoreDayClosureRequest.status == "Pending").order_by(StoreDayClosureRequest.created_at.desc()))).scalars().first()

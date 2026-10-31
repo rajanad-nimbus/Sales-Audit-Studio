@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -160,6 +160,14 @@ def test_store_day_detail_bounds_history_but_counts_all_open_cases():
                 id=f"total-{version:03}", store_day_id=day.id, audit_version=version,
                 total_name=f"Total {version}", calculated_amount=0, currency="USD",
             ) for version in range(1, sd.MAX_STORE_DAY_HISTORY_ITEMS + 6)])
+            db.add_all([
+                AuditTotal(id="processor-bank", store_day_id=day.id, audit_version=day.audit_version,
+                           total_name="Processor to Bank Variance", level="Store", calculated_amount=0,
+                           declared_amount=0, variance_amount=0, currency="USD"),
+                AuditTotal(id="pos-gl", store_day_id=day.id, audit_version=day.audit_version,
+                           total_name="POS to GL Variance", level="Store", calculated_amount=0,
+                           declared_amount=0, variance_amount=0, currency="USD"),
+            ])
             await db.flush()
 
             result = await sd.get_store_day("S1", day.business_date, None, db, {"user": "finance", "role": "finance"})
@@ -171,6 +179,19 @@ def test_store_day_detail_bounds_history_but_counts_all_open_cases():
             assert result["cases_truncated"] and result["closure_requests_truncated"]
             assert result["evidence_overrides_truncated"] and result["versions_truncated"]
             assert "205 open case(s)" in result["close_blockers"]
+
+            case_count_queries = []
+            track_case_count = True
+
+            @event.listens_for(db.get_bind(), "before_cursor_execute")
+            def capture_case_count(_connection, _cursor, statement, _parameters, _context, _executemany):
+                if track_case_count and "from cases" in statement.lower() and "count(" in statement.lower():
+                    case_count_queries.append(statement)
+
+            with pytest.raises(HTTPException, match="205 case\\(s\\) remain open"):
+                await sd.close_store_day("S1", day.business_date, db, {"user": "finance", "role": "finance"})
+            track_case_count = False
+            assert case_count_queries
     run(go())
 
 
