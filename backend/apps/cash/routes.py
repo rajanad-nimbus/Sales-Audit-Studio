@@ -102,6 +102,8 @@ async def calculate(db: AsyncSession, row: CashControl):
     )
     if row.register_id:
         query = query.where(CanonicalTransaction.register_id == row.register_id)
+    if row.cashier_id:
+        query = query.where(CanonicalTransaction.cashier_id == row.cashier_id)
     expected = await sum_effective_amounts(db, query)
     accounted = row.declared_cash + row.paid_out + row.safe_drop
     row.expected_amount, row.variance_amount = expected, expected - accounted
