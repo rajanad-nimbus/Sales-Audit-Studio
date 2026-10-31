@@ -49,3 +49,60 @@ def test_request_body_limit_enforces_streamed_bodies_without_content_length():
         assert response.status_code == 413
 
     asyncio.run(run())
+
+
+def test_request_body_limit_preserves_handler_errors_during_oversized_reads():
+    async def run():
+        app = FastAPI()
+        app.add_middleware(RequestBodyLimitMiddleware, max_bytes=8)
+
+        @app.post("/echo")
+        async def echo(request: Request):
+            await request.body()
+            raise RuntimeError("handler failed")
+
+        async def chunks():
+            yield b"123456789"
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as client:
+            response = await client.post("/echo", content=chunks())
+
+        assert response.status_code == 413
+
+    asyncio.run(run())
+
+
+def test_request_body_limit_ignores_invalid_content_length_and_handles_non_http_scope():
+    async def run():
+        requests = []
+
+        async def app(scope, receive, send):
+            requests.append(scope["type"])
+            if scope["type"] == "http":
+                await send({"type": "http.response.start", "status": 200, "headers": []})
+                await send({"type": "http.response.body", "body": b"ok"})
+
+        middleware = RequestBodyLimitMiddleware(app, max_bytes=8)
+
+        async def receive():
+            return {"type": "http.request", "body": b"123456789", "more_body": False}
+
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        await middleware(
+            {"type": "http", "method": "POST", "headers": [(b"content-length", b"invalid")]},
+            receive,
+            send,
+        )
+        await middleware({"type": "websocket"}, receive, send)
+
+        assert requests == ["http", "websocket"]
+        assert sent[0]["status"] == 200
+
+    asyncio.run(run())

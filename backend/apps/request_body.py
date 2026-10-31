@@ -11,6 +11,8 @@ class RequestBodyLimitMiddleware:
     """Enforce a streaming size limit before application handlers parse request bodies."""
 
     def __init__(self, app, max_bytes: int = MAX_API_REQUEST_BODY_BYTES):
+        if max_bytes < 0:
+            raise ValueError("max_bytes must be non-negative")
         self.app = app
         self.max_bytes = max_bytes
 
@@ -51,11 +53,13 @@ class RequestBodyLimitMiddleware:
                 response_started = True
             await send(message)
 
+        application_error = None
         try:
             await self.app(scope, limited_receive, guarded_send)
-        except Exception:
-            if not oversized:
-                raise
+        except Exception as exc:
+            application_error = exc
+        if application_error is not None and not oversized:
+            raise application_error
         if oversized and not response_started:
             await self._reject(send)
 
