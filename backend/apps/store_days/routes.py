@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, union
+from sqlalchemy import case, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.identifiers import generate_case_number
@@ -181,10 +181,18 @@ async def get_store_day(store_id: str, business_date: str,
     versions_truncated = len(versions) > MAX_STORE_DAY_HISTORY_ITEMS
     versions = versions[:MAX_STORE_DAY_HISTORY_ITEMS]
     case_query = select(Case).where(Case.store_id == store_id, Case.business_date == business_date)
-    case_count = (await db.execute(select(func.count()).select_from(Case).where(
-        Case.store_id == store_id, Case.business_date == business_date))).scalar_one()
-    open_case_count = (await db.execute(select(func.count()).select_from(Case).where(
-        Case.store_id == store_id, Case.business_date == business_date, Case.status != "Closed"))).scalar_one()
+    case_counts = (
+        await db.execute(
+            select(
+                func.count(Case.id),
+                func.coalesce(
+                    func.sum(case((Case.status != "Closed", 1), else_=0)),
+                    0,
+                ),
+            ).where(Case.store_id == store_id, Case.business_date == business_date)
+        )
+    ).one()
+    case_count, open_case_count = case_counts
     cases = (await db.execute(case_query.order_by(Case.created_at.desc(), Case.id.desc())
                               .limit(MAX_STORE_DAY_HISTORY_ITEMS + 1))).scalars().all()
     cases_truncated = len(cases) > MAX_STORE_DAY_HISTORY_ITEMS

@@ -194,16 +194,6 @@ def test_store_day_detail_bounds_history_but_counts_all_open_cases():
             ])
             await db.flush()
 
-            result = await sd.get_store_day("S1", day.business_date, None, db, {"user": "finance", "role": "finance"})
-
-            assert len(result["cases"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
-            assert len(result["closure_requests"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
-            assert len(result["evidence_overrides"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
-            assert len(result["versions"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
-            assert result["cases_truncated"] and result["closure_requests_truncated"]
-            assert result["evidence_overrides_truncated"] and result["versions_truncated"]
-            assert "205 open case(s)" in result["close_blockers"]
-
             case_count_queries = []
             track_case_count = True
 
@@ -211,6 +201,18 @@ def test_store_day_detail_bounds_history_but_counts_all_open_cases():
             def capture_case_count(_connection, _cursor, statement, _parameters, _context, _executemany):
                 if track_case_count and "from cases" in statement.lower() and "count(" in statement.lower():
                     case_count_queries.append(statement)
+
+            result = await sd.get_store_day("S1", day.business_date, None, db, {"user": "finance", "role": "finance"})
+
+            assert len(case_count_queries) == 1
+            case_count_queries.clear()
+            assert len(result["cases"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
+            assert len(result["closure_requests"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
+            assert len(result["evidence_overrides"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
+            assert len(result["versions"]) == sd.MAX_STORE_DAY_HISTORY_ITEMS
+            assert result["cases_truncated"] and result["closure_requests_truncated"]
+            assert result["evidence_overrides_truncated"] and result["versions_truncated"]
+            assert "205 open case(s)" in result["close_blockers"]
 
             with pytest.raises(HTTPException, match="205 case\\(s\\) remain open"):
                 await sd.close_store_day("S1", day.business_date, db, {"user": "finance", "role": "finance"})
