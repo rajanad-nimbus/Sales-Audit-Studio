@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import agent_settings, investigation_service
+from apps.database_errors import violates_unique_constraint
 from apps.ingest import reconciliation
 from apps.ingest import service as ingest
 from apps.ingest.common import VALID_TYPES
@@ -37,10 +38,11 @@ class BatchRunOwnershipLost(RuntimeError):
 
 def _is_active_batch_conflict(exc: IntegrityError) -> bool:
     """Recognize the one-running-batch-per-date constraint across supported databases."""
-    constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
-    if constraint_name == "uq_batch_runs_one_running_per_date":
-        return True
-    return "UNIQUE constraint failed: batch_runs.business_date" in str(exc.orig)
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"uq_batch_runs_one_running_per_date"},
+        sqlite_messages={"UNIQUE constraint failed: batch_runs.business_date"},
+    )
 
 
 async def run_daily_batch(db: AsyncSession, business_date: str, feeds: dict | None = None,

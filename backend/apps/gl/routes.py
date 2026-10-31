@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.corrections.effects import effective_amounts
+from apps.database_errors import violates_unique_constraint
 from apps.ingest.manifests import validate_business_date
 from apps.security import scope
 from auth import require_role
@@ -56,14 +57,13 @@ def view(row: GLCrossReference) -> dict:
 
 def _is_duplicate_cross_reference(exc: IntegrityError) -> bool:
     """Recognize either supported GL mapping uniqueness constraint."""
-    constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
-    if constraint_name in {"uq_gl_cross_reference", "uq_gl_cross_reference_default_by_type"}:
-        return True
-    message = str(exc.orig)
-    return (
-        "UNIQUE constraint failed: gl_cross_references.transaction_type, gl_cross_references.tender_type"
-        in message
-        or "UNIQUE constraint failed: gl_cross_references.transaction_type" in message
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"uq_gl_cross_reference", "uq_gl_cross_reference_default_by_type"},
+        sqlite_messages={
+            "UNIQUE constraint failed: gl_cross_references.transaction_type, gl_cross_references.tender_type",
+            "UNIQUE constraint failed: gl_cross_references.transaction_type",
+        },
     )
 
 

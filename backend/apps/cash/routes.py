@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.security import scope
 from apps.corrections.effects import sum_effective_amounts
+from apps.database_errors import violates_unique_constraint
 from apps.store_days.freshness import lock_store_day
 from auth import require_role
 from database import get_db
@@ -193,10 +194,11 @@ def _set_page_headers(response: Response, total: int, skip: int, returned: int) 
 
 def _is_duplicate_deposit_reference(exc: IntegrityError) -> bool:
     """Recognize only the deposit-reference unique constraint across supported databases."""
-    constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
-    if constraint_name == "cash_deposits_deposit_reference_key":
-        return True
-    return "UNIQUE constraint failed: cash_deposits.deposit_reference" in str(exc.orig)
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"cash_deposits_deposit_reference_key"},
+        sqlite_messages={"UNIQUE constraint failed: cash_deposits.deposit_reference"},
+    )
 
 @router.post("/deposits")
 async def record_deposit(body: CashDepositBody, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
