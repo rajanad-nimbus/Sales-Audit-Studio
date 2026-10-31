@@ -35,6 +35,14 @@ class BatchRunOwnershipLost(RuntimeError):
     """Raised when a worker's batch claim was recovered by another worker."""
 
 
+def _is_active_batch_conflict(exc: IntegrityError) -> bool:
+    """Recognize the one-running-batch-per-date constraint across supported databases."""
+    constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+    if constraint_name == "uq_batch_runs_one_running_per_date":
+        return True
+    return "UNIQUE constraint failed: batch_runs.business_date" in str(exc.orig)
+
+
 async def run_daily_batch(db: AsyncSession, business_date: str, feeds: dict | None = None,
                           trigger: str = "manual", rerun: bool = False) -> BatchRun:
     try:
@@ -71,7 +79,9 @@ async def run_daily_batch(db: AsyncSession, business_date: str, feeds: dict | No
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail=f"A batch for {business_date} is already running") from exc
+        if _is_active_batch_conflict(exc):
+            raise HTTPException(status_code=409, detail=f"A batch for {business_date} is already running") from exc
+        raise
     try:
         if feeds is None:
             wanted = await source_settings.batch_sources(db)   # sources switched off or kept out of the batch are skipped
