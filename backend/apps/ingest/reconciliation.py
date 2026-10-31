@@ -1,5 +1,5 @@
 """Deterministic transaction matching and sales audit control evaluation."""
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 import json
@@ -62,27 +62,13 @@ async def reconcile(
             f"Reconciliation{scope} exceeds the {MAX_RECONCILIATION_TRANSACTIONS:,}-transaction limit; "
             "resolve a smaller date scope or reduce the unmatched backlog."
         )
-    amounts = await effective_amounts(db, txns)
-    pos = sorted([t for t in txns if t.source_lineage == LINEAGE["POS"]], key=lambda t: t.event_timestamp)
-    proc = [t for t in txns if t.source_lineage == LINEAGE["Processor"]]
     policy = (await db.execute(select(ReconciliationPolicy).where(ReconciliationPolicy.active == True)
                                .order_by(ReconciliationPolicy.updated_at.desc(), ReconciliationPolicy.id.desc())
                                .limit(1))).scalar_one_or_none()  # noqa: E712
     amount_tolerance = policy.amount_tolerance if policy else Decimal("0")
     tolerance_currency = policy.amount_tolerance_currency if policy else "USD"
-    settlement_day_tolerance = policy.settlement_day_tolerance if policy else 0
-    # A sale part-paid by voucher or cash is captured by the processor for the card part only.
-    tenders = defaultdict(list)
-    pos_ids = [t.id for t in pos]
-    for i in range(0, len(pos_ids), 500):
-        for td in (await db.execute(select(TransactionTender).where(TransactionTender.transaction_id.in_(pos_ids[i:i + 500])))).scalars().all():
-            tenders[td.transaction_id].append({"tender_type": td.tender_type, "amount": td.amount})
-    proc_idx = defaultdict(deque)
-    for t in proc:
-        if t.payment_reference:
-            proc_idx[(t.store_id, t.currency, t.payment_reference, t.transaction_type)].append(t)
-
-    findings, matched, used = [], 0, set()
+    findings, matched = await match_processor_transactions(db, txns, amount_tolerance, tolerance_currency,
+                                                           policy.settlement_day_tolerance if policy else 0)
 
     def add(etype, store, bdate, amount, currency):
         findings.append((etype, store, bdate, amount, [], currency))
@@ -92,78 +78,146 @@ async def reconcile(
         for t in group:
             t.reconciliation_status, t.disposition = "Exception", "Awaiting"
 
-    seen, dupes = set(), set()
-    for t in pos:
-        if t.transaction_type != "Sale" or not t.payment_reference:
-            continue
-        key = (t.store_id, t.business_date, t.register_id, t.currency, amounts[t.id], t.payment_reference)
-        if key in seen:
-            dupes.add(t.id)
-            flag("DUPLICATE_SALES", abs(amounts[t.id]), t)
-        seen.add(key)
-
-    for t in pos:
-        if t.id in dupes:
-            continue
-        want = "Capture" if t.transaction_type == "Sale" else "Refund"
-        expected = transaction_detail.card_amount(tenders.get(t.id, []), amounts[t.id])
-        if tenders.get(t.id) and expected == 0:      # paid entirely without a card, so there is no processor leg to match
-            t.reconciliation_status, t.disposition = "Matched", "Closed"
-            matched += 1
-            continue
-        candidates = proc_idx.get((t.store_id, t.currency, t.payment_reference, want), ()) if t.payment_reference else ()
-        if len(candidates) != 1:
-            flag("MISSING_REFUND" if t.transaction_type == "Return" else "UNMATCHED_SALE", abs(amounts[t.id]), t)
-            continue
-        p = candidates.popleft()
-        used.add(p.id)
-        if abs(amounts[p.id] - expected) > (amount_tolerance if t.currency == tolerance_currency else Decimal("0")):
-            flag("AMOUNT_MISMATCH", abs(amounts[p.id] - expected), t, p)
-        elif (datetime.fromisoformat(p.settlement_date).date() - datetime.fromisoformat(t.business_date).date()).days > settlement_day_tolerance:
-            flag("TIMING_DIFFERENCE", abs(amounts[t.id]), t, p)
-        else:
-            for x in (t, p):
-                x.reconciliation_status, x.disposition = "Matched", "Closed"
-            matched += 1
-
-    for p in proc:
-        if p.id not in used:
-            flag("ORPHAN_PAYMENT", abs(amounts[p.id]), p)
-
     await reconcile_shopify(db, txns, flag)
     await run_transaction_audit(db, txns, flag)
     await run_controls(db, business_date, add, policy, store_ids=store_ids)
     await run_settlement_controls(db, txns, add, amount_tolerance, tolerance_currency)
 
-    groups = defaultdict(list)
-    for f in findings:
-        groups[(f[0], f[1], f[2], f[5])].append(f)
-
-    counts, cases = defaultdict(int), 0
-    for (etype, store, bdate, currency), items in groups.items():
-        od = ontology.get(etype)
-        amount = sum((i[3] for i in items), Decimal("0"))
-        exposure = Decimal("0") if od["exposure"] == "zero" else amount
-        cid = str(uuid.uuid4())
-        db.add(Case(
-            id=cid, case_number=generate_case_number(bdate), status="Open",
-            case_type=od["label"], business_date=bdate, store_id=store, currency=currency, total_exception_amount=amount,
-            total_exposure=exposure, investigation_status="Pending", evidence_completeness=0,
-            priority=(prio := "Critical" if amount > 3000 else "High" if amount > 1000 else "Normal"),
-            sla_due_at=sla_due(prio)))
-        db.add(DBException(
-            id=str(uuid.uuid4()), case_id=cid, exception_type=etype, exception_family=od["family"],
-            source_system="Reconciliation", detection_origin="Reconciliation", detection_rule_id=f"RECON-{etype}",
-            exception_amount=amount, estimated_exposure=exposure, severity="High" if amount > 1000 else "Medium",
-            confidence="High", close_impact="Yes" if amount else "No"))
-        audit(db, "CASE_CREATED", cid, "Case", cid,
-              f"Reconciliation raised {od['label']} ({len(items)} item(s), {amount})",
-              actor="reconciliation-engine", after={"transaction_ids": [i for it in items for i in it[4]]})
-        counts[etype] += len(items)
-        cases += 1
-
+    counts, cases = create_reconciliation_cases(db, findings)
     return {"transactions_examined": len(txns), "matched_pairs": matched,
             "exceptions": dict(counts), "cases_created": cases}
+
+
+async def match_processor_transactions(db, transactions, amount_tolerance, tolerance_currency,
+                                       settlement_day_tolerance):
+    """Match POS transactions to processor activity and mark unmatched findings."""
+    amounts = await effective_amounts(db, transactions)
+    pos = sorted((t for t in transactions if t.source_lineage == LINEAGE["POS"]),
+                 key=lambda t: t.event_timestamp)
+    processors = [t for t in transactions if t.source_lineage == LINEAGE["Processor"]]
+    tenders = await load_tenders(db, pos)
+    processor_index = defaultdict(list)
+    for processor in processors:
+        if processor.payment_reference:
+            key = (processor.store_id, processor.currency, processor.payment_reference,
+                   processor.transaction_type)
+            processor_index[key].append(processor)
+
+    findings, matched, used_processors = [], 0, set()
+
+    def flag(exception_type, amount, *group):
+        findings.append((exception_type, group[0].store_id, group[0].business_date, amount,
+                         [transaction.id for transaction in group], group[0].currency))
+        for transaction in group:
+            transaction.reconciliation_status, transaction.disposition = "Exception", "Awaiting"
+
+    duplicate_sales = flag_duplicate_sales(pos, amounts, flag)
+
+    for transaction in pos:
+        if transaction.id in duplicate_sales:
+            continue
+        matched += match_pos_transaction(
+            transaction, amounts, tenders, processor_index, used_processors, flag,
+            amount_tolerance, tolerance_currency, settlement_day_tolerance)
+
+    for processor in processors:
+        if processor.id not in used_processors:
+            flag("ORPHAN_PAYMENT", abs(amounts[processor.id]), processor)
+    return findings, matched
+
+
+def flag_duplicate_sales(pos_transactions, amounts, flag):
+    """Mark duplicate POS sale identities and return the duplicate transaction IDs."""
+    seen, duplicates = set(), set()
+    for transaction in pos_transactions:
+        if transaction.transaction_type != "Sale" or not transaction.payment_reference:
+            continue
+        key = (transaction.store_id, transaction.business_date, transaction.register_id,
+               transaction.currency, amounts[transaction.id], transaction.payment_reference)
+        if key in seen:
+            duplicates.add(transaction.id)
+            flag("DUPLICATE_SALES", abs(amounts[transaction.id]), transaction)
+        seen.add(key)
+    return duplicates
+
+
+async def load_tenders(db, pos_transactions):
+    """Load tenders in bounded batches for POS transactions."""
+    tenders = defaultdict(list)
+    pos_ids = [transaction.id for transaction in pos_transactions]
+    for offset in range(0, len(pos_ids), 500):
+        query = select(TransactionTender).where(
+            TransactionTender.transaction_id.in_(pos_ids[offset:offset + 500]))
+        for tender in (await db.execute(query)).scalars().all():
+            tenders[tender.transaction_id].append(
+                {"tender_type": tender.tender_type, "amount": tender.amount})
+    return tenders
+
+
+def match_pos_transaction(transaction, amounts, tenders, processor_index, used_processors, flag,
+                           amount_tolerance, tolerance_currency, settlement_day_tolerance):
+    """Match one POS transaction and return one when a counterpart is accepted."""
+    expected = transaction_detail.card_amount(tenders.get(transaction.id, []), amounts[transaction.id])
+    if tenders.get(transaction.id) and expected == 0:
+        transaction.reconciliation_status, transaction.disposition = "Matched", "Closed"
+        return 1
+
+    expected_type = "Capture" if transaction.transaction_type == "Sale" else "Refund"
+    key = (transaction.store_id, transaction.currency, transaction.payment_reference, expected_type)
+    candidates = processor_index.get(key, []) if transaction.payment_reference else []
+    if len(candidates) != 1:
+        exception_type = "MISSING_REFUND" if transaction.transaction_type == "Return" else "UNMATCHED_SALE"
+        flag(exception_type, abs(amounts[transaction.id]), transaction)
+        return 0
+
+    processor = candidates.pop()
+    used_processors.add(processor.id)
+    tolerance = amount_tolerance if transaction.currency == tolerance_currency else Decimal("0")
+    if abs(amounts[processor.id] - expected) > tolerance:
+        flag("AMOUNT_MISMATCH", abs(amounts[processor.id] - expected), transaction, processor)
+        return 0
+    settlement_delay = (datetime.fromisoformat(processor.settlement_date).date()
+                        - datetime.fromisoformat(transaction.business_date).date()).days
+    if settlement_delay > settlement_day_tolerance:
+        flag("TIMING_DIFFERENCE", abs(amounts[transaction.id]), transaction, processor)
+        return 0
+    for matched_transaction in (transaction, processor):
+        matched_transaction.reconciliation_status, matched_transaction.disposition = "Matched", "Closed"
+    return 1
+
+
+def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
+    """Group findings and persist their cases, exceptions, and audit events."""
+    groups = defaultdict(list)
+    for finding in findings:
+        groups[(finding[0], finding[1], finding[2], finding[5])].append(finding)
+
+    counts, cases = defaultdict(int), 0
+    for (exception_type, store, business_date, currency), items in groups.items():
+        definition = ontology.get(exception_type)
+        amount = sum((item[3] for item in items), Decimal("0"))
+        exposure = Decimal("0") if definition["exposure"] == "zero" else amount
+        case_id = str(uuid.uuid4())
+        priority = "Critical" if amount > 3000 else "High" if amount > 1000 else "Normal"
+        db.add(Case(
+            id=case_id, case_number=generate_case_number(business_date), status="Open",
+            case_type=definition["label"], business_date=business_date, store_id=store, currency=currency,
+            total_exception_amount=amount, total_exposure=exposure, investigation_status="Pending",
+            evidence_completeness=0, priority=priority, sla_due_at=sla_due(priority)))
+        db.add(DBException(
+            id=str(uuid.uuid4()), case_id=case_id, exception_type=exception_type,
+            exception_family=definition["family"], source_system="Reconciliation",
+            detection_origin="Reconciliation", detection_rule_id=f"RECON-{exception_type}",
+            exception_amount=amount, estimated_exposure=exposure,
+            severity="High" if amount > 1000 else "Medium", confidence="High",
+            close_impact="Yes" if amount else "No"))
+        audit(db, "CASE_CREATED", case_id, "Case", case_id,
+              f"Reconciliation raised {definition['label']} ({len(items)} item(s), {amount})",
+              actor="reconciliation-engine",
+              after={"transaction_ids": [transaction_id for item in items for transaction_id in item[4]]})
+        counts[exception_type] += len(items)
+        cases += 1
+    return dict(counts), cases
 
 
 async def reconcile_shopify(db, txns, flag):
