@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,48 +121,38 @@ async def expected_cash_deposit(db: AsyncSession, store_id: str, business_date: 
         CashControl.tender_type == "Cash",
     )
     amount = CashControl.declared_cash + CashControl.safe_drop
-
-    store_total = (
+    scope_totals = (
         await db.execute(
-            select(func.sum(amount)).where(
-                *day_scope,
-                CashControl.register_id.is_(None),
-                CashControl.cashier_id.is_(None),
+            select(
+                CashControl.register_id,
+                CashControl.cashier_id,
+                func.sum(amount),
             )
-        )
-    ).scalar_one()
-    if store_total is not None:
-        return store_total
-
-    register_rows = (
-        await db.execute(
-            select(CashControl.register_id, func.sum(amount))
-            .where(
-                *day_scope,
-                CashControl.register_id.is_not(None),
-                CashControl.cashier_id.is_(None),
-            )
-            .group_by(CashControl.register_id)
+            .where(*day_scope)
+            .group_by(CashControl.register_id, CashControl.cashier_id)
         )
     ).all()
-    register_totals = {register_id: total for register_id, total in register_rows}
 
-    cashier_query = select(func.sum(amount)).where(
-        *day_scope,
-        CashControl.cashier_id.is_not(None),
-    )
-    if register_totals:
-        cashier_query = cashier_query.where(
-            or_(
-                CashControl.register_id.is_(None),
-                and_(
-                    CashControl.register_id.is_not(None),
-                    CashControl.register_id.not_in(register_totals),
-                ),
-            )
-        )
-    cashier_total = (await db.execute(cashier_query)).scalar_one() or Decimal("0")
-    return sum(register_totals.values(), Decimal("0")) + cashier_total
+    store_totals = [
+        total
+        for register_id, cashier_id, total in scope_totals
+        if register_id is None and cashier_id is None
+    ]
+    if store_totals:
+        return sum(store_totals, Decimal("0"))
+
+    register_totals = {
+        register_id: total
+        for register_id, cashier_id, total in scope_totals
+        if register_id is not None and cashier_id is None
+    }
+    cashier_totals = [
+        total
+        for register_id, cashier_id, total in scope_totals
+        if cashier_id is not None
+        and (register_id is None or register_id not in register_totals)
+    ]
+    return sum(register_totals.values(), Decimal("0")) + sum(cashier_totals, Decimal("0"))
 
 
 async def require_writable_store_day(db: AsyncSession, store_id: str, business_date: str) -> None:

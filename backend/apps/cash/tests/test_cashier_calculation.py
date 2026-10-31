@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -63,15 +63,41 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                     store_id="S1", business_date="2026-10-01", register_id="R1",
                     cashier_id="C2", declared_cash=Decimal("20.00"),
                 ), db, finance)
+                cash_scope_queries = []
+
+                @event.listens_for(db.get_bind(), "before_cursor_execute")
+                def capture_cash_scope_query(
+                    _connection, _cursor, statement, _parameters, _context, _executemany
+                ):
+                    if "from cash_controls" in statement.lower():
+                        cash_scope_queries.append(statement)
+
+                query_count = len(cash_scope_queries)
                 assert await expected_cash_deposit(db, "S1", "2026-10-01") == Decimal("30.00")
+                assert len(cash_scope_queries) - query_count == 1
                 register = await declare_cash(CashControlBody(
                     store_id="S1", business_date="2026-10-01", register_id="R1",
                     declared_cash=Decimal("30.00"),
                 ), db, finance)
+                query_count = len(cash_scope_queries)
                 deposit = await record_deposit(CashDepositBody(
                     store_id="S1", business_date="2026-10-01",
                     deposit_reference="BANK-REF-1", deposited_amount=Decimal("30.00"),
                 ), db, finance)
+                assert len(cash_scope_queries) - query_count == 1
+                other_register_cashier = await declare_cash(CashControlBody(
+                    store_id="S1", business_date="2026-10-01", register_id="R2",
+                    cashier_id="C3", declared_cash=Decimal("5.00"),
+                ), db, finance)
+                query_count = len(cash_scope_queries)
+                assert await expected_cash_deposit(db, "S1", "2026-10-01") == Decimal("35.00")
+                assert len(cash_scope_queries) - query_count == 1
+                store_wide = await declare_cash(CashControlBody(
+                    store_id="S1", business_date="2026-10-01", declared_cash=Decimal("40.00"),
+                ), db, finance)
+                query_count = len(cash_scope_queries)
+                assert await expected_cash_deposit(db, "S1", "2026-10-01") == Decimal("40.00")
+                assert len(cash_scope_queries) - query_count == 1
 
                 assert cashier_one["expected_amount"] == Decimal("10.00")
                 assert cashier_two["expected_amount"] == Decimal("20.00")
@@ -82,7 +108,10 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                 assert deposit["status"] == "Balanced"
                 events = (await db.execute(
                     select(AuditEvent).where(
-                        AuditEvent.object_id.in_([cashier_one["id"], cashier_two["id"], register["id"], deposit["id"]])
+                        AuditEvent.object_id.in_([
+                            cashier_one["id"], cashier_two["id"], register["id"],
+                            other_register_cashier["id"], store_wide["id"], deposit["id"],
+                        ])
                     )
                 )).scalars().all()
                 assert {event.event_type for event in events} == {
