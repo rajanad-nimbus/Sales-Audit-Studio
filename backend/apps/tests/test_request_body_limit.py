@@ -1,9 +1,10 @@
 import asyncio
 
 import httpx
+import pytest
 from fastapi import FastAPI, Request
 
-from apps.request_body import RequestBodyLimitMiddleware
+from apps.request_body import RequestBodyLimitMiddleware, _RequestBodyTooLarge
 
 
 def test_request_body_limit_rejects_oversized_and_allows_exact_limit():
@@ -71,6 +72,26 @@ def test_request_body_limit_preserves_handler_errors_during_oversized_reads():
             response = await client.post("/echo", content=chunks())
 
         assert response.status_code == 413
+
+    asyncio.run(run())
+
+
+def test_request_body_limit_does_not_suppress_handler_error_after_response_start():
+    async def run():
+        async def app(scope, receive, send):
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await receive()
+
+        middleware = RequestBodyLimitMiddleware(app, max_bytes=8)
+
+        async def receive():
+            return {"type": "http.request", "body": b"123456789", "more_body": False}
+
+        async def send(_message):
+            return None
+
+        with pytest.raises(_RequestBodyTooLarge):
+            await middleware({"type": "http", "method": "POST", "headers": []}, receive, send)
 
     asyncio.run(run())
 

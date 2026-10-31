@@ -53,13 +53,14 @@ class RequestBodyLimitMiddleware:
                 response_started = True
             await send(message)
 
-        application_error = None
         try:
             await self.app(scope, limited_receive, guarded_send)
-        except Exception as exc:
-            application_error = exc
-        if application_error is not None and not oversized:
-            raise application_error
+        except _RequestBodyTooLarge:
+            if response_started:
+                raise
+        except Exception:
+            if not oversized:
+                raise
         if oversized and not response_started:
             await self._reject(send)
 
