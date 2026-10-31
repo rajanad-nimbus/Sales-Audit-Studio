@@ -1,10 +1,18 @@
 """Bound request-body reads before buffering untrusted payloads in application memory."""
 
 import json
+from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
 
 MAX_API_REQUEST_BODY_BYTES = 26 * 1024 * 1024
+
+
+@dataclass
+class _BodyLimitState:
+    received_bytes: int = 0
+    oversized: bool = False
+    response_started: bool = False
 
 
 def _content_length(values: list[bytes | str]) -> int | None:
@@ -33,53 +41,70 @@ class RequestBodyLimitMiddleware:
         self.max_bytes = max_bytes
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["method"] in {"GET", "HEAD", "OPTIONS"}:
+        if not self._requires_body_limit(scope):
             await self.app(scope, receive, send)
             return
-
-        try:
-            declared_length = _content_length(
-                [value for name, value in scope.get("headers", []) if name.lower() == b"content-length"]
-            )
-        except ValueError as exc:
-            await self._reject(send, status=400, detail=str(exc))
+        declared_length, invalid_detail = self._declared_content_length(scope)
+        if invalid_detail:
+            await self._reject(send, status=400, detail=invalid_detail)
             return
         if declared_length is not None and declared_length > self.max_bytes:
             await self._reject(send)
             return
+        await self._run_with_body_limit(scope, receive, send)
 
-        received_bytes = 0
-        oversized = False
-        response_started = False
+    def _requires_body_limit(self, scope) -> bool:
+        return scope["type"] == "http" and scope["method"] not in {"GET", "HEAD", "OPTIONS"}
 
+    @staticmethod
+    def _declared_content_length(scope) -> tuple[int | None, str | None]:
+        try:
+            value = _content_length(
+                [header for name, header in scope.get("headers", []) if name.lower() == b"content-length"]
+            )
+        except ValueError as exc:
+            return None, str(exc)
+        return value, None
+
+    async def _run_with_body_limit(self, scope, receive, send) -> None:
+        state = _BodyLimitState()
+        try:
+            await self.app(
+                scope,
+                self._limited_receive(receive, state),
+                self._guarded_send(send, state),
+            )
+        except _RequestBodyTooLarge:
+            if state.response_started:
+                raise
+        except Exception:
+            if not state.oversized:
+                raise
+        if state.oversized and not state.response_started:
+            await self._reject(send)
+
+    def _limited_receive(self, receive, state: _BodyLimitState):
         async def limited_receive():
-            nonlocal received_bytes, oversized
             message = await receive()
             if message["type"] == "http.request":
-                received_bytes += len(message.get("body", b""))
-                if received_bytes > self.max_bytes:
-                    oversized = True
+                state.received_bytes += len(message.get("body", b""))
+                if state.received_bytes > self.max_bytes:
+                    state.oversized = True
                     raise _RequestBodyTooLarge
             return message
 
+        return limited_receive
+
+    @staticmethod
+    def _guarded_send(send, state: _BodyLimitState):
         async def guarded_send(message):
-            nonlocal response_started
-            if oversized:
+            if state.oversized:
                 return
             if message["type"] == "http.response.start":
-                response_started = True
+                state.response_started = True
             await send(message)
 
-        try:
-            await self.app(scope, limited_receive, guarded_send)
-        except _RequestBodyTooLarge:
-            if response_started:
-                raise
-        except Exception:
-            if not oversized:
-                raise
-        if oversized and not response_started:
-            await self._reject(send)
+        return guarded_send
 
     async def _reject(
         self,
