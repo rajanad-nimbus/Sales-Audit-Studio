@@ -188,41 +188,9 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
                      sources=[_needs_src(c) for c in nd], followups=GLOBAL_FOLLOWUPS)
 
     if sc:
-        r = sc["recommendations"][0] if sc["recommendations"] else None
-        src = [_src(sc)] + ([{"type": "ontology", "label": ontology.ONTOLOGY_VERSION, "href": None}] if sc.get("ontology") else [])
-        head = f"{sc['case_number']} ({sc['type']}, {sc['store']})"
-        if re.search(r"why|cause|root|finding|happen|explain", m):
-            f = sc["findings"]
-            od = sc.get("ontology")
-            return reply(f"**{f[0]['conclusion']}**" if f else f"**No finding yet for {head}.** The investigation hasn't run.",
-                         ([f"Confidence: {f[0]['confidence']}"] if f else []) + [f"Evidence completeness: {sc['evidence_completeness']}%"]
-                         + ([f"Known causes for this type: {', '.join(od['known_causes'])}", "These are candidate causes from the ontology, not proven for this case."] if od else []),
-                         "Run the investigation." if not f else ("Provide the missing evidence, then re-run the investigation." if sc["evidence_completeness"] < 100 or f[0]["confidence"] == "Low" else "Review the recommendation and decide."), src, CASE_FOLLOWUPS)
-        if re.search(r"exposure|loss|amount|money|impact|how much|cost", m):
-            ci = sc["exceptions"][0]["close_impact"] if sc["exceptions"] else "unknown"
-            if sc.get("amount_needs_review"):
-                return reply(f"**{head}: recorded amounts require finance review after a correction.**",
-                             ["The previous amount and exposure are historical and are not current figures."],
-                             "Review and record the updated amounts before investigation or export.", src, CASE_FOLLOWUPS)
-            return reply(f"**{head}: exception amount {money(sc['exception_amount'], sc.get('currency'))}, estimated loss exposure {money(sc['loss_exposure'], sc.get('currency'))}.**",
-                         ["Amount and exposure are tracked separately; exposure can be lower (for example a pure timing difference).",
-                          f"Close impact: {ci}", f"Priority {sc['priority']}" + (f", SLA due {sc['sla_due_at'][:16]}" if sc["sla_due_at"] else "")],
-                         None, src, CASE_FOLLOWUPS)
-        if re.search(r"policy|authority|allowed|permit|rule", m):
-            p = sc["policy"][0] if sc["policy"] else None
-            return reply(f"**{'Policy ' + p['version'] + ' decided: ' + p['outcome'] if p else 'No policy evaluation yet.'}**",
-                         p["reasons"] if p else ["The policy gate runs when a recommendation is approved."], None, src, CASE_FOLLOWUPS)
-        if re.search(r"evidence|complete|missing", m):
-            od = sc.get("ontology")
-            return reply(f"**Evidence completeness for {head} is {sc['evidence_completeness']}%.**",
-                         ([f"Required by the ontology: {', '.join(od['required_evidence'])}"] if od else []) + ["Completeness is computed from required evidence, not asserted by a model."],
-                         "Run the investigation to collect missing evidence." if sc["evidence_completeness"] < 100 else None, src, CASE_FOLLOWUPS)
-        if re.search(r"next|status|stage|what now|should|recommend|approve|do", m):
-            if r:
-                return reply(f"**{head} is '{sc['status']}'. Proposed action: {r['disposition']} via {r['action_class']} ({r['status']}).**",
-                             [f"What happens: {r['workflow']}", f"Financial movement: {money(r['financial_impact'], sc.get('currency'))}"],
-                             "Use Approve, Escalate or Request more evidence on the case. I can't decide for you.", src, CASE_FOLLOWUPS)
-            return reply(f"**{head} is '{sc['status']}' and has no recommendation yet.**", None, "Run the investigation.", src, CASE_FOLLOWUPS)
+        case_response = answer_selected_case(m, sc)
+        if case_response is not None:
+            return case_response
 
     key, od = _ont_match(m)
     if key:
@@ -286,3 +254,77 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
                   "For a case: why it happened, its exposure, the evidence, the policy decision, or what to do next.",
                   "For definitions: ask what evidence a specific exception type needs."],
                  "Select a case or mention one by number.", followups=GLOBAL_FOLLOWUPS)
+
+
+def answer_selected_case(message: str, case: dict) -> dict | None:
+    """Answer supported intents using the selected case's grounded context."""
+    recommendation = case["recommendations"][0] if case["recommendations"] else None
+    sources = [_src(case)] + ([{"type": "ontology", "label": ontology.ONTOLOGY_VERSION, "href": None}]
+                               if case.get("ontology") else [])
+    heading = f"{case['case_number']} ({case['type']}, {case['store']})"
+    if re.search(r"why|cause|root|finding|happen|explain", message):
+        return answer_case_cause(case, heading, sources)
+    if re.search(r"exposure|loss|amount|money|impact|how much|cost", message):
+        return answer_case_exposure(case, heading, sources)
+    if re.search(r"policy|authority|allowed|permit|rule", message):
+        evaluation = case["policy"][0] if case["policy"] else None
+        headline = (f"Policy {evaluation['version']} decided: {evaluation['outcome']}"
+                    if evaluation else "No policy evaluation yet.")
+        return reply(f"**{headline}**", evaluation["reasons"] if evaluation else
+                     ["The policy gate runs when a recommendation is approved."], None, sources, CASE_FOLLOWUPS)
+    if re.search(r"evidence|complete|missing", message):
+        ontology_data = case.get("ontology")
+        return reply(f"**Evidence completeness for {heading} is {case['evidence_completeness']}%.**",
+                     ([f"Required by the ontology: {', '.join(ontology_data['required_evidence'])}"]
+                      if ontology_data else [])
+                     + ["Completeness is computed from required evidence, not asserted by a model."],
+                     "Run the investigation to collect missing evidence."
+                     if case["evidence_completeness"] < 100 else None,
+                     sources, CASE_FOLLOWUPS)
+    if re.search(r"next|status|stage|what now|should|recommend|approve|do", message):
+        if recommendation:
+            return reply(
+                f"**{heading} is '{case['status']}'. Proposed action: {recommendation['disposition']} "
+                f"via {recommendation['action_class']} ({recommendation['status']}).**",
+                [f"What happens: {recommendation['workflow']}",
+                 f"Financial movement: {money(recommendation['financial_impact'], case.get('currency'))}"],
+                "Use Approve, Escalate or Request more evidence on the case. I can't decide for you.",
+                sources, CASE_FOLLOWUPS)
+        return reply(f"**{heading} is '{case['status']}' and has no recommendation yet.**",
+                     None, "Run the investigation.", sources, CASE_FOLLOWUPS)
+    return None
+
+
+def answer_case_cause(case: dict, heading: str, sources: list[dict]) -> dict:
+    findings = case["findings"]
+    ontology_data = case.get("ontology")
+    bullets = ([f"Confidence: {findings[0]['confidence']}"] if findings else [])
+    bullets.append(f"Evidence completeness: {case['evidence_completeness']}%")
+    if ontology_data:
+        bullets.extend((f"Known causes for this type: {', '.join(ontology_data['known_causes'])}",
+                        "These are candidate causes from the ontology, not proven for this case."))
+    if not findings:
+        next_step = "Run the investigation."
+    elif case["evidence_completeness"] < 100 or findings[0]["confidence"] == "Low":
+        next_step = "Provide the missing evidence, then re-run the investigation."
+    else:
+        next_step = "Review the recommendation and decide."
+    headline = (f"**{findings[0]['conclusion']}**" if findings
+                else f"**No finding yet for {heading}.** The investigation hasn't run.")
+    return reply(headline, bullets, next_step, sources, CASE_FOLLOWUPS)
+
+
+def answer_case_exposure(case: dict, heading: str, sources: list[dict]) -> dict:
+    if case.get("amount_needs_review"):
+        return reply(f"**{heading}: recorded amounts require finance review after a correction.**",
+                     ["The previous amount and exposure are historical and are not current figures."],
+                     "Review and record the updated amounts before investigation or export.",
+                     sources, CASE_FOLLOWUPS)
+    close_impact = case["exceptions"][0]["close_impact"] if case["exceptions"] else "unknown"
+    sla = f", SLA due {case['sla_due_at'][:16]}" if case["sla_due_at"] else ""
+    return reply(
+        f"**{heading}: exception amount {money(case['exception_amount'], case.get('currency'))}, "
+        f"estimated loss exposure {money(case['loss_exposure'], case.get('currency'))}.**",
+        ["Amount and exposure are tracked separately; exposure can be lower (for example a pure timing difference).",
+         f"Close impact: {close_impact}", f"Priority {case['priority']}{sla}"],
+        None, sources, CASE_FOLLOWUPS)
