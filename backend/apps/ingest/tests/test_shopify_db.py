@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -194,6 +194,47 @@ def test_refund_reconciliation_batches_order_and_history_queries():
             assert findings == []
             assert all(row.reconciliation_status == "Matched" for row in transactions)
             assert len(statements) <= 6
+
+    run(go())
+
+
+def test_refund_reconciliation_chooses_earliest_order_by_event_time_not_id():
+    async def go():
+        Session = await make_session()
+        async with Session() as db:
+            early = datetime(2024, 1, 15, 10, tzinfo=timezone.utc)
+            late = datetime(2024, 1, 15, 11, tzinfo=timezone.utc)
+            shared = {
+                "business_date": "2024-01-15", "transaction_date": early,
+                "processing_timestamp": late, "settlement_date": "2024-01-15",
+                "transaction_type": "Order", "source_lineage": "shopify-map-v1",
+                "currency": "USD", "store_id": "S1", "channel_id": "online",
+                "payment_reference": "order-1", "reconciliation_status": "Unmatched",
+                "disposition": "Open",
+            }
+            earliest_order = CanonicalTransaction(
+                id="z-earliest", event_timestamp=early, signed_amount=100, **shared,
+            )
+            later_order = CanonicalTransaction(
+                id="a-later", event_timestamp=late, signed_amount=200, **shared,
+            )
+            refund_row = CanonicalTransaction(
+                id="refund", business_date="2024-01-16", transaction_date=late,
+                event_timestamp=late, processing_timestamp=late, settlement_date="2024-01-16",
+                transaction_type="Refund", source_lineage="shopify-map-v1", currency="USD",
+                signed_amount=-100, store_id="S1", channel_id="online", payment_reference="order-1",
+                reconciliation_status="Unmatched", disposition="Open",
+            )
+            db.add_all([earliest_order, later_order, refund_row])
+            await db.commit()
+
+            findings = []
+            await reconciliation.reconcile_shopify(db, [refund_row], lambda *finding: findings.append(finding))
+
+            assert findings == []
+            assert earliest_order.reconciliation_status == "Matched"
+            assert refund_row.reconciliation_status == "Matched"
+            assert later_order.reconciliation_status == "Unmatched"
 
     run(go())
 

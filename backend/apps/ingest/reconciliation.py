@@ -195,23 +195,27 @@ async def reconcile_shopify(db, txns, flag):
             CanonicalTransaction.payment_reference,
         ).in_(key_batch)
 
-        # Choose the same earliest order as the previous per-key query, but fetch a page
-        # of keys at once and lock only the selected canonical rows.
-        first_order_ids = select(
-            func.min(CanonicalTransaction.id).label("id"),
+        # Preserve earliest-event selection while fetching keys in a batch. IDs are
+        # only a deterministic tie-breaker; their lexical order is not chronological.
+        ranked_orders = select(
+            CanonicalTransaction.id.label("id"),
+            func.row_number().over(
+                partition_by=(
+                    CanonicalTransaction.store_id,
+                    CanonicalTransaction.currency,
+                    CanonicalTransaction.payment_reference,
+                ),
+                order_by=(CanonicalTransaction.event_timestamp, CanonicalTransaction.id),
+            ).label("order_rank"),
         ).where(
             CanonicalTransaction.source_lineage == LINEAGE["Shopify"],
             CanonicalTransaction.transaction_type == "Order",
             key_filter,
-        ).group_by(
-            CanonicalTransaction.store_id,
-            CanonicalTransaction.currency,
-            CanonicalTransaction.payment_reference,
         ).subquery()
         orders = (await db.execute(
             select(CanonicalTransaction).join(
-                first_order_ids, CanonicalTransaction.id == first_order_ids.c.id
-            ).order_by(CanonicalTransaction.id).with_for_update()
+                ranked_orders, CanonicalTransaction.id == ranked_orders.c.id
+            ).where(ranked_orders.c.order_rank == 1).order_by(CanonicalTransaction.id).with_for_update()
             .execution_options(populate_existing=True)
         )).scalars().all()
         orders_by_key.update({
