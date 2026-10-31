@@ -19,10 +19,8 @@ from apps.ingest.manifests import iter_manifests, validate_business_date
 from apps.transactions import detail as transaction_detail
 from integrations.ontology import ontology
 from integrations.ontology.nimbus import audit, sla_due
-from models import (
-    CanonicalTransaction, Case, Exception as DBException, ReconciliationPolicy,
-    SourceRecord, TransactionDiscount, TransactionTender,
-)
+from models import CanonicalTransaction, Case, Exception as DBException, TransactionDiscount, TransactionTender
+from apps.ingest.models import ReconciliationPolicy, SourceRecord
 
 
 async def lock_reconciliation(db) -> None:

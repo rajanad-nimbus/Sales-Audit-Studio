@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.ingest.common import VALID_TYPES
-from models import SourceSetting
+from apps.ingest.models import SourceSetting
 
 SOURCES = ("POS", "POSControl", "Processor", "Bank", "ERP", "Shopify")
 PULLED = {"Shopify"}   # sources Nimbus fetches itself; the rest are delivered to it

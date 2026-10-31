@@ -8,7 +8,8 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import FoundationReference, ShopifyReferenceStage, ShopifyReferenceSyncState, utcnow
+from models import FoundationReference, utcnow
+from apps.ingest.models import ShopifyReferenceStage, ShopifyReferenceSyncState
 
 SOURCE = "Shopify"
 STAGE_BATCH_SIZE = 500

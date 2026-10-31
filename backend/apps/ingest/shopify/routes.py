@@ -19,7 +19,8 @@ from apps.ingest.shopify import reference_sync
 from apps.request_body import read_limited_body
 from auth import require_role
 from database import get_db
-from models import SourceRecord, utcnow
+from models import utcnow
+from apps.ingest.models import SourceRecord
 from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/ingest/shopify")

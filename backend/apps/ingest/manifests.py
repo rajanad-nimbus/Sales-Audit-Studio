@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import select
 
-from models import SourceRecord
+from apps.ingest.models import SourceRecord
 
 MANIFEST_PAGE_SIZE = 500
 

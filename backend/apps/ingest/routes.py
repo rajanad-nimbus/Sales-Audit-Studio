@@ -28,7 +28,9 @@ from apps.totals.currency import validate_currency
 from integrations.ontology.nimbus import audit
 from auth import require_role
 from database import get_db
-from models import CanonicalTransaction, ReconciliationMatch, ReconciliationPolicy, SourceFeedProfile, SourceRecord, SourceSetting, utcnow
+from models import CanonicalTransaction, utcnow
+from apps.ingest.models import (ReconciliationMatch, ReconciliationPolicy,
+                                SourceFeedProfile, SourceRecord, SourceSetting)
 
 router = APIRouter()
 
