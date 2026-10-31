@@ -50,10 +50,29 @@ def _is_active_batch_conflict(exc: IntegrityError) -> bool:
 
 async def run_daily_batch(db: AsyncSession, business_date: str, feeds: dict | None = None,
                           trigger: str = "manual", rerun: bool = False) -> BatchRun:
+    validate_batch_date(business_date)
+    run = await claim_batch(db, business_date, trigger, rerun)
+    try:
+        counts, reconciliation_result = await execute_batch(db, run, business_date, feeds)
+        await complete_batch(db, run, business_date, counts, reconciliation_result)
+    except Exception as exc:  # keep the failure visible instead of losing the run
+        return await record_batch_failure(db, run.id, business_date, exc)
+
+    run = await load_batch(db, run.id)
+    run = await run_optional_investigation(db, run, business_date)
+    return run
+
+
+def validate_batch_date(business_date: str) -> None:
+    """Translate an invalid business date into the batch API's validation response."""
     try:
         validate_business_date(business_date)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def claim_batch(db: AsyncSession, business_date: str, trigger: str, rerun: bool) -> BatchRun:
+    """Reject conflicting runs, recover stale ownership, and persist a new run claim."""
     done = (await db.execute(select(BatchRun).where(
         BatchRun.business_date == business_date, BatchRun.status == "Succeeded"))).scalars().first()
     if done and not rerun:
@@ -78,7 +97,6 @@ async def run_daily_batch(db: AsyncSession, business_date: str, feeds: dict | No
 
     run = BatchRun(id=str(uuid.uuid4()), business_date=business_date, trigger=trigger, status="Running",
                    heartbeat_at=now)
-    run_id = run.id
     db.add(run)
     try:
         await db.commit()
@@ -87,79 +105,98 @@ async def run_daily_batch(db: AsyncSession, business_date: str, feeds: dict | No
         if _is_active_batch_conflict(exc):
             raise HTTPException(status_code=409, detail=f"A batch for {business_date} is already running") from exc
         raise
-    try:
-        if feeds is None:
-            wanted = await source_settings.batch_sources(db)   # sources switched off or kept out of the batch are skipped
-            feeds = {src: rows for src, rows in simulate_feed(business_date).items() if src in wanted}
-            bd = datetime.fromisoformat(business_date).replace(tzinfo=timezone.utc)
-            if "Shopify" in wanted and os.getenv("SHOPIFY_STORE_URL"):  # a configured connector must not fail silently
-                feeds.update(await shopify_adapter.fetch_shopify_feed(
-                    store_id=os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN"),
-                    created_at_min=bd, created_at_max=bd + timedelta(days=1)))
-        delivery = f"BATCH-{business_date}-{run.id[:6]}"
-        counts = {}
-        for src, records in feeds.items():
-            counts[src] = await ingest.ingest(db, src, delivery, records)
-            checkpoint = await db.execute(
-                update(BatchRun)
-                .where(BatchRun.id == run_id, BatchRun.status == "Running")
-                .values(
-                    source_counts=dict(counts),
-                    transactions_loaded=sum(count["canonical_created"] for count in counts.values()),
-                    heartbeat_at=utcnow(),
-                )
-            )
-            if checkpoint.rowcount != 1:
-                raise BatchRunOwnershipLost(f"Batch run {run_id} no longer owns {business_date}")
-            await db.commit()
-        recon = await reconciliation.reconcile(db, business_date)
-        finished_at = utcnow()
-        completion = await db.execute(
-            update(BatchRun)
-            .where(BatchRun.id == run_id, BatchRun.status == "Running")
-            .values(
-                source_counts=counts,
-                transactions_loaded=sum(c["canonical_created"] for c in counts.values()),
-                matched_pairs=recon["matched_pairs"],
-                cases_created=recon["cases_created"],
-                status="Succeeded",
-                finished_at=finished_at,
-                heartbeat_at=None,
-            )
-        )
-        if completion.rowcount != 1:
-            raise BatchRunOwnershipLost(f"Batch run {run_id} no longer owns {business_date}")
-        audit(db, "BATCH_COMPLETED", None, "BatchRun", run_id,
-              f"Daily batch {business_date}: {sum(c['canonical_created'] for c in counts.values())} transactions loaded, {recon['cases_created']} cases raised",
-              actor="batch-scheduler")
-        await db.commit()
-    except Exception as e:  # keep the failure visible instead of losing the run
-        await db.rollback()
-        failure = await db.execute(
-            update(BatchRun)
-            .where(BatchRun.id == run_id, BatchRun.status == "Running")
-            .values(status="Failed", finished_at=utcnow(), error=str(e)[:500], heartbeat_at=None)
-        )
-        if failure.rowcount == 1:
-            audit(db, "BATCH_FAILED", None, "BatchRun", run_id,
-                  f"Daily batch {business_date} failed: {str(e)[:120]}", actor="batch-scheduler")
-        await db.commit()
-        run = (await db.execute(select(BatchRun).where(BatchRun.id == run_id)
-                                .execution_options(populate_existing=True))).scalar_one()
-        return run
+    return run
 
-    run = (await db.execute(select(BatchRun).where(BatchRun.id == run_id)
-                            .execution_options(populate_existing=True))).scalar_one()
 
-    # Investigation is a separate, optional operation. The batch and its audit event
-    # have already committed, so an investigation failure cannot undo their success.
+async def execute_batch(db: AsyncSession, run: BatchRun, business_date: str, feeds: dict | None):
+    """Load all feeds with per-feed durable checkpoints, then reconcile the date."""
+    if feeds is None:
+        feeds = await resolve_batch_feeds(db, business_date)
+    delivery = f"BATCH-{business_date}-{run.id[:6]}"
+    counts = {}
+    for source, records in feeds.items():
+        counts[source] = await ingest.ingest(db, source, delivery, records)
+        await checkpoint_batch_progress(db, run.id, business_date, counts)
+    reconciliation_result = await reconciliation.reconcile(db, business_date)
+    return counts, reconciliation_result
+
+
+async def resolve_batch_feeds(db: AsyncSession, business_date: str) -> dict:
+    """Build configured simulated feeds and fetch the live Shopify feed when enabled."""
+    wanted = await source_settings.batch_sources(db)
+    feeds = {source: rows for source, rows in simulate_feed(business_date).items() if source in wanted}
+    batch_start = datetime.fromisoformat(business_date).replace(tzinfo=timezone.utc)
+    if "Shopify" in wanted and os.getenv("SHOPIFY_STORE_URL"):
+        feeds.update(await shopify_adapter.fetch_shopify_feed(
+            store_id=os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN"),
+            created_at_min=batch_start, created_at_max=batch_start + timedelta(days=1)))
+    return feeds
+
+
+async def checkpoint_batch_progress(db: AsyncSession, run_id: str, business_date: str, counts: dict) -> None:
+    """Persist progress and prove the worker still owns the active batch run."""
+    checkpoint = await db.execute(update(BatchRun).where(
+        BatchRun.id == run_id, BatchRun.status == "Running",
+    ).values(
+        source_counts=dict(counts),
+        transactions_loaded=sum(count["canonical_created"] for count in counts.values()),
+        heartbeat_at=utcnow(),
+    ))
+    if checkpoint.rowcount != 1:
+        raise BatchRunOwnershipLost(f"Batch run {run_id} no longer owns {business_date}")
+    await db.commit()
+
+
+async def complete_batch(db: AsyncSession, run: BatchRun, business_date: str, counts: dict,
+                         reconciliation_result: dict) -> None:
+    """Mark the owned batch successful and commit its completion audit event."""
+    transactions_loaded = sum(count["canonical_created"] for count in counts.values())
+    completion = await db.execute(update(BatchRun).where(
+        BatchRun.id == run.id, BatchRun.status == "Running",
+    ).values(
+        source_counts=counts, transactions_loaded=transactions_loaded,
+        matched_pairs=reconciliation_result["matched_pairs"],
+        cases_created=reconciliation_result["cases_created"], status="Succeeded",
+        finished_at=utcnow(), heartbeat_at=None,
+    ))
+    if completion.rowcount != 1:
+        raise BatchRunOwnershipLost(f"Batch run {run.id} no longer owns {business_date}")
+    audit(db, "BATCH_COMPLETED", None, "BatchRun", run.id,
+          f"Daily batch {business_date}: {transactions_loaded} transactions loaded, "
+          f"{reconciliation_result['cases_created']} cases raised", actor="batch-scheduler")
+    await db.commit()
+
+
+async def record_batch_failure(db: AsyncSession, run_id: str, business_date: str,
+                               error: Exception) -> BatchRun:
+    """Persist the failure of a still-owned run without overwriting recovered ownership."""
+    await db.rollback()
+    failure = await db.execute(update(BatchRun).where(
+        BatchRun.id == run_id, BatchRun.status == "Running",
+    ).values(status="Failed", finished_at=utcnow(), error=str(error)[:500], heartbeat_at=None))
+    if failure.rowcount == 1:
+        audit(db, "BATCH_FAILED", None, "BatchRun", run_id,
+              f"Daily batch {business_date} failed: {str(error)[:120]}", actor="batch-scheduler")
+    await db.commit()
+    return await load_batch(db, run_id)
+
+
+async def load_batch(db: AsyncSession, run_id: str) -> BatchRun:
+    """Reload current durable state after a worker commits or recovers its run."""
+    return (await db.execute(select(BatchRun).where(BatchRun.id == run_id)
+                             .execution_options(populate_existing=True))).scalar_one()
+
+
+async def run_optional_investigation(db: AsyncSession, run: BatchRun, business_date: str) -> BatchRun:
+    """Run optional investigation after batch success; its failure cannot undo the batch."""
+    run_id = run.id
     try:
         if (await agent_settings.load(db))["auto_investigate"]:
             await investigation_service.auto_investigate(db, business_date)
     except Exception:
         logger.exception("Automatic investigation failed after batch %s completed", run_id)
         await db.rollback()
-        run = (await db.execute(select(BatchRun).where(BatchRun.id == run_id))).scalar_one()
+        return await load_batch(db, run_id)
     return run
 
 
