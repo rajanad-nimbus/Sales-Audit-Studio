@@ -92,6 +92,9 @@ def test_test_sink_is_disabled_and_not_seeded_in_production(monkeypatch, tmp_pat
                 await routes.ensure_defaults(db)
                 names = (await db.execute(select(ExportDestination.name))).scalars().all()
                 assert names == ["ERP/GL file drop"]
+                identifier = (await db.execute(select(ExportDestination.id))).scalar_one()
+                await routes.ensure_defaults(db)
+                assert (await db.execute(select(ExportDestination.id))).scalar_one() == identifier
         finally:
             await engine.dispose()
 

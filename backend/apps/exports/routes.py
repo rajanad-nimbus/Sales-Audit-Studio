@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from apps.security.authentication import require_role
 from apps.database_errors import violates_unique_constraint
@@ -55,6 +57,9 @@ DATASETS = {
     "adjustments": "Approved financial adjustments from validated cases (journal lines for ERP/GL)",
     "audit": "Audit trail events since the last delivery (with hashes)",
 }
+DEFAULT_DESTINATION_NAMESPACE = uuid.UUID("e3648eeb-fb20-4290-a08b-fd39404b0be4")
+
+
 def test_sink_enabled() -> bool:
     environment = os.getenv("ENVIRONMENT", "production").strip().lower()
     explicit_setting = os.getenv("NIMBUS_ENABLE_TEST_SINK", "true").strip().lower()
@@ -168,14 +173,27 @@ async def ensure_defaults(db):
         return
     defaults = []
     if test_sink_enabled():
-        defaults.append(ExportDestination(
-            id=str(uuid.uuid4()), name="Test receiver (webhook)", kind="webhook", format="json",
-            config={"url": "http://localhost:8000/api/exports/_sink", "secret": sink_secret()},
-        ))
-    defaults.append(ExportDestination(
-        id=str(uuid.uuid4()), name="ERP/GL file drop", kind="file", format="csv", config={},
-    ))
-    db.add_all(defaults)
+        defaults.append({
+            "id": str(uuid.uuid5(DEFAULT_DESTINATION_NAMESPACE, "Test receiver (webhook)")),
+            "name": "Test receiver (webhook)", "kind": "webhook", "format": "json",
+            "config": {"url": "http://localhost:8000/api/exports/_sink", "secret": sink_secret()},
+        })
+    defaults.append({
+        "id": str(uuid.uuid5(DEFAULT_DESTINATION_NAMESPACE, "ERP/GL file drop")),
+        "name": "ERP/GL file drop", "kind": "file", "format": "csv", "config": {},
+    })
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = postgresql_insert(ExportDestination).values(defaults).on_conflict_do_nothing(
+            index_elements=["name"],
+        )
+    elif dialect == "sqlite":
+        statement = sqlite_insert(ExportDestination).values(defaults).on_conflict_do_nothing(
+            index_elements=["name"],
+        )
+    else:
+        raise RuntimeError(f"Default export destinations are unsupported for database dialect {dialect}")
+    await db.execute(statement)
     await db.commit()
 
 
