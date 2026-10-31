@@ -193,6 +193,14 @@ def _is_duplicate_profile_name(exc: IntegrityError) -> bool:
     )
 
 
+def _is_active_reconciliation_policy_conflict(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"uq_reconciliation_policies_one_active"},
+        sqlite_messages={"UNIQUE constraint failed: reconciliation_policies.active"},
+    )
+
+
 def schedule_window_hours(schedule: str | None) -> int | None:
     """Interpret a small, explicit cadence vocabulary without guessing cron syntax."""
     value = (schedule or "").strip().lower()
@@ -328,10 +336,12 @@ async def update_reconciliation_policy(body: ReconciliationPolicyRequest, db: As
     policy.updated_by, policy.updated_at = user["user"] or "ontology.user", utcnow()
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         # Concurrent first writes can race to create the fallback row. The active
         # policy index serializes the winner; apply this request to that row.
         await db.rollback()
+        if not _is_active_reconciliation_policy_conflict(exc):
+            raise
         policy = (await db.execute(policy_query)).scalar_one_or_none()
         if policy is None:
             raise HTTPException(status_code=409, detail="Reconciliation policy changed concurrently")
