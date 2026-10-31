@@ -89,3 +89,37 @@ def test_finance_can_set_unknown_case_currency_once():
         finally:
             await engine.dispose()
     asyncio.run(run())
+
+
+def test_assistant_counts_all_decisions_and_checks_currency_beyond_context_limit():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add_all([
+                    Case(
+                        id=f"case-{index}", case_number=f"CASE-{index}", case_type="Test",
+                        business_date="2026-10-01", store_id="S1", status="In Review",
+                        currency="USD" if index < 8 else "EUR",
+                        total_exposure=Decimal(100 - index),
+                    )
+                    for index in range(10)
+                ])
+                await db.commit()
+
+                user = {"user": "finance", "role": "finance"}
+                context = await chat.build_context(db, None, user=user)
+                decision_answer = chat.rule_answer("What needs my decision?", context)["answer"]
+                largest_answer = chat.rule_answer("What is the biggest exposure?", context)["answer"]
+
+                assert context["needs_decision_count"] == 10
+                assert len(context["needs_decision"]) == 8
+                assert set(context["needs_decision_currencies"]) == {"USD", "EUR"}
+                assert "10 case(s) are waiting" in decision_answer
+                assert "cannot be ranked across different or unknown currencies" in largest_answer
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())

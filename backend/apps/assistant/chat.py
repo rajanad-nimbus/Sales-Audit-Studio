@@ -68,12 +68,21 @@ async def build_context(db, case_id: str | None, message: str = "", user: dict |
         func.sum(Case.total_exposure)).where(Case.status != "Closed", Case.amount_needs_review.is_(False)).group_by(Case.currency), user, Case.store_id))).all()
     stale_count = (await db.execute(scope.restrict(select(func.count()).select_from(Case).where(
         Case.status != "Closed", Case.amount_needs_review.is_(True)), user, Case.store_id))).scalar() or 0
+    decision_counts = (await db.execute(scope.restrict(
+        select(Case.currency, func.count())
+        .where(Case.status == "In Review")
+        .group_by(Case.currency),
+        user,
+        Case.store_id,
+    ))).all()
     needs = (await db.execute(scope.restrict(select(Case).where(Case.status == "In Review"), user, Case.store_id)
                               .order_by(Case.total_exposure.desc()).limit(8))).scalars().all()
     batch = (await db.execute(select(BatchRun).where(BatchRun.status == "Succeeded").order_by(BatchRun.finished_at.desc()).limit(1))).scalars().first()
     ctx = {
         "cases_by_status": by_status,
         "stale_amount_cases": stale_count,
+        "needs_decision_count": sum(count for _, count in decision_counts),
+        "needs_decision_currencies": [currency for currency, _ in decision_counts],
         "open_amounts_by_currency": [{"currency": currency, "amount": str(amount), "exposure": str(exposure)}
                                      for currency, amount, exposure in amounts],
         "needs_decision": [{"id": c.id, "case_number": c.case_number, "type": c.case_type, "store": c.store_id,
@@ -200,7 +209,9 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
 
     if re.search(r"decision|waiting|attention|pending|approve|review|need|work on|priorit", m):
         nd = ctx["needs_decision"]
-        lead = f"**{len(nd)} case(s) are waiting for a decision.**" if nd else "**Nothing is waiting for your decision.**"
+        decision_count = ctx.get("needs_decision_count", len(nd))
+        lead = (f"**{decision_count} case(s) are waiting for a decision.**"
+                if decision_count else "**Nothing is waiting for your decision.**")
         extra = []
         if persona == "it":
             bad = [k for k in ctx["connectors"] if k["state"] != "Healthy"]
@@ -208,7 +219,10 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
         return reply(lead, [f"{c['case_number']}: {c['type']} at {c['store']}, exposure {money(c['exposure'], c.get('currency'))}" for c in nd[:5]] + extra,
                      "Review the cases in the Action Center." if nd else None, [_needs_src(c) for c in nd[:5]], GLOBAL_FOLLOWUPS)
     if re.search(r"biggest|largest|top|worst", m):
-        currencies = {c.get("currency") for c in ctx["needs_decision"]}
+        currencies = set(ctx.get(
+            "needs_decision_currencies",
+            [c.get("currency") for c in ctx["needs_decision"]],
+        ))
         if len(currencies) > 1 or None in currencies:
             return reply("**Exposures cannot be ranked across different or unknown currencies.**",
                          [f"{c['case_number']}: {money(c['exposure'], c.get('currency'))}" for c in ctx["needs_decision"][:5]],
