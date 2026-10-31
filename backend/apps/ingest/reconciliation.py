@@ -338,6 +338,7 @@ async def accumulate_shopify_refund_history(db, key_batch, through_dates, totals
         lambda refund: (refund.store_id, refund.currency, refund.payment_reference),
         totals,
         max_groups=MAX_RECONCILIATION_TRANSACTIONS,
+        group_description="Shopify refund history groups",
     )
 
 
@@ -472,6 +473,7 @@ async def reconcile_control_manifest_batch(db, manifests, add, policy=None):
             lambda transaction: (transaction.store_id, transaction.currency, transaction.business_date),
             transaction_totals,
             max_groups=MAX_SETTLEMENT_GROUPS,
+            group_description="control manifest totals",
         )
 
     for manifest, store, business_date, currency, declared_count, declared_total in manifests:
@@ -532,6 +534,7 @@ async def reconcile_referenced_bank_batches(db, referenced_banks, add, amount_to
             lambda row: (row.store_id, row.currency, row.settlement_date, row.settlement_reference),
             expected,
             max_groups=MAX_SETTLEMENT_GROUPS,
+            group_description="processor settlement totals",
         )
         await accumulate_reconciliation_amounts(
             db,
@@ -544,6 +547,7 @@ async def reconcile_referenced_bank_batches(db, referenced_banks, add, amount_to
             lambda row: (row.store_id, row.currency, row.business_date, row.settlement_reference),
             actual,
             max_groups=MAX_SETTLEMENT_GROUPS,
+            group_description="bank settlement totals",
         )
     report_referenced_bank_variances(expected, actual, add, amount_tolerance, tolerance_currency)
     mark_referenced_bank_deposits(referenced_banks, expected, actual, amount_tolerance, tolerance_currency)
@@ -621,6 +625,7 @@ async def collect_daily_feed_amounts(db, feed, basis):
             lambda row: (row.store_id, row.currency, row.business_date),
             actual,
             max_groups=MAX_SETTLEMENT_GROUPS,
+            group_description="daily feed totals",
         )
 
     # Restrict reads to represented feed scopes and keep all-dates scans bounded.
@@ -638,6 +643,7 @@ async def collect_daily_feed_amounts(db, feed, basis):
             lambda row: (row.store_id, row.currency, row.business_date),
             expected,
             max_groups=MAX_SETTLEMENT_GROUPS,
+            group_description="daily source totals",
         )
     return actual, expected
 
@@ -678,7 +684,9 @@ async def update_daily_feed_statuses(db, feed_lineage, scope_statuses, unreferen
                     row.disposition = disposition
 
 
-async def accumulate_reconciliation_amounts(db, query, key_for, totals, *, max_groups: int) -> None:
+async def accumulate_reconciliation_amounts(
+    db, query, key_for, totals, *, max_groups: int, group_description: str,
+) -> None:
     """Aggregate corrected amounts in bounded primary-key pages."""
     last_id = None
     while True:
@@ -694,7 +702,7 @@ async def accumulate_reconciliation_amounts(db, query, key_for, totals, *, max_g
             key = key_for(row)
             if key not in totals and len(totals) >= max_groups:
                 raise ReconciliationCapacityError(
-                    f"Settlement reconciliation exceeds the {max_groups:,}-group working limit; "
+                    f"{group_description.capitalize()} exceed the {max_groups:,}-group working limit; "
                     "narrow the reconciliation date scope."
                 )
             totals[key] += amounts[row.id]
