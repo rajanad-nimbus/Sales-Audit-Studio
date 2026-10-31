@@ -201,29 +201,12 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
                      None, [{"type": "ontology", "label": ontology.ONTOLOGY_VERSION, "href": None}],
                      ["What evidence does a missing refund need?", "Give me a summary"])
 
-    if re.search(r"decision|waiting|attention|pending|approve|review|need|work on|priorit", m):
-        nd = ctx["needs_decision"]
-        decision_count = ctx.get("needs_decision_count", len(nd))
-        lead = (f"**{decision_count} case(s) are waiting for a decision.**"
-                if decision_count else "**Nothing is waiting for your decision.**")
-        extra = []
-        if persona == "it":
-            bad = [k for k in ctx["connectors"] if k["state"] != "Healthy"]
-            extra = [f"Connector issues: {', '.join(k['name'] + ' (' + k['state'] + ')' for k in bad)}"] if bad else ["All connectors are healthy."]
-        return reply(lead, [f"{c['case_number']}: {c['type']} at {c['store']}, exposure {money(c['exposure'], c.get('currency'))}" for c in nd[:5]] + extra,
-                     "Review the cases in the Action Center." if nd else None, [_needs_src(c) for c in nd[:5]], GLOBAL_FOLLOWUPS)
-    if re.search(r"biggest|largest|top|worst", m):
-        currencies = set(ctx.get(
-            "needs_decision_currencies",
-            [c.get("currency") for c in ctx["needs_decision"]],
-        ))
-        if len(currencies) > 1 or None in currencies:
-            return reply("**Exposures cannot be ranked across different or unknown currencies.**",
-                         [f"{c['case_number']}: {money(c['exposure'], c.get('currency'))}" for c in ctx["needs_decision"][:5]],
-                         None, [_needs_src(c) for c in ctx["needs_decision"][:5]], GLOBAL_FOLLOWUPS)
-        nd = sorted(ctx["needs_decision"], key=lambda c: -Decimal(c["exposure"]))[:3]
-        return reply("**Largest open exposure among cases awaiting a decision:**" if nd else "**No cases are awaiting a decision.**",
-                     [f"{c['case_number']}: {money(c['exposure'], c.get('currency'))} ({c['type']}, {c['store']})" for c in nd], None, [_needs_src(c) for c in nd], GLOBAL_FOLLOWUPS)
+    decision_answer = answer_decision_queue(m, ctx, persona)
+    if decision_answer is not None:
+        return decision_answer
+    exposure_answer = answer_largest_exposure(m, ctx)
+    if exposure_answer is not None:
+        return exposure_answer
     if re.search(r"connector|health|feed|integration", m):
         ks = ctx["connectors"]
         bad = [k for k in ks if k["state"] != "Healthy"]
@@ -240,20 +223,73 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
         ra = ctx["recent_activity"][:5]
         return reply("**Latest activity:**" if ra else "**No activity yet.**", [f"{x['actor']}: {x['what']}" for x in ra],
                      "See the Audit Trail for the full, verified record.", followups=GLOBAL_FOLLOWUPS)
-    if re.search(r"summary|overview|today|how many|status|total|portfolio", m):
-        s = ctx["cases_by_status"]
-        amounts = ctx.get("open_amounts_by_currency", [])
-        return reply(f"**{sum(s.values()):,} cases.**",
-                     [f"{v:,} {k.lower()}" for k, v in s.items()] +
-                     ([f"{ctx['stale_amount_cases']} open case(s) have amounts awaiting review and are excluded from totals."] if ctx.get("stale_amount_cases") else []) +
-                     [f"{money(a['amount'], a['currency'])} open amount; {money(a['exposure'], a['currency'])} exposure" for a in amounts],
-                     None, followups=["What needs my decision?", "Which connectors are unhealthy?"])
+    summary_answer = answer_portfolio_summary(m, ctx)
+    if summary_answer is not None:
+        return summary_answer
 
     return reply("**I can't answer that from the data I have.**",
                  ["Try: what needs my decision, a summary, the biggest exposure, connector health, the daily batch, or recent activity.",
                   "For a case: why it happened, its exposure, the evidence, the policy decision, or what to do next.",
                   "For definitions: ask what evidence a specific exception type needs."],
                  "Select a case or mention one by number.", followups=GLOBAL_FOLLOWUPS)
+
+
+def answer_decision_queue(message: str, context: dict, persona: str) -> dict | None:
+    """Summarize decision queue volume and selected cases when requested."""
+    if not re.search(r"decision|waiting|attention|pending|approve|review|need|work on|priorit", message):
+        return None
+    cases = context["needs_decision"]
+    decision_count = context.get("needs_decision_count", len(cases))
+    headline = (f"**{decision_count} case(s) are waiting for a decision.**"
+                if decision_count else "**Nothing is waiting for your decision.**")
+    additional = []
+    if persona == "it":
+        unhealthy = [connector for connector in context["connectors"]
+                     if connector["state"] != "Healthy"]
+        additional = ([f"Connector issues: {', '.join(item['name'] + ' (' + item['state'] + ')'
+                                                        for item in unhealthy)}"]
+                      if unhealthy else ["All connectors are healthy."])
+    bullets = [f"{case['case_number']}: {case['type']} at {case['store']}, "
+               f"exposure {money(case['exposure'], case.get('currency'))}"
+               for case in cases[:5]] + additional
+    return reply(headline, bullets, "Review the cases in the Action Center." if cases else None,
+                 [_needs_src(case) for case in cases[:5]], GLOBAL_FOLLOWUPS)
+
+
+def answer_largest_exposure(message: str, context: dict) -> dict | None:
+    """Rank decision-queue exposure only when the currency basis is comparable."""
+    if not re.search(r"biggest|largest|top|worst", message):
+        return None
+    cases = context["needs_decision"]
+    currencies = set(context.get("needs_decision_currencies",
+                                 [case.get("currency") for case in cases]))
+    if len(currencies) > 1 or None in currencies:
+        return reply("**Exposures cannot be ranked across different or unknown currencies.**",
+                     [f"{case['case_number']}: {money(case['exposure'], case.get('currency'))}"
+                      for case in cases[:5]], None, [_needs_src(case) for case in cases[:5]],
+                     GLOBAL_FOLLOWUPS)
+    largest = sorted(cases, key=lambda case: -Decimal(case["exposure"]))[:3]
+    headline = ("**Largest open exposure among cases awaiting a decision:**" if largest
+                else "**No cases are awaiting a decision.**")
+    bullets = [f"{case['case_number']}: {money(case['exposure'], case.get('currency'))} "
+               f"({case['type']}, {case['store']})" for case in largest]
+    return reply(headline, bullets, None, [_needs_src(case) for case in largest], GLOBAL_FOLLOWUPS)
+
+
+def answer_portfolio_summary(message: str, context: dict) -> dict | None:
+    """Summarize portfolio counts and amounts after higher-priority intents."""
+    if not re.search(r"summary|overview|today|how many|status|total|portfolio", message):
+        return None
+    statuses = context["cases_by_status"]
+    amounts = context.get("open_amounts_by_currency", [])
+    bullets = [f"{count:,} {status.lower()}" for status, count in statuses.items()]
+    if context.get("stale_amount_cases"):
+        bullets.append(f"{context['stale_amount_cases']} open case(s) have amounts awaiting review "
+                       "and are excluded from totals.")
+    bullets.extend(f"{money(item['amount'], item['currency'])} open amount; "
+                   f"{money(item['exposure'], item['currency'])} exposure" for item in amounts)
+    return reply(f"**{sum(statuses.values()):,} cases.**", bullets, None,
+                 followups=["What needs my decision?", "Which connectors are unhealthy?"])
 
 
 def answer_selected_case(message: str, case: dict) -> dict | None:
