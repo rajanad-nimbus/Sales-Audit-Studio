@@ -3,7 +3,10 @@
 import asyncio
 from types import SimpleNamespace
 
-from apps.ingest.service import link_return_page
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from apps.ingest.service import link_return_page, return_candidate_query
+from models import Base
 
 
 class SaleStream:
@@ -54,3 +57,26 @@ def test_return_linking_stops_after_all_page_returns_find_their_earliest_sale():
     assert [item.original_transaction_id for item in returns] == ["sale-1", "sale-2"]
     assert db.stream_result.rows_seen == 2
     assert db.stream_result.closed
+
+
+def test_single_store_return_candidate_scan_uses_event_order_index():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://")
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+                query = return_candidate_query({("S1", "PAY-1"), ("S1", "PAY-2")})
+                sql = str(
+                    query.compile(
+                        dialect=connection.dialect,
+                        compile_kwargs={"literal_binds": True},
+                    )
+                )
+                plan = await connection.exec_driver_sql("EXPLAIN QUERY PLAN " + sql)
+                details = " ".join(row[3] for row in plan.fetchall())
+                assert "ix_ct_store_type_event_id" in details
+                assert "TEMP B-TREE FOR ORDER BY" not in details
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())

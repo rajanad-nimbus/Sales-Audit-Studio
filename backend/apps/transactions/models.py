@@ -47,6 +47,7 @@ class CanonicalTransaction(Base):
 
     __table_args__ = (
         Index("ix_ct_store_business_date_type", "store_id", "business_date", "transaction_type"),
+        Index("ix_ct_store_type_event_id", "store_id", "transaction_type", "event_timestamp", "id"),
         Index("ix_ct_original_reference", "original_reference"),
         Index("ix_ct_original_transaction_id", "original_transaction_id"),
         Index("ix_ct_detail_status", "detail_status"),

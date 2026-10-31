@@ -350,6 +350,27 @@ async def load_pending_return_page(db, batch_keys, last_id: str, page_size: int)
     return (await db.execute(query)).scalars().all()
 
 
+def return_candidate_query(reference_keys: set[tuple[str, str]]):
+    """Build the ordered candidate scan used to find earliest matching sales."""
+    conditions = [
+        and_(
+            CanonicalTransaction.store_id == store_id,
+            or_(
+                SourceRecord.source_record_id == reference,
+                CanonicalTransaction.payment_reference == reference,
+            ),
+        )
+        for store_id, reference in reference_keys
+    ]
+    return (
+        select(CanonicalTransaction, SourceRecord.source_record_id)
+        .outerjoin(SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id)
+        .where(CanonicalTransaction.transaction_type == "Sale", or_(*conditions))
+        .order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
+        .execution_options(yield_per=500)
+    )
+
+
 async def link_return_page(db, pending: list[CanonicalTransaction]) -> int:
     """Stream candidate sales and link each pending return to the earliest match."""
     returns_by_reference: dict[tuple[str, str], list[CanonicalTransaction]] = defaultdict(list)
@@ -359,23 +380,9 @@ async def link_return_page(db, pending: list[CanonicalTransaction]) -> int:
             key = (return_transaction.store_id, return_transaction.original_reference)
             returns_by_reference[key].append(return_transaction)
             remaining += 1
-    conditions = [
-        and_(
-            CanonicalTransaction.store_id == store_id,
-            or_(SourceRecord.source_record_id == reference,
-                CanonicalTransaction.payment_reference == reference),
-        )
-        for store_id, reference in returns_by_reference
-    ]
-    if not conditions:
+    if not returns_by_reference:
         return 0
-    candidates = await db.stream(
-        select(CanonicalTransaction, SourceRecord.source_record_id)
-        .outerjoin(SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id)
-        .where(CanonicalTransaction.transaction_type == "Sale", or_(*conditions))
-        .order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
-        .execution_options(yield_per=500)
-    )
+    candidates = await db.stream(return_candidate_query(set(returns_by_reference)))
     linked = 0
     try:
         async for sale, source_record_id in candidates:
