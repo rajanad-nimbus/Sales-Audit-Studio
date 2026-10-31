@@ -2,12 +2,17 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select, true
+from sqlalchemy import or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from apps.corrections.effects import effective_amounts
-from apps.cases.lineage import case_creation_mentions_transaction, case_transaction_ids_table
+from apps.cases.lineage import (
+    audit_json_text_value,
+    audit_json_value_is_string,
+    case_creation_mentions_transaction,
+    case_transaction_ids_table,
+)
 from apps.transactions.detail import card_amount
 from integrations.ontology.nimbus import audit
 from apps.audit.models import AuditEvent
@@ -30,12 +35,16 @@ async def linked_cases(db: AsyncSession, transaction: CanonicalTransaction) -> l
     """
     locked: dict[str, Case] = {}
     while True:
-        events = (await db.execute(select(AuditEvent).join(Case, Case.id == AuditEvent.case_id).where(
-            Case.store_id == transaction.store_id, AuditEvent.event_type == "CASE_CREATED",
-            case_creation_mentions_transaction(db, transaction.id)))).scalars().all()
-        parents = {event.case_id: event.after_state.get("parent_case_id") for event in events
-                   if isinstance(event.after_state, dict) and isinstance(event.after_state.get("transaction_ids"), list)
-                   and transaction.id in event.after_state["transaction_ids"] and event.case_id}
+        created_event = aliased(AuditEvent)
+        parent_id = audit_json_text_value(db, created_event, "parent_case_id")
+        rows = (await db.execute(select(created_event.case_id, parent_id).join(
+            Case, Case.id == created_event.case_id
+        ).where(
+            Case.store_id == transaction.store_id, created_event.event_type == "CASE_CREATED",
+            or_(parent_id.is_(None), audit_json_value_is_string(db, created_event, "parent_case_id")),
+            case_creation_mentions_transaction(db, transaction.id, created_event),
+        ))).all()
+        parents = {case_id: parent_id for case_id, parent_id in rows if case_id}
         remaining = set(parents) - locked.keys()
         if not remaining:
             return list(locked.values())

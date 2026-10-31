@@ -89,7 +89,16 @@ def test_related_correction_pair_uses_database_lineage_for_large_cases():
                     action_description="Large reconciliation case",
                     after_state={"transaction_ids": transaction_ids},
                 )
-                db.add(case_created)
+                db.add_all([case_created, AuditEvent(
+                    id="large-case-follow-up", event_type="CASE_CREATED", actor="system",
+                    object_type="Case", object_id="child-case", case_id="child-case",
+                    action_description="Follow-up with malformed parent metadata",
+                    after_state={"parent_case_id": {"legacy": True}, "transaction_ids": ["target"]},
+                )])
+                db.add(Case(
+                    id="child-case", case_number="CASE-CHILD", case_type="Amount mismatch",
+                    business_date="2026-10-01", store_id="S1",
+                ))
                 await db.flush()
 
                 statements = []
