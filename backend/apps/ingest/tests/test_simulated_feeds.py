@@ -1,4 +1,4 @@
-from apps.ingest.service import simulate_feed
+from apps.ingest.simulation import simulate_feed
 
 
 def test_simulated_feed_includes_non_pos_reconciliation_sources():

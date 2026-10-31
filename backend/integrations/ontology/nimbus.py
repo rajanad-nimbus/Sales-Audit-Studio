@@ -9,9 +9,10 @@ from models import (
     PolicyEvaluation, Workflow, ValidationObligation, utcnow,
 )
 
-POLICY_VERSION = "policy-v1.0"
+POLICY_VERSION = "policy-v1.1"
 AUTONOMY_LIMIT = Decimal("1000")
 TIMING_AUTONOMY_LIMIT = Decimal("250")
+THRESHOLD_CURRENCY = "USD"
 
 SLA_HOURS = {"Critical": 4, "High": 24, "Normal": 72}
 
@@ -93,9 +94,15 @@ def investigate(db, case, exceptions, evidence_by_requirement, narrative=None):
 def evaluate_policy(db, case, rec, approved_rule_codes=frozenset()):
     """Deterministic gate: permit autonomously, require human, request evidence, or block."""
     reasons = []
-    if case.evidence_completeness < 100:
+    if getattr(case, "amount_needs_review", False):
+        outcome = "RequestEvidence"
+        reasons.append("Case amounts require finance review")
+    elif case.evidence_completeness < 100:
         outcome = "RequestEvidence"
         reasons.append("Required evidence incomplete")
+    elif case.currency != THRESHOLD_CURRENCY:
+        outcome = "RequireHuman"
+        reasons.append("Autonomy thresholds are defined in USD; review cases with other or unknown currencies individually")
     elif (rec.disposition_type == "Timing" and rec.financial_impact == 0
           and case.total_exception_amount <= TIMING_AUTONOMY_LIMIT):
         outcome = "Permit"
@@ -147,7 +154,15 @@ def resolve(db, case, wf):
     return ob
 
 
-def validate(db, case, wf, ob, evidence_records):
+def validate(
+    db,
+    case,
+    wf,
+    ob,
+    evidence_records,
+    rationale: str | None = None,
+    actor: str = "validation-agent",
+):
     """Close only when a fresh, linked observation is available for verification."""
     if not evidence_records:
         ob.status, ob.verification_result = "Waiting", "EvidenceUnavailable"
@@ -157,7 +172,10 @@ def validate(db, case, wf, ob, evidence_records):
     ob.status, ob.verification_result = "Complete", "Verified"
     wf.state, wf.current_step = "Completed", "Closed"
     case.status, case.investigation_status = "Closed", "Resolved"
+    after = {"source_record_ids": [r["source_record_id"] for r in evidence_records]}
+    if rationale:
+        after["rationale"] = rationale
     audit(db, "VALIDATION_VERIFIED", case.id, "ValidationObligation", ob.id,
-          "Outcome verified from fresh linked source evidence", actor="validation-agent",
-          after={"source_record_ids": [r["source_record_id"] for r in evidence_records]})
+          "Outcome verified from fresh linked source evidence", actor=actor,
+          after=after)
     return ob

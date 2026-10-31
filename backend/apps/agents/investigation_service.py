@@ -1,12 +1,16 @@
 """Shared investigation entry point: scoped evidence retrieval, optional agent, deterministic findings."""
+import logging
 import os
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import agent_settings, investigator, llm
 from integrations.ontology import nimbus, ontology
 from models import AuditTotal, Case, CanonicalTransaction, EvidenceRequest, Recommendation, SourceRecord, StoreDay
+
+logger = logging.getLogger(__name__)
 
 
 def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransaction, SourceRecord]],
@@ -36,13 +40,35 @@ def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransac
     return selected
 
 
-async def case_source_rows(db: AsyncSession, case: Case) -> list[tuple[CanonicalTransaction, SourceRecord]]:
-    result = await db.execute(
-        select(CanonicalTransaction, SourceRecord).join(
+async def case_source_rows(
+    db: AsyncSession, case: Case, requirements: list[str]
+) -> list[tuple[CanonicalTransaction, SourceRecord]]:
+    source_filters = []
+    include_all_sources = False
+    for requirement in requirements:
+        spec = ontology.EVIDENCE_SOURCES.get(requirement)
+        if not spec or spec.get("totals") or spec.get("ontology"):
+            continue
+        if spec.get("any"):
+            include_all_sources = True
+            break
+        conditions = []
+        if spec.get("source"):
+            conditions.append(SourceRecord.source_system == spec["source"])
+        if spec.get("type"):
+            conditions.append(CanonicalTransaction.transaction_type == spec["type"])
+        if conditions:
+            source_filters.append(and_(*conditions))
+    if not source_filters and not include_all_sources:
+        return []
+
+    query = select(CanonicalTransaction, SourceRecord).join(
             SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id
         ).where(CanonicalTransaction.business_date == case.business_date,
                 CanonicalTransaction.store_id == case.store_id)
-    )
+    if not include_all_sources:
+        query = query.where(or_(*source_filters))
+    result = await db.execute(query)
     return list(result.all())
 
 
@@ -68,7 +94,51 @@ async def provided_evidence(db: AsyncSession, case: Case) -> dict[str, list[dict
     return out
 
 
-async def run_investigation(db: AsyncSession, case: Case, exceptions, use_agent: bool = True) -> object:
+class InvestigationEvidenceCache:
+    """Reuse immutable store-day evidence within one batch or bulk operation."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self._source_rows: dict[
+            tuple[str, str, tuple[str, ...]], list[tuple[CanonicalTransaction, SourceRecord]]
+        ] = {}
+        self._store_day_totals: dict[tuple[str, str], list[AuditTotal]] = {}
+
+    def clear(self) -> None:
+        """Discard ORM instances after a transaction rollback expires them."""
+        self._source_rows.clear()
+        self._store_day_totals.clear()
+
+    @staticmethod
+    def _key(case: Case) -> tuple[str, str]:
+        return case.store_id, case.business_date
+
+    async def source_rows(
+        self, case: Case, requirements: list[str]
+    ) -> list[tuple[CanonicalTransaction, SourceRecord]]:
+        key = (*self._key(case), tuple(sorted(set(requirements))))
+        if key not in self._source_rows:
+            self._source_rows[key] = await case_source_rows(self.db, case, requirements)
+        return self._source_rows[key]
+
+    async def store_day_totals(self, case: Case) -> list[AuditTotal]:
+        key = self._key(case)
+        if key not in self._store_day_totals:
+            self._store_day_totals[key] = await case_store_day_totals(self.db, case)
+        return self._store_day_totals[key]
+
+
+async def run_investigation(
+    db: AsyncSession,
+    case: Case,
+    exceptions,
+    use_agent: bool = True,
+    evidence_cache: InvestigationEvidenceCache | None = None,
+) -> object:
+    case = (await db.execute(select(Case).where(Case.id == case.id).with_for_update()
+                             .execution_options(populate_existing=True))).scalar_one()
+    if case.amount_needs_review:
+        raise HTTPException(status_code=409, detail="Case amounts require finance review before investigation")
     from integrations.ontology.ontology_integration import integration
     await integration.refresh()
     context = integration.context()
@@ -90,18 +160,23 @@ async def run_investigation(db: AsyncSession, case: Case, exceptions, use_agent:
             narrative = await llm.narrate(od["label"], str(case.total_exception_amount), od["evidence"], od["known_causes"])
             if narrative:
                 narrative = f"[LLM-drafted; figures and authority are deterministic] {narrative}"
-    rows = await case_source_rows(db, case)
+    evidence_cache = evidence_cache or InvestigationEvidenceCache(db)
     required = od["evidence"] if od else ontology.DEFAULT_EVIDENCE
-    totals = await case_store_day_totals(db, case)
+    rows = await evidence_cache.source_rows(case, required)
+    totals = await evidence_cache.store_day_totals(case)
     etype = exceptions[0].exception_type if exceptions else None
     evidence = {requirement: evidence_for_requirement(requirement, rows, totals, etype) for requirement in required}
     provided = await provided_evidence(db, case)
     for requirement in required:
         if not evidence[requirement]:
             evidence[requirement] = provided.get(requirement.strip().lower(), [])
-    # A new investigation replaces any recommendation still waiting for a decision.
+    # Serialize investigations and all other proposal writers on the case row.
+    # The partial unique index is the final guard, while this lock ensures the
+    # old proposal is superseded before the replacement is inserted.
+    case = (await db.execute(select(Case).where(Case.id == case.id).with_for_update()
+                             .execution_options(populate_existing=True))).scalar_one()
     for old in (await db.execute(select(Recommendation).where(
-            Recommendation.case_id == case.id, Recommendation.status == "Proposed"))).scalars().all():
+            Recommendation.case_id == case.id, Recommendation.status == "Proposed").with_for_update())).scalars().all():
         old.status = "Superseded"
     return nimbus.investigate(db, case, exceptions, evidence, narrative)
 
@@ -115,17 +190,26 @@ async def auto_investigate(db: AsyncSession, business_date: str, limit: int = 20
     The LLM agent handles the highest-exposure cases first, up to NIMBUS_AGENT_BATCH_LIMIT per batch, so an unattended
     run has bounded time and cost. The rest get the deterministic investigation and can be run by the agent on demand."""
     from models import Exception as DBException
-    cases = (await db.execute(select(Case).where(
+    case_ids = (await db.execute(select(Case.id).where(
         Case.business_date == business_date, Case.status == "Open", Case.investigation_status == "Pending",
+        Case.amount_needs_review.is_(False),
     ).order_by(Case.total_exposure.desc()).limit(limit))).scalars().all()
     done = 0
-    for i, case in enumerate(cases):
+    evidence_cache = InvestigationEvidenceCache(db)
+    for i, case_id in enumerate(case_ids):
         try:
-            excs = (await db.execute(select(DBException).where(DBException.case_id == case.id))).scalars().all()
+            case = await db.get(Case, case_id)
+            if case is None:
+                continue
+            excs = (await db.execute(select(DBException).where(DBException.case_id == case_id))).scalars().all()
             if excs:
-                await run_investigation(db, case, excs, use_agent=i < AGENT_BATCH_LIMIT)
+                await run_investigation(
+                    db, case, excs, use_agent=i < AGENT_BATCH_LIMIT, evidence_cache=evidence_cache
+                )
                 await db.commit()
                 done += 1
         except Exception:
+            logger.exception("Automatic investigation failed for case %s", case_id)
             await db.rollback()
+            evidence_cache.clear()
     return done

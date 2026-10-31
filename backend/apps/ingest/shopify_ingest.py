@@ -1,7 +1,9 @@
 """Shopify-specific ingestion parsing and validation."""
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
+
 from apps.transactions import detail as transaction_detail
+from apps.transactions.detail import MAX_MONEY
 
 SHOPIFY_VALID_RECORD_TYPES = {"Order", "Refund"}
 
@@ -28,10 +30,11 @@ def identity_payload(rec: dict) -> dict:
 
 def tax_detail(rec: dict, sign: int) -> dict | None:
     """The tax Shopify reported on an order or refund, as a transaction detail block (negative for a refund)."""
-    if not rec.get("taxes"):
+    taxes = rec.get("taxes")
+    if taxes is None or taxes == []:
         return None
     try:
-        return transaction_detail.extract({"taxes": rec["taxes"]}, sign)
+        return transaction_detail.extract({"taxes": taxes}, sign)
     except (ValueError, InvalidOperation, OverflowError) as e:
         raise ValueError(f"invalid transaction detail: {e}")
 
@@ -46,13 +49,12 @@ def parse_shopify_order(rec: dict) -> dict:
     if rec.get("record_type") != "Order":
         raise ValueError("record_type must be 'Order'")
 
-    try:
-        amount = Decimal(str(rec["amount"])).quantize(Decimal("0.01"))
-    except (ValueError, InvalidOperation):
-        raise ValueError("amount is not a valid decimal")
+    amount = transaction_detail.cent_value(rec["amount"], "amount")
 
     if amount < 0:
         raise ValueError("amount must be non-negative")
+    if amount > MAX_MONEY:
+        raise ValueError("amount exceeds supported precision")
 
     try:
         ts = datetime.fromisoformat(str(rec["event_time"]).replace("Z", "+00:00"))
@@ -62,7 +64,10 @@ def parse_shopify_order(rec: dict) -> dict:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
 
-    financial_status = rec.get("financial_status", "pending").lower()
+    financial_status = rec.get("financial_status", "pending")
+    if not isinstance(financial_status, str):
+        raise ValueError("financial_status must be a string")
+    financial_status = financial_status.lower()
     if financial_status not in SHOPIFY_FINANCIAL_STATUSES:
         raise ValueError(f"invalid financial_status: {financial_status}")
 
@@ -85,13 +90,12 @@ def parse_shopify_refund(rec: dict) -> dict:
     if rec.get("record_type") != "Refund":
         raise ValueError("record_type must be 'Refund'")
 
-    try:
-        amount = Decimal(str(rec["amount"])).quantize(Decimal("0.01"))
-    except (ValueError, InvalidOperation):
-        raise ValueError("amount is not a valid decimal")
+    amount = transaction_detail.cent_value(rec["amount"], "amount")
 
     if amount < 0:
         raise ValueError("amount must be non-negative")
+    if amount > MAX_MONEY:
+        raise ValueError("amount exceeds supported precision")
 
     try:
         ts = datetime.fromisoformat(str(rec["event_time"]).replace("Z", "+00:00"))

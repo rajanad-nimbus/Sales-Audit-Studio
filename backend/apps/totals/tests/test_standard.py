@@ -4,7 +4,8 @@ from apps.totals.domain import validate_definition
 from apps.totals.standard import STANDARD_TOTALS, TAX_TOTALS
 
 DEFAULTS = {"measure": "Amount", "level": "Store", "status": "Active", "calculation_basis": "Raw", "over_short_group": None,
-            "over_short_operator": None, "combined_total_ids": [], "tender_type": None}
+            "over_short_operator": None, "combined_total_ids": [], "tender_type": None,
+            "start_date": None, "end_date": None, "combined_operator": None}
 
 
 def test_every_standard_total_is_valid():

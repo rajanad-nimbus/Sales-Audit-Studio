@@ -127,6 +127,13 @@ EXCEPTION_TYPES = {
         "disposition": ["Escalation", "Manual Review", "amount",
                         "Route to merchant with refund and order search results"],
     },
+    "SHOPIFY_REFUND_MANUAL_REVIEW": {
+        "label": "Shopify Refund Requires Manual Review", "family": "Payment Reconciliation", "exposure": "amount",
+        "evidence": ["Shopify order", "Refund record", "Manual reconciliation decision"],
+        "known_causes": ["A refund arrived after the order was manually reconciled"],
+        "disposition": ["Escalation", "Manual Review", "amount",
+                        "Review the refund and existing reconciliation decision"],
+    },
     "SHOPIFY_PARTIAL_REFUND": {
         "label": "Shopify Partial Refund", "family": "Payment Reconciliation", "exposure": "zero",
         "evidence": ["Shopify order", "Refund details", "Line items"],
@@ -196,6 +203,7 @@ EVIDENCE_SOURCES: dict[str, dict | None] = {
     "Refund details": {"source": "Shopify"},
     "Line items": {"source": "Shopify"},
     "Refund record": {"source": "Shopify"},
+    "Manual reconciliation decision": None,
     "Line item breakdown": {"source": "Shopify"},
 }
 

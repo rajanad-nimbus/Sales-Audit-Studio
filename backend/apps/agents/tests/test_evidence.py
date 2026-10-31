@@ -141,9 +141,45 @@ def test_closed_case_rejects_new_evidence_and_collaboration_exposes_override_det
             with pytest.raises(HTTPException) as e:
                 await main.provide_case_evidence("c1", EvidenceProvide(requirement="Fee schedule", note="n"), db, {"user": "alice"})
             assert e.value.status_code == 409
-            out = await main.case_collaboration("c1", db)
+            out = await main.case_collaboration("c1", db, {"user": "alice", "store_scoped": False})
             by = {r["id"]: r for r in out["evidence_requests"]}
             assert by["r1"]["override_reason"] == "Bank cannot supply it" and by["r1"]["override_financial_impact"] == "12.50"
             assert by["r1"]["override_requested_by"] == "alice" and by["r1"]["override_approved_by"] == "bob"
             assert by["r2"]["rejection_reason"] == "ERP is offline"
+    asyncio.run(go())
+
+
+def test_case_collaboration_bounds_notes_and_requests():
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    import main
+    from apps.cases import evidence
+    from models import Base, Case, CaseNote, EvidenceRequest
+
+    async def go():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add(Case(id="c1", case_number="CASE-1", case_type="x",
+                            business_date="2026-10-01", store_id="S1"))
+                db.add_all([CaseNote(id=f"note-{index:03}", case_id="c1", author="analyst", body="note")
+                            for index in range(evidence.MAX_CASE_HISTORY_ITEMS + 5)])
+                db.add_all([EvidenceRequest(id=f"request-{index:03}", case_id="c1", requirement="receipt",
+                                            requested_from="store", requested_by="analyst")
+                            for index in range(evidence.MAX_CASE_HISTORY_ITEMS + 5)])
+                await db.flush()
+
+                response = await main.case_collaboration("c1", db, {"user": "analyst", "store_scoped": False})
+
+                assert len(response["notes"]) == evidence.MAX_CASE_HISTORY_ITEMS
+                assert len(response["evidence_requests"]) == evidence.MAX_CASE_HISTORY_ITEMS
+                assert response["notes_truncated"] is True
+                assert response["evidence_requests_truncated"] is True
+        finally:
+            await engine.dispose()
     asyncio.run(go())

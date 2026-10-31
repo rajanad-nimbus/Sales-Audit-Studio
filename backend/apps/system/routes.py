@@ -1,16 +1,45 @@
 """System endpoints used by platform health checks and deployment readiness."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import AUTH_ENABLED
+from auth import AUTH_ENABLED, require_role
 from database import get_db
 from integrations.ontology import ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
-from models import SourceRecord
+from models import Connector, SourceRecord
 
 router = APIRouter()
+
+
+@router.get("/api/connectors")
+async def list_connectors(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(Connector).order_by(Connector.name))).scalars().all()
+    return [
+        {"id": row.id, "name": row.name, "state": row.state, "mode": row.mode,
+         "last_error": row.last_error, "last_checked_at": row.last_checked_at}
+        for row in rows
+    ]
+
+
+@router.post("/api/connectors/{connector_id}/{action}")
+async def connector_action(
+    connector_id: str,
+    action: str,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_role("it")),
+):
+    """Reject connector controls until a real adapter can execute them."""
+    if action not in {"retry", "pause", "resume"}:
+        raise HTTPException(status_code=400, detail="Unknown action")
+    connector = await db.get(Connector, connector_id)
+    if connector is None:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    raise HTTPException(
+        status_code=501,
+        detail=f"{action.capitalize()} is unavailable: {connector.name} has no configured connector adapter",
+    )
 
 
 @router.get("/")
@@ -23,9 +52,11 @@ async def root():
 
 
 @router.get("/api/health")
-async def health_check():
+async def health_check(db: AsyncSession = Depends(get_db)):
+    await db.execute(select(1))
     return {
         "status": "healthy",
+        "database": "healthy",
         "auth_enabled": AUTH_ENABLED,
         "ontology": ontology.ONTOLOGY_VERSION,
         "ontology_integration": ontology_integration.status(),
@@ -37,9 +68,9 @@ async def production_readiness(db: AsyncSession = Depends(get_db)):
     """Show the concrete prerequisites before a sales-audit cutover."""
     rows = (
         await db.execute(
-            select(SourceRecord.source_system, func.max(SourceRecord.received_at)).group_by(
-                SourceRecord.source_system
-            )
+            select(SourceRecord.source_system, func.max(SourceRecord.received_at))
+            .where(SourceRecord.status.in_(("Archived", "Processed")))
+            .group_by(SourceRecord.source_system)
         )
     ).all()
     received = {source: timestamp for source, timestamp in rows}

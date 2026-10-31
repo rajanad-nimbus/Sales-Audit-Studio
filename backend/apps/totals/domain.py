@@ -4,6 +4,7 @@ This module deliberately has no database or web dependencies.  The route layer
 adapts HTTP payloads and persistence to these rules, so the business invariants
 can be tested without starting FastAPI or a database.
 """
+from datetime import date
 from typing import Protocol
 
 
@@ -17,6 +18,9 @@ class TotalDefinitionLike(Protocol):
     over_short_group: str | None
     over_short_operator: str | None
     combined_total_ids: list[str]
+    combined_operator: str | None
+    start_date: str | None
+    end_date: str | None
 
 
 class PersistedDefinitionLike(TotalDefinitionLike, Protocol):
@@ -54,8 +58,26 @@ def validate_definition(definition: TotalDefinitionLike) -> None:
         or definition.over_short_operator not in VALID_OPERATORS
     ):
         raise ValueError("Over/Short totals require a valid group and operator")
-    if definition.calculation_basis == "Combined" and not definition.combined_total_ids:
-        raise ValueError("Combined totals require at least one existing total")
+    if definition.calculation_basis == "Combined" and (
+        len(definition.combined_total_ids) != 2 or len(set(definition.combined_total_ids)) != 2
+    ):
+        raise ValueError("Combined totals require two distinct existing totals")
+    if definition.calculation_basis == "Combined" and definition.combined_operator not in VALID_OPERATORS:
+        raise ValueError("Combined totals require an addition or subtraction operator")
+    dates = []
+    for value in (definition.start_date, definition.end_date):
+        if value is None:
+            dates.append(None)
+            continue
+        try:
+            parsed = date.fromisoformat(value)
+            if parsed.isoformat() != value:
+                raise ValueError
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Effective dates must use YYYY-MM-DD") from exc
+        dates.append(parsed)
+    if dates[0] and dates[1] and dates[0] > dates[1]:
+        raise ValueError("Start date must not be after end date")
 
 
 def serialize_definition(row: PersistedDefinitionLike) -> dict[str, object]:

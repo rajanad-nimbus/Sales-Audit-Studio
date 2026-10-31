@@ -2,12 +2,13 @@
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
 from database import get_db
 from apps.agents import agent_settings, investigator, llm
+from apps.security import scope
 from integrations.ontology import nimbus
 from models import AuditEvent, Case, Exception as DBException, HumanDecision, Recommendation
 
@@ -46,14 +47,39 @@ def shadow_report(runs: dict, decisions: dict, types: dict) -> dict:
 
 @router.get("/shadow")
 async def shadow(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it", "admin"))):
-    events = (await db.execute(select(AuditEvent).where(AuditEvent.event_type == "AGENT_RUN")
-                               .order_by(AuditEvent.created_at))).scalars().all()
-    runs = {e.case_id: (e.after_state or {}).get("result") for e in events if e.case_id}  # latest wins
-    decs = (await db.execute(select(HumanDecision).order_by(HumanDecision.created_at))).scalars().all()
-    decisions = {d.case_id: d.decision for d in decs}
+    ranked_runs = select(
+        AuditEvent.case_id.label("case_id"),
+        AuditEvent.after_state.label("after_state"),
+        func.row_number().over(
+            partition_by=AuditEvent.case_id,
+            order_by=(AuditEvent.created_at.desc(), AuditEvent.id.desc()),
+        ).label("row_number"),
+    ).where(AuditEvent.event_type == "AGENT_RUN", AuditEvent.case_id.is_not(None)).subquery()
+    run_rows = (await db.execute(select(ranked_runs.c.case_id, ranked_runs.c.after_state)
+                                 .where(ranked_runs.c.row_number == 1))).all()
+    runs = {case_id: (state or {}).get("result") for case_id, state in run_rows}
+
+    ranked_decisions = select(
+        HumanDecision.case_id.label("case_id"),
+        HumanDecision.decision.label("decision"),
+        func.row_number().over(
+            partition_by=HumanDecision.case_id,
+            order_by=(HumanDecision.created_at.desc(), HumanDecision.id.desc()),
+        ).label("row_number"),
+    ).subquery()
+    decision_rows = (await db.execute(select(ranked_decisions.c.case_id, ranked_decisions.c.decision)
+                                      .where(ranked_decisions.c.row_number == 1))).all()
+    decisions = dict(decision_rows)
+
+    compared_case_ids = set(runs) & set(decisions)
     types = {}
-    for x in (await db.execute(select(DBException.case_id, DBException.exception_type))).all():
-        types.setdefault(x[0], x[1])
+    if compared_case_ids:
+        type_rows = (await db.execute(
+            select(DBException.case_id, func.min(DBException.exception_type))
+            .where(DBException.case_id.in_(compared_case_ids))
+            .group_by(DBException.case_id)
+        )).all()
+        types = dict(type_rows)
     return shadow_report(runs, decisions, types)
 
 
@@ -62,6 +88,8 @@ def eligible(case, rec, result) -> bool:
     It only nominates cases; approval still goes through the finance-role bulk approve and the policy gate."""
     return bool(
         agent_supported(result) and case.status == "In Review" and case.evidence_completeness == 100
+        and not getattr(case, "amount_needs_review", False)
+        and case.currency == nimbus.THRESHOLD_CURRENCY
         and rec.status == "Proposed" and rec.disposition_type == "Timing" and rec.financial_impact == 0
         and case.total_exception_amount <= nimbus.TIMING_AUTONOMY_LIMIT)
 
@@ -69,17 +97,38 @@ def eligible(case, rec, result) -> bool:
 @router.get("/eligible")
 async def eligible_cases(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "admin"))):
     """Cases the agent proposes for one-click batch approval. Nothing is changed here."""
-    events = (await db.execute(select(AuditEvent).where(AuditEvent.event_type == "AGENT_RUN")
-                               .order_by(AuditEvent.created_at))).scalars().all()
-    runs = {e.case_id: (e.after_state or {}).get("result") for e in events if e.case_id}
-    rows = (await db.execute(select(Case, Recommendation).join(Recommendation, Recommendation.case_id == Case.id)
-                             .where(Case.status == "In Review", Case.id.in_(list(runs))))).all()
-    latest = {}
-    for c, r in rows:
-        if c.id not in latest or r.created_at > latest[c.id][1].created_at:
-            latest[c.id] = (c, r)
-    out = [{"case_id": c.id, "case_number": c.case_number, "amount": str(c.total_exception_amount),
-            "disposition": r.disposition_type} for c, r in latest.values() if eligible(c, r, runs[c.id])]
+    review_cases = scope.restrict(select(Case.id).where(Case.status == "In Review"), _, Case.store_id)
+    ranked_runs = select(
+        AuditEvent.case_id.label("case_id"),
+        AuditEvent.after_state.label("after_state"),
+        func.row_number().over(
+            partition_by=AuditEvent.case_id,
+            order_by=(AuditEvent.created_at.desc(), AuditEvent.id.desc()),
+        ).label("row_number"),
+    ).where(AuditEvent.event_type == "AGENT_RUN", AuditEvent.case_id.in_(review_cases)).subquery()
+    run_rows = (await db.execute(select(ranked_runs.c.case_id, ranked_runs.c.after_state)
+                                 .where(ranked_runs.c.row_number == 1))).all()
+    runs = {case_id: (state or {}).get("result") for case_id, state in run_rows}
+    if not runs:
+        return {"count": 0, "cases": [],
+                "how_to_approve": "POST /api/action-center/bulk with action=approve and these case ids"}
+
+    ranked_recommendations = select(
+        Recommendation.id.label("recommendation_id"),
+        Recommendation.case_id.label("case_id"),
+        func.row_number().over(
+            partition_by=Recommendation.case_id,
+            order_by=(Recommendation.created_at.desc(), Recommendation.id.desc()),
+        ).label("row_number"),
+    ).subquery()
+    query = select(Case, Recommendation).join(
+        ranked_recommendations,
+        (ranked_recommendations.c.case_id == Case.id) & (ranked_recommendations.c.row_number == 1),
+    ).join(Recommendation, Recommendation.id == ranked_recommendations.c.recommendation_id).where(
+        Case.status == "In Review", Case.id.in_(runs))
+    rows = (await db.execute(scope.restrict(query, _, Case.store_id))).all()
+    out = [{"case_id": c.id, "case_number": c.case_number, "amount": str(c.total_exception_amount), "currency": c.currency,
+            "disposition": r.disposition_type} for c, r in rows if eligible(c, r, runs[c.id])]
     return {"count": len(out), "cases": out,
             "how_to_approve": "POST /api/action-center/bulk with action=approve and these case ids"}
 

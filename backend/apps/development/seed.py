@@ -4,6 +4,8 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from database import async_session
 from apps.ingest import service as ingest
+from apps.ingest import reconciliation
+from apps.ingest.simulation import simulate_feed
 from apps.agents import investigation_service
 from models import (AuditTotalDefinition, CanonicalTransaction, CashControl, CashDeposit, Case,
     ConfiguredAuditRule, FoundationReference, GLCrossReference, ReconciliationPolicy)
@@ -31,11 +33,11 @@ async def main():
       db.add(GLCrossReference(id=str(uuid.uuid4()), transaction_type=transaction_type, tender_type=tender, debit_account=debit, credit_account=credit, active=True, updated_by="demo.seed"))
     await db.commit()
 
-    feeds = ingest.simulate_feed(DAY)
+    feeds = simulate_feed(DAY)
     for source, records in feeds.items():
       await ingest.ingest(db, source, f"DEMO-{DAY}-{source}", records)
     await db.commit()
-    reconciliation = await ingest.reconcile(db, DAY)
+    reconciliation_result = await reconciliation.reconcile(db, DAY)
     await db.commit()
     investigated = await investigation_service.auto_investigate(db, DAY)
 
@@ -56,6 +58,6 @@ async def main():
       db.add(CashControl(id=str(uuid.uuid4()), store_id=store, business_date=DAY, register_id="R1", cashier_id="CASHIER-01", tender_type="Cash", declared_cash=expected, paid_out=Decimal("0"), safe_drop=Decimal("0"), expected_amount=expected, variance_amount=Decimal("0"), status="Balanced", declared_by="demo.cashier"))
       db.add(CashDeposit(id=str(uuid.uuid4()), store_id=store, business_date=DAY, deposit_reference=ref, bank_account="OPERATING-001", deposited_amount=deposited, expected_amount=expected, variance_amount=expected-deposited, status=status, recorded_by="demo.cashier"))
     await db.commit()
-    print({"day": DAY, "feeds": {k: len(v) for k,v in feeds.items()}, "reconciliation": reconciliation, "agent_investigations": investigated, "store_days": len(stores), "cases": await db.scalar(select(func.count()).select_from(Case))})
+    print({"day": DAY, "feeds": {k: len(v) for k,v in feeds.items()}, "reconciliation": reconciliation_result, "agent_investigations": investigated, "store_days": len(stores), "cases": await db.scalar(select(func.count()).select_from(Case))})
 
 if __name__ == "__main__": asyncio.run(main())

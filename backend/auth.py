@@ -9,7 +9,8 @@ ONTOLOGY_AUTH_URL = os.getenv("NIMBUS_ONTOLOGY_AUTH_URL", "").rstrip("/")
 AUTH_ENABLED = bool(ONTOLOGY_AUTH_URL)
 IMPERSONABLE = {"finance", "it", "analyst", "auditor", "store_manager"}
 # store_manager is limited to these areas, and within them to the stores assigned to the person in Ontology Studio.
-STORE_MANAGER_PREFIXES = ("/api/cash", "/api/store-days")
+STORE_MANAGER_CASH_PREFIXES = ("/api/cash", "/api/cash-controls")
+STORE_MANAGER_PREFIXES = (*STORE_MANAGER_CASH_PREFIXES, "/api/store-days")
 # Where the identity carries the user's stores: a dotted path into the Ontology Studio user object (a list, or a comma-separated string).
 STORE_CLAIM = os.getenv("NIMBUS_ONTOLOGY_STORE_CLAIM", "stores")
 
@@ -47,6 +48,9 @@ def _role_map() -> dict[str, str]:
 
 async def current_user(request: Request, authorization: str | None = Header(default=None)) -> dict:
     """Ask Ontology Studio to validate the submitted user JWT."""
+    verified_user = getattr(request.state, "user", None)
+    if verified_user is not None:
+        return verified_user
     if not ONTOLOGY_AUTH_URL:
         raise HTTPException(status_code=503, detail="Ontology authentication is not configured")
     headers = {}
@@ -60,8 +64,13 @@ async def current_user(request: Request, authorization: str | None = Header(defa
         raise HTTPException(status_code=401, detail="Sign in through Ontology Studio or provide its bearer token",
                             headers={"WWW-Authenticate": "Bearer"})
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        app = request.scope.get("app")
+        client = getattr(getattr(app, "state", None), "identity_http_client", None)
+        if client is not None:
             response = await client.get(ONTOLOGY_AUTH_URL, headers=headers)
+        else:
+            async with httpx.AsyncClient(timeout=5.0) as owned_client:
+                response = await owned_client.get(ONTOLOGY_AUTH_URL, headers=headers)
     except httpx.HTTPError:
         raise HTTPException(status_code=503, detail="Ontology authentication service is unavailable")
     if response.status_code in (401, 403):
@@ -71,6 +80,8 @@ async def current_user(request: Request, authorization: str | None = Header(defa
         raise HTTPException(status_code=503, detail="Ontology authentication service could not verify the token")
     try:
         identity = response.json()["user"]
+        if not isinstance(identity, dict):
+            raise TypeError("Ontology user must be an object")
         ontology_role = str(identity.get("role") or "").lower()
         real_role = _role_map().get(ontology_role, "viewer")
         role = real_role
@@ -111,10 +122,17 @@ def role_allowed(role: str, roles: tuple[str, ...], method: str, path: str) -> b
     if role == "auditor":
         return method == "GET" and ("finance" in roles or "it" in roles)
     if role == "store_manager":
-        if not shared or not path.startswith(STORE_MANAGER_PREFIXES):
+        if not shared or not any(_path_is_within(path, prefix) for prefix in STORE_MANAGER_PREFIXES):
             return False
-        return method == "GET" or path.startswith("/api/cash")
+        return method == "GET" or any(
+            _path_is_within(path, prefix) for prefix in STORE_MANAGER_CASH_PREFIXES
+        )
     return False
+
+
+def _path_is_within(path: str, prefix: str) -> bool:
+    """Match an API area at a path-segment boundary, never a neighboring name."""
+    return path == prefix or path.startswith(f"{prefix}/")
 
 
 def require_role(*roles: str):

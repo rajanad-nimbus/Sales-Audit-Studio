@@ -1,5 +1,8 @@
 """Optional LLM narrator. Facts, amounts and authority stay deterministic; the model only drafts prose."""
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 def credentials() -> str | None:
@@ -23,13 +26,14 @@ async def narrate(exception_label: str, amount: str, evidence: list[str], known_
     try:
         import anthropic
 
-        client = anthropic.AsyncAnthropic(api_key=key)
-        msg = await client.messages.create(
-            model=os.getenv("NIMBUS_LLM_MODEL", "claude-sonnet-5-5"),
-            max_tokens=250, messages=[{"role": "user", "content": prompt}],
-        )
+        async with anthropic.AsyncAnthropic(api_key=key) as client:
+            msg = await client.messages.create(
+                model=os.getenv("NIMBUS_LLM_MODEL", "claude-sonnet-5-5"),
+                max_tokens=250, messages=[{"role": "user", "content": prompt}],
+            )
         return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip() or None
-    except Exception:
+    except Exception as exc:
+        logger.warning("Optional LLM narration failed (%s)", type(exc).__name__)
         return None
 
 
@@ -125,11 +129,12 @@ async def chat(context: dict, history: list[dict], message: str, persona: str = 
     try:
         import anthropic
 
-        client = anthropic.AsyncAnthropic(api_key=key)
         msgs = [{"role": h["role"], "content": h["content"]} for h in history[-10:] if h.get("role") in ("user", "assistant")]
         msgs.append({"role": "user", "content": message})
-        r = await client.messages.create(model=os.getenv("NIMBUS_LLM_MODEL", "claude-sonnet-5-5"), max_tokens=600,
-                                         system=system, messages=msgs)
+        async with anthropic.AsyncAnthropic(api_key=key) as client:
+            r = await client.messages.create(model=os.getenv("NIMBUS_LLM_MODEL", "claude-sonnet-5-5"), max_tokens=600,
+                                             system=system, messages=msgs)
         return "".join(b.text for b in r.content if getattr(b, "type", "") == "text").strip() or None
-    except Exception:
+    except Exception as exc:
+        logger.warning("Optional LLM chat failed (%s)", type(exc).__name__)
         return None

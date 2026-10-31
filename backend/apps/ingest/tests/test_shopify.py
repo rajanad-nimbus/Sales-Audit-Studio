@@ -1,4 +1,5 @@
 """Unit tests for the Shopify adapter helpers and ingest validation (no network or DB)."""
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -15,6 +16,92 @@ def test_next_page_info_parses_link_header():
             '<https://s/admin/api/2024-01/orders.json?limit=250&page_info=next2>; rel="next"')
     assert sa._next_page_info(link) == "next2"
     assert sa._next_page_info("") is None
+
+
+def test_fetch_locations_follows_all_pages(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+    requests = []
+    pages = [
+        ({"locations": [{"id": 1}]}, {"Link": '<https://shop.test/locations.json?page_info=next>; rel="next"'}),
+        ({"locations": [{"id": 2}]}, {}),
+    ]
+
+    async def request_full(_method, _endpoint, params=None):
+        requests.append(params)
+        return pages.pop(0)
+
+    monkeypatch.setattr(adapter, "_request_full", request_full)
+
+    async def consume():
+        return [location async for location in adapter.fetch_locations()]
+
+    assert asyncio.run(consume()) == [{"id": 1}, {"id": 2}]
+    assert requests[0]["limit"] == 250
+    assert requests[1]["page_info"] == "next"
+
+
+def test_fetch_locations_rejects_repeated_cursor_even_for_empty_pages(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+    calls = 0
+    headers = {"Link": '<https://shop.test/locations.json?page_info=repeat>; rel="next"'}
+
+    async def request_full(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {"locations": []}, headers
+
+    monkeypatch.setattr(adapter, "_request_full", request_full)
+
+    async def consume():
+        return [location async for location in adapter.fetch_locations()]
+
+    with pytest.raises(sa.ShopifyAPIError, match="repeated pagination cursor"):
+        asyncio.run(consume())
+    assert calls == 2
+
+
+def test_shopify_pagination_enforces_page_limit(monkeypatch):
+    pagination = sa._ShopifyPagination()
+    headers = {"Link": '<https://shop.test/locations.json?page_info=next>; rel="next"'}
+    params = {"limit": 250, "fields": "id"}
+    monkeypatch.setattr(sa, "MAX_SHOPIFY_PAGES", 2)
+
+    assert pagination.next_params(headers, params)["page_info"] == "next"
+    pagination._seen_cursors.clear()
+    assert pagination.next_params(headers, params)["page_info"] == "next"
+    pagination._seen_cursors.clear()
+    with pytest.raises(sa.ShopifyAPIError, match="2-page limit"):
+        pagination.next_params(headers, params)
+
+
+def test_fetch_locations_rejects_malformed_collection_response(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+
+    async def request_full(*_args, **_kwargs):
+        return {"unexpected": []}, {}
+
+    monkeypatch.setattr(adapter, "_request_full", request_full)
+    with pytest.raises(sa.ShopifyAPIError, match="invalid locations response"):
+
+        async def consume():
+            return [location async for location in adapter.fetch_locations()]
+
+        asyncio.run(consume())
+
+
+def test_fetch_products_rejects_malformed_collection_response(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+
+    async def request_full(*_args, **_kwargs):
+        return {"products": None}, {}
+
+    monkeypatch.setattr(adapter, "_request_full", request_full)
+
+    async def consume():
+        return [product async for product in adapter.fetch_products()]
+
+    with pytest.raises(sa.ShopifyAPIError, match="invalid products response"):
+        asyncio.run(consume())
 
 
 def test_refund_amount_prefers_transactions():
@@ -62,6 +149,43 @@ def test_webhook_signature():
     assert sa.verify_webhook_signature("secret", body, good)
     assert not sa.verify_webhook_signature("secret", body, "bad")
     assert not sa.verify_webhook_signature(None, body, good)
+
+
+def test_shopify_feed_stops_at_delivery_record_limit(monkeypatch):
+    class FakeAdapter:
+        closed = False
+
+        async def fetch_orders(self, *_args, **_kwargs):
+            for order_id in (1, 2):
+                yield {"id": order_id, "created_at": "2024-01-15T10:00:00Z", "total_price": "1.00",
+                       "currency": "USD", "financial_status": "paid"}
+
+        async def close(self):
+            self.closed = True
+
+    adapter = FakeAdapter()
+    monkeypatch.setattr(sa, "ShopifyAdapter", lambda: adapter)
+    monkeypatch.setattr(sa, "MAX_DELIVERY_RECORDS", 1)
+
+    with pytest.raises(sa.ShopifyFeedLimitError, match="1-record"):
+        asyncio.run(sa.fetch_shopify_feed("S1"))
+    assert adapter.closed
+
+
+def test_shopify_feed_stops_at_delivery_byte_limit(monkeypatch):
+    class FakeAdapter:
+        async def fetch_orders(self, *_args, **_kwargs):
+            yield {"id": 1, "created_at": "2024-01-15T10:00:00Z", "total_price": "1.00",
+                   "currency": "USD", "financial_status": "paid"}
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(sa, "ShopifyAdapter", FakeAdapter)
+    monkeypatch.setattr(sa, "MAX_DELIVERY_BYTES", 2)
+
+    with pytest.raises(sa.ShopifyFeedLimitError, match="2-byte"):
+        asyncio.run(sa.fetch_shopify_feed("S1"))
 
 
 def test_identity_payload_ignores_mutable_fields():

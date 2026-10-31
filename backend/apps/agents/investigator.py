@@ -94,7 +94,12 @@ async def run_via_sdk(db, case, exceptions, label: str, known_causes: list[str],
     token = os.getenv("CLAUDE_CODE_OAUTH_TOKEN")
     if not token and query_fn is None:
         return None
-    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server, query
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server, query
+    except ModuleNotFoundError as exc:
+        if exc.name != "claude_agent_sdk":
+            raise
+        return {"result": None, "trace": {"via": "claude-agent-sdk", "error": "SDK unavailable"}}
 
     model = model or os.getenv("NIMBUS_LLM_MODEL", DEFAULT_MODEL)
     allowed = set(enabled_tools) if enabled_tools is not None else {t["name"] for t in TOOL_SPECS}
@@ -137,6 +142,7 @@ async def run(db, case, exceptions, label: str, known_causes: list[str], client=
     Prefers the Claude Agent SDK (Claude Code OAuth token); falls back to the Messages API with an API key.
     """
     key = os.getenv("ANTHROPIC_API_KEY")
+    owns_client = False
     if client is None:
         if os.getenv("CLAUDE_CODE_OAUTH_TOKEN"):
             out = await run_via_sdk(db, case, exceptions, label, known_causes, model, enabled_tools, ontology_context=ontology_context)
@@ -147,6 +153,7 @@ async def run(db, case, exceptions, label: str, known_causes: list[str], client=
             return None
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=key)
+        owns_client = True
     model = model or os.getenv("NIMBUS_LLM_MODEL", DEFAULT_MODEL)
     allowed = set(enabled_tools) if enabled_tools is not None else {t["name"] for t in TOOL_SPECS}
     specs = [t for t in TOOL_SPECS if t["name"] in allowed]
@@ -184,6 +191,9 @@ async def run(db, case, exceptions, label: str, known_causes: list[str], client=
     except Exception as exc:  # fall back to the deterministic path, but leave a trace
         trace["error"] = type(exc).__name__
         return {"result": None, "trace": trace}
+    finally:
+        if owns_client:
+            await client.close()
     return {"result": result, "trace": trace}
 
 

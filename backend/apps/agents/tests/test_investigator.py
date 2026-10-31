@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace as NS
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -106,6 +107,16 @@ def test_failure_returns_trace_without_result():
     run(go())
 
 
+def test_missing_optional_agent_dependency_returns_fallback(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    result = run(investigator.run_via_sdk(None, None, [], "label", [], query_fn=object()))
+
+    assert result["result"] is None
+    assert result["trace"]["error"] == "SDK unavailable"
+
+
 def test_auto_investigate_processes_new_cases_and_isolates_scope():
     async def go():
         from apps.agents import investigation_service
@@ -117,6 +128,110 @@ def test_auto_investigate_processes_new_cases_and_isolates_scope():
             c = (await db.execute(select(Case).where(Case.id == "c1"))).scalar_one()
             assert c.investigation_status in ("Awaiting Evidence", "Ready for Decision")
             assert await investigation_service.auto_investigate(db, "2026-10-01") == 0  # idempotent
+    run(go())
+
+
+def test_auto_investigate_continues_after_case_rollback(monkeypatch):
+    from apps.agents import investigation_service
+
+    async def go():
+        Session, _, _, _ = await seed()
+        async with Session() as db:
+            db.add(Case(id="c2", case_number="CASE-2", case_type="Reconciliation",
+                        business_date="2026-10-01", store_id="S1"))
+            db.add(Exc(id="e2", case_id="c2", exception_type="UNMATCHED_SALE", exception_family="x",
+                       source_system="POS", detection_origin="d", detection_rule_id="r",
+                       exception_amount=Decimal("10"), estimated_exposure=Decimal("10"),
+                       severity="High", confidence="High", close_impact="None"))
+            await db.commit()
+            visited = []
+
+            async def investigate(_db, case, _exceptions, use_agent=True, evidence_cache=None):
+                visited.append(case.id)
+                if len(visited) == 1:
+                    await evidence_cache.source_rows(case, ["Source record"])
+                    assert evidence_cache._source_rows
+                    raise RuntimeError("first case failed")
+                assert evidence_cache._source_rows == {}
+                await evidence_cache.source_rows(case, ["Source record"])
+                case.investigation_status = "Awaiting Evidence"
+
+            monkeypatch.setattr(investigation_service, "run_investigation", investigate)
+            assert await investigation_service.auto_investigate(db, "2026-10-01") == 1
+            assert len(visited) == 2
+
+    run(go())
+
+
+def test_investigation_evidence_cache_reuses_store_day_query():
+    from apps.agents.investigation_service import InvestigationEvidenceCache
+
+    async def go():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            statements = []
+
+            @event.listens_for(engine.sync_engine, "before_cursor_execute")
+            def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+                if "FROM canonical_transactions" in statement:
+                    statements.append(statement)
+
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                cache = InvestigationEvidenceCache(db)
+                first_case = NS(store_id="S1", business_date="2026-10-01")
+                same_store_day = NS(store_id="S1", business_date="2026-10-01")
+
+                first_rows = await cache.source_rows(first_case, ["Source record"])
+                second_rows = await cache.source_rows(same_store_day, ["Source record"])
+
+                assert first_rows == second_rows == []
+                assert len(statements) == 1
+        finally:
+            await engine.dispose()
+
+    run(go())
+
+
+def test_investigation_source_query_honors_declared_evidence_sources_and_types():
+    from apps.agents.investigation_service import case_source_rows
+
+    async def go():
+        Session, case, _, _ = await seed()
+        async with Session() as db:
+            now = datetime.now(timezone.utc)
+            inputs = [
+                ("shopify", "Shopify", "Order"),
+                ("processor-refund", "Processor", "Refund"),
+                ("processor-sale", "Processor", "Sale"),
+            ]
+            for name, source, transaction_type in inputs:
+                source_record = SourceRecord(
+                    id=f"source-{name}", source_system=source, source_version="1",
+                    source_record_id=name, delivery_id=f"delivery-{name}", payload=b"{}",
+                    payload_hash="h", received_at=now, source_event_time=now,
+                )
+                db.add(source_record)
+                db.add(CanonicalTransaction(
+                    id=f"transaction-{name}", business_date=case.business_date,
+                    transaction_date=now, event_timestamp=now, processing_timestamp=now,
+                    settlement_date=case.business_date, transaction_type=transaction_type,
+                    source_lineage=source, signed_amount=Decimal("1"), store_id=case.store_id,
+                    channel_id="test", source_record_id=source_record.id,
+                ))
+            await db.commit()
+
+            source_rows = await case_source_rows(db, case, ["Source record"])
+            refund_rows = await case_source_rows(db, case, ["Refund confirmation"])
+            lineage_rows = await case_source_rows(db, case, ["Source transaction lineage"])
+
+            assert {record.source_system for _, record in source_rows} == {"POS"}
+            assert [(txn.transaction_type, record.source_system) for txn, record in refund_rows] == [
+                ("Refund", "Processor")
+            ]
+            assert {record.source_system for _, record in lineage_rows} == {"POS", "Shopify", "Processor"}
+
     run(go())
 
 
@@ -135,12 +250,14 @@ def test_eligibility_requires_all_permit_conditions_and_grounded_finding():
     from decimal import Decimal as D
     from apps.agents.routes import eligible
     sup = {"hypotheses": [{"verdict": "supported", "cited_ids": ["x"]}]}
-    case = NS(status="In Review", evidence_completeness=100, total_exception_amount=D("100"))
+    case = NS(status="In Review", evidence_completeness=100, total_exception_amount=D("100"), currency="USD")
     rec = NS(status="Proposed", disposition_type="Timing", financial_impact=D("0"))
     assert eligible(case, rec, sup)
     assert not eligible(case, rec, {"hypotheses": [{"verdict": "supported", "cited_ids": []}]})
     assert not eligible(NS(**{**case.__dict__, "evidence_completeness": 80}), rec, sup)
     assert not eligible(NS(**{**case.__dict__, "total_exception_amount": D("251")}), rec, sup)
+    assert not eligible(NS(**{**case.__dict__, "currency": "EUR"}), rec, sup)
+    assert not eligible(NS(**{**case.__dict__, "currency": None}), rec, sup)
     assert not eligible(case, NS(**{**rec.__dict__, "disposition_type": "Correction"}), sup)
     assert not eligible(case, NS(**{**rec.__dict__, "financial_impact": D("5")}), sup)
 

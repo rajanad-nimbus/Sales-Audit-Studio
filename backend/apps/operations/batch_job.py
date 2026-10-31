@@ -13,7 +13,6 @@ async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=(datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d"))
     ap.add_argument("--rerun", action="store_true")
-    ap.parse_args()
     args = ap.parse_args()
     async with async_session() as db:
         run = await run_daily_batch(db, args.date, trigger="schedule", rerun=args.rerun)

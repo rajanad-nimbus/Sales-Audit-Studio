@@ -4,14 +4,18 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
+import logging
 
 from alembic import context
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from database import DATABASE_URL
 from models import Base
 
 target_metadata = Base.metadata
+logger = logging.getLogger("alembic.runtime.migration")
+MIGRATION_LOCK_KEYS = (1313164626, 1296387405)
 
 
 def run_migrations_offline() -> None:
@@ -28,9 +32,25 @@ def do_run(connection) -> None:
 
 async def run_migrations_online() -> None:
     engine = create_async_engine(DATABASE_URL)
-    async with engine.connect() as connection:
-        await connection.run_sync(do_run)
-    await engine.dispose()
+    try:
+        async with engine.connect() as connection:
+            locked = connection.dialect.name == "postgresql"
+            try:
+                if locked:
+                    await connection.execute(text("SELECT pg_advisory_lock(:key1, :key2)"),
+                                             {"key1": MIGRATION_LOCK_KEYS[0], "key2": MIGRATION_LOCK_KEYS[1]})
+                    await connection.commit()
+                await connection.run_sync(do_run)
+            finally:
+                if locked:
+                    try:
+                        await connection.execute(text("SELECT pg_advisory_unlock(:key1, :key2)"),
+                                                 {"key1": MIGRATION_LOCK_KEYS[0], "key2": MIGRATION_LOCK_KEYS[1]})
+                        await connection.commit()
+                    except Exception:
+                        logger.exception("Could not release the PostgreSQL migration advisory lock")
+    finally:
+        await engine.dispose()
 
 
 if context.is_offline_mode():

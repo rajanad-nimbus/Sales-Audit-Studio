@@ -1,16 +1,21 @@
 """Action Center: server-side triage at scale (filters, facets, aggregates, bulk actions, export)."""
 import csv
 import io
+import math
 import uuid
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select, text
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import investigation_service
+from apps.search import contains_literal
+from apps.security import scope
 from integrations.ontology import nimbus
 from integrations.ontology.ontology_integration import integration as ontology_integration
 from auth import require_role
@@ -28,24 +33,43 @@ STAGES = {
 BULK_LIMIT = 1000          # max cases touched per bulk call
 HEAVY_LIMIT = 200          # max cases for agent-driven bulk actions
 BULK_APPROVE_MAX_IMPACT = 5000  # bulk approval refuses larger financial movements
+EXPORT_BATCH_SIZE = 1000
+MAX_FILTER_VALUES = 100
+FILTER_VALUE_LENGTHS = {"status": 50, "case_type": 50, "store": 50, "priority": 20}
 SORTS = {
     "sla": Case.sla_due_at, "exposure": Case.total_exposure, "amount": Case.total_exception_amount,
     "age": Case.created_at, "store": Case.store_id, "type": Case.case_type, "date": Case.business_date,
     "case_number": Case.case_number, "status": Case.status, "priority": Case.priority, "evidence": Case.evidence_completeness,
 }
+FILTER_FIELDS = frozenset({
+    "q", "stage", "status", "case_type", "store", "priority", "assignee",
+    "min_amount", "max_amount", "date_from", "date_to", "sla", "snoozed",
+})
 
 
+@dataclass(slots=True)
 class Filters:
-    def __init__(self, q: str | None = None, stage: str | None = None, status: str | None = None,
-                 case_type: str | None = None, store: str | None = None, priority: str | None = None,
-                 assignee: str | None = None, min_amount: float | None = None, max_amount: float | None = None,
-                 date_from: str | None = None, date_to: str | None = None, sla: str | None = None,
-                 snoozed: str | None = None):
-        self.__dict__.update(locals())
+    q: str | None = None
+    stage: str | None = None
+    status: str | None = None
+    case_type: str | None = None
+    store: str | None = None
+    priority: str | None = None
+    assignee: str | None = None
+    min_amount: float | None = None
+    max_amount: float | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    sla: str | None = None
+    snoozed: str | None = None
 
 
 def me_name(user: dict) -> str:
     return user["user"] or "demo.user"
+
+
+def as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def apply(stmt, f: Filters, user: dict, skip: str | None = None):
@@ -53,8 +77,9 @@ def apply(stmt, f: Filters, user: dict, skip: str | None = None):
     conds = []
     csv_ = lambda v: [x.strip() for x in v.split(",") if x.strip()]
     if f.q:
-        like = f"%{f.q.strip()}%"
-        conds.append(or_(Case.case_number.ilike(like), Case.store_id.ilike(like), Case.case_type.ilike(like)))
+        conds.append(or_(contains_literal(Case.case_number, f.q),
+                         contains_literal(Case.store_id, f.q),
+                         contains_literal(Case.case_type, f.q)))
     if f.stage and skip != "stage" and f.stage in STAGES:
         conds.append(Case.status.in_(STAGES[f.stage]))
     if f.status and skip != "status":
@@ -86,41 +111,91 @@ def apply(stmt, f: Filters, user: dict, skip: str | None = None):
         conds.append(Case.snoozed_until > now)
     elif f.snoozed != "all":
         conds.append(or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now))
-    return stmt.where(*conds) if conds else stmt
+    stmt = stmt.where(*conds) if conds else stmt
+    return scope.restrict(stmt, user, Case.store_id)
 
 
 def filters(q: str | None = None, stage: str | None = None, status: str | None = None, case_type: str | None = None,
             store: str | None = None, priority: str | None = None, assignee: str | None = None,
-            min_amount: float | None = None, max_amount: float | None = None, date_from: str | None = None,
-            date_to: str | None = None, sla: str | None = None, snoozed: str | None = None) -> Filters:
-    return Filters(q, stage, status, case_type, store, priority, assignee, min_amount, max_amount,
-                   date_from, date_to, sla, snoozed)
+            min_amount: float | None = None, max_amount: float | None = None,
+            date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+            date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+            sla: str | None = None, snoozed: str | None = None) -> Filters:
+    for field, value in {
+        "q": q,
+        "stage": stage,
+        "status": status,
+        "case_type": case_type,
+        "store": store,
+        "priority": priority,
+        "assignee": assignee,
+        "sla": sla,
+        "snoozed": snoozed,
+    }.items():
+        if value is None:
+            continue
+        values = [item.strip() for item in value.split(",") if item.strip()]
+        if field in FILTER_VALUE_LENGTHS:
+            max_length = FILTER_VALUE_LENGTHS[field]
+            if len(values) > MAX_FILTER_VALUES or any(len(item) > max_length for item in values):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field} supports at most {MAX_FILTER_VALUES} values of {max_length} characters",
+                )
+        elif len(value) > 255:
+            raise HTTPException(status_code=422, detail=f"{field} must be at most 255 characters")
+    date_from = _validated_filter_date(date_from, "date_from")
+    date_to = _validated_filter_date(date_to, "date_to")
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must not be after date_to")
+    return Filters(
+        q=q, stage=stage, status=status, case_type=case_type, store=store,
+        priority=priority, assignee=assignee, min_amount=min_amount, max_amount=max_amount,
+        date_from=date_from, date_to=date_to, sla=sla, snoozed=snoozed,
+    )
+
+
+def _validated_filter_date(value: str | None, field: str) -> str | None:
+    if value is None:
+        return None
+    try:
+        normalized = date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} must be a valid YYYY-MM-DD date") from exc
+    if normalized != value:
+        raise HTTPException(status_code=422, detail=f"{field} must use YYYY-MM-DD")
+    return normalized
 
 
 def sla_state(c: Case, now: datetime) -> str:
     if c.status == "Closed" or not c.sla_due_at:
         return "none"
-    if c.sla_due_at < now:
+    if as_utc(c.sla_due_at) < now:
         return "breached"
-    return "at_risk" if c.sla_due_at < now + timedelta(hours=8) else "ok"
+    return "at_risk" if as_utc(c.sla_due_at) < now + timedelta(hours=8) else "ok"
 
 
 def row(c: Case, now: datetime) -> dict:
     return {"id": c.id, "case_number": c.case_number, "case_type": c.case_type, "store_id": c.store_id,
+            "currency": c.currency,
+            "amount_needs_review": c.amount_needs_review,
             "business_date": c.business_date, "status": c.status, "priority": c.priority,
             "amount": str(c.total_exception_amount), "exposure": str(c.total_exposure),
             "evidence": c.evidence_completeness, "investigation_status": c.investigation_status, "assigned_to": c.assigned_to,
             "sla_due_at": c.sla_due_at, "sla_state": sla_state(c, now), "snoozed_until": c.snoozed_until,
-            "age_hours": int((now - c.created_at).total_seconds() // 3600)}
+            "age_hours": int((now - as_utc(c.created_at)).total_seconds() // 3600)}
 
 
 @router.get("/cases")
-async def list_cases(f: Filters = Depends(filters), sort: str = "sla", dir: str = "asc",
-                     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100),
+async def list_cases(f: Filters = Depends(filters),
+                     sort: Literal["sla", "exposure", "amount", "age", "store", "type", "date",
+                                   "case_number", "status", "priority", "evidence"] = "sla",
+                     dir: Literal["asc", "desc"] = "asc",
+                     page: int = Query(1, ge=1, le=10_000), page_size: int = Query(50, ge=1, le=100),
                      db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
     now = datetime.now(timezone.utc)
     total = (await db.execute(apply(select(func.count()).select_from(Case), f, user))).scalar() or 0
-    col = SORTS.get(sort, Case.sla_due_at)
+    col = SORTS[sort]
     order = col.desc().nulls_last() if dir == "desc" else col.asc().nulls_last()
     stmt = apply(select(Case), f, user).order_by(order, Case.id).offset((page - 1) * page_size).limit(page_size)
     items = [row(c, now) for c in (await db.execute(stmt)).scalars().all()]
@@ -147,13 +222,21 @@ async def summary(db: AsyncSession = Depends(get_db), user: dict = Depends(requi
     visible = or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now)
 
     async def one(*conds, expr=func.count()):
-        return (await db.execute(select(expr).select_from(Case).where(*conds))).scalar() or 0
+        stmt = scope.restrict(select(expr).select_from(Case).where(*conds), user, Case.store_id)
+        return (await db.execute(stmt)).scalar() or 0
 
     closed = await one(Case.status == "Closed")
-    manual = (await db.execute(select(func.count(func.distinct(HumanDecision.case_id))).where(
-        HumanDecision.decision_type.in_(["Finance", "IT"])))).scalar() or 0
-    days = (await db.execute(select(Case.business_date, func.count()).group_by(Case.business_date)
-                             .order_by(Case.business_date.desc()).limit(14))).all()
+    manual_query = select(func.count(func.distinct(HumanDecision.case_id))).join(Case, Case.id == HumanDecision.case_id).where(
+        HumanDecision.decision_type.in_(["Finance", "IT"]), Case.status == "Closed")
+    manual = (await db.execute(scope.restrict(manual_query, user, Case.store_id))).scalar() or 0
+    days_query = select(Case.business_date, func.count()).group_by(Case.business_date).order_by(Case.business_date.desc()).limit(14)
+    days = (await db.execute(scope.restrict(days_query, user, Case.store_id))).all()
+    currency_query = (select(Case.currency, func.sum(Case.total_exception_amount), func.sum(Case.total_exposure))
+                      .where(live, Case.amount_needs_review.is_(False)).group_by(Case.currency))
+    amounts = (await db.execute(scope.restrict(currency_query, user, Case.store_id))).all()
+    amount_by_currency = [{"currency": currency, "amount": str(amount), "exposure": str(exposure)}
+                          for currency, amount, exposure in amounts]
+    single = amounts[0] if len(amounts) == 1 and amounts[0][0] else None
     return {
         "needs_decision": await one(Case.status == "In Review", visible),
         "agent_prepared": await one(Case.investigation_status == "Ready for Decision", visible),
@@ -164,8 +247,10 @@ async def summary(db: AsyncSession = Depends(get_db), user: dict = Depends(requi
         "mine": await one(live, Case.assigned_to == me_name(user)),
         "snoozed": await one(live, Case.snoozed_until > now),
         "open_total": await one(live),
-        "open_exposure": str(await one(live, expr=func.coalesce(func.sum(Case.total_exposure), 0))),
-        "open_amount": str(await one(live, expr=func.coalesce(func.sum(Case.total_exception_amount), 0))),
+        "open_exposure": str(single[2]) if single else "0" if not amounts else None,
+        "open_amount": str(single[1]) if single else "0" if not amounts else None,
+        "currency": single[0] if single else None, "amounts_by_currency": amount_by_currency,
+        "stale_amount_cases": await one(live, Case.amount_needs_review.is_(True)),
         "stores_affected": await one(live, expr=func.count(func.distinct(Case.store_id))),
         "closed": closed,
         "straight_through_rate": round(100 * max(closed - manual, 0) / closed, 1) if closed else None,
@@ -181,20 +266,83 @@ async def groups(by: str = "case_type", f: Filters = Depends(filters), db: Async
     if col is None:
         raise HTTPException(status_code=400, detail="Unknown grouping")
     now = datetime.now(timezone.utc)
+    top = (apply(select(col.label("k"), func.count().label("n")).group_by(col), f, user)
+           .order_by(func.count().desc(), col).limit(100).subquery())
     stmt = apply(select(
-        col.label("k"), func.count(), func.coalesce(func.sum(Case.total_exception_amount), 0),
-        func.coalesce(func.sum(Case.total_exposure), 0),
+        col.label("k"), Case.currency, func.count(),
+        func.coalesce(func.sum(case((Case.amount_needs_review.is_(False), Case.total_exception_amount), else_=0)), 0),
+        func.coalesce(func.sum(case((Case.amount_needs_review.is_(False), Case.total_exposure), else_=0)), 0),
         func.count().filter(and_(Case.status != "Closed", Case.sla_due_at < now)), func.min(Case.created_at),
-    ).group_by(col), f, user).order_by(func.sum(Case.total_exposure).desc().nulls_last()).limit(100)
-    return [{"key": k, "count": n, "amount": str(a), "exposure": str(e), "breached": b,
-             "oldest_hours": int((now - o).total_seconds() // 3600)} for k, n, a, e, b, o in (await db.execute(stmt)).all()]
+        func.count().filter(Case.amount_needs_review.is_(True)),
+    ).where(col.in_(select(top.c.k))).group_by(col, Case.currency), f, user)
+    grouped = {}
+    for key, currency, count, amount, exposure, breached, oldest, stale_count in (await db.execute(stmt)).all():
+        item = grouped.setdefault(key, {"key": key, "count": 0, "breached": 0, "oldest": oldest, "stale_amount_cases": 0, "amounts_by_currency": []})
+        item["count"] += count
+        item["breached"] += breached
+        item["stale_amount_cases"] += stale_count
+        item["oldest"] = min(item["oldest"], oldest)
+        item["amounts_by_currency"].append({"currency": currency, "amount": str(amount), "exposure": str(exposure)})
+    result = []
+    for item in grouped.values():
+        amounts = item["amounts_by_currency"]
+        single = amounts[0] if len(amounts) == 1 and amounts[0]["currency"] and not item["stale_amount_cases"] else None
+        item["currency"] = single["currency"] if single else None
+        item["amount"] = single["amount"] if single else None
+        item["exposure"] = single["exposure"] if single else None
+        item["oldest_hours"] = int((now - as_utc(item.pop("oldest"))).total_seconds() // 3600)
+        result.append(item)
+    return sorted(result, key=lambda item: (-item["count"], str(item["key"])))[:100]
 
 
 class BulkRequest(BaseModel):
-    action: str
-    ids: list[str] | None = None
-    select_all: dict | None = None
-    params: dict = {}
+    action: Literal["assign", "unassign", "priority", "snooze", "unsnooze",
+                    "investigate", "approve", "escalate", "advance"]
+    ids: list[Annotated[str, Field(min_length=1, max_length=36)]] | None = Field(default=None, max_length=10_000)
+    select_all: dict[str, object] | None = Field(default=None, max_length=20)
+    params: dict = Field(default_factory=dict, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_action_parameters(self):
+        allowed_params = {
+            "assign": {"assignee"},
+            "priority": {"priority"},
+            "snooze": {"hours"},
+        }.get(self.action, set())
+        unexpected_params = self.params.keys() - allowed_params
+        if unexpected_params:
+            raise ValueError(f"unsupported parameters for {self.action}: {', '.join(sorted(unexpected_params))}")
+
+        if self.action == "snooze":
+            hours = self.params.get("hours", 24)
+            try:
+                valid_hours = (
+                    not isinstance(hours, bool)
+                    and isinstance(hours, (int, float))
+                    and math.isfinite(float(hours))
+                    and 0 < hours <= 8760
+                )
+            except (OverflowError, ValueError):
+                valid_hours = False
+            if not valid_hours:
+                raise ValueError("snooze hours must be greater than zero and no more than one year")
+        if self.action == "assign":
+            assignee = self.params.get("assignee", "me")
+            if not isinstance(assignee, str) or not assignee.strip() or len(assignee) > 255:
+                raise ValueError("assignee must be a nonempty string of at most 255 characters")
+        if self.action == "priority":
+            priority = self.params.get("priority")
+            if not isinstance(priority, str) or priority not in nimbus.SLA_HOURS:
+                raise ValueError("priority must be a supported priority")
+        if self.select_all is not None:
+            for key, value in self.select_all.items():
+                if key not in FILTER_FIELDS:
+                    raise ValueError(f"unsupported select_all filter: {key}")
+                if len(key) > 50 or (isinstance(value, str) and len(value) > 500):
+                    raise ValueError("select_all filter keys and values exceed the supported length")
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"select_all filter {key} must be a string")
+        return self
 
 
 @router.post("/bulk")
@@ -204,12 +352,19 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         stmt = select(Case).where(Case.id.in_(req.ids[:BULK_LIMIT]))
         truncated = len(req.ids) > BULK_LIMIT
     elif req.select_all is not None:
-        stmt = apply(select(Case), Filters(**{k: v for k, v in req.select_all.items() if k in Filters.__init__.__code__.co_varnames}), user)
+        stmt = apply(
+            select(Case),
+            filters(**req.select_all),
+            user,
+        )
         stmt = stmt.order_by(Case.sla_due_at.asc().nulls_last()).limit(BULK_LIMIT + 1)
         truncated = False
     else:
         raise HTTPException(status_code=400, detail="Provide ids or select_all")
-    cases = list((await db.execute(stmt)).scalars().all())
+    cases = list((await db.execute(stmt.order_by(Case.id).with_for_update().execution_options(populate_existing=True))).scalars().all())
+    if req.ids:
+        for case in cases:
+            scope.require_store(user, case.store_id)
     if req.select_all is not None and len(cases) > BULK_LIMIT:
         cases, truncated = cases[:BULK_LIMIT], True
 
@@ -218,6 +373,7 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         cases, truncated = cases[:HEAVY_LIMIT], True
 
     ok, skipped = 0, []
+    evidence_cache = investigation_service.InvestigationEvidenceCache(db)
     skip = lambda c, why: skipped.append({"case_number": c.case_number, "reason": why})
     now = datetime.now(timezone.utc)
 
@@ -236,18 +392,22 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
         elif a == "unsnooze":
             c.snoozed_until = None; ok += 1
         elif a == "investigate":
+            if c.amount_needs_review: skip(c, "case amounts require finance review"); continue
             if c.status not in ("Open", "In Investigation"): skip(c, f"already {c.status}"); continue
             excs = (await db.execute(select(DBException).where(DBException.case_id == c.id))).scalars().all()
             if not excs: skip(c, "no exception records to investigate"); continue
-            await investigation_service.run_investigation(db, c, excs); ok += 1
+            await investigation_service.run_investigation(db, c, excs, evidence_cache=evidence_cache); ok += 1
         elif a in ("approve", "escalate"):
             if user["role"] not in ("finance", "admin"): skip(c, "requires finance role"); continue
             if c.status != "In Review": skip(c, f"not awaiting decision ({c.status})"); continue
             rec = (await db.execute(select(Recommendation).where(
-                Recommendation.case_id == c.id, Recommendation.status == "Proposed"))).scalars().first()
+                Recommendation.case_id == c.id, Recommendation.status == "Proposed").order_by(
+                    Recommendation.created_at.desc(), Recommendation.id.desc()).limit(1))).scalars().first()
             if not rec: skip(c, "no open recommendation"); continue
             if a == "approve":
-                if rec.financial_impact > BULK_APPROVE_MAX_IMPACT:
+                if rec.financial_impact != 0 and c.currency != nimbus.THRESHOLD_CURRENCY:
+                    skip(c, "bulk financial limit is in USD; review this currency individually"); continue
+                if abs(rec.financial_impact) > BULK_APPROVE_MAX_IMPACT:
                     skip(c, f"financial movement above bulk limit ({BULK_APPROVE_MAX_IMPACT}); review individually"); continue
                 if nimbus.evaluate_policy(db, c, rec, await ontology_integration.refresh()).outcome == "RequestEvidence":
                     skip(c, "policy: evidence incomplete"); continue
@@ -289,18 +449,30 @@ async def bulk(req: BulkRequest, db: AsyncSession = Depends(get_db), user: dict 
 async def export_csv(f: Filters = Depends(filters), sort: str = "sla", dir: str = "asc",
                      db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
     col = SORTS.get(sort, Case.sla_due_at)
-    stmt = apply(select(Case), f, user).order_by(col.desc().nulls_last() if dir == "desc" else col.asc().nulls_last()).limit(50000)
-    now = datetime.now(timezone.utc)
-    buf = io.StringIO()
-    w = csv.writer(buf)
     cols = ["case_number", "case_type", "store_id", "business_date", "status", "priority", "amount", "exposure",
             "evidence", "assigned_to", "sla_due_at", "sla_state", "age_hours"]
-    w.writerow(cols)
-    for c in (await db.execute(stmt)).scalars().all():
-        r = row(c, now)
-        w.writerow([r[k] for k in cols])
-    buf.seek(0)
-    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
+
+    async def generate():
+        now = datetime.now(timezone.utc)
+        descending = dir.lower() == "desc"
+
+        def csv_line(values):
+            buffer = io.StringIO()
+            csv.writer(buffer).writerow(values)
+            return buffer.getvalue()
+
+        yield csv_line(cols)
+        ordering = col.desc().nulls_last() if descending else col.asc().nulls_last()
+        stmt = apply(select(Case), f, user).order_by(ordering, Case.id).limit(50000)
+        result = await db.stream(stmt.execution_options(yield_per=EXPORT_BATCH_SIZE))
+        try:
+            async for case_row in result.scalars():
+                values = row(case_row, now)
+                yield csv_line([values[key] for key in cols])
+        finally:
+            await result.close()
+
+    return StreamingResponse(generate(), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=action-center.csv"})
 
 

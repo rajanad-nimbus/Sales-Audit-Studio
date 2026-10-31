@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
-    DateTime, ForeignKey, String, Text, Numeric, Integer, Boolean,
-    LargeBinary, JSON, Index, UniqueConstraint
+    CheckConstraint, DateTime, ForeignKey, String, Text, Numeric, Integer, Boolean,
+    LargeBinary, JSON, Index, UniqueConstraint, text
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -33,6 +33,12 @@ class SourceRecord(Base):
     status: Mapped[str] = mapped_column(String(50), default="Received", index=True)
     quarantine_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (
+        Index("ix_source_records_system_event_time", "source_system", "source_event_time"),
+        Index("ix_source_records_system_status_id", "source_system", "status", "id"),
+        Index("ix_source_records_system_record_id", "source_system", "source_record_id"),
+        Index("ix_source_records_system_delivery", "source_system", "delivery_id"),
+    )
 
 
 class CanonicalTransaction(Base):
@@ -53,21 +59,34 @@ class CanonicalTransaction(Base):
     quantity: Mapped[int | None] = mapped_column(Integer)
     store_id: Mapped[str] = mapped_column(String(50), index=True)
     register_id: Mapped[str | None] = mapped_column(String(50))
+    cashier_id: Mapped[str | None] = mapped_column(String(100))
     channel_id: Mapped[str] = mapped_column(String(50))
-    tender_type: Mapped[str | None] = mapped_column(String(50))
+    tender_type: Mapped[str | None] = mapped_column(String(50), index=True)
     payment_reference: Mapped[str | None] = mapped_column(String(255), index=True)
     settlement_reference: Mapped[str | None] = mapped_column(String(255))
     reconciliation_status: Mapped[str] = mapped_column(String(50), default="Unmatched", index=True)
     source_record_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("source_records.id"), index=True)
     disposition: Mapped[str] = mapped_column(String(50), default="Open")
     # Returns point at the sale they reverse. The reference is what the feed sent; the id is set once that sale is found.
-    original_reference: Mapped[str | None] = mapped_column(String(255), index=True)
-    original_transaction_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("canonical_transactions.id"), index=True)
+    original_reference: Mapped[str | None] = mapped_column(String(255))
+    original_transaction_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("canonical_transactions.id"))
     return_reason: Mapped[str | None] = mapped_column(String(255))
-    detail_status: Mapped[str] = mapped_column(String(20), default="No detail", index=True)   # No detail | Balanced | Unbalanced
+    detail_status: Mapped[str] = mapped_column(String(20), default="No detail", server_default="No detail")  # No detail | Balanced | Unbalanced
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_ct_store_business_date_type", "store_id", "business_date", "transaction_type"),
+        Index("ix_ct_original_reference", "original_reference"),
+        Index("ix_ct_original_transaction_id", "original_transaction_id"),
+        Index("ix_ct_detail_status", "detail_status"),
+        Index(
+            "ix_ct_pending_return_link", "store_id", "original_reference", "id",
+            postgresql_where=text("transaction_type = 'Return' AND original_transaction_id IS NULL"),
+            sqlite_where=text("transaction_type = 'Return' AND original_transaction_id IS NULL"),
+        ),
     )
 
 
@@ -102,6 +121,8 @@ class Case(Base):
     case_type: Mapped[str] = mapped_column(String(50))
     business_date: Mapped[str] = mapped_column(String(10), index=True)
     store_id: Mapped[str] = mapped_column(String(50), index=True)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    amount_needs_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     total_exception_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
     total_exposure: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
     investigation_status: Mapped[str] = mapped_column(String(50), default="Pending")
@@ -136,6 +157,10 @@ class EvidenceSnapshot(Base):
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     staleness_threshold: Mapped[int] = mapped_column(Integer, default=14400)  # 4 hours in seconds
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index(
+        "ix_evidence_snapshots_case_retrieved_id", "case_id", "retrieved_at", "id"
+    ),)
 
 
 class CaseNote(Base):
@@ -197,6 +222,16 @@ class Recommendation(Base):
     confidence: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(50), default="Proposed")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index(
+            "uq_recommendations_one_proposed_per_case",
+            "case_id",
+            unique=True,
+            postgresql_where=text("status = 'Proposed'"),
+            sqlite_where=text("status = 'Proposed'"),
+        ),
+    )
 
 
 class HumanDecision(Base):
@@ -266,6 +301,11 @@ class AuditEvent(Base):
     prev_hash: Mapped[str | None] = mapped_column(String(64))
     hash: Mapped[str | None] = mapped_column(String(64))
 
+    __table_args__ = (
+        Index("ix_audit_events_case_seq", "case_id", "seq"),
+        Index("ix_audit_events_object_seq", "object_type", "object_id", "seq"),
+    )
+
 
 class PolicyEvaluation(Base):
     """Deterministic policy gate result for a recommendation"""
@@ -286,10 +326,33 @@ class Connector(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
-    state: Mapped[str] = mapped_column(String(50), default="Healthy")
-    mode: Mapped[str] = mapped_column(String(50), default="Governed Automation")
+    state: Mapped[str] = mapped_column(String(50), default="Unknown")
+    mode: Mapped[str] = mapped_column(String(50), default="Not Configured")
     last_error: Mapped[str | None] = mapped_column(Text)
-    last_checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SourceSetting(Base):
+    """Per-source switches: whether a source is accepted at all, joins the daily batch, and allows a manual sync or upload.
+    A source with no row behaves as today: on, in the batch (Shopify only when its connector is configured), manual allowed."""
+    __tablename__ = "source_settings"
+
+    source_system: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    in_daily_batch: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    manual_sync: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Scheduled sync for sources Nimbus pulls itself: "daily" or "weekly" at sync_time (HH:MM) in sync_timezone,
+    # on sync_weekday (0 = Monday) when weekly. None means not scheduled.
+    sync_frequency: Mapped[str | None] = mapped_column(String(8))
+    sync_time: Mapped[str | None] = mapped_column(String(5))
+    sync_weekday: Mapped[int | None] = mapped_column(Integer)
+    sync_timezone: Mapped[str | None] = mapped_column(String(64))
+    last_scheduled_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_scheduled_status: Mapped[str | None] = mapped_column(String(16))
+    last_scheduled_message: Mapped[str | None] = mapped_column(String(255))
+    updated_by: Mapped[str | None] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                  server_default=text("now()"), onupdate=utcnow)
 
 
 class SourceFeedProfile(Base):
@@ -314,6 +377,7 @@ class StoreDay(Base):
     business_date: Mapped[str] = mapped_column(String(10), index=True)
     status: Mapped[str] = mapped_column(String(32), default="Open", index=True)
     audit_version: Mapped[int] = mapped_column(Integer, default=0)
+    totals_stale: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_by: Mapped[str | None] = mapped_column(String(255))
     reopened_by: Mapped[str | None] = mapped_column(String(255))
@@ -330,6 +394,8 @@ class AuditTotal(Base):
     store_day_id: Mapped[str] = mapped_column(String(36), ForeignKey("store_days.id"), index=True)
     audit_version: Mapped[int] = mapped_column(Integer, index=True)
     total_name: Mapped[str] = mapped_column(String(100))
+    definition_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("audit_total_definitions.id"))
+    definition_revision: Mapped[int | None] = mapped_column(Integer)
     level: Mapped[str] = mapped_column(String(24), default="Store")
     dimension_key: Mapped[str | None] = mapped_column(String(100))
     calculated_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
@@ -358,12 +424,20 @@ class ReconciliationPolicy(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
     amount_tolerance: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
+    amount_tolerance_currency: Mapped[str] = mapped_column(String(3), default="USD", server_default="USD")
     settlement_day_tolerance: Mapped[int] = mapped_column(Integer, default=0)
-    gap_min_count: Mapped[int] = mapped_column(Integer, default=10)          # a missing-transaction gap is "big" from this many...
-    gap_share: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.1"))   # ...and this share of the declared count
+    gap_min_count: Mapped[int] = mapped_column(Integer, default=10, server_default="10")  # a missing-transaction gap is "big" from this many...
+    gap_share: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.1"), server_default="0.1")  # ...and this share of the declared count
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    __table_args__ = (Index(
+        "uq_reconciliation_policies_one_active",
+        "active",
+        unique=True,
+        postgresql_where=text("active IS TRUE"),
+        sqlite_where=text("active = 1"),
+    ),)
 
 
 class ReconciliationMatch(Base):
@@ -371,6 +445,7 @@ class ReconciliationMatch(Base):
     __tablename__ = "reconciliation_matches"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     transaction_ids: Mapped[list] = mapped_column(JSON)
+    store_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     match_type: Mapped[str] = mapped_column(String(50))
     status: Mapped[str] = mapped_column(String(24), default="Proposed", index=True)
     rationale: Mapped[str] = mapped_column(Text)
@@ -378,6 +453,10 @@ class ReconciliationMatch(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(255))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (CheckConstraint(
+        "status IN ('Proposed', 'Approved', 'Rejected')",
+        name="ck_reconciliation_matches_status",
+    ), Index("ix_reconciliation_matches_store_created_id", "store_id", "created_at", "id"))
 
 
 class FoundationReference(Base):
@@ -392,6 +471,33 @@ class FoundationReference(Base):
     updated_by: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     __table_args__ = (UniqueConstraint("category", "code", name="uq_foundation_reference_category_code"),)
+
+
+class ShopifyReferenceStage(Base):
+    """Durable, isolated snapshot rows awaiting an atomic Shopify reference sync."""
+    __tablename__ = "shopify_reference_stage"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    sync_id: Mapped[str] = mapped_column(String(36), index=True)
+    generation: Mapped[int] = mapped_column(Integer)
+    category: Mapped[str] = mapped_column(String(50))
+    code: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(255))
+    active: Mapped[bool] = mapped_column(Boolean)
+    attributes: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, server_default=text("CURRENT_TIMESTAMP"))
+    __table_args__ = (
+        UniqueConstraint("sync_id", "category", "code", name="uq_shopify_reference_stage_sync_code"),
+        Index("ix_shopify_reference_stage_sync_id_id", "sync_id", "id"),
+        Index("ix_shopify_reference_stage_created_at", "created_at"),
+    )
+
+
+class ShopifyReferenceSyncState(Base):
+    """Database-wide ordering for concurrent Shopify catalog snapshots."""
+    __tablename__ = "shopify_reference_sync_state"
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    applied_generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class CashControl(Base):
@@ -443,6 +549,14 @@ class TransactionAdjustment(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(255))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('Proposed', 'Approved', 'Rejected')",
+            name="ck_transaction_adjustments_status",
+        ),
+        Index("ix_transaction_adjustments_created_id", "created_at", "id"),
+        Index("ix_transaction_adjustments_status_created_id", "status", "created_at", "id"),
+    )
 
 
 class GLCrossReference(Base):
@@ -455,46 +569,58 @@ class GLCrossReference(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-    __table_args__ = (UniqueConstraint("transaction_type", "tender_type", name="uq_gl_cross_reference"),)
+    __table_args__ = (
+        UniqueConstraint("transaction_type", "tender_type", name="uq_gl_cross_reference"),
+        Index(
+            "uq_gl_cross_reference_default_by_type",
+            "transaction_type",
+            unique=True,
+            postgresql_where=text("tender_type IS NULL"),
+            sqlite_where=text("tender_type IS NULL"),
+        ),
+    )
 
 
 class AuditTotalDefinition(Base):
     """Retailer-defined total evaluated against immutable canonical transactions."""
     __tablename__ = "audit_total_definitions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), index=True)
-    revision: Mapped[int] = mapped_column(Integer, default=1)
+    name: Mapped[str] = mapped_column(String(100))
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     description: Mapped[str | None] = mapped_column(Text)
     start_date: Mapped[str | None] = mapped_column(String(10))
     end_date: Mapped[str | None] = mapped_column(String(10))
-    category: Mapped[str] = mapped_column(String(50), default="Miscellaneous")
+    category: Mapped[str] = mapped_column(String(50), default="Miscellaneous", server_default="Miscellaneous")
     over_short_group: Mapped[str | None] = mapped_column(String(32))
     over_short_operator: Mapped[str | None] = mapped_column(String(8))
-    calculation_basis: Mapped[str] = mapped_column(String(32), default="Raw")
-    status: Mapped[str] = mapped_column(String(24), default="Worksheet")
+    calculation_basis: Mapped[str] = mapped_column(String(32), default="Raw", server_default="Raw")
+    status: Mapped[str] = mapped_column(String(24), default="Worksheet", server_default="Worksheet")
     aggregation: Mapped[str] = mapped_column(String(16), default="Sum")
-    measure: Mapped[str] = mapped_column(String(16), default="Amount")      # Amount (header amount) | Tax (tax recorded in the detail)
+    measure: Mapped[str] = mapped_column(String(16), default="Amount", server_default="Amount")  # Amount (header amount) | Tax (tax recorded in the detail)
     source_system: Mapped[str | None] = mapped_column(String(50))
     transaction_types: Mapped[list] = mapped_column(JSON, default=list)
     tender_type: Mapped[str | None] = mapped_column(String(50))
     level: Mapped[str] = mapped_column(String(24), default="Store")
-    corresponds_to_rtlog: Mapped[bool] = mapped_column(Boolean, default=False)
-    system_calculated: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_with_wizard: Mapped[bool] = mapped_column(Boolean, default=True)
-    required_by_system: Mapped[bool] = mapped_column(Boolean, default=False)
-    display_group: Mapped[int] = mapped_column(Integer, default=0)
-    realms: Mapped[list] = mapped_column(JSON, default=list)
-    joins: Mapped[list] = mapped_column(JSON, default=list)
-    parameters: Mapped[list] = mapped_column(JSON, default=list)
-    rollups: Mapped[list] = mapped_column(JSON, default=list)
-    restrictions: Mapped[list] = mapped_column(JSON, default=list)
-    combined_total_ids: Mapped[list] = mapped_column(JSON, default=list)
-    location_traits: Mapped[list] = mapped_column(JSON, default=list)
-    usages: Mapped[list] = mapped_column(JSON, default=list)
+    corresponds_to_rtlog: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    system_calculated: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_with_wizard: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    required_by_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    display_group: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    realms: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    joins: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    parameters: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    rollups: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    restrictions: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    combined_total_ids: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    combined_operator: Mapped[str | None] = mapped_column(String(1))
+    location_traits: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    usages: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     sql_statement: Mapped[str | None] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (Index("ix_audit_total_definitions_name_revision", "name", "revision", unique=True),)
 
 
 class SalesAuditErrorDefinition(Base):
@@ -505,7 +631,7 @@ class SalesAuditErrorDefinition(Base):
     form: Mapped[str | None] = mapped_column(String(100))
     tab: Mapped[str | None] = mapped_column(String(100))
     recommended_solution: Mapped[str] = mapped_column(Text)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
 class ConfiguredAuditRule(Base):
@@ -515,6 +641,7 @@ class ConfiguredAuditRule(Base):
     name: Mapped[str] = mapped_column(String(150), unique=True)
     total_name: Mapped[str] = mapped_column(String(150))
     threshold: Mapped[Decimal] = mapped_column(Numeric(15, 2))
+    threshold_currency: Mapped[str | None] = mapped_column(String(3).evaluates_none(), default="USD", server_default="USD")
     severity: Mapped[str] = mapped_column(String(20), default="Medium")
     owner: Mapped[str | None] = mapped_column(String(255))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -558,12 +685,21 @@ class BatchRun(Base):
     status: Mapped[str] = mapped_column(String(20), index=True, default="Running")
     trigger: Mapped[str] = mapped_column(String(30), default="manual")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_counts: Mapped[dict | None] = mapped_column(JSON)
     transactions_loaded: Mapped[int] = mapped_column(Integer, default=0)
     matched_pairs: Mapped[int] = mapped_column(Integer, default=0)
     cases_created: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index(
+            "uq_batch_runs_one_running_per_date", "business_date", unique=True,
+            postgresql_where=text("status = 'Running'"), sqlite_where=text("status = 'Running'"),
+        ),
+        Index("ix_batch_runs_status_finished_at", "status", "finished_at"),
+    )
 
 
 class ExportDestination(Base):
@@ -587,6 +723,8 @@ class ExportBatch(Base):
     destination_id: Mapped[str] = mapped_column(String(36), ForeignKey("export_destinations.id"), index=True)
     dataset: Mapped[str] = mapped_column(String(30), index=True)
     status: Mapped[str] = mapped_column(String(20), index=True, default="Pending")  # Pending|Sent|Acknowledged|Failed
+    delivery_attempt_id: Mapped[str | None] = mapped_column(String(36))
+    attempt_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     record_count: Mapped[int] = mapped_column(Integer, default=0)
     payload: Mapped[str | None] = mapped_column(Text)
     payload_hash: Mapped[str | None] = mapped_column(String(64))
@@ -602,7 +740,7 @@ class ExportBatch(Base):
     response_ref: Mapped[str | None] = mapped_column(String(255))
     error: Mapped[str | None] = mapped_column(Text)
     retries: Mapped[int] = mapped_column(Integer, default=0)
-    backposted_count: Mapped[int] = mapped_column(Integer, default=0)  # records for an earlier or already-exported business day
+    backposted_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # records for an earlier or already-exported business day
 
 
 class ExportItem(Base):
@@ -617,14 +755,25 @@ class ExportItem(Base):
     object_version: Mapped[str] = mapped_column(String(40), default="v1")
     # Manifest of what each batch holds. A record is reserved for its batch the moment the batch is created, so it
     # can never be sent twice, and stays "Pending" until the batch is delivered.
-    state: Mapped[str] = mapped_column(String(20), default="Pending")      # Pending | Delivered
+    state: Mapped[str] = mapped_column(String(20), default="Pending", server_default="Pending")  # Pending | Delivered
     record_ref: Mapped[str | None] = mapped_column(String(120))              # case number or journal id
     store_id: Mapped[str | None] = mapped_column(String(50))
     business_date: Mapped[str | None] = mapped_column(String(10))
-    backpost: Mapped[bool] = mapped_column(Boolean, default=False)
+    backpost: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (UniqueConstraint("destination_id", "dataset", "object_id", "object_version", name="uq_export_item"),)
+
+
+class TestSinkReceipt(Base):
+    """Durable deduplication receipt for the built-in demonstration receiver."""
+    __tablename__ = "test_sink_receipts"
+
+    idempotency_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dataset: Mapped[str] = mapped_column(String(30))
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    byte_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class TransactionLine(Base):
@@ -639,8 +788,8 @@ class TransactionLine(Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     gross_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     tax_code: Mapped[str | None] = mapped_column(String(30))
-    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=0)
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=0, server_default="0")
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0, server_default="0")
     return_reason: Mapped[str | None] = mapped_column(String(255))
 
 
@@ -651,9 +800,9 @@ class TransactionTax(Base):
     transaction_id: Mapped[str] = mapped_column(String(36), ForeignKey("canonical_transactions.id"), index=True)
     tax_code: Mapped[str] = mapped_column(String(30))
     tax_name: Mapped[str] = mapped_column(String(100))
-    rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=0)
-    taxable_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
+    rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=0, server_default="0")
+    taxable_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0, server_default="0")
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0, server_default="0")
 
 
 class TransactionDiscount(Base):

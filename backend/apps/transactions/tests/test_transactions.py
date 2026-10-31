@@ -66,6 +66,8 @@ def test_filters_search_sort_and_status_spread():
             assert by_status["by_status"] == {"Matched": 3, "Exception": 1}      # the tiles keep showing the whole spread
             assert ids(await rt.list_transactions(q="PAY-1", db=db, _=USER)) and set(ids(await rt.list_transactions(q="PAY-1", db=db, _=USER))) == {"t1", "t2"}
             assert ids(await rt.list_transactions(q="SRC-t4", db=db, _=USER)) == ["t4"]         # matches the source record id too
+            assert ids(await rt.list_transactions(q="%", db=db, _=USER)) == []
+            assert ids(await rt.list_transactions(q="_", db=db, _=USER)) == []
             assert set(ids(await rt.list_transactions(date_from="2026-10-02", date_to="2026-10-02", db=db, _=USER))) == {"t3", "t4"}
             assert ids(await rt.list_transactions(sort="amount", dir="asc", db=db, _=USER))[0] == "t4"
             paged = await rt.list_transactions(page=2, page_size=3, db=db, _=USER)
@@ -80,6 +82,21 @@ def test_facets_lists_what_exists():
             f = await rt.facets(db=db, _=USER)
             assert f["stores"] == ["S1", "S2"] and f["sources"] == ["Bank", "POS", "Processor"]
             assert f["statuses"] == ["Exception", "Matched"] and f["date_min"] == "2026-10-01" and f["date_max"] == "2026-10-02"
+    run(go())
+
+
+def test_transaction_date_filters_reject_invalid_and_reversed_ranges():
+    async def go():
+        Session = await seed()
+        async with Session() as db:
+            for filters in (
+                {"date_from": "2026-02-30"},
+                {"date_to": "20261001"},
+                {"date_from": "2026-10-02", "date_to": "2026-10-01"},
+            ):
+                with pytest.raises(HTTPException) as error:
+                    await rt.list_transactions(db=db, _=USER, **filters)
+                assert error.value.status_code == 422
     run(go())
 
 

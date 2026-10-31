@@ -4,18 +4,72 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
+import math
 import os
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
 from typing import AsyncGenerator
 
 import aiohttp
+
+from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 
 
 class ShopifyAPIError(Exception):
     """Shopify API error."""
     pass
+
+
+class ShopifyFeedLimitError(ShopifyAPIError):
+    """The remote feed exceeds the ingestion limits and cannot be collected safely."""
+
+
+MAX_RETRY_DELAY_SECONDS = 30.0
+MAX_SHOPIFY_PAGES = 1_000
+
+
+class _ShopifyPagination:
+    """Track cursor progress and bound a collection fetch to a finite number of pages."""
+
+    def __init__(self) -> None:
+        self._seen_cursors: set[str] = set()
+        self._pages_fetched = 0
+
+    def next_params(self, headers: dict, params: dict) -> dict | None:
+        self._pages_fetched += 1
+        if self._pages_fetched > MAX_SHOPIFY_PAGES:
+            raise ShopifyAPIError(f"Shopify pagination exceeded the {MAX_SHOPIFY_PAGES}-page limit")
+
+        page_info = _next_page_info(headers.get("Link", ""))
+        if not page_info:
+            return None
+        if page_info in self._seen_cursors:
+            raise ShopifyAPIError("Shopify returned a repeated pagination cursor")
+        self._seen_cursors.add(page_info)
+        return {"limit": params["limit"], "page_info": page_info, "fields": params["fields"]}
+
+
+def retry_delay(retry_after: str | None, attempt: int) -> float:
+    """Honor a valid Retry-After without allowing a remote server to stall a job indefinitely."""
+    if retry_after:
+        try:
+            seconds = float(retry_after)
+            if math.isfinite(seconds) and seconds > 0:
+                return min(seconds, MAX_RETRY_DELAY_SECONDS)
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+                if seconds > 0:
+                    return min(seconds, MAX_RETRY_DELAY_SECONDS)
+            except (TypeError, ValueError, OverflowError):
+                pass
+    return min(2**attempt, MAX_RETRY_DELAY_SECONDS)
 
 
 class ShopifyAdapter:
@@ -47,7 +101,6 @@ class ShopifyAdapter:
         self.base_url = f"{(self.store_url or '').rstrip('/')}/admin/api/{self.api_version}"
         self.session = None
         self.max_retries = 3
-        self.retry_backoff = 1  # seconds
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -78,11 +131,7 @@ class ShopifyAdapter:
                     if resp.status == 429 or resp.status >= 500:
                         last_error = f"Status {resp.status}"
                         if not last:
-                            try:
-                                wait = float(resp.headers.get("Retry-After", 0))
-                            except ValueError:
-                                wait = 0
-                            await asyncio.sleep(wait or self.retry_backoff * (2 ** attempt))
+                            await asyncio.sleep(retry_delay(resp.headers.get("Retry-After"), attempt))
                             continue
                         raise ShopifyAPIError(f"{last_error} after {self.max_retries} attempts")
 
@@ -94,7 +143,7 @@ class ShopifyAdapter:
             except (asyncio.TimeoutError, aiohttp.ClientError) as e:
                 last_error = str(e) or type(e).__name__
                 if not last:
-                    await asyncio.sleep(self.retry_backoff * (2 ** attempt))
+                    await asyncio.sleep(retry_delay(None, attempt))
                     continue
                 raise ShopifyAPIError(f"Request failed after {self.max_retries} attempts: {last_error}") from e
 
@@ -127,17 +176,60 @@ class ShopifyAdapter:
             "fields": "id,order_number,created_at,updated_at,financial_status,fulfillment_status,"
                       "total_price,currency,customer,note,tax_lines",
         }
+        pagination = _ShopifyPagination()
 
         while True:
             data, headers = await self._request_full("GET", "/orders.json", params=params)
             for order in data.get("orders", []):
                 yield order
 
-            page_info = _next_page_info(headers.get("Link", ""))
-            if not page_info:
+            next_params = pagination.next_params(headers, params)
+            if next_params is None:
                 break
             # With page_info, Shopify rejects every filter except limit/fields.
-            params = {"limit": params["limit"], "page_info": page_info, "fields": params["fields"]}
+            params = next_params
+
+    async def fetch_shop(self) -> dict:
+        """Fetch the shop record (its name labels the store the orders belong to)."""
+        data = await self._request("GET", "/shop.json", params={"fields": "id,name,currency,iana_timezone"})
+        shop = data.get("shop") if isinstance(data, dict) else None
+        if not isinstance(shop, dict) or not shop.get("id"):
+            raise ShopifyAPIError("Shopify returned an invalid shop response")
+        return shop
+
+    @staticmethod
+    def _collection_page(data: dict, key: str, endpoint: str) -> list[dict]:
+        """Reject malformed collection responses instead of treating them as an empty catalog."""
+        records = data.get(key) if isinstance(data, dict) else None
+        if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+            raise ShopifyAPIError(f"Shopify returned an invalid {endpoint} response")
+        return records
+
+    async def fetch_locations(self) -> AsyncGenerator[dict, None]:
+        """Stream every shop location while following Shopify's Link-header pagination."""
+        params = {"limit": 250, "fields": "id,name,active,city,province,country_code"}
+        pagination = _ShopifyPagination()
+        while True:
+            data, headers = await self._request_full("GET", "/locations.json", params=params)
+            for location in self._collection_page(data, "locations", "locations"):
+                yield location
+            next_params = pagination.next_params(headers, params)
+            if next_params is None:
+                break
+            params = next_params
+
+    async def fetch_products(self) -> AsyncGenerator[dict, None]:
+        """Fetch the product catalog with variants, following Link-header pagination."""
+        params = {"limit": 250, "fields": "id,title,status,vendor,product_type,variants"}
+        pagination = _ShopifyPagination()
+        while True:
+            data, headers = await self._request_full("GET", "/products.json", params=params)
+            for product in self._collection_page(data, "products", "products"):
+                yield product
+            next_params = pagination.next_params(headers, params)
+            if next_params is None:
+                break
+            params = next_params
 
     async def fetch_refunds(self, order_id: str) -> list[dict]:
         """Fetch refunds for a specific order."""
@@ -166,28 +258,6 @@ def verify_webhook_signature(secret: str | None, body: bytes, signature: str) ->
     """Verify an X-Shopify-Hmac-SHA256 header against the raw request body."""
     if not secret or not signature:
         return False
-    async def fetch_shop(self) -> dict:
-        """Fetch the shop record (its name labels the store the orders belong to)."""
-        data = await self._request("GET", "/shop.json", params={"fields": "id,name,currency,iana_timezone"})
-        return data.get("shop", {})
-
-    async def fetch_locations(self) -> list[dict]:
-        """Fetch the shop's locations (stores, warehouses, pop-ups)."""
-        data = await self._request("GET", "/locations.json")
-        return data.get("locations", [])
-
-    async def fetch_products(self) -> AsyncGenerator[dict, None]:
-        """Fetch the product catalog with variants, following Link-header pagination."""
-        params = {"limit": 250, "fields": "id,title,status,vendor,product_type,variants"}
-        while True:
-            data, headers = await self._request_full("GET", "/products.json", params=params)
-            for product in data.get("products", []):
-                yield product
-            page_info = _next_page_info(headers.get("Link", ""))
-            if not page_info:
-                break
-            params = {"limit": params["limit"], "page_info": page_info, "fields": params["fields"]}
-
     computed = hmac.new(secret.encode(), body, hashlib.sha256).digest()
     return hmac.compare_digest(base64.b64encode(computed).decode(), signature)
 
@@ -210,14 +280,30 @@ async def fetch_shopify_feed(
     """Fetch Shopify orders and refunds. Any API failure propagates so no partial feed is ingested."""
     adapter = ShopifyAdapter()
     records = []
+    payload_size = 2  # opening and closing brackets of the JSON record list
+
+    def append_record(record: dict) -> None:
+        nonlocal payload_size
+        if len(records) >= MAX_DELIVERY_RECORDS:
+            raise ShopifyFeedLimitError(
+                f"Shopify feed exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit"
+            )
+        encoded_size = len(json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        next_size = payload_size + encoded_size + bool(records)
+        if next_size > MAX_DELIVERY_BYTES:
+            raise ShopifyFeedLimitError(
+                f"Shopify feed exceeds the {MAX_DELIVERY_BYTES:,}-byte delivery limit"
+            )
+        records.append(record)
+        payload_size = next_size
 
     try:
         async for order in adapter.fetch_orders(created_at_min, created_at_max):
-            records.append(normalize_order(order, store_id))
+            append_record(normalize_order(order, store_id))
 
             if order.get("financial_status") in ("refunded", "partially_refunded"):
                 for refund in await adapter.fetch_refunds(order["id"]):
-                    records.append(normalize_refund(refund, order["id"], order.get("currency"), store_id))
+                    append_record(normalize_refund(refund, order["id"], order.get("currency"), store_id))
 
         return {"Shopify": records}
     finally:
@@ -225,8 +311,10 @@ async def fetch_shopify_feed(
 
 
 def _tax(code: str, name: str, rate, amount) -> dict:
-    return {"tax_code": code[:30], "tax_name": name[:100], "rate": str(Decimal(str(rate or 0)).quantize(Decimal("0.0001"))),
-            "tax_amount": str(abs(Decimal(str(amount or 0))).quantize(Decimal("0.01")))}
+    # Preserve source precision. The ingestion validator must quarantine values the
+    # database cannot represent instead of silently changing Shopify's figures.
+    return {"tax_code": code[:30], "tax_name": name[:100], "rate": str(Decimal(str(rate or 0))),
+            "tax_amount": str(abs(Decimal(str(amount or 0))))}
 
 
 def order_taxes(order: dict) -> list[dict]:

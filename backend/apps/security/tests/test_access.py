@@ -31,6 +31,16 @@ def test_the_longest_prefix_wins_and_unowned_paths_are_left_to_their_endpoint():
     assert access.api_allowed("viewer", "/api/seed")[0] and access.api_allowed("viewer", "/api/chat")[0]   # unowned: endpoint decides
 
 
+def test_store_manager_role_rules_match_only_complete_api_areas():
+    assert role_allowed("store_manager", ("finance", "it"), "GET", "/api/store-days")
+    assert role_allowed("store_manager", ("finance", "it"), "GET", "/api/store-days/S1/2026-10-01")
+    assert role_allowed("store_manager", ("finance", "it"), "POST", "/api/cash-controls")
+    assert role_allowed("store_manager", ("finance", "it"), "POST", "/api/cash-controls/deposits")
+    assert not role_allowed("store_manager", ("finance", "it"), "GET", "/api/store-days-admin")
+    assert not role_allowed("store_manager", ("finance", "it"), "POST", "/api/cashier/deposit")
+    assert not role_allowed("store_manager", ("finance", "it"), "POST", "/api/cash-controls-admin")
+
+
 def test_screen_registry_is_well_formed():
     keys = [s.key for s in access.SCREENS]
     assert len(keys) == len(set(keys)) and len({s.path for s in access.SCREENS}) == len(access.SCREENS)

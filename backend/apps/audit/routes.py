@@ -2,18 +2,24 @@
 import csv
 import io
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_role
+from apps.search import contains_literal
 from database import get_db
 from models import AuditEvent
+from schemas import AuditEventSchema
 
 router = APIRouter(prefix="/api/audit")
+MAX_EXPORT_EVENTS = 100000
+EXPORT_PAGE_SIZE = 500
+MAX_EVENT_TYPE_FILTERS = 50
 
 VERIFY_SQL = text("""
     WITH chain AS (
@@ -36,21 +42,67 @@ def event(e: AuditEvent) -> dict:
             "prev_hash": e.prev_hash, "hash": e.hash}
 
 
+async def export_event_pages(db: AsyncSession, conds: list, head_seq: int):
+    """Fetch keyset pages and release the database connection between client writes."""
+    last_seq = 0
+    while True:
+        rows = (await db.execute(
+            select(AuditEvent).where(*conds, AuditEvent.seq > last_seq, AuditEvent.seq <= head_seq)
+            .order_by(AuditEvent.seq).limit(EXPORT_PAGE_SIZE)
+        )).scalars().all()
+        records = [event(row) for row in rows]
+        if rows:
+            last_seq = rows[-1].seq
+        await db.commit()
+        if not records:
+            return
+        yield records
+
+
+@router.get("", response_model=list[AuditEventSchema])
+async def list_recent_events(
+    case_id: Annotated[str | None, Query(max_length=36)] = None,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """Compatibility endpoint for the dashboard's latest-event view."""
+    query = select(AuditEvent).order_by(AuditEvent.seq.desc()).limit(limit)
+    if case_id:
+        query = query.where(AuditEvent.case_id == case_id)
+    rows = (await db.execute(query)).scalars().all()
+    return rows
+
+
 def conditions(event_type, actor, case_id, date_from, date_to, q):
     conds = []
-    if event_type: conds.append(AuditEvent.event_type.in_([x.strip() for x in event_type.split(",")]))
-    if actor: conds.append(AuditEvent.actor.ilike(f"%{actor}%"))
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must not be after date_to")
+    if event_type:
+        event_types = list(dict.fromkeys(value.strip() for value in event_type.split(",")))
+        if len(event_types) > MAX_EVENT_TYPE_FILTERS or any(not value or len(value) > 100 for value in event_types):
+            raise HTTPException(status_code=422, detail="event_type must contain at most 50 non-empty values of 100 characters or fewer")
+        conds.append(AuditEvent.event_type.in_(event_types))
+    if actor: conds.append(contains_literal(AuditEvent.actor, actor))
     if case_id: conds.append(AuditEvent.case_id == case_id)
-    if date_from: conds.append(AuditEvent.created_at >= datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc))
-    if date_to: conds.append(AuditEvent.created_at < datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc).replace(hour=23, minute=59, second=59))
-    if q: conds.append(AuditEvent.action_description.ilike(f"%{q}%"))
+    if date_from:
+        conds.append(AuditEvent.created_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc))
+    if date_to:
+        if date_to == date.max:
+            conds.append(AuditEvent.created_at <= datetime.max.replace(tzinfo=timezone.utc))
+        else:
+            conds.append(AuditEvent.created_at < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc))
+    if q: conds.append(contains_literal(AuditEvent.action_description, q))
     return conds
 
 
 @router.get("/page")
-async def page(event_type: str | None = None, actor: str | None = None, case_id: str | None = None,
-               date_from: str | None = None, date_to: str | None = None, q: str | None = None,
-               page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+async def page(event_type: Annotated[str | None, Query(max_length=5100)] = None,
+               actor: Annotated[str | None, Query(max_length=255)] = None,
+               case_id: Annotated[str | None, Query(max_length=36)] = None,
+               date_from: date | None = None, date_to: date | None = None,
+               q: Annotated[str | None, Query(max_length=500)] = None,
+               page: int = Query(1, ge=1, le=10000), page_size: int = Query(50, ge=1, le=200),
                db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
     conds = conditions(event_type, actor, case_id, date_from, date_to, q)
     total = (await db.execute(select(func.count()).select_from(AuditEvent).where(*conds))).scalar() or 0
@@ -70,22 +122,51 @@ async def verify(db: AsyncSession = Depends(get_db), _: dict = Depends(require_r
 
 
 @router.get("/export")
-async def export(format: str = "csv", event_type: str | None = None, actor: str | None = None,
-                 case_id: str | None = None, date_from: str | None = None, date_to: str | None = None,
-                 q: str | None = None, db: AsyncSession = Depends(get_db),
+async def export(format: str = "csv", event_type: Annotated[str | None, Query(max_length=5100)] = None,
+                 actor: Annotated[str | None, Query(max_length=255)] = None,
+                 case_id: Annotated[str | None, Query(max_length=36)] = None,
+                 date_from: date | None = None, date_to: date | None = None,
+                 q: Annotated[str | None, Query(max_length=500)] = None, db: AsyncSession = Depends(get_db),
                  user: dict = Depends(require_role("finance", "it"))):
     conds = conditions(event_type, actor, case_id, date_from, date_to, q)
-    rows = (await db.execute(select(AuditEvent).where(*conds).order_by(AuditEvent.seq).limit(100000))).scalars().all()
-    head = (await db.execute(select(AuditEvent.hash).order_by(AuditEvent.seq.desc()).limit(1))).scalar()
-    data = [event(e) for e in rows]
-    if format == "json":
-        body = json.dumps({"exported_at": datetime.now(timezone.utc), "head_hash": head, "count": len(data), "events": data},
-                          default=str, indent=1)
-        return Response(body, media_type="application/json", headers={"Content-Disposition": "attachment; filename=audit-trail.json"})
-    buf = io.StringIO()
+    if format not in {"csv", "json"}:
+        raise HTTPException(status_code=422, detail="format must be csv or json")
+    head_event = (await db.execute(select(AuditEvent.seq, AuditEvent.hash).order_by(AuditEvent.seq.desc()).limit(1))).first()
+    head_seq, head_hash = head_event if head_event else (0, None)
+    count = (await db.execute(select(func.count()).select_from(AuditEvent).where(
+        *conds, AuditEvent.seq <= head_seq))).scalar() or 0
+    if count > MAX_EXPORT_EVENTS:
+        raise HTTPException(status_code=413, detail=f"Export exceeds {MAX_EXPORT_EVENTS} events; narrow the filters")
+    await db.commit()
     cols = ["seq", "created_at", "event_type", "actor", "object_type", "object_id", "case_id", "description", "prev_hash", "hash"]
-    w = csv.writer(buf)
-    w.writerow(cols)
-    for r in data:
-        w.writerow([r[c] for c in cols])
-    return Response(buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=audit-trail.csv"})
+
+    async def generate_csv():
+        def csv_line(values):
+            buffer = io.StringIO()
+            csv.writer(buffer).writerow(values)
+            return buffer.getvalue()
+
+        yield csv_line(cols)
+        async for records in export_event_pages(db, conds, head_seq):
+            for record in records:
+                yield csv_line([record[column] for column in cols])
+
+    async def generate_json():
+        exported_at = datetime.now(timezone.utc)
+        yield json.dumps({"exported_at": exported_at, "head_hash": head_hash, "count": count}, default=str)[:-1]
+        yield ',"events":['
+        first = True
+        async for records in export_event_pages(db, conds, head_seq):
+            for record in records:
+                if not first:
+                    yield ","
+                yield json.dumps(record, default=str)
+                first = False
+        yield "]}"
+
+    is_json = format == "json"
+    filename = "audit-trail.json" if is_json else "audit-trail.csv"
+    generator = generate_json() if is_json else generate_csv()
+    media_type = "application/json" if is_json else "text/csv"
+    return StreamingResponse(generator, media_type=media_type,
+                             headers={"Content-Disposition": f"attachment; filename={filename}"})

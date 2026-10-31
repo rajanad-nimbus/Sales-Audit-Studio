@@ -1,30 +1,49 @@
 """REST endpoints for Shopify integration."""
 import json
+import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.ingest import service as ingest
 from apps.ingest import shopify_adapter
+from apps.ingest.limits import MAX_DELIVERY_BYTES
+from apps.ingest import source_settings
 from apps.ingest.shopify import reference_sync
+from apps.request_body import read_limited_body
 from auth import require_role
 from database import get_db
 from models import SourceRecord, utcnow
 from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/ingest/shopify")
+logger = logging.getLogger(__name__)
 
 
 class ShopifySyncRequest(BaseModel):
-    store_id: str | None = None  # defaults to SHOPIFY_STORE_ID
+    model_config = ConfigDict(extra="forbid")
+
     created_at_min: datetime | None = None
     created_at_max: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        start, end = self.created_at_min, self.created_at_max
+        for field, value in (("created_at_min", start), ("created_at_max", end)):
+            if value is not None and value.tzinfo is None:
+                raise ValueError(f"{field} must include a timezone")
+        if start is not None and end is not None:
+            if start >= end:
+                raise ValueError("created_at_min must be before created_at_max")
+            if end - start > timedelta(days=90):
+                raise ValueError("Shopify sync range cannot exceed 90 days")
+        return self
 
 
 class ShopifySyncResponse(BaseModel):
@@ -43,8 +62,9 @@ async def sync_shopify(
     _: dict = Depends(require_role("it", "finance")),
 ) -> ShopifySyncResponse:
     """Fetch orders and refunds from Shopify and ingest them."""
+    await source_settings.require_allowed(db, "Shopify", manual=True)
     errors = []
-    store_id = req.store_id or os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN")
+    store_id = os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN")
 
     try:
         feed = await shopify_adapter.fetch_shopify_feed(
@@ -52,8 +72,10 @@ async def sync_shopify(
             created_at_min=req.created_at_min,
             created_at_max=req.created_at_max,
         )
+    except shopify_adapter.ShopifyFeedLimitError as e:
+        raise HTTPException(status_code=413, detail=str(e)) from e
     except shopify_adapter.ShopifyAPIError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch from Shopify: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch from Shopify: {str(e)}") from e
 
     delivery_id = f"SHOPIFY-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
 
@@ -83,22 +105,40 @@ async def sync_reference(
     user: dict = Depends(require_role("it", "finance")),
 ):
     """Sync Shopify locations (Stores) and product variants (Items) into the retail foundation data."""
+    await source_settings.require_allowed(db, "Shopify")
     store_code = os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN")
+    sync_id = str(uuid.uuid4())
     adapter = shopify_adapter.ShopifyAdapter()
     try:
-        wanted = await reference_sync.collect(adapter, store_code)
+        staged = await reference_sync.stage(adapter, db, sync_id, store_code)
     except shopify_adapter.ShopifyAPIError as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch from Shopify: {str(e)}")
     finally:
         await adapter.close()
     actor = user.get("user") or "shopify-connector"
-    counts = await reference_sync.apply(db, wanted, actor)
-    audit(db, "SHOPIFY_REFERENCE_SYNCED", None, "ShopifySync", store_code,
-          f"Shopify reference sync: {counts['created']} created, {counts['updated']} updated, "
-          f"{counts['deactivated']} deactivated", actor=actor)
-    await db.commit()
-    return {"status": "success", "stores": sum(r["category"] == "Store" for r in wanted),
-            "items": sum(r["category"] == "Item" for r in wanted), **counts}
+    try:
+        counts = await reference_sync.apply(
+            db, sync_id, staged["generation"], actor, staged["duplicates"]
+        )
+        if counts["superseded"]:
+            event_type = "SHOPIFY_REFERENCE_SYNC_SUPERSEDED"
+            description = f"Shopify reference sync generation {staged['generation']} was superseded"
+        else:
+            event_type = "SHOPIFY_REFERENCE_SYNCED"
+            description = (
+                f"Shopify reference sync: {counts['created']} created, {counts['updated']} updated, "
+                f"{counts['deactivated']} deactivated"
+            )
+        audit(db, event_type, None, "ShopifySync", store_code, description, actor=actor)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        try:
+            await reference_sync.discard(db, sync_id)
+        except Exception:
+            logger.exception("Could not discard failed Shopify reference stage %s", sync_id)
+        raise
+    return {"status": "superseded" if counts["superseded"] else "success", **staged, **counts}
 
 
 WEBHOOK_TOPICS = {"orders/create", "orders/updated", "refunds/create"}
@@ -107,12 +147,16 @@ WEBHOOK_TOPICS = {"orders/create", "orders/updated", "refunds/create"}
 @router.post("/webhook")
 async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     """Verify and ingest a Shopify webhook delivery (authenticated by HMAC, not a user token)."""
-    body = await request.body()
+    body = await read_limited_body(request, MAX_DELIVERY_BYTES)
     signature = request.headers.get("X-Shopify-Hmac-SHA256", "")
     topic = request.headers.get("X-Shopify-Topic", "unknown")
 
     if not shopify_adapter.verify_webhook_signature(os.getenv("SHOPIFY_WEBHOOK_SECRET"), body, signature):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    if not (await source_settings.load(db))["Shopify"]["enabled"]:
+        # Acknowledge so Shopify does not keep retrying (and eventually drop the webhook), but ingest nothing.
+        return {"status": "ignored", "reason": "Shopify is switched off in Nimbus", "topic": topic}
 
     try:
         payload = json.loads(body)

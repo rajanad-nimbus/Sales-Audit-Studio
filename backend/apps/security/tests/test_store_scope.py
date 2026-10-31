@@ -133,6 +133,7 @@ def test_cash_controls_and_deposits_are_scoped_for_reading_and_writing():
             for store in ("S1", "S2"):
                 db.add(CashControl(id=f"c-{store}", store_id=store, business_date="2026-10-01", tender_type="Cash", declared_cash=D("10"), paid_out=D("0"), safe_drop=D("0"), declared_by="x"))
                 db.add(CashDeposit(id=f"p-{store}", store_id=store, business_date="2026-10-01", deposit_reference=f"R-{store}", deposited_amount=D("10"), recorded_by="x"))
+            db.add(StoreDay(id="d-s2", store_id="S2", business_date="2026-10-02", status="Auditing"))
             await db.commit()
             assert [r["store_id"] for r in await cash.list_controls(None, None, db, mgr(["S2"]))] == ["S2"]
             assert [r["store_id"] for r in await cash.list_deposits(None, None, db, mgr(["S2"]))] == ["S2"]
@@ -148,6 +149,42 @@ def test_cash_controls_and_deposits_are_scoped_for_reading_and_writing():
             assert e.value.status_code == 403
             ok = await cash.declare_cash(cash.CashControlBody(store_id="S2", business_date="2026-10-02", declared_cash=D("5")), db, mgr(["S2"]))
             assert ok["store_id"] == "S2"
+    asyncio.run(go())
+
+
+def test_cash_writes_require_an_open_store_day_and_reject_closed_days():
+    async def go():
+        Session = await session()
+        async with Session() as db:
+            db.add_all([
+                StoreDay(id="open-day", store_id="S1", business_date="2026-10-01", status="Auditing"),
+                StoreDay(id="closed-day", store_id="S1", business_date="2026-10-02", status="Closed"),
+            ])
+            await db.commit()
+
+            declaration = cash.CashControlBody(store_id="S1", business_date="2026-10-01", declared_cash=D("5"))
+            await cash.declare_cash(declaration, db, FINANCE)
+            deposit = cash.CashDepositBody(
+                store_id="S1", business_date="2026-10-01", deposit_reference="DEP-1", deposited_amount=D("5")
+            )
+            await cash.record_deposit(deposit, db, FINANCE)
+
+            missing = cash.CashControlBody(store_id="S1", business_date="2026-10-03", declared_cash=D("5"))
+            with pytest.raises(HTTPException) as error:
+                await cash.declare_cash(missing, db, FINANCE)
+            assert error.value.status_code == 409
+
+            closed_declaration = cash.CashControlBody(store_id="S1", business_date="2026-10-02", declared_cash=D("5"))
+            with pytest.raises(HTTPException) as error:
+                await cash.declare_cash(closed_declaration, db, FINANCE)
+            assert error.value.status_code == 409 and "Reopen" in error.value.detail
+
+            closed_deposit = cash.CashDepositBody(
+                store_id="S1", business_date="2026-10-02", deposit_reference="DEP-2", deposited_amount=D("5")
+            )
+            with pytest.raises(HTTPException) as error:
+                await cash.record_deposit(closed_deposit, db, FINANCE)
+            assert error.value.status_code == 409 and "Reopen" in error.value.detail
     asyncio.run(go())
 
 
@@ -199,7 +236,7 @@ def test_me_carries_both_the_name_and_the_email(monkeypatch):
 
 # ---- sign out -----------------------------------------------------------------------------------------------------
 def _logout(monkeypatch, cookie="abc", upstream_ok=True):
-    from apps.ingest import routes as ri
+    from apps.security import routes as ri
     from starlette.requests import Request
     calls = []
 

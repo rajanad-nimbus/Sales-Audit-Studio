@@ -1,6 +1,7 @@
 import asyncio
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -40,3 +41,26 @@ def test_order_and_refund_tax_are_stored_signed_like_the_transaction():
 def test_order_without_tax_lines_stores_no_tax_and_is_not_quarantined():
     result, rows = stored_taxes([shopify_adapter.normalize_order({**ORDER, "tax_lines": []}, "S1")])
     assert result["quarantined"] == 0 and rows == []
+
+
+def test_malformed_empty_tax_container_is_quarantined():
+    record = shopify_adapter.normalize_order(ORDER, "S1")
+    record["taxes"] = {}
+
+    result, rows = stored_taxes([record])
+
+    assert result["quarantined"] == 1
+    assert rows == []
+
+
+@pytest.mark.parametrize("tax_line", [
+    {"title": "VAT", "rate": "0.13005", "price": "13.00"},
+    {"title": "VAT", "rate": "0.13", "price": "13.005"},
+])
+def test_shopify_tax_precision_is_preserved_for_ingest_validation(tax_line):
+    record = shopify_adapter.normalize_order({**ORDER, "tax_lines": [tax_line]}, "S1")
+
+    result, rows = stored_taxes([record])
+
+    assert result["quarantined"] == 1
+    assert rows == []

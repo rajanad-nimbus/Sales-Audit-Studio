@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.ingest import service
+from apps.ingest import reconciliation, service
 from models import Base, Exception as DBException, ReconciliationPolicy
 
 
@@ -25,7 +25,7 @@ def run_reconcile(pos=(), manifest=None, policy=None):
                 await service.ingest(db, "POS", "d1", list(pos))
                 if manifest:
                     await service.ingest(db, "POSControl", "d2", [manifest])
-                await service.reconcile(db)
+                await reconciliation.reconcile(db)
                 return sorted((await db.execute(select(DBException.exception_type))).scalars().all())
         finally:
             await engine.dispose()

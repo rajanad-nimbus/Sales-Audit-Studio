@@ -4,30 +4,42 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
+from apps.security import scope
 from integrations.ontology import ontology
 from models import (AuditEvent, BatchRun, Case, Connector, Exception as DBException, Finding, PolicyEvaluation,
                     Recommendation, ValidationObligation, Workflow)
 
 CASE_REF = re.compile(r"\b(Z[AS]-[A-Z0-9]{4,8}-?[A-Z0-9]{0,8}(?:-[A-Z0-9]+)?)\b", re.I)
 VAGUE = re.compile(r"\b(this|that|it|the case|here)\b", re.I)
+CASE_CONTEXT_RECORD_LIMIT = 20
 
 
-def money(v) -> str:
-    return f"${Decimal(str(v)):,.2f}"
+def money(v, currency=None) -> str:
+    return f"{currency or 'currency unknown'} {Decimal(str(v)):,.2f}"
 
 
 async def case_context(db, c: Case) -> dict:
-    exc = (await db.execute(select(DBException).where(DBException.case_id == c.id))).scalars().all()
-    fnd = (await db.execute(select(Finding).where(Finding.case_id == c.id))).scalars().all()
-    rec = (await db.execute(select(Recommendation).where(Recommendation.case_id == c.id))).scalars().all()
-    wf = (await db.execute(select(Workflow).where(Workflow.case_id == c.id))).scalars().all()
-    val = (await db.execute(select(ValidationObligation).where(ValidationObligation.case_id == c.id))).scalars().all()
+    async def recent_records(model):
+        rows = (await db.execute(
+            select(model).where(model.case_id == c.id)
+            .order_by(model.created_at.desc(), model.id.desc())
+            .limit(CASE_CONTEXT_RECORD_LIMIT + 1)
+        )).scalars().all()
+        return rows[:CASE_CONTEXT_RECORD_LIMIT], len(rows) > CASE_CONTEXT_RECORD_LIMIT
+
+    exc, exceptions_truncated = await recent_records(DBException)
+    fnd, findings_truncated = await recent_records(Finding)
+    rec, recommendations_truncated = await recent_records(Recommendation)
+    wf, workflows_truncated = await recent_records(Workflow)
+    val, validations_truncated = await recent_records(ValidationObligation)
     pol = (await db.execute(select(PolicyEvaluation).where(PolicyEvaluation.case_id == c.id)
                             .order_by(PolicyEvaluation.created_at.desc()).limit(1))).scalars().all()
     od = ontology.get(exc[0].exception_type) if exc else None
     return {
         "id": c.id, "case_number": c.case_number, "type": c.case_type, "store": c.store_id, "status": c.status,
         "priority": c.priority, "business_date": c.business_date, "assigned_to": c.assigned_to,
+        "currency": c.currency,
+        "amount_needs_review": c.amount_needs_review,
         "sla_due_at": str(c.sla_due_at) if c.sla_due_at else None,
         "exception_amount": str(c.total_exception_amount), "loss_exposure": str(c.total_exposure),
         "evidence_completeness": c.evidence_completeness,
@@ -37,30 +49,46 @@ async def case_context(db, c: Case) -> dict:
                              "financial_impact": str(r.financial_impact), "status": r.status} for r in rec],
         "workflows": [{"state": w.state, "step": w.current_step} for w in wf],
         "validations": [{"status": v.status, "result": v.verification_result} for v in val],
+        "truncated": {
+            "exceptions": exceptions_truncated,
+            "findings": findings_truncated,
+            "recommendations": recommendations_truncated,
+            "workflows": workflows_truncated,
+            "validations": validations_truncated,
+        },
         "policy": [{"outcome": p.outcome, "reasons": (p.reasons or {}).get("reasons", []), "version": p.rule_version} for p in pol],
         "ontology": {"required_evidence": od["evidence"], "known_causes": od["known_causes"]} if od else None,
     }
 
 
-async def build_context(db, case_id: str | None, message: str = "") -> dict:
-    by_status = dict((await db.execute(select(Case.status, func.count()).group_by(Case.status))).all())
-    live = (await db.execute(select(func.coalesce(func.sum(Case.total_exception_amount), 0),
-                                    func.coalesce(func.sum(Case.total_exposure), 0)).where(Case.status != "Closed"))).one()
-    needs = (await db.execute(select(Case).where(Case.status == "In Review").order_by(Case.total_exposure.desc()).limit(8))).scalars().all()
+async def build_context(db, case_id: str | None, message: str = "", user: dict | None = None) -> dict:
+    user = user or {}
+    by_status = dict((await db.execute(scope.restrict(select(Case.status, func.count()).group_by(Case.status), user, Case.store_id))).all())
+    amounts = (await db.execute(scope.restrict(select(Case.currency, func.sum(Case.total_exception_amount),
+        func.sum(Case.total_exposure)).where(Case.status != "Closed", Case.amount_needs_review.is_(False)).group_by(Case.currency), user, Case.store_id))).all()
+    stale_count = (await db.execute(scope.restrict(select(func.count()).select_from(Case).where(
+        Case.status != "Closed", Case.amount_needs_review.is_(True)), user, Case.store_id))).scalar() or 0
+    needs = (await db.execute(scope.restrict(select(Case).where(Case.status == "In Review"), user, Case.store_id)
+                              .order_by(Case.total_exposure.desc()).limit(8))).scalars().all()
     batch = (await db.execute(select(BatchRun).where(BatchRun.status == "Succeeded").order_by(BatchRun.finished_at.desc()).limit(1))).scalars().first()
     ctx = {
-        "cases_by_status": by_status, "open_exception_amount": str(live[0]), "open_loss_exposure": str(live[1]),
+        "cases_by_status": by_status,
+        "stale_amount_cases": stale_count,
+        "open_amounts_by_currency": [{"currency": currency, "amount": str(amount), "exposure": str(exposure)}
+                                     for currency, amount, exposure in amounts],
         "needs_decision": [{"id": c.id, "case_number": c.case_number, "type": c.case_type, "store": c.store_id,
-                            "amount": str(c.total_exception_amount), "exposure": str(c.total_exposure)} for c in needs],
+                            "amount": str(c.total_exception_amount), "exposure": str(c.total_exposure), "currency": c.currency} for c in needs],
         "connectors": [{"name": k.name, "state": k.state, "mode": k.mode} for k in (await db.execute(select(Connector))).scalars().all()],
         "last_batch": {"business_date": batch.business_date, "finished_at": str(batch.finished_at),
                        "cases_created": batch.cases_created} if batch else None,
         "recent_activity": [{"actor": a.actor, "what": a.action_description, "case_id": a.case_id} for a in
-                            (await db.execute(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(6))).scalars().all()],
+                            (await db.execute(scope.restrict(select(AuditEvent).join(Case, Case.id == AuditEvent.case_id), user, Case.store_id)
+                             .order_by(AuditEvent.created_at.desc()).limit(6) if scope.scoped(user) else
+                             select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(6))).scalars().all()],
     }
     mentioned = []
     for ref in dict.fromkeys(m.upper() for m in CASE_REF.findall(message or "")):
-        c = (await db.execute(select(Case).where(func.upper(Case.case_number) == ref))).scalars().first()
+        c = (await db.execute(scope.restrict(select(Case).where(func.upper(Case.case_number) == ref), user, Case.store_id))).scalars().first()
         if c:
             mentioned.append(await case_context(db, c))
     if mentioned:
@@ -69,7 +97,7 @@ async def build_context(db, case_id: str | None, message: str = "") -> dict:
     if mentioned:
         sel = mentioned[0]
     elif case_id:
-        c = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+        c = (await db.execute(scope.restrict(select(Case).where(Case.id == case_id), user, Case.store_id))).scalar_one_or_none()
         sel = await case_context(db, c) if c else None
     if sel:
         ctx["selected_case"] = sel
@@ -81,7 +109,7 @@ def _src(c: dict) -> dict:
 
 
 def _needs_src(c: dict) -> dict:
-    return {"type": "case", "id": c["id"], "label": f"{c['case_number']} · {c['type']} · {money(c['amount'])}", "href": f"/cases/{c['id']}"}
+    return {"type": "case", "id": c["id"], "label": f"{c['case_number']} · {c['type']} · {money(c['amount'], c.get('currency'))}", "href": f"/cases/{c['id']}"}
 
 
 def _ont_match(m: str):
@@ -120,7 +148,7 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
     if not sc and VAGUE.search(m) and re.search(r"\b(why|exposure|evidence|next|status|approve|should|finding)\b", m):
         nd = ctx["needs_decision"][:4]
         return reply("**Which case do you mean?** I don't have one selected, and your question refers to a specific case.",
-                     [f"{c['case_number']}: {c['type']} at {c['store']}, {money(c['amount'])}" for c in nd] or ["No cases are awaiting a decision right now."],
+                     [f"{c['case_number']}: {c['type']} at {c['store']}, {money(c['amount'], c.get('currency'))}" for c in nd] or ["No cases are awaiting a decision right now."],
                      "Select a case in the Command Center or Action Center, or mention its number.",
                      sources=[_needs_src(c) for c in nd], followups=GLOBAL_FOLLOWUPS)
 
@@ -137,7 +165,11 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
                          "Run the investigation." if not f else ("Provide the missing evidence, then re-run the investigation." if sc["evidence_completeness"] < 100 or f[0]["confidence"] == "Low" else "Review the recommendation and decide."), src, CASE_FOLLOWUPS)
         if re.search(r"exposure|loss|amount|money|impact|how much|cost", m):
             ci = sc["exceptions"][0]["close_impact"] if sc["exceptions"] else "unknown"
-            return reply(f"**{head}: exception amount {money(sc['exception_amount'])}, estimated loss exposure {money(sc['loss_exposure'])}.**",
+            if sc.get("amount_needs_review"):
+                return reply(f"**{head}: recorded amounts require finance review after a correction.**",
+                             ["The previous amount and exposure are historical and are not current figures."],
+                             "Review and record the updated amounts before investigation or export.", src, CASE_FOLLOWUPS)
+            return reply(f"**{head}: exception amount {money(sc['exception_amount'], sc.get('currency'))}, estimated loss exposure {money(sc['loss_exposure'], sc.get('currency'))}.**",
                          ["Amount and exposure are tracked separately; exposure can be lower (for example a pure timing difference).",
                           f"Close impact: {ci}", f"Priority {sc['priority']}" + (f", SLA due {sc['sla_due_at'][:16]}" if sc["sla_due_at"] else "")],
                          None, src, CASE_FOLLOWUPS)
@@ -153,7 +185,7 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
         if re.search(r"next|status|stage|what now|should|recommend|approve|do", m):
             if r:
                 return reply(f"**{head} is '{sc['status']}'. Proposed action: {r['disposition']} via {r['action_class']} ({r['status']}).**",
-                             [f"What happens: {r['workflow']}", f"Financial movement: {money(r['financial_impact'])}"],
+                             [f"What happens: {r['workflow']}", f"Financial movement: {money(r['financial_impact'], sc.get('currency'))}"],
                              "Use Approve, Escalate or Request more evidence on the case. I can't decide for you.", src, CASE_FOLLOWUPS)
             return reply(f"**{head} is '{sc['status']}' and has no recommendation yet.**", None, "Run the investigation.", src, CASE_FOLLOWUPS)
 
@@ -173,17 +205,23 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
         if persona == "it":
             bad = [k for k in ctx["connectors"] if k["state"] != "Healthy"]
             extra = [f"Connector issues: {', '.join(k['name'] + ' (' + k['state'] + ')' for k in bad)}"] if bad else ["All connectors are healthy."]
-        return reply(lead, [f"{c['case_number']}: {c['type']} at {c['store']}, exposure {money(c['exposure'])}" for c in nd[:5]] + extra,
-                     "Open the largest first in the Action Center." if nd else None, [_needs_src(c) for c in nd[:5]], GLOBAL_FOLLOWUPS)
+        return reply(lead, [f"{c['case_number']}: {c['type']} at {c['store']}, exposure {money(c['exposure'], c.get('currency'))}" for c in nd[:5]] + extra,
+                     "Review the cases in the Action Center." if nd else None, [_needs_src(c) for c in nd[:5]], GLOBAL_FOLLOWUPS)
     if re.search(r"biggest|largest|top|worst", m):
+        currencies = {c.get("currency") for c in ctx["needs_decision"]}
+        if len(currencies) > 1 or None in currencies:
+            return reply("**Exposures cannot be ranked across different or unknown currencies.**",
+                         [f"{c['case_number']}: {money(c['exposure'], c.get('currency'))}" for c in ctx["needs_decision"][:5]],
+                         None, [_needs_src(c) for c in ctx["needs_decision"][:5]], GLOBAL_FOLLOWUPS)
         nd = sorted(ctx["needs_decision"], key=lambda c: -Decimal(c["exposure"]))[:3]
         return reply("**Largest open exposure among cases awaiting a decision:**" if nd else "**No cases are awaiting a decision.**",
-                     [f"{c['case_number']}: {money(c['exposure'])} ({c['type']}, {c['store']})" for c in nd], None, [_needs_src(c) for c in nd], GLOBAL_FOLLOWUPS)
+                     [f"{c['case_number']}: {money(c['exposure'], c.get('currency'))} ({c['type']}, {c['store']})" for c in nd], None, [_needs_src(c) for c in nd], GLOBAL_FOLLOWUPS)
     if re.search(r"connector|health|feed|integration", m):
         ks = ctx["connectors"]
         bad = [k for k in ks if k["state"] != "Healthy"]
         return reply(f"**{len(ks) - len(bad)} of {len(ks)} connectors are healthy.**" if ks else "**No connectors are registered yet.**",
-                     [f"{k['name']}: {k['state']} ({k['mode']})" for k in ks], "Retry or pause a connector from the Command Center (IT view)." if bad else None,
+                     [f"{k['name']}: {k['state']} ({k['mode']})" for k in ks],
+                     "Configure the source adapters before enabling automated connector controls." if bad else None,
                      followups=GLOBAL_FOLLOWUPS)
     if re.search(r"batch|nightly|daily|data as of|fresh|stale", m):
         b = ctx.get("last_batch")
@@ -196,8 +234,12 @@ def rule_answer(msg: str, ctx: dict, persona: str = "") -> dict:
                      "See the Audit Trail for the full, verified record.", followups=GLOBAL_FOLLOWUPS)
     if re.search(r"summary|overview|today|how many|status|total|portfolio", m):
         s = ctx["cases_by_status"]
-        return reply(f"**{sum(s.values()):,} cases; {money(ctx['open_exception_amount'])} open exception amount, {money(ctx['open_loss_exposure'])} open loss exposure.**",
-                     [f"{v:,} {k.lower()}" for k, v in s.items()], None, followups=["What needs my decision?", "Which connectors are unhealthy?"])
+        amounts = ctx.get("open_amounts_by_currency", [])
+        return reply(f"**{sum(s.values()):,} cases.**",
+                     [f"{v:,} {k.lower()}" for k, v in s.items()] +
+                     ([f"{ctx['stale_amount_cases']} open case(s) have amounts awaiting review and are excluded from totals."] if ctx.get("stale_amount_cases") else []) +
+                     [f"{money(a['amount'], a['currency'])} open amount; {money(a['exposure'], a['currency'])} exposure" for a in amounts],
+                     None, followups=["What needs my decision?", "Which connectors are unhealthy?"])
 
     return reply("**I can't answer that from the data I have.**",
                  ["Try: what needs my decision, a summary, the biggest exposure, connector health, the daily batch, or recent activity.",
