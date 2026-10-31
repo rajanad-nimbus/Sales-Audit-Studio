@@ -59,7 +59,7 @@ def test_failed_batch_is_recorded_after_rollback(monkeypatch):
             async with session() as db:
                 result = await batch.run_daily_batch(db, "2026-10-01", feeds={"POS": []})
                 assert result.status == "Failed"
-                assert result.error == "source unavailable"
+                assert result.error == "Batch failed (RuntimeError)"
                 events = (await db.execute(select(AuditEvent.event_type))).scalars().all()
                 assert events == ["BATCH_FAILED"]
         finally:
@@ -87,11 +87,39 @@ def test_failure_preserves_counts_for_feeds_already_committed(monkeypatch):
                     db, "2026-10-01", feeds={"POS": [], "Processor": []}
                 )
                 assert result.status == "Failed"
-                assert result.error == "processor unavailable"
+                assert result.error == "Batch failed (RuntimeError)"
                 assert result.source_counts == {
                     "POS": {"received": 3, "canonical_created": 2, "quarantined": 1}
                 }
                 assert result.transactions_loaded == 2
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_batch_failure_does_not_persist_sensitive_exception_text(monkeypatch):
+    secret = "https://feed.example/?token=top-secret"
+
+    async def ingest(_db, _source, _delivery, _records):
+        raise RuntimeError(f"failed to fetch {secret}")
+
+    monkeypatch.setattr(batch.ingest, "ingest", ingest)
+
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            session = async_sessionmaker(engine, expire_on_commit=False)
+            async with session() as db:
+                result = await batch.run_daily_batch(db, "2026-10-01", feeds={"POS": []})
+                assert result.error == "Batch failed (RuntimeError)"
+                event = (await db.execute(select(AuditEvent))).scalar_one()
+                assert secret not in event.action_description
+                assert result.error == event.action_description.removeprefix(
+                    "Daily batch 2026-10-01 failed: "
+                )
         finally:
             await engine.dispose()
 

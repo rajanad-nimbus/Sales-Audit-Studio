@@ -40,6 +40,17 @@ class BatchRunOwnershipLost(RuntimeError):
     """Raised when a worker's batch claim was recovered by another worker."""
 
 
+def safe_batch_failure(error: Exception) -> str:
+    """Describe a failed run without persisting source payloads or driver details."""
+    if isinstance(error, reconciliation.ReconciliationCapacityError):
+        return str(error)
+    if isinstance(error, BatchRunOwnershipLost):
+        return "Batch ownership was lost; another worker recovered this run"
+    if isinstance(error, HTTPException):
+        return f"Batch failed with HTTP status {error.status_code}"
+    return f"Batch failed ({type(error).__name__})"
+
+
 def _is_active_batch_conflict(exc: IntegrityError) -> bool:
     """Recognize the one-running-batch-per-date constraint across supported databases."""
     return violates_unique_constraint(
@@ -241,13 +252,14 @@ async def record_batch_failure(
 ) -> BatchRun:
     """Persist the failure of a still-owned run without overwriting recovered ownership."""
     await db.rollback()
+    safe_error = safe_batch_failure(error)
     failure = await db.execute(
         update(BatchRun)
         .where(
             BatchRun.id == run_id,
             BatchRun.status == "Running",
         )
-        .values(status="Failed", finished_at=utcnow(), error=str(error)[:500], heartbeat_at=None)
+        .values(status="Failed", finished_at=utcnow(), error=safe_error, heartbeat_at=None)
     )
     if failure.rowcount == 1:
         audit(
@@ -256,7 +268,7 @@ async def record_batch_failure(
             None,
             "BatchRun",
             run_id,
-            f"Daily batch {business_date} failed: {str(error)[:120]}",
+            f"Daily batch {business_date} failed: {safe_error}",
             actor="batch-scheduler",
         )
     await db.commit()
