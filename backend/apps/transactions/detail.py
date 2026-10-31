@@ -89,85 +89,131 @@ def extract(rec: dict, sign: int) -> dict | None:
     """Validate and normalize the detail of one source record. Amounts are signed like the header (returns negative)."""
     if not has_detail(rec):
         return None
-    out = {"lines": [], "discounts": [], "taxes": [], "tenders": [],
-           "original_reference": (optional_text(rec.get("original_reference"), "original_reference") or "").strip() or None,
-           "return_reason": (optional_text(rec.get("return_reason"), "return_reason") or "").strip() or None}
+    validate_detail_collections(rec)
+    lines = [parse_line(line, index, sign) for index, line in enumerate(rec.get("lines") or [], 1)]
+    discounts = [parse_discount(item, index, sign, len(lines))
+                 for index, item in enumerate(rec.get("discounts") or [], 1)]
+    tenders = [parse_tender(item, index, sign)
+               for index, item in enumerate(rec.get("tenders") or [], 1)]
+    taxes = parse_taxes(rec.get("taxes"), lines, sign)
+    return {
+        "lines": lines,
+        "discounts": discounts,
+        "taxes": taxes,
+        "tenders": tenders,
+        "original_reference": normalized_metadata(rec, "original_reference"),
+        "return_reason": normalized_metadata(rec, "return_reason"),
+    }
+
+
+def validate_detail_collections(record: dict) -> None:
+    """Ensure supplied child collections have the expected list shape."""
     for key in DETAIL_KEYS:
-        if rec.get(key) is not None and not isinstance(rec[key], list):
+        if record.get(key) is not None and not isinstance(record[key], list):
             raise ValueError(f"{key} must be a list")
 
-    for n, ln in enumerate(rec.get("lines") or [], 1):
-        if not isinstance(ln, dict):
-            raise ValueError(f"line {n} must be an object")
-        item_code = optional_text(ln.get("item_code"), "item_code")
-        if not item_code or not item_code.strip():
-            raise ValueError(f"line {n} has no item_code")
-        description = optional_text(ln.get("description"), "line description")
-        tax_code = optional_text(ln.get("tax_code"), "line tax_code")
-        return_reason = optional_text(ln.get("return_reason"), "line return_reason")
-        qty = decimal_value(ln.get("quantity"), f"line {n} quantity")
-        if qty <= 0:
-            raise ValueError(f"line {n} quantity must be positive")
-        if qty > MAX_QUANTITY or qty != qty.quantize(Decimal("0.001")):
-            raise ValueError(f"line {n} quantity exceeds supported precision")
-        price = money(ln.get("unit_price"), f"line {n} unit_price")
-        gross = money(ln["gross_amount"], f"line {n} gross_amount") if ln.get("gross_amount") is not None else money(qty * price, f"line {n} gross_amount")
-        rate = decimal_value(ln.get("tax_rate", 0), f"line {n} tax_rate")
-        if rate < 0 or rate > 1 or rate != rate.quantize(Decimal("0.0001")):
-            raise ValueError(f"line {n} tax_rate must be between 0 and 1")
-        tax = money(ln["tax_amount"], f"line {n} tax_amount") if ln.get("tax_amount") is not None else money(gross * rate, f"line {n} tax_amount")
-        out["lines"].append({"line_no": n, "item_code": item_code.strip(), "description": description,
-                             "quantity": qty * sign, "unit_price": price, "gross_amount": gross * sign, "tax_code": tax_code,
-                             "tax_rate": rate, "tax_amount": tax * sign, "return_reason": return_reason})
 
-    for n, d in enumerate(rec.get("discounts") or [], 1):
-        if not isinstance(d, dict):
-            raise ValueError(f"discount {n} must be an object")
-        kind = d.get("kind")
-        if kind not in DISCOUNT_KINDS:
-            raise ValueError(f"discount {n} kind must be one of {', '.join(DISCOUNT_KINDS)}")
-        line_no = d.get("line_no")
-        code = optional_text(d.get("code"), "discount code")
-        description = optional_text(d.get("description"), "discount description")
-        if line_no is not None and not (type(line_no) is int and 1 <= line_no <= len(out["lines"])):
-            raise ValueError(f"discount {n} refers to a line that does not exist")
-        out["discounts"].append({"kind": kind, "code": code, "description": description, "line_no": line_no,
-                                 "amount": money(d.get("amount"), f"discount {n} amount", allow_zero=False) * sign})
+def normalized_metadata(record: dict, field: str) -> str | None:
+    """Normalize optional transaction-level return metadata."""
+    return (optional_text(record.get(field), field) or "").strip() or None
 
-    for n, t in enumerate(rec.get("tenders") or [], 1):
-        if not isinstance(t, dict):
-            raise ValueError(f"tender {n} must be an object")
-        if t.get("tender_type") not in TENDER_TYPES:
-            raise ValueError(f"tender {n} tender_type must be one of {', '.join(TENDER_TYPES)}")
-        reference = optional_text(t.get("reference"), "tender reference")
-        authorization = optional_text(t.get("authorization"), "tender authorization")
-        out["tenders"].append({"tender_type": t["tender_type"], "reference": reference, "authorization": authorization,
-                               "amount": money(t.get("amount"), f"tender {n} amount", allow_zero=False) * sign})
 
-    if rec.get("taxes"):
-        for n, x in enumerate(rec["taxes"], 1):
-            if not isinstance(x, dict) or not x.get("tax_code"):
-                raise ValueError(f"tax {n} needs a tax_code")
-            tax_code = optional_text(x.get("tax_code"), "tax_code")
-            tax_name = optional_text(x.get("tax_name"), "tax_name") or tax_code
-            rate = decimal_value(x.get("rate", 0), f"tax {n} rate")
-            if not 0 <= rate <= 1 or rate != rate.quantize(Decimal("0.0001")):
-                raise ValueError(f"tax {n} rate must be between 0 and 1")
-            out["taxes"].append({"tax_code": tax_code, "tax_name": tax_name, "rate": rate,
-                                 "taxable_amount": money(x.get("taxable_amount", 0), f"tax {n} taxable_amount") * sign,
-                                 "tax_amount": money(x.get("tax_amount"), f"tax {n} tax_amount") * sign})
-    else:   # summarize from the lines
-        by: dict = {}
-        for ln in out["lines"]:
-            if ln["tax_code"] and ln["tax_amount"]:
-                s = by.setdefault(ln["tax_code"], {"tax_code": ln["tax_code"], "tax_name": ln["tax_code"], "rate": ln["tax_rate"],
-                                                    "taxable_amount": Decimal("0"), "tax_amount": Decimal("0")})
-                s["taxable_amount"] += ln["gross_amount"]
-                s["tax_amount"] += ln["tax_amount"]
-                if abs(s["taxable_amount"]) > MAX_MONEY or abs(s["tax_amount"]) > MAX_MONEY:
-                    raise ValueError("summarized tax exceeds supported precision")
-        out["taxes"] = list(by.values())
-    return out
+def parse_line(line: dict, number: int, sign: int) -> dict:
+    """Validate and normalize one transaction line."""
+    if not isinstance(line, dict):
+        raise ValueError(f"line {number} must be an object")
+    item_code = optional_text(line.get("item_code"), "item_code")
+    if not item_code or not item_code.strip():
+        raise ValueError(f"line {number} has no item_code")
+    description = optional_text(line.get("description"), "line description")
+    tax_code = optional_text(line.get("tax_code"), "line tax_code")
+    return_reason = optional_text(line.get("return_reason"), "line return_reason")
+    quantity = decimal_value(line.get("quantity"), f"line {number} quantity")
+    if quantity <= 0:
+        raise ValueError(f"line {number} quantity must be positive")
+    if quantity > MAX_QUANTITY or quantity != quantity.quantize(Decimal("0.001")):
+        raise ValueError(f"line {number} quantity exceeds supported precision")
+    price = money(line.get("unit_price"), f"line {number} unit_price")
+    gross = (money(line["gross_amount"], f"line {number} gross_amount")
+             if line.get("gross_amount") is not None
+             else money(quantity * price, f"line {number} gross_amount"))
+    rate = decimal_value(line.get("tax_rate", 0), f"line {number} tax_rate")
+    if rate < 0 or rate > 1 or rate != rate.quantize(Decimal("0.0001")):
+        raise ValueError(f"line {number} tax_rate must be between 0 and 1")
+    tax = (money(line["tax_amount"], f"line {number} tax_amount")
+           if line.get("tax_amount") is not None
+           else money(gross * rate, f"line {number} tax_amount"))
+    return {"line_no": number, "item_code": item_code.strip(), "description": description,
+            "quantity": quantity * sign, "unit_price": price, "gross_amount": gross * sign,
+            "tax_code": tax_code, "tax_rate": rate, "tax_amount": tax * sign,
+            "return_reason": return_reason}
+
+
+def parse_discount(discount: dict, number: int, sign: int, line_count: int) -> dict:
+    """Validate and normalize one transaction discount."""
+    if not isinstance(discount, dict):
+        raise ValueError(f"discount {number} must be an object")
+    kind = discount.get("kind")
+    if kind not in DISCOUNT_KINDS:
+        raise ValueError(f"discount {number} kind must be one of {', '.join(DISCOUNT_KINDS)}")
+    line_no = discount.get("line_no")
+    if line_no is not None and not (type(line_no) is int and 1 <= line_no <= line_count):
+        raise ValueError(f"discount {number} refers to a line that does not exist")
+    return {"kind": kind,
+            "code": optional_text(discount.get("code"), "discount code"),
+            "description": optional_text(discount.get("description"), "discount description"),
+            "line_no": line_no,
+            "amount": money(discount.get("amount"), f"discount {number} amount", allow_zero=False) * sign}
+
+
+def parse_tender(tender: dict, number: int, sign: int) -> dict:
+    """Validate and normalize one payment tender."""
+    if not isinstance(tender, dict):
+        raise ValueError(f"tender {number} must be an object")
+    if tender.get("tender_type") not in TENDER_TYPES:
+        raise ValueError(f"tender {number} tender_type must be one of {', '.join(TENDER_TYPES)}")
+    return {"tender_type": tender["tender_type"],
+            "reference": optional_text(tender.get("reference"), "tender reference"),
+            "authorization": optional_text(tender.get("authorization"), "tender authorization"),
+            "amount": money(tender.get("amount"), f"tender {number} amount", allow_zero=False) * sign}
+
+
+def parse_taxes(supplied_taxes, lines: list[dict], sign: int) -> list[dict]:
+    """Normalize explicit taxes or derive bounded tax summaries from transaction lines."""
+    if supplied_taxes:
+        return [parse_tax(item, number, sign) for number, item in enumerate(supplied_taxes, 1)]
+    return summarize_line_taxes(lines)
+
+
+def parse_tax(tax: dict, number: int, sign: int) -> dict:
+    """Validate and normalize one explicit tax entry."""
+    if not isinstance(tax, dict) or not tax.get("tax_code"):
+        raise ValueError(f"tax {number} needs a tax_code")
+    tax_code = optional_text(tax.get("tax_code"), "tax_code")
+    tax_name = optional_text(tax.get("tax_name"), "tax_name") or tax_code
+    rate = decimal_value(tax.get("rate", 0), f"tax {number} rate")
+    if not 0 <= rate <= 1 or rate != rate.quantize(Decimal("0.0001")):
+        raise ValueError(f"tax {number} rate must be between 0 and 1")
+    return {"tax_code": tax_code, "tax_name": tax_name, "rate": rate,
+            "taxable_amount": money(tax.get("taxable_amount", 0), f"tax {number} taxable_amount") * sign,
+            "tax_amount": money(tax.get("tax_amount"), f"tax {number} tax_amount") * sign}
+
+
+def summarize_line_taxes(lines: list[dict]) -> list[dict]:
+    """Derive tax totals from lines while enforcing aggregate monetary bounds."""
+    by_code: dict = {}
+    for line in lines:
+        if not line["tax_code"] or not line["tax_amount"]:
+            continue
+        summary = by_code.setdefault(line["tax_code"], {
+            "tax_code": line["tax_code"], "tax_name": line["tax_code"], "rate": line["tax_rate"],
+            "taxable_amount": Decimal("0"), "tax_amount": Decimal("0"),
+        })
+        summary["taxable_amount"] += line["gross_amount"]
+        summary["tax_amount"] += line["tax_amount"]
+        if abs(summary["taxable_amount"]) > MAX_MONEY or abs(summary["tax_amount"]) > MAX_MONEY:
+            raise ValueError("summarized tax exceeds supported precision")
+    return list(by_code.values())
 
 
 def totals(detail: dict) -> dict:
