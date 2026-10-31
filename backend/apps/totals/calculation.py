@@ -133,38 +133,14 @@ async def calculate_store_day(
             counts[definition.id] = 0
 
     while True:
-        query = select(CanonicalTransaction).where(
-            CanonicalTransaction.store_id == store_id,
-            CanonicalTransaction.business_date == business_date,
-        )
-        if last_id is not None:
-            query = query.where(CanonicalTransaction.id > last_id)
-        rows = (await db.execute(query.order_by(CanonicalTransaction.id).limit(
-            TRANSACTION_BATCH_SIZE))).scalars().all()
+        rows = await load_transaction_batch(db, store_id, business_date, last_id)
         if not rows:
             break
         transaction_count += len(rows)
         last_id = rows[-1].id
         amounts = await effective_amounts(db, rows)
-
-        for transaction in rows:
-            currencies.add(transaction.currency)
-            source_total = SOURCE_TOTALS.get(transaction.source_lineage)
-            if source_total:
-                totals[(source_total, "Store", None)] += amounts[transaction.id]
-            if transaction.source_lineage == "pos-map-v1":
-                totals[("POS Net", "Tender", transaction.tender_type or "Unspecified")] += amounts[transaction.id]
-                totals[("POS Net", "Register", transaction.register_id or "Unspecified")] += amounts[transaction.id]
-            totals[("Approved Adjustment Net", "Store", None)] += (
-                amounts[transaction.id] - transaction.signed_amount
-            )
-
-        definition_values, batch_counts = await calculate_definitions(db, definitions, rows, amounts)
-        for definition_id, dimensions in definition_values.items():
-            for dimension, amount in dimensions.items():
-                definition_totals[definition_id][dimension] += amount
-        for definition_id, count in batch_counts.items():
-            counts[definition_id] += count
+        currencies.update(aggregate_source_totals(rows, amounts, totals))
+        await aggregate_configured_totals(db, definitions, rows, amounts, definition_totals, counts)
 
     # Avoid persisting an empty adjustment total, matching the store-day output contract.
     if totals.get(("Approved Adjustment Net", "Store", None)) == 0:
@@ -176,6 +152,51 @@ async def calculate_store_day(
         currencies=currencies,
         transaction_count=transaction_count,
     )
+
+
+async def load_transaction_batch(
+    db: AsyncSession, store_id: str, business_date: str, last_id: str | None,
+) -> list[CanonicalTransaction]:
+    """Fetch the next stable, bounded page of transactions for one store day."""
+    query = select(CanonicalTransaction).where(
+        CanonicalTransaction.store_id == store_id,
+        CanonicalTransaction.business_date == business_date,
+    )
+    if last_id is not None:
+        query = query.where(CanonicalTransaction.id > last_id)
+    result = await db.execute(
+        query.order_by(CanonicalTransaction.id).limit(TRANSACTION_BATCH_SIZE))
+    return list(result.scalars().all())
+
+
+def aggregate_source_totals(rows, amounts, totals) -> set[str]:
+    """Accumulate standard source totals and return currencies represented in a page."""
+    currencies = set()
+    for transaction in rows:
+        currencies.add(transaction.currency)
+        source_total = SOURCE_TOTALS.get(transaction.source_lineage)
+        if source_total:
+            totals[(source_total, "Store", None)] += amounts[transaction.id]
+        if transaction.source_lineage == "pos-map-v1":
+            totals[("POS Net", "Tender", transaction.tender_type or "Unspecified")] += amounts[transaction.id]
+            totals[("POS Net", "Register", transaction.register_id or "Unspecified")] += amounts[transaction.id]
+        totals[("Approved Adjustment Net", "Store", None)] += (
+            amounts[transaction.id] - transaction.signed_amount
+        )
+    return currencies
+
+
+async def aggregate_configured_totals(
+    db: AsyncSession, definitions: list[AuditTotalDefinition], rows: list[CanonicalTransaction],
+    amounts: dict[str, Decimal], totals: dict[str, dict[str | None, Decimal]], counts: dict[str, int],
+) -> None:
+    """Calculate one page of configured totals and add it to the running aggregates."""
+    definition_values, batch_counts = await calculate_definitions(db, definitions, rows, amounts)
+    for definition_id, dimensions in definition_values.items():
+        for dimension, amount in dimensions.items():
+            totals[definition_id][dimension] += amount
+    for definition_id, count in batch_counts.items():
+        counts[definition_id] += count
 
 
 def dependencies_for_preview(
