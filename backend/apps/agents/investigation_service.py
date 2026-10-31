@@ -74,6 +74,31 @@ def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransac
 async def case_source_rows(
     db: AsyncSession, case: Case, requirements: list[str]
 ) -> CaseSourceRows:
+    scopes = _evidence_scopes(requirements)
+    if not scopes:
+        return CaseSourceRows(())
+
+    records_by_transaction: dict[str, tuple[CanonicalTransaction, SourceRecord]] = {}
+    truncated_scopes: set[tuple[str | None, str | None]] = set()
+    truncated_any = False
+    for evidence_scope in sorted(scopes, key=lambda item: (item[0] or "", item[1] or "")):
+        rows, truncated = await _source_rows_for_scope(db, case, evidence_scope)
+        if truncated:
+            if evidence_scope == (None, None):
+                truncated_any = True
+            else:
+                truncated_scopes.add(evidence_scope)
+        for transaction, record in rows:
+            records_by_transaction[transaction.id] = (transaction, record)
+
+    ordered_records = tuple(sorted(
+        records_by_transaction.values(),
+        key=lambda pair: (pair[0].event_timestamp, pair[0].id),
+    ))
+    return CaseSourceRows(ordered_records, frozenset(truncated_scopes), truncated_any)
+
+
+def _evidence_scopes(requirements: list[str]) -> set[tuple[str | None, str | None]]:
     scopes: set[tuple[str | None, str | None]] = set()
     for requirement in requirements:
         spec = ontology.EVIDENCE_SOURCES.get(requirement)
@@ -83,41 +108,30 @@ async def case_source_rows(
             scopes.add((None, None))
         elif spec.get("source") or spec.get("type"):
             scopes.add((spec.get("source"), spec.get("type")))
-    if not scopes:
-        return CaseSourceRows(())
+    return scopes
 
-    records_by_transaction: dict[str, tuple[CanonicalTransaction, SourceRecord]] = {}
-    truncated_scopes: set[tuple[str | None, str | None]] = set()
-    truncated_any = False
-    for source, transaction_type in sorted(scopes, key=lambda item: (item[0] or "", item[1] or "")):
-        query = select(CanonicalTransaction, SourceRecord).join(
-            SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id,
-        ).where(
-            CanonicalTransaction.business_date == case.business_date,
-            CanonicalTransaction.store_id == case.store_id,
-        )
-        if source is not None:
-            query = query.where(SourceRecord.source_system == source)
-        if transaction_type is not None:
-            query = query.where(CanonicalTransaction.transaction_type == transaction_type)
-        rows = (await db.execute(
-            query.order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
-            .limit(MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE + 1)
-        )).all()
-        truncated = len(rows) > MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE
-        if truncated:
-            if source is None and transaction_type is None:
-                truncated_any = True
-            else:
-                truncated_scopes.add((source, transaction_type))
-        for transaction, record in rows[:MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE]:
-            records_by_transaction[transaction.id] = (transaction, record)
 
-    ordered_records = tuple(sorted(
-        records_by_transaction.values(),
-        key=lambda pair: (pair[0].event_timestamp, pair[0].id),
-    ))
-    return CaseSourceRows(ordered_records, frozenset(truncated_scopes), truncated_any)
+async def _source_rows_for_scope(
+    db: AsyncSession,
+    case: Case,
+    evidence_scope: tuple[str | None, str | None],
+) -> tuple[list[tuple[CanonicalTransaction, SourceRecord]], bool]:
+    source, transaction_type = evidence_scope
+    query = select(CanonicalTransaction, SourceRecord).join(
+        SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id,
+    ).where(
+        CanonicalTransaction.business_date == case.business_date,
+        CanonicalTransaction.store_id == case.store_id,
+    )
+    if source is not None:
+        query = query.where(SourceRecord.source_system == source)
+    if transaction_type is not None:
+        query = query.where(CanonicalTransaction.transaction_type == transaction_type)
+    rows = (await db.execute(
+        query.order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
+        .limit(MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE + 1)
+    )).all()
+    return rows[:MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE], len(rows) > MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE
 
 
 async def case_store_day_totals(db: AsyncSession, case: Case) -> list[AuditTotal]:
