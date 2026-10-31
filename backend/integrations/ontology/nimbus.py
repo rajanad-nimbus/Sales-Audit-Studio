@@ -54,7 +54,8 @@ def investigate(db, case, exceptions, evidence_by_requirement, narrative=None):
             evidence_data={"requirement": req, "retrieved_by": inv_id,
                            "ontology": ontology.ONTOLOGY_VERSION,
                            "source_record_ids": [r["source_record_id"] for r in records],
-                           "canonical_transaction_ids": [r["transaction_id"] for r in records]},
+                           "canonical_transaction_ids": [r["transaction_id"] for r in records],
+                           "source_records_truncated": any(r.get("truncated", False) for r in records)},
             retrieved_at=utcnow()))
     case.evidence_completeness = int((complete / len(required)) * 100) if required else 100
 

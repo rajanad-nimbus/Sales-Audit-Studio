@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace as NS
 
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.agents import investigator
 from apps.agents.agent_tools import EvidenceTools
-from models import Base, Case, CanonicalTransaction, Exception as Exc, SourceRecord
+from models import Base, Case, CanonicalTransaction, EvidenceSnapshot, Exception as Exc, SourceRecord
 
 
 def run(c):
@@ -186,10 +186,68 @@ def test_investigation_evidence_cache_reuses_store_day_query():
                 first_rows = await cache.source_rows(first_case, ["Source record"])
                 second_rows = await cache.source_rows(same_store_day, ["Source record"])
 
-                assert first_rows == second_rows == []
+                assert first_rows == second_rows
+                assert first_rows.records == ()
                 assert len(statements) == 1
         finally:
             await engine.dispose()
+
+    run(go())
+
+
+def test_investigation_source_reads_are_capped_per_evidence_scope(monkeypatch):
+    from apps.agents import investigation_service
+
+    async def go():
+        Session, case, _, _ = await seed()
+        async with Session() as db:
+            now = datetime.now(timezone.utc)
+            for index in range(5):
+                source = "POS" if index < 2 else "Processor"
+                transaction_type = "Sale" if source == "POS" else "Refund"
+                source_record = SourceRecord(
+                    id=f"bounded-source-{index}", source_system=source, source_version="1",
+                    source_record_id=f"bounded-{index}", delivery_id=f"bounded-delivery-{index}",
+                    payload=b"{}", payload_hash=f"hash-{index}", received_at=now, source_event_time=now,
+                )
+                db.add(source_record)
+                db.add(CanonicalTransaction(
+                    id=f"bounded-transaction-{index}", business_date=case.business_date,
+                    transaction_date=now, event_timestamp=now, processing_timestamp=now,
+                    settlement_date=case.business_date, transaction_type=transaction_type,
+                    source_lineage=source, signed_amount=Decimal("1"), store_id=case.store_id,
+                    channel_id="test", source_record_id=source_record.id,
+                ))
+            await db.commit()
+
+            monkeypatch.setattr(investigation_service, "MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE", 2)
+            rows = await investigation_service.case_source_rows(
+                db, case, ["Source record", "Refund confirmation"],
+            )
+            pos_evidence = investigation_service.evidence_for_requirement("Source record", rows)
+            refund_evidence = investigation_service.evidence_for_requirement("Refund confirmation", rows)
+
+            assert len(rows.records) == 4  # two POS and two Processor refunds; no cross-scope starvation
+            assert len(pos_evidence) == len(refund_evidence) == 2
+            assert all(record["truncated"] for record in (*pos_evidence, *refund_evidence))
+
+            from integrations.ontology import nimbus
+
+            requirements = ["POS journal", "Processor capture status", "Authorization record"]
+            evidence = {
+                requirement: investigation_service.evidence_for_requirement(
+                    requirement, rows, exception_type="UNMATCHED_SALE",
+                )
+                for requirement in requirements
+            }
+            nimbus.investigate(db, case, [Exc(id="primary", exception_type="UNMATCHED_SALE",
+                exception_amount=Decimal("10"))], evidence)
+            await db.flush()
+            snapshot = (await db.execute(select(EvidenceSnapshot).where(
+                EvidenceSnapshot.case_id == case.id,
+                EvidenceSnapshot.evidence_type == "POS journal",
+            ))).scalar_one()
+            assert snapshot.evidence_data["source_records_truncated"] is True
 
     run(go())
 

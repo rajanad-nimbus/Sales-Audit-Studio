@@ -1,9 +1,10 @@
 """Shared investigation entry point: scoped evidence retrieval, optional agent, deterministic findings."""
 import logging
 import os
+from dataclasses import dataclass
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import agent_settings, investigator, llm
@@ -11,9 +12,22 @@ from integrations.ontology import nimbus, ontology
 from models import AuditTotal, Case, CanonicalTransaction, EvidenceRequest, Recommendation, SourceRecord, StoreDay
 
 logger = logging.getLogger(__name__)
+MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE = 100
 
 
-def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransaction, SourceRecord]],
+@dataclass(frozen=True, slots=True)
+class CaseSourceRows:
+    """Bounded source evidence plus scopes whose matching records were sampled."""
+
+    records: tuple[tuple[CanonicalTransaction, SourceRecord], ...]
+    truncated_scopes: frozenset[tuple[str | None, str | None]] = frozenset()
+    truncated_any: bool = False
+
+    def __iter__(self):
+        return iter(self.records)
+
+
+def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransaction, SourceRecord]] | CaseSourceRows,
                              totals=(), exception_type: str | None = None) -> list[dict]:
     """Return only real, scoped records that satisfy an ontology requirement, using its declared source.
 
@@ -29,47 +43,70 @@ def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransac
             return []
         ref = f"ontology:{exception_type}:{ontology.ONTOLOGY_VERSION}"
         return [{"source_record_id": ref, "transaction_id": ref, "source_system": "Ontology"}]
+    records = rows.records if isinstance(rows, CaseSourceRows) else rows
     selected = []
-    for txn, record in rows:
+    for txn, record in records:
         if spec.get("source") and record.source_system != spec["source"]:
             continue
         if spec.get("type") and txn.transaction_type != spec["type"]:
             continue
+        truncated = isinstance(rows, CaseSourceRows) and (
+            rows.truncated_any
+            or (record.source_system, spec.get("type")) in rows.truncated_scopes
+            or (record.source_system, None) in rows.truncated_scopes
+        )
         selected.append({"source_record_id": record.id, "transaction_id": txn.id,
-                         "source_system": record.source_system})
+                         "source_system": record.source_system, "truncated": truncated})
     return selected
 
 
 async def case_source_rows(
     db: AsyncSession, case: Case, requirements: list[str]
-) -> list[tuple[CanonicalTransaction, SourceRecord]]:
-    source_filters = []
-    include_all_sources = False
+) -> CaseSourceRows:
+    scopes: set[tuple[str | None, str | None]] = set()
     for requirement in requirements:
         spec = ontology.EVIDENCE_SOURCES.get(requirement)
         if not spec or spec.get("totals") or spec.get("ontology"):
             continue
         if spec.get("any"):
-            include_all_sources = True
-            break
-        conditions = []
-        if spec.get("source"):
-            conditions.append(SourceRecord.source_system == spec["source"])
-        if spec.get("type"):
-            conditions.append(CanonicalTransaction.transaction_type == spec["type"])
-        if conditions:
-            source_filters.append(and_(*conditions))
-    if not source_filters and not include_all_sources:
-        return []
+            scopes.add((None, None))
+        elif spec.get("source") or spec.get("type"):
+            scopes.add((spec.get("source"), spec.get("type")))
+    if not scopes:
+        return CaseSourceRows(())
 
-    query = select(CanonicalTransaction, SourceRecord).join(
-            SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id
-        ).where(CanonicalTransaction.business_date == case.business_date,
-                CanonicalTransaction.store_id == case.store_id)
-    if not include_all_sources:
-        query = query.where(or_(*source_filters))
-    result = await db.execute(query)
-    return list(result.all())
+    records_by_transaction: dict[str, tuple[CanonicalTransaction, SourceRecord]] = {}
+    truncated_scopes: set[tuple[str | None, str | None]] = set()
+    truncated_any = False
+    for source, transaction_type in sorted(scopes, key=lambda item: (item[0] or "", item[1] or "")):
+        query = select(CanonicalTransaction, SourceRecord).join(
+            SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id,
+        ).where(
+            CanonicalTransaction.business_date == case.business_date,
+            CanonicalTransaction.store_id == case.store_id,
+        )
+        if source is not None:
+            query = query.where(SourceRecord.source_system == source)
+        if transaction_type is not None:
+            query = query.where(CanonicalTransaction.transaction_type == transaction_type)
+        rows = (await db.execute(
+            query.order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
+            .limit(MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE + 1)
+        )).all()
+        truncated = len(rows) > MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE
+        if truncated:
+            if source is None and transaction_type is None:
+                truncated_any = True
+            else:
+                truncated_scopes.add((source, transaction_type))
+        for transaction, record in rows[:MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE]:
+            records_by_transaction[transaction.id] = (transaction, record)
+
+    ordered_records = tuple(sorted(
+        records_by_transaction.values(),
+        key=lambda pair: (pair[0].event_timestamp, pair[0].id),
+    ))
+    return CaseSourceRows(ordered_records, frozenset(truncated_scopes), truncated_any)
 
 
 async def case_store_day_totals(db: AsyncSession, case: Case) -> list[AuditTotal]:
@@ -100,7 +137,7 @@ class InvestigationEvidenceCache:
     def __init__(self, db: AsyncSession):
         self.db = db
         self._source_rows: dict[
-            tuple[str, str, tuple[str, ...]], list[tuple[CanonicalTransaction, SourceRecord]]
+            tuple[str, str, tuple[str, ...]], CaseSourceRows
         ] = {}
         self._store_day_totals: dict[tuple[str, str], list[AuditTotal]] = {}
 
@@ -115,7 +152,7 @@ class InvestigationEvidenceCache:
 
     async def source_rows(
         self, case: Case, requirements: list[str]
-    ) -> list[tuple[CanonicalTransaction, SourceRecord]]:
+    ) -> CaseSourceRows:
         key = (*self._key(case), tuple(sorted(set(requirements))))
         if key not in self._source_rows:
             self._source_rows[key] = await case_source_rows(self.db, case, requirements)
