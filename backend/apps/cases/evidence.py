@@ -14,8 +14,9 @@ from apps.security import scope
 from auth import require_role
 from database import get_db
 from integrations.ontology import nimbus, ontology
-from models import (AuditEvent, CanonicalTransaction, Case, CaseNote, EvidenceRequest, EvidenceSnapshot,
-                    Exception as DBException, Recommendation, SourceRecord, utcnow)
+from models import AuditEvent, CanonicalTransaction, SourceRecord, utcnow
+from apps.cases.models import (Case, CaseNote, EvidenceRequest, EvidenceSnapshot,
+                                Exception as DBException, Recommendation)
 from schemas import EvidenceOverride, EvidenceProvide, EvidenceReject, EvidenceRequestCreate, CaseNoteCreate
 
 router = APIRouter()

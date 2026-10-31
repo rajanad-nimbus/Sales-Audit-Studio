@@ -13,8 +13,9 @@ from apps.security import scope
 from auth import require_role
 from database import get_db
 from integrations.ontology import nimbus
-from models import (CanonicalTransaction, Case, EvidenceSnapshot, Exception as DBException,
-                    PolicyEvaluation, SourceRecord, ValidationObligation, Workflow, utcnow)
+from models import CanonicalTransaction, PolicyEvaluation, SourceRecord, utcnow
+from apps.cases.models import (Case, EvidenceSnapshot, Exception as DBException,
+                                ValidationObligation, Workflow)
 from schemas import Recommendation as RecommendationSchema, ValidationRunRequest
 
 router = APIRouter()

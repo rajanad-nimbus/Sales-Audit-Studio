@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.security import scope
-from models import Case
+from apps.cases.models import Case
 
 
 async def locked_scoped_case(db: AsyncSession, case_id: str, user: dict) -> Case:
