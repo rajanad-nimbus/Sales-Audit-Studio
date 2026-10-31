@@ -22,6 +22,7 @@ from apps.transactions.detail import MAX_MONEY, cent_value, money
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from apps.ingest.models import SourceRecord
+from apps.exports.models import ExportItem
 from model_base import utcnow
 from apps.corrections.models import TransactionAdjustment
 from integrations.ontology.nimbus import audit
@@ -239,8 +240,6 @@ async def approve_adjustment(adjustment_id: str, db: AsyncSession = Depends(get_
     if any(case.status in {"Resolving", "Pending Validation"} for case in cases):
         raise HTTPException(status_code=409, detail="A linked case has an active workflow; resolve it before approving this correction")
     if cases:
-        from models import ExportItem
-
         pending_export = (await db.execute(select(ExportItem.id).where(
             ExportItem.object_id.in_([case.id for case in cases]),
             ExportItem.dataset.in_(["resolutions", "adjustments"]), ExportItem.state == "Pending").limit(1))).scalar_one_or_none()

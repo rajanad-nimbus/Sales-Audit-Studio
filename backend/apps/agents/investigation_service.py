@@ -15,6 +15,7 @@ from apps.store_days.models import (
 )
 from apps.cases.models import (
     Case,
+    Exception as DBException,
     EvidenceRequest,
     Recommendation,
 )
@@ -236,7 +237,6 @@ async def auto_investigate(db: AsyncSession, business_date: str, limit: int = 20
 
     The LLM agent handles the highest-exposure cases first, up to NIMBUS_AGENT_BATCH_LIMIT per batch, so an unattended
     run has bounded time and cost. The rest get the deterministic investigation and can be run by the agent on demand."""
-    from models import Exception as DBException
     case_ids = (await db.execute(select(Case.id).where(
         Case.business_date == business_date, Case.status == "Open", Case.investigation_status == "Pending",
         Case.amount_needs_review.is_(False),
