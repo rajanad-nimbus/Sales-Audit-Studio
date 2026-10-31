@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI, Request
 from starlette.requests import Request as StarletteRequest
 
-from apps.request_body import RequestBodyLimitMiddleware, _RequestBodyTooLarge, read_limited_body
+from apps.request_body import RequestBodyLimitMiddleware, read_limited_body
 
 
 def test_request_body_limit_rejects_oversized_and_allows_exact_limit():
@@ -53,6 +53,60 @@ def test_request_body_limit_enforces_streamed_bodies_without_content_length():
     asyncio.run(run())
 
 
+def test_request_body_limit_rejects_oversized_stream_when_handler_ignores_body():
+    async def run():
+        app = FastAPI()
+        app.add_middleware(RequestBodyLimitMiddleware, max_bytes=8)
+
+        @app.post("/ignore")
+        async def ignore():
+            return {"ok": True}
+
+        async def chunks():
+            yield b"1234"
+            yield b"56789"
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post("/ignore", content=chunks())
+
+        assert response.status_code == 413
+
+    asyncio.run(run())
+
+
+def test_request_body_limit_replays_drained_body_to_handler():
+    async def run():
+        received = []
+
+        async def app(scope, receive, send):
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            while True:
+                message = await receive()
+                received.append(message)
+                if not message.get("more_body", False):
+                    break
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        middleware = RequestBodyLimitMiddleware(app, max_bytes=8)
+
+        async def receive():
+            return {"type": "http.request", "body": b"1234", "more_body": False}
+
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        await middleware({"type": "http", "method": "POST", "headers": []}, receive, send)
+
+        assert received == [{"type": "http.request", "body": b"1234", "more_body": False}]
+        assert [message["status"] for message in sent if message["type"] == "http.response.start"] == [200]
+
+    asyncio.run(run())
+
+
 def test_request_body_limit_preserves_handler_errors_during_oversized_reads():
     async def run():
         app = FastAPI()
@@ -77,7 +131,7 @@ def test_request_body_limit_preserves_handler_errors_during_oversized_reads():
     asyncio.run(run())
 
 
-def test_request_body_limit_does_not_suppress_handler_error_after_response_start():
+def test_request_body_limit_checks_unread_body_before_response_start():
     async def run():
         async def app(scope, receive, send):
             await send({"type": "http.response.start", "status": 200, "headers": []})
@@ -88,11 +142,14 @@ def test_request_body_limit_does_not_suppress_handler_error_after_response_start
         async def receive():
             return {"type": "http.request", "body": b"123456789", "more_body": False}
 
-        async def send(_message):
-            return None
+        sent = []
 
-        with pytest.raises(_RequestBodyTooLarge):
-            await middleware({"type": "http", "method": "POST", "headers": []}, receive, send)
+        async def send(_message):
+            sent.append(_message)
+
+        await middleware({"type": "http", "method": "POST", "headers": []}, receive, send)
+
+        assert [message["status"] for message in sent if message["type"] == "http.response.start"] == [413]
 
     asyncio.run(run())
 

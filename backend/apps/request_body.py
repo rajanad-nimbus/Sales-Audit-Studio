@@ -1,7 +1,8 @@
 """Bound request-body reads before buffering untrusted payloads in application memory."""
 
 import json
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 
 from fastapi import HTTPException, Request
 
@@ -13,6 +14,8 @@ class _BodyLimitState:
     received_bytes: int = 0
     oversized: bool = False
     response_started: bool = False
+    request_complete: bool = False
+    buffered_messages: deque = field(default_factory=deque)
 
 
 def _content_length(values: list[bytes | str]) -> int | None:
@@ -72,7 +75,7 @@ class RequestBodyLimitMiddleware:
             await self.app(
                 scope,
                 self._limited_receive(receive, state),
-                self._guarded_send(send, state),
+                self._guarded_send(send, receive, state),
             )
         except _RequestBodyTooLarge:
             if state.response_started:
@@ -85,22 +88,37 @@ class RequestBodyLimitMiddleware:
 
     def _limited_receive(self, receive, state: _BodyLimitState):
         async def limited_receive():
+            if state.buffered_messages:
+                return state.buffered_messages.popleft()
             message = await receive()
-            if message["type"] == "http.request":
-                state.received_bytes += len(message.get("body", b""))
-                if state.received_bytes > self.max_bytes:
-                    state.oversized = True
-                    raise _RequestBodyTooLarge
+            self._record_request_message(message, state)
+            if state.oversized:
+                raise _RequestBodyTooLarge
             return message
 
         return limited_receive
 
-    @staticmethod
-    def _guarded_send(send, state: _BodyLimitState):
+    def _record_request_message(self, message, state: _BodyLimitState) -> None:
+        if message["type"] != "http.request":
+            return
+        state.received_bytes += len(message.get("body", b""))
+        state.request_complete = not message.get("more_body", False)
+        if state.received_bytes > self.max_bytes:
+            state.oversized = True
+
+    def _guarded_send(self, send, receive, state: _BodyLimitState):
         async def guarded_send(message):
             if state.oversized:
                 return
             if message["type"] == "http.response.start":
+                while not state.request_complete:
+                    request_message = await receive()
+                    state.buffered_messages.append(request_message)
+                    self._record_request_message(request_message, state)
+                    if state.oversized:
+                        raise _RequestBodyTooLarge
+                    if request_message["type"] == "http.disconnect":
+                        break
                 state.response_started = True
             await send(message)
 
