@@ -330,48 +330,62 @@ async def link_returns(db, reference_keys: set[tuple[str, str]]) -> int:
         batch_keys = ordered_keys[offset:offset + reference_batch_size]
         last_id = ""
         while True:
-            pending_query = select(CanonicalTransaction).where(
-                CanonicalTransaction.transaction_type == "Return",
-                CanonicalTransaction.original_reference.is_not(None),
-                CanonicalTransaction.original_transaction_id.is_(None),
-                CanonicalTransaction.id > last_id,
-                tuple_(CanonicalTransaction.store_id, CanonicalTransaction.original_reference).in_(batch_keys),
-            ).order_by(CanonicalTransaction.id).limit(return_page_size).with_for_update()
-            pending = (await db.execute(pending_query)).scalars().all()
+            pending = await load_pending_return_page(db, batch_keys, last_id, return_page_size)
             if not pending:
                 break
             last_id = pending[-1].id
+            linked += await link_return_page(db, pending)
+    return linked
 
-            returns_by_reference: dict[tuple[str, str], list[CanonicalTransaction]] = defaultdict(list)
-            for row in pending:
-                if row.original_reference:
-                    returns_by_reference[(row.store_id, row.original_reference)].append(row)
-            pending_keys = list(returns_by_reference)
-            match_conditions = [
-                and_(
-                    CanonicalTransaction.store_id == store_id,
-                    or_(SourceRecord.source_record_id == reference,
-                        CanonicalTransaction.payment_reference == reference),
-                )
-                for store_id, reference in pending_keys
-            ]
-            candidates = await db.stream(
-                select(CanonicalTransaction, SourceRecord.source_record_id)
-                .outerjoin(SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id)
-                .where(CanonicalTransaction.transaction_type == "Sale", or_(*match_conditions))
-                .order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
-                .execution_options(yield_per=500)
-            )
-            try:
-                async for sale, source_record_id in candidates:
-                    references = {source_record_id, sale.payment_reference} - {None, ""}
-                    for reference in references:
-                        for return_row in returns_by_reference.get((sale.store_id, reference), ()):
-                            if return_row.original_transaction_id is None:
-                                return_row.original_transaction_id = sale.id
-                                linked += 1
-            finally:
-                await candidates.close()
+
+async def load_pending_return_page(db, batch_keys, last_id: str, page_size: int):
+    """Load the next locked page of unlinked returns for a reference batch."""
+    query = select(CanonicalTransaction).where(
+        CanonicalTransaction.transaction_type == "Return",
+        CanonicalTransaction.original_reference.is_not(None),
+        CanonicalTransaction.original_transaction_id.is_(None),
+        CanonicalTransaction.id > last_id,
+        tuple_(CanonicalTransaction.store_id, CanonicalTransaction.original_reference).in_(batch_keys),
+    ).order_by(CanonicalTransaction.id).limit(page_size).with_for_update()
+    return (await db.execute(query)).scalars().all()
+
+
+async def link_return_page(db, pending: list[CanonicalTransaction]) -> int:
+    """Stream candidate sales and link each pending return to the earliest match."""
+    returns_by_reference: dict[tuple[str, str], list[CanonicalTransaction]] = defaultdict(list)
+    for return_transaction in pending:
+        if return_transaction.original_reference:
+            key = (return_transaction.store_id, return_transaction.original_reference)
+            returns_by_reference[key].append(return_transaction)
+    conditions = [
+        and_(
+            CanonicalTransaction.store_id == store_id,
+            or_(SourceRecord.source_record_id == reference,
+                CanonicalTransaction.payment_reference == reference),
+        )
+        for store_id, reference in returns_by_reference
+    ]
+    if not conditions:
+        return 0
+    candidates = await db.stream(
+        select(CanonicalTransaction, SourceRecord.source_record_id)
+        .outerjoin(SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id)
+        .where(CanonicalTransaction.transaction_type == "Sale", or_(*conditions))
+        .order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
+        .execution_options(yield_per=500)
+    )
+    linked = 0
+    try:
+        async for sale, source_record_id in candidates:
+            references = {source_record_id, sale.payment_reference} - {None, ""}
+            for reference in references:
+                matching_returns = returns_by_reference.get((sale.store_id, reference), ())
+                for return_transaction in matching_returns:
+                    if return_transaction.original_transaction_id is None:
+                        return_transaction.original_transaction_id = sale.id
+                        linked += 1
+    finally:
+        await candidates.close()
     return linked
 
 
