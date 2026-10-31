@@ -1,6 +1,10 @@
 from sqlalchemy.exc import IntegrityError
 
-from apps.exports.routes import _is_duplicate_destination_name, _is_export_reservation_conflict
+from apps.exports.routes import (
+    _is_duplicate_destination_name,
+    _is_export_reservation_conflict,
+    _is_sink_receipt_conflict,
+)
 
 
 def test_destination_name_conflict_matches_sqlite_constraint():
@@ -32,3 +36,19 @@ def test_unrelated_export_integrity_error_is_not_misclassified():
     error = IntegrityError("insert", {}, Exception("FOREIGN KEY constraint failed"))
 
     assert not _is_export_reservation_conflict(error)
+
+
+def test_sink_receipt_conflict_matches_idempotency_primary_key():
+    error = IntegrityError(
+        "insert",
+        {},
+        Exception("UNIQUE constraint failed: test_sink_receipts.idempotency_key"),
+    )
+
+    assert _is_sink_receipt_conflict(error)
+
+
+def test_unrelated_sink_integrity_error_is_not_a_retry():
+    error = IntegrityError("insert", {}, Exception("FOREIGN KEY constraint failed"))
+
+    assert not _is_sink_receipt_conflict(error)

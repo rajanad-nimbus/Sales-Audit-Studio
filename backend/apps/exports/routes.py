@@ -89,6 +89,14 @@ def _is_export_reservation_conflict(exc: IntegrityError) -> bool:
     )
 
 
+def _is_sink_receipt_conflict(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"test_sink_receipts_pkey"},
+        sqlite_messages={"UNIQUE constraint failed: test_sink_receipts.idempotency_key"},
+    )
+
+
 def valid_signature(actual: str | None, expected: str) -> bool:
     return bool(actual and re.fullmatch(r"sha256=[0-9a-f]{64}", actual) and hmac.compare_digest(actual, expected))
 
@@ -878,7 +886,9 @@ async def sink(request: Request, x_nimbus_signature: str | None = Header(default
         async with db.begin_nested():
             await db.execute(insert(TestSinkReceipt).values(idempotency_key=x_nimbus_idempotency_key,
                              dataset=x_nimbus_dataset, payload_hash=digest, byte_count=len(body)))
-    except IntegrityError:
+    except IntegrityError as exc:
+        if not _is_sink_receipt_conflict(exc):
+            raise
         receipt = await db.get(TestSinkReceipt, x_nimbus_idempotency_key)
         if not receipt or receipt.payload_hash != digest or receipt.dataset != x_nimbus_dataset:
             raise HTTPException(status_code=409, detail="Idempotency key was already used for a different delivery")
