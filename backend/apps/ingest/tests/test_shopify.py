@@ -18,6 +18,50 @@ def test_next_page_info_parses_link_header():
     assert sa._next_page_info("") is None
 
 
+def test_shopify_response_json_is_read_within_byte_limit(monkeypatch):
+    class Content:
+        async def iter_chunked(self, _chunk_size):
+            yield b'{"orders":['
+            yield b'{"id":1}]}'
+
+    class Response:
+        content_length = None
+        content = Content()
+
+    monkeypatch.setattr(sa, "MAX_SHOPIFY_RESPONSE_BYTES", 64)
+    assert asyncio.run(sa._read_response_json(Response())) == {"orders": [{"id": 1}]}
+
+
+def test_shopify_response_rejects_oversized_stream_without_content_length(monkeypatch):
+    class Content:
+        async def iter_chunked(self, _chunk_size):
+            yield b"{" + b" " * 40
+            yield b" " * 40 + b"}"
+
+    class Response:
+        content_length = None
+        content = Content()
+
+    monkeypatch.setattr(sa, "MAX_SHOPIFY_RESPONSE_BYTES", 64)
+    with pytest.raises(sa.ShopifyFeedLimitError, match="64-byte limit"):
+        asyncio.run(sa._read_response_json(Response()))
+
+
+def test_shopify_response_rejects_oversized_declared_length(monkeypatch):
+    class Content:
+        async def iter_chunked(self, _chunk_size):
+            raise AssertionError("oversized response should be rejected before reading")
+            yield b""
+
+    class Response:
+        content_length = 65
+        content = Content()
+
+    monkeypatch.setattr(sa, "MAX_SHOPIFY_RESPONSE_BYTES", 64)
+    with pytest.raises(sa.ShopifyFeedLimitError, match="64-byte limit"):
+        asyncio.run(sa._read_response_json(Response()))
+
+
 def test_fetch_locations_follows_all_pages(monkeypatch):
     adapter = sa.ShopifyAdapter(require_credentials=False)
     requests = []

@@ -29,6 +29,33 @@ class ShopifyFeedLimitError(ShopifyAPIError):
 
 MAX_RETRY_DELAY_SECONDS = 30.0
 MAX_SHOPIFY_PAGES = 1_000
+MAX_SHOPIFY_RESPONSE_BYTES = MAX_DELIVERY_BYTES
+SHOPIFY_RESPONSE_CHUNK_BYTES = 64 * 1024
+
+
+async def _read_response_json(response: aiohttp.ClientResponse) -> dict:
+    """Read a Shopify response without buffering an unbounded body in memory."""
+    content_length = response.content_length
+    if content_length is not None and content_length > MAX_SHOPIFY_RESPONSE_BYTES:
+        raise ShopifyFeedLimitError(
+            f"Shopify API response exceeds the {MAX_SHOPIFY_RESPONSE_BYTES:,}-byte limit"
+        )
+
+    body = bytearray()
+    async for chunk in response.content.iter_chunked(SHOPIFY_RESPONSE_CHUNK_BYTES):
+        if len(body) + len(chunk) > MAX_SHOPIFY_RESPONSE_BYTES:
+            raise ShopifyFeedLimitError(
+                f"Shopify API response exceeds the {MAX_SHOPIFY_RESPONSE_BYTES:,}-byte limit"
+            )
+        body.extend(chunk)
+
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ShopifyAPIError("Shopify returned an invalid JSON response") from exc
+    if not isinstance(payload, dict):
+        raise ShopifyAPIError("Shopify returned an invalid JSON response")
+    return payload
 
 
 class _ShopifyPagination:
@@ -139,7 +166,7 @@ class ShopifyAdapter:
                         text = await resp.text()
                         raise ShopifyAPIError(f"Status {resp.status}: {text}")
 
-                    return await resp.json(), dict(resp.headers)
+                    return await _read_response_json(resp), dict(resp.headers)
             except (asyncio.TimeoutError, aiohttp.ClientError) as e:
                 last_error = str(e) or type(e).__name__
                 if not last:
