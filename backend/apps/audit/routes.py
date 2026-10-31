@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import require_role
+from apps.security.authentication import require_role
 from apps.search import contains_literal
 from database import get_db
 from apps.audit.models import AuditEvent

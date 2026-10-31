@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-import auth
+from apps.security import authentication as auth
 import main
 from apps.assistant import chat
 from apps.agents import llm

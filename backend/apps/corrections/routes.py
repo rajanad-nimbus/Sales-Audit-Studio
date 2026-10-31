@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import String, case, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import require_role
+from apps.security.authentication import require_role
 from apps.search import contains_literal
 from apps.security import scope
 from apps.ingest.common import LINEAGE, SIGN, VALID_TYPES

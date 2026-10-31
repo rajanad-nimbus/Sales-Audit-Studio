@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth import require_role
+from apps.security.authentication import require_role
 from integrations.ontology import ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
 

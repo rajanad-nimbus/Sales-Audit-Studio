@@ -3,7 +3,7 @@ import asyncio
 import httpx
 from fastapi import Depends, FastAPI
 
-import auth
+from apps.security import authentication as auth
 import main
 
 

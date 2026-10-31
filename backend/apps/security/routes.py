@@ -6,9 +6,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import auth
+from apps.security import authentication as auth
 from apps.security import access, scope
-from auth import current_user
+from apps.security.authentication import current_user
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from apps.store_days.models import StoreDay

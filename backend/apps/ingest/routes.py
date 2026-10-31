@@ -32,7 +32,7 @@ from apps.ingest.shopify import scheduler
 from apps.ingest.manifests import validate_business_date
 from apps.totals.currency import validate_currency
 from integrations.ontology.nimbus import audit
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from model_base import utcnow

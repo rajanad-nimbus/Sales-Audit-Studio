@@ -21,7 +21,7 @@ from apps.ingest.simulation import simulate_feed
 from apps.ingest import shopify_adapter, source_settings
 from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 from apps.ingest.manifests import validate_business_date
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from model_base import utcnow

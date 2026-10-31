@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import investigation_service
 from apps.security import scope
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from integrations.ontology import nimbus
 from apps.transactions.models import CanonicalTransaction

@@ -17,7 +17,7 @@ from apps.ingest.limits import MAX_DELIVERY_BYTES
 from apps.ingest import source_settings
 from apps.ingest.shopify import reference_sync
 from apps.request_body import read_limited_body
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from model_base import utcnow
 from apps.ingest.models import SourceRecord

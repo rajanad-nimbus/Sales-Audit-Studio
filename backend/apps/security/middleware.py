@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable
 
 from apps.security import access, scope
-from auth import current_user
+from apps.security.authentication import current_user
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response

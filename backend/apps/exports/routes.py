@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from auth import require_role
+from apps.security.authentication import require_role
 from apps.database_errors import violates_unique_constraint
 from apps.request_body import read_limited_body
 from database import get_db

@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import require_role
+from apps.security.authentication import require_role
 from apps.database_errors import violates_unique_constraint
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from database import get_db

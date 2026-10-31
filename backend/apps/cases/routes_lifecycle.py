@@ -13,7 +13,7 @@ from apps.cases.identifiers import generate_case_number
 from apps.corrections.follow_up import create_follow_up
 from apps.security import scope
 from apps.transactions.detail import MAX_MONEY
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from integrations.ontology import nimbus
 from apps.audit.models import AuditEvent

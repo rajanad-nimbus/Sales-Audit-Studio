@@ -13,7 +13,7 @@ from apps.ingest.manifests import validate_business_date
 from apps.totals.calculation import calculate_store_day, dependencies_for_preview, effective_definitions, store_location_traits
 from apps.totals.currency import single_currency
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.totals.models import AuditTotalDefinition, SalesAuditErrorDefinition
 from .domain import serialize_definition, validate_definition

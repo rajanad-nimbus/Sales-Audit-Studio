@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-import auth
+from apps.security import authentication as auth
 import main
 from apps.security import middleware
 

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.audit.models import AuditEvent
 from apps.transactions.models import (

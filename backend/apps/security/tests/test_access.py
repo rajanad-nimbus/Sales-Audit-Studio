@@ -1,7 +1,7 @@
 """Screen access: one map, enforced by the API, consistent with every endpoint's own role check."""
 
 from apps.security import access
-from auth import role_allowed
+from apps.security.authentication import role_allowed
 
 
 def test_every_role_can_always_reach_its_chrome_and_nothing_extra():

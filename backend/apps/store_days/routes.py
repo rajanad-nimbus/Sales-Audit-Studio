@@ -16,7 +16,7 @@ from apps.security import scope
 from apps.store_days.freshness import lock_configuration, lock_store_day_identity
 from apps.totals.calculation import calculate_store_day, effective_definitions
 from apps.totals.currency import single_currency
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.audit.models import AuditEvent
 from apps.transactions.models import CanonicalTransaction

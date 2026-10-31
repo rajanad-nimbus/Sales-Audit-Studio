@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.audit.models import AuditEvent
 from apps.cases.models import (

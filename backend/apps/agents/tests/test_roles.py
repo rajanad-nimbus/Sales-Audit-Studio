@@ -1,5 +1,5 @@
 """Derived role permissions (analyst, auditor, store_manager) from existing require_role declarations."""
-from auth import role_allowed
+from apps.security.authentication import role_allowed
 
 
 def test_analyst_does_shared_work_but_not_approvals_or_it_ops():

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-import auth
+from apps.security import authentication as auth
 from apps.cash import routes as cash
 from apps.store_days import routes as sd
 from apps.security import scope

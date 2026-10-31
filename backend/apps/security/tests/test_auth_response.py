@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import auth
+from apps.security import authentication as auth
 
 
 @pytest.mark.parametrize("user", [None, [], "invalid", 42])

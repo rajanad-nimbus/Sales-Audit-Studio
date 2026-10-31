@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from apps.database_errors import violates_unique_constraint
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.totals.models import AuditTotalDefinition
 from apps.controls.rules.models import ConfiguredAuditRule

@@ -13,7 +13,7 @@ from apps.corrections.effects import effective_amounts
 from apps.database_errors import violates_unique_constraint
 from apps.ingest.manifests import validate_business_date
 from apps.security import scope
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from apps.gl.models import GLCrossReference

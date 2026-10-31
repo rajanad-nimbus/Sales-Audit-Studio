@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import llm
 from apps.assistant import chat
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 
 router = APIRouter()

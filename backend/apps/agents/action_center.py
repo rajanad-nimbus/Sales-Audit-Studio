@@ -18,7 +18,7 @@ from apps.search import contains_literal
 from apps.security import scope
 from integrations.ontology import nimbus
 from integrations.ontology.ontology_integration import integration as ontology_integration
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.cases.models import (
     Case,

@@ -13,7 +13,7 @@ from apps.security import scope
 from apps.corrections.effects import sum_effective_amounts
 from apps.database_errors import violates_unique_constraint
 from apps.store_days.freshness import lock_store_day
-from auth import require_role
+from apps.security.authentication import require_role
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from apps.cash.models import CashControl, CashDeposit

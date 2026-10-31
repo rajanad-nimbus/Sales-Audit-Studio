@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import AUTH_ENABLED, require_role
+from apps.security.authentication import AUTH_ENABLED, require_role
 from database import get_db
 from integrations.ontology import ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration

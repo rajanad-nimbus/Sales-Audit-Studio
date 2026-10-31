@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy import String, case as sql_case, cast, func, literal, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import require_role
+from apps.security.authentication import require_role
 from apps.cases.lineage import case_creation_mentions_transaction
 from database import get_db
 from apps.search import contains_literal
