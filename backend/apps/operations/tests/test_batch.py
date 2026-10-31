@@ -82,6 +82,42 @@ def test_failed_batch_is_recorded_after_rollback(monkeypatch):
     asyncio.run(run())
 
 
+def test_cancelled_batch_is_recorded_failed_before_cancellation_propagates(monkeypatch):
+    started = asyncio.Event()
+
+    async def wait_for_shutdown(_db, _source, _delivery, _records):
+        started.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(batch.ingest, "ingest", wait_for_shutdown)
+
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                task = asyncio.create_task(
+                    batch.run_daily_batch(db, "2026-10-01", feeds={"POS": []})
+                )
+                await started.wait()
+                task.cancel()
+
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+                stored = (await db.execute(select(BatchRun))).scalar_one()
+                assert stored.status == "Failed"
+                assert stored.error == "Batch failed (CancelledError)"
+                events = (await db.execute(select(AuditEvent.event_type))).scalars().all()
+                assert events == ["BATCH_FAILED"]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_failure_preserves_counts_for_feeds_already_committed(monkeypatch):
     async def ingest(_db, source, _delivery, _records):
         if source == "Processor":

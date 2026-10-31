@@ -1,5 +1,6 @@
 """Daily transaction-log batch: load the day's feeds, then reconcile. Entry point for a scheduler (cron)."""
 
+import asyncio
 import logging
 import os
 import uuid
@@ -40,7 +41,7 @@ class BatchRunOwnershipLost(RuntimeError):
     """Raised when a worker's batch claim was recovered by another worker."""
 
 
-def safe_batch_failure(error: Exception) -> str:
+def safe_batch_failure(error: BaseException) -> str:
     """Describe a failed run without persisting source payloads or driver details."""
     if isinstance(error, reconciliation.ReconciliationCapacityError):
         return str(error)
@@ -72,6 +73,9 @@ async def run_daily_batch(
     try:
         counts, reconciliation_result = await execute_batch(db, run, business_date, feeds)
         await complete_batch(db, run, business_date, counts, reconciliation_result)
+    except asyncio.CancelledError as exc:
+        await asyncio.shield(record_batch_failure(db, run.id, business_date, exc))
+        raise
     except Exception as exc:  # keep the failure visible instead of losing the run
         return await record_batch_failure(db, run.id, business_date, exc)
 
@@ -248,7 +252,7 @@ async def complete_batch(
 
 
 async def record_batch_failure(
-    db: AsyncSession, run_id: str, business_date: str, error: Exception
+    db: AsyncSession, run_id: str, business_date: str, error: BaseException
 ) -> BatchRun:
     """Persist the failure of a still-owned run without overwriting recovered ownership."""
     await db.rollback()
