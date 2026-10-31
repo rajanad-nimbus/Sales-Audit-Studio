@@ -59,6 +59,83 @@ async def export_event_pages(db: AsyncSession, conds: list, head_seq: int):
         yield records
 
 
+async def prepare_export(db: AsyncSession, conds: list, format: str) -> tuple[int, str | None, int]:
+    """Validate format and pin the bounded export to the current audit-chain head."""
+    if format not in {"csv", "json"}:
+        raise HTTPException(status_code=422, detail="format must be csv or json")
+    head_event = (
+        await db.execute(
+            select(AuditEvent.seq, AuditEvent.hash).order_by(AuditEvent.seq.desc()).limit(1)
+        )
+    ).first()
+    head_seq, head_hash = head_event if head_event else (0, None)
+    count = (
+        await db.execute(
+            select(func.count()).select_from(AuditEvent).where(*conds, AuditEvent.seq <= head_seq)
+        )
+    ).scalar() or 0
+    if count > MAX_EXPORT_EVENTS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Export exceeds {MAX_EXPORT_EVENTS} events; narrow the filters",
+        )
+    await db.commit()
+    return head_seq, head_hash, count
+
+
+def csv_line(values: list) -> str:
+    """Encode a row with the CSV writer's quoting and escaping rules."""
+    buffer = io.StringIO()
+    csv.writer(buffer).writerow(values)
+    return buffer.getvalue()
+
+
+async def generate_csv(db: AsyncSession, conds: list, head_seq: int):
+    """Stream a stable audit export as CSV pages."""
+    columns = [
+        "seq", "created_at", "event_type", "actor", "object_type", "object_id",
+        "case_id", "description", "prev_hash", "hash",
+    ]
+    yield csv_line(columns)
+    async for records in export_event_pages(db, conds, head_seq):
+        for record in records:
+            yield csv_line([record[column] for column in columns])
+
+
+async def generate_json(db: AsyncSession, conds: list, head_seq: int, head_hash: str | None, count: int):
+    """Stream JSON metadata and paginated audit records without buffering the full export."""
+    exported_at = datetime.now(timezone.utc)
+    yield json.dumps({"exported_at": exported_at, "head_hash": head_hash, "count": count}, default=str)[:-1]
+    yield ',"events":['
+    first = True
+    async for records in export_event_pages(db, conds, head_seq):
+        for record in records:
+            if not first:
+                yield ","
+            yield json.dumps(record, default=str)
+            first = False
+    yield "]}"
+
+
+def export_response(
+    db: AsyncSession, conds: list, format: str, head_seq: int, head_hash: str | None, count: int
+) -> StreamingResponse:
+    """Build a streaming response for the requested audit export format."""
+    is_json = format == "json"
+    generator = (
+        generate_json(db, conds, head_seq, head_hash, count)
+        if is_json
+        else generate_csv(db, conds, head_seq)
+    )
+    filename = "audit-trail.json" if is_json else "audit-trail.csv"
+    media_type = "application/json" if is_json else "text/csv"
+    return StreamingResponse(
+        generator,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.get("", response_model=list[AuditEventSchema])
 async def list_recent_events(
     case_id: Annotated[str | None, Query(max_length=36)] = None,
@@ -129,44 +206,5 @@ async def export(format: str = "csv", event_type: Annotated[str | None, Query(ma
                  q: Annotated[str | None, Query(max_length=500)] = None, db: AsyncSession = Depends(get_db),
                  user: dict = Depends(require_role("finance", "it"))):
     conds = conditions(event_type, actor, case_id, date_from, date_to, q)
-    if format not in {"csv", "json"}:
-        raise HTTPException(status_code=422, detail="format must be csv or json")
-    head_event = (await db.execute(select(AuditEvent.seq, AuditEvent.hash).order_by(AuditEvent.seq.desc()).limit(1))).first()
-    head_seq, head_hash = head_event if head_event else (0, None)
-    count = (await db.execute(select(func.count()).select_from(AuditEvent).where(
-        *conds, AuditEvent.seq <= head_seq))).scalar() or 0
-    if count > MAX_EXPORT_EVENTS:
-        raise HTTPException(status_code=413, detail=f"Export exceeds {MAX_EXPORT_EVENTS} events; narrow the filters")
-    await db.commit()
-    cols = ["seq", "created_at", "event_type", "actor", "object_type", "object_id", "case_id", "description", "prev_hash", "hash"]
-
-    async def generate_csv():
-        def csv_line(values):
-            buffer = io.StringIO()
-            csv.writer(buffer).writerow(values)
-            return buffer.getvalue()
-
-        yield csv_line(cols)
-        async for records in export_event_pages(db, conds, head_seq):
-            for record in records:
-                yield csv_line([record[column] for column in cols])
-
-    async def generate_json():
-        exported_at = datetime.now(timezone.utc)
-        yield json.dumps({"exported_at": exported_at, "head_hash": head_hash, "count": count}, default=str)[:-1]
-        yield ',"events":['
-        first = True
-        async for records in export_event_pages(db, conds, head_seq):
-            for record in records:
-                if not first:
-                    yield ","
-                yield json.dumps(record, default=str)
-                first = False
-        yield "]}"
-
-    is_json = format == "json"
-    filename = "audit-trail.json" if is_json else "audit-trail.csv"
-    generator = generate_json() if is_json else generate_csv()
-    media_type = "application/json" if is_json else "text/csv"
-    return StreamingResponse(generator, media_type=media_type,
-                             headers={"Content-Disposition": f"attachment; filename={filename}"})
+    head_seq, head_hash, count = await prepare_export(db, conds, format)
+    return export_response(db, conds, format, head_seq, head_hash, count)
