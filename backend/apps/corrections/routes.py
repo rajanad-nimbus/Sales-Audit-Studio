@@ -1,7 +1,5 @@
 """Governed transaction correction proposals and approvals."""
 import uuid
-from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -11,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.security.authentication import require_role
 from apps.search import contains_literal
 from apps.security import scope
-from apps.ingest.common import SIGN, VALID_TYPES
-from apps.totals.currency import validate_currency
 from apps.corrections.approval import apply_approval_effects, prepare_approval
-from apps.transactions.detail import MAX_MONEY, cent_value, money
+from apps.corrections.validation import (
+    missing_transaction_source,
+    validate_adjustment_values,
+    validate_missing_transaction,
+)
 from database import get_db
 from apps.transactions.models import CanonicalTransaction
 from model_base import utcnow
@@ -30,85 +30,6 @@ class AdjustmentBody(BaseModel):
     proposed_values: dict = Field(min_length=1, max_length=20)
     rationale: str = Field(min_length=1, max_length=5000)
 
-
-def validate_adjustment_values(adjustment_type: str, values: dict) -> None:
-    """Ensure correction fields match their type before they enter financial calculations."""
-    try:
-        if adjustment_type == "MissingTransaction":
-            validate_missing_transaction(values)
-            return
-        fields = {
-            "Amount": {"amount_delta", "corrected_amount"},
-            "Tax": {"tax_delta"},
-            "Tender": {"tender_type"},
-            "Reference": {"reference"},
-            "Item": {"item"},
-        }
-        allowed = fields.get(adjustment_type)
-        if not isinstance(values, dict) or not allowed or len(values) != 1 or not set(values) <= allowed:
-            raise ValueError("provide exactly one field appropriate to the adjustment type")
-        field, value = next(iter(values.items()))
-        if adjustment_type in {"Amount", "Tax"}:
-            amount = cent_value(value, field)
-            if abs(amount) > MAX_MONEY:
-                raise ValueError(f"{field} must fit supported monetary precision")
-        elif not isinstance(value, str) or not value.strip() or len(value) > 255:
-            raise ValueError(f"{field} must be a nonempty string of at most 255 characters")
-    except (ValueError, TypeError, InvalidOperation) as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid adjustment values: {exc}") from exc
-
-
-def validate_missing_transaction(values: dict) -> tuple[Decimal, str, str, datetime, str]:
-    """Validate all fields needed to safely create an approved missing transaction."""
-    try:
-        allowed = {"amount", "business_date", "store_id", "transaction_type", "event_timestamp",
-                   "settlement_date", "currency", "quantity", "register_id", "channel_id", "tender_type",
-                   "payment_reference", "settlement_reference", "source_system"}
-        if not isinstance(values, dict) or set(values) - allowed:
-            raise ValueError("unsupported missing transaction fields")
-        amount = money(values["amount"], "amount", allow_zero=False)
-        business_date = str(values["business_date"])
-        if date.fromisoformat(business_date).isoformat() != business_date:
-            raise ValueError("business_date must use YYYY-MM-DD")
-        store = values["store_id"]
-        if not isinstance(store, str) or not store.strip() or len(store) > 50 or store != store.strip():
-            raise ValueError("store_id must contain 1 to 50 characters without surrounding whitespace")
-        transaction_type = values["transaction_type"]
-        if not isinstance(transaction_type, str) or transaction_type not in SIGN:
-            raise ValueError("unsupported transaction_type")
-        missing_transaction_source(values)
-        event_at = datetime.fromisoformat(str(values.get("event_timestamp") or f"{business_date}T00:00:00+00:00").replace("Z", "+00:00"))
-        if event_at.tzinfo is None:
-            event_at = event_at.replace(tzinfo=timezone.utc)
-        settlement_date = str(values.get("settlement_date") or business_date)
-        if date.fromisoformat(settlement_date).isoformat() != settlement_date:
-            raise ValueError("settlement_date must use YYYY-MM-DD")
-        currency = values.get("currency") or "USD"
-        validate_currency(currency)
-        quantity = values.get("quantity")
-        if quantity is not None and (isinstance(quantity, bool) or not isinstance(quantity, int)
-                                     or not -(2**31) <= quantity < 2**31):
-            raise ValueError("quantity must be a 32-bit integer")
-        for name, max_length in (("register_id", 50), ("channel_id", 50), ("tender_type", 50),
-                                 ("payment_reference", 255), ("settlement_reference", 255)):
-            value = values.get(name)
-            if value is not None and (not isinstance(value, str) or len(value) > max_length):
-                raise ValueError(f"{name} must be a string of at most {max_length} characters")
-        return amount, transaction_type, business_date, event_at, settlement_date
-    except (KeyError, TypeError, ValueError, OverflowError) as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid missing transaction: {exc}") from exc
-
-
-def missing_transaction_source(values: dict) -> str:
-    """Resolve an unambiguous source, requiring an explicit source for shared types."""
-    transaction_type = values["transaction_type"]
-    candidates = [source for source, types in VALID_TYPES.items() if transaction_type in types]
-    source = values.get("source_system")
-    if source is None and len(candidates) == 1:
-        return candidates[0]
-    if not isinstance(source, str) or source not in candidates:
-        raise ValueError("source_system must identify a valid source for the transaction type")
-    return source
 
 def view(row: TransactionAdjustment):
     return {"id": row.id, "transaction_id": row.transaction_id, "adjustment_type": row.adjustment_type, "proposed_values": row.proposed_values, "rationale": row.rationale, "status": row.status, "proposed_by": row.proposed_by, "reviewed_by": row.reviewed_by, "created_at": row.created_at}
