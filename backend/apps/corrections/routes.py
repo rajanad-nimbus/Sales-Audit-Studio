@@ -42,7 +42,12 @@ def transaction_view(row: CanonicalTransaction):
             "reconciliation_status": row.reconciliation_status}
 
 @router.get("/transactions/search")
-async def search_transactions(q: str, limit: Annotated[int, Query(ge=1, le=25)] = 12, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
+async def search_transactions(
+    q: Annotated[str, Query(min_length=2, max_length=255)],
+    limit: Annotated[int, Query(ge=1, le=25)] = 12,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it")),
+):
     term = q.strip()
     if len(term) < 2: raise HTTPException(status_code=422, detail="Enter at least two characters to search transactions")
     query = scope.restrict(select(CanonicalTransaction), user, CanonicalTransaction.store_id)
