@@ -16,6 +16,17 @@ NOW = datetime.now(timezone.utc)
 USER = {"user": "x", "role": "finance"}
 
 
+def test_payload_preview_is_bounded_before_json_formatting_and_has_stable_shape():
+    empty = rt.decode_payload(None)
+    oversized = rt.decode_payload(b'{"value":"' + b"x" * (rt.MAX_PAYLOAD_CHARS * 3) + b'"}')
+    small_json = rt.decode_payload(b'{"k":1}')
+
+    assert empty == {"text": None, "truncated": False}
+    assert set(oversized) == set(small_json) == {"text", "truncated"}
+    assert oversized["truncated"] and len(oversized["text"]) <= rt.MAX_PAYLOAD_CHARS
+    assert small_json == {"text": '{\n  "k": 1\n}', "truncated": False}
+
+
 async def seed():
     engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     async with engine.begin() as conn:

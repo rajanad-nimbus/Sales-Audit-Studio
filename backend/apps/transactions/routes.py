@@ -167,14 +167,15 @@ async def facets(db: AsyncSession = Depends(get_db), _: dict = Depends(require_r
 
 def decode_payload(raw: bytes | None) -> dict:
     if not raw:
-        return {"text": None, "json": None, "truncated": False}
-    text = raw.decode("utf-8", errors="replace")
-    try:
-        parsed = json.loads(text)
-        text = json.dumps(parsed, indent=2, default=str)
-    except ValueError:
-        parsed = None
-    return {"text": text[:MAX_PAYLOAD_CHARS], "truncated": len(text) > MAX_PAYLOAD_CHARS}
+        return {"text": None, "truncated": False}
+    truncated = len(raw) > MAX_PAYLOAD_CHARS
+    text = raw[:MAX_PAYLOAD_CHARS].decode("utf-8", errors="replace")
+    if not truncated:
+        try:
+            text = json.dumps(json.loads(text), indent=2, default=str)
+        except ValueError:
+            pass
+    return {"text": text[:MAX_PAYLOAD_CHARS], "truncated": truncated or len(text) > MAX_PAYLOAD_CHARS}
 
 
 def fmt_qty(q) -> str:
