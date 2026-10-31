@@ -457,93 +457,133 @@ async def run_settlement_controls(db, txns, add, amount_tolerance=Decimal("0"), 
     bank = [t for t in txns if t.source_lineage == LINEAGE["Bank"]]
     referenced_banks = [t for t in bank if t.settlement_reference]
     if referenced_banks:
-        scopes = {(row.store_id, row.currency, row.business_date) for row in referenced_banks}
-        expected, actual = defaultdict(Decimal), defaultdict(Decimal)
-        ordered_scopes = sorted(scopes)
-        # A scope uses three bind parameters; keep each query safely below SQLite's
-        # traditional 999-variable limit and avoid the cross-product from separate IN lists.
-        for offset in range(0, len(ordered_scopes), COMPOSITE_SCOPE_BATCH_SIZE):
-            scope_batch = ordered_scopes[offset:offset + COMPOSITE_SCOPE_BATCH_SIZE]
-            expected_query = select(CanonicalTransaction).where(
+        await reconcile_referenced_bank_batches(
+            db, referenced_banks, add, amount_tolerance, tolerance_currency
+        )
+    controls = (
+        ("Bank", "BANK_VARIANCE", "MISSING_DEPOSIT", "Processor"),
+        ("ERP", "GL_VARIANCE", "MISSING_GL_POSTING", "POS"),
+    )
+    for feed_key, variance_code, missing_code, basis in controls:
+        feed = [
+            txn for txn in txns
+            if txn.source_lineage == LINEAGE[feed_key]
+            and (feed_key != "Bank" or not txn.settlement_reference)
+        ]
+        if feed:
+            await reconcile_daily_feed(
+                db, feed, basis, variance_code, missing_code, add,
+                amount_tolerance, tolerance_currency,
+            )
+
+
+async def reconcile_referenced_bank_batches(db, referenced_banks, add, amount_tolerance, tolerance_currency):
+    """Compare referenced bank deposits with matched processor settlements."""
+    expected, actual = defaultdict(Decimal), defaultdict(Decimal)
+    scopes = sorted({(row.store_id, row.currency, row.business_date) for row in referenced_banks})
+    # Three bind parameters per scope keep these queries below SQLite's traditional limit.
+    for offset in range(0, len(scopes), COMPOSITE_SCOPE_BATCH_SIZE):
+        scope_batch = scopes[offset:offset + COMPOSITE_SCOPE_BATCH_SIZE]
+        await accumulate_reconciliation_amounts(
+            db,
+            select(CanonicalTransaction).where(
                 CanonicalTransaction.source_lineage == LINEAGE["Processor"],
                 CanonicalTransaction.reconciliation_status == "Matched",
                 tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
                        CanonicalTransaction.settlement_date).in_(scope_batch),
-                CanonicalTransaction.settlement_reference.is_not(None))
-            await accumulate_reconciliation_amounts(
-                db,
-                expected_query,
-                lambda row: (row.store_id, row.currency, row.settlement_date, row.settlement_reference),
-                expected,
-                max_groups=MAX_SETTLEMENT_GROUPS,
-            )
-
-            bank_query = select(CanonicalTransaction).where(
+                CanonicalTransaction.settlement_reference.is_not(None),
+            ),
+            lambda row: (row.store_id, row.currency, row.settlement_date, row.settlement_reference),
+            expected,
+            max_groups=MAX_SETTLEMENT_GROUPS,
+        )
+        await accumulate_reconciliation_amounts(
+            db,
+            select(CanonicalTransaction).where(
                 CanonicalTransaction.source_lineage == LINEAGE["Bank"],
                 tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
                        CanonicalTransaction.business_date).in_(scope_batch),
-                CanonicalTransaction.settlement_reference.is_not(None))
-            await accumulate_reconciliation_amounts(
-                db,
-                bank_query,
-                lambda row: (row.store_id, row.currency, row.business_date, row.settlement_reference),
-                actual,
-                max_groups=MAX_SETTLEMENT_GROUPS,
-            )
-        for key in set(expected) | set(actual):
-            variance = expected.get(key, Decimal("0")) - actual.get(key, Decimal("0"))
-            if abs(variance) > (amount_tolerance if key[1] == tolerance_currency else Decimal("0")):
-                add("MISSING_DEPOSIT" if key not in actual else "BANK_VARIANCE", key[0], key[2], abs(variance), key[1])
-        # A referenced deposit is governed by its batch comparison, not the coarser daily total.
-        for row in referenced_banks:
-            key = (row.store_id, row.currency, row.business_date, row.settlement_reference)
-            tolerance = amount_tolerance if row.currency == tolerance_currency else Decimal("0")
-            ok = abs(expected.get(key, Decimal("0")) - actual.get(key, Decimal("0"))) <= tolerance
-            row.reconciliation_status, row.disposition = ("Matched", "Closed") if ok else ("Exception", "Awaiting")
-    for feed_key, var, missing, basis in (("Bank", "BANK_VARIANCE", "MISSING_DEPOSIT", "Processor"),
-                                          ("ERP", "GL_VARIANCE", "MISSING_GL_POSTING", "POS")):
-        feed = [t for t in txns if t.source_lineage == LINEAGE[feed_key] and (feed_key != "Bank" or not t.settlement_reference)]
-        if not feed:
+                CanonicalTransaction.settlement_reference.is_not(None),
+            ),
+            lambda row: (row.store_id, row.currency, row.business_date, row.settlement_reference),
+            actual,
+            max_groups=MAX_SETTLEMENT_GROUPS,
+        )
+    report_referenced_bank_variances(expected, actual, add, amount_tolerance, tolerance_currency)
+    mark_referenced_bank_deposits(referenced_banks, expected, actual, amount_tolerance, tolerance_currency)
+
+
+def report_referenced_bank_variances(expected, actual, add, amount_tolerance, tolerance_currency):
+    """Emit one finding per referenced settlement with an out-of-tolerance variance."""
+    for key in expected.keys() | actual.keys():
+        variance = expected.get(key, Decimal("0")) - actual.get(key, Decimal("0"))
+        tolerance = amount_tolerance if key[1] == tolerance_currency else Decimal("0")
+        if abs(variance) > tolerance:
+            code = "MISSING_DEPOSIT" if key not in actual else "BANK_VARIANCE"
+            add(code, key[0], key[2], abs(variance), key[1])
+
+
+def mark_referenced_bank_deposits(referenced_banks, expected, actual, amount_tolerance, tolerance_currency):
+    """Set referenced deposit reconciliation state from its batch comparison."""
+    for row in referenced_banks:
+        key = (row.store_id, row.currency, row.business_date, row.settlement_reference)
+        tolerance = amount_tolerance if row.currency == tolerance_currency else Decimal("0")
+        balanced = abs(expected.get(key, Decimal("0")) - actual.get(key, Decimal("0"))) <= tolerance
+        row.reconciliation_status, row.disposition = (
+            ("Matched", "Closed") if balanced else ("Exception", "Awaiting")
+        )
+
+
+async def reconcile_daily_feed(
+    db, feed, basis, variance_code, missing_code, add, amount_tolerance, tolerance_currency
+):
+    """Compare unreferenced bank or ERP totals with matched source transactions."""
+    actual, expected, feed_by_scope = await collect_daily_feed_amounts(db, feed, basis)
+    for key in expected.keys() | actual.keys():
+        store, currency, business_date = key
+        expected_amount, feed_amount = expected.get(key, Decimal("0")), actual.get(key)
+        if feed_amount is None:
+            if expected_amount != 0:
+                add(missing_code, store, business_date, abs(expected_amount), currency)
             continue
-        expected, got, by_store = defaultdict(Decimal), defaultdict(Decimal), defaultdict(list)
-        feed_amounts = await effective_amounts(db, feed)
-        scopes = sorted({(row.store_id, row.currency, row.business_date) for row in feed})
-        for row in feed:
-            key = (row.store_id, row.currency, row.business_date)
-            got[key] += feed_amounts[row.id]
-            by_store[key].append(row)
-
-        # Only matched source transactions for scopes represented by this feed can
-        # affect its reconciliation. Read them in bounded batches across all dates.
-        for offset in range(0, len(scopes), 250):
-            scope_batch = scopes[offset:offset + 250]
-            expected_query = select(CanonicalTransaction).where(
-                CanonicalTransaction.source_lineage == LINEAGE[basis],
-                CanonicalTransaction.reconciliation_status == "Matched",
-                tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
-                       CanonicalTransaction.business_date).in_(scope_batch),
-            )
-            await accumulate_reconciliation_amounts(
-                db,
-                expected_query,
-                lambda row: (row.store_id, row.currency, row.business_date),
-                expected,
-                max_groups=MAX_SETTLEMENT_GROUPS,
+        tolerance = amount_tolerance if currency == tolerance_currency else Decimal("0")
+        balanced = abs(expected_amount - feed_amount) <= tolerance
+        if not balanced:
+            add(variance_code, store, business_date, abs(expected_amount - feed_amount), currency)
+        for row in feed_by_scope[key]:
+            row.reconciliation_status, row.disposition = (
+                ("Matched", "Closed") if balanced else ("Exception", "Awaiting")
             )
 
-        for key in expected.keys() | got.keys():
-            store, currency, business_date = key
-            expected_amount, feed_amount = expected.get(key, Decimal("0")), got.get(key)
-            if feed_amount is None:
-                if expected_amount != 0:
-                    add(missing, store, business_date, abs(expected_amount), currency)
-                continue
-            tolerance = amount_tolerance if currency == tolerance_currency else Decimal("0")
-            balanced = abs(expected_amount - feed_amount) <= tolerance
-            if not balanced:
-                add(var, store, business_date, abs(expected_amount - feed_amount), currency)
-            for row in by_store[key]:
-                row.reconciliation_status, row.disposition = ("Matched", "Closed") if balanced else ("Exception", "Awaiting")
+
+async def collect_daily_feed_amounts(db, feed, basis):
+    """Aggregate actual feed values and matched source values in bounded scope batches."""
+    actual, expected = defaultdict(Decimal), defaultdict(Decimal)
+    feed_by_scope = defaultdict(list)
+    feed_amounts = await effective_amounts(db, feed)
+    scopes = sorted({(row.store_id, row.currency, row.business_date) for row in feed})
+    for row in feed:
+        key = (row.store_id, row.currency, row.business_date)
+        actual[key] += feed_amounts[row.id]
+        feed_by_scope[key].append(row)
+
+    # Restrict reads to represented feed scopes and keep all-dates scans bounded.
+    for offset in range(0, len(scopes), 250):
+        scope_batch = scopes[offset:offset + 250]
+        expected_query = select(CanonicalTransaction).where(
+            CanonicalTransaction.source_lineage == LINEAGE[basis],
+            CanonicalTransaction.reconciliation_status == "Matched",
+            tuple_(CanonicalTransaction.store_id, CanonicalTransaction.currency,
+                   CanonicalTransaction.business_date).in_(scope_batch),
+        )
+        await accumulate_reconciliation_amounts(
+            db,
+            expected_query,
+            lambda row: (row.store_id, row.currency, row.business_date),
+            expected,
+            max_groups=MAX_SETTLEMENT_GROUPS,
+        )
+    return actual, expected, feed_by_scope
 
 
 async def accumulate_reconciliation_amounts(db, query, key_for, totals, *, max_groups: int) -> None:
