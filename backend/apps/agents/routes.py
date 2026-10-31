@@ -76,6 +76,7 @@ def shadow_report_totals(out: dict) -> dict:
 
 @router.get("/shadow")
 async def shadow(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it", "admin"))):
+    visible_cases = scope.restrict(select(Case.id), _, Case.store_id)
     ranked_runs = select(
         AuditEvent.case_id.label("case_id"),
         AuditEvent.after_state.label("after_state"),
@@ -83,7 +84,10 @@ async def shadow(db: AsyncSession = Depends(get_db), _: dict = Depends(require_r
             partition_by=AuditEvent.case_id,
             order_by=(AuditEvent.created_at.desc(), AuditEvent.id.desc()),
         ).label("row_number"),
-    ).where(AuditEvent.event_type == "AGENT_RUN", AuditEvent.case_id.is_not(None)).subquery()
+    ).where(
+        AuditEvent.event_type == "AGENT_RUN",
+        AuditEvent.case_id.in_(visible_cases),
+    ).subquery()
     ranked_decisions = select(
         HumanDecision.case_id.label("case_id"),
         HumanDecision.decision.label("decision"),
@@ -91,9 +95,10 @@ async def shadow(db: AsyncSession = Depends(get_db), _: dict = Depends(require_r
             partition_by=HumanDecision.case_id,
             order_by=(HumanDecision.created_at.desc(), HumanDecision.id.desc()),
         ).label("row_number"),
-    ).subquery()
+    ).where(HumanDecision.case_id.in_(visible_cases)).subquery()
     exception_types = (
         select(DBException.case_id.label("case_id"), func.min(DBException.exception_type).label("exception_type"))
+        .where(DBException.case_id.in_(visible_cases))
         .group_by(DBException.case_id)
         .subquery()
     )

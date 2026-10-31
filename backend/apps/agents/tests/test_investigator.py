@@ -331,6 +331,13 @@ def test_shadow_endpoint_streams_latest_run_and_decision_per_case():
                 financial_impact=Decimal("0"),
                 confidence="High",
             ))
+            db.add(Case(
+                id="c2",
+                case_number="CASE-2",
+                case_type="Reconciliation",
+                business_date="2026-10-01",
+                store_id="S2",
+            ))
             db.add_all([
                 AuditEvent(
                     id="run-old",
@@ -374,10 +381,57 @@ def test_shadow_endpoint_streams_latest_run_and_decision_per_case():
                     authority_check="Authorized",
                     created_at=now,
                 ),
+                Exc(
+                    id="e2",
+                    case_id="c2",
+                    exception_type="UNMATCHED_SALE",
+                    exception_family="Reconciliation",
+                    source_system="POS",
+                    detection_origin="Test",
+                    detection_rule_id="TEST-UNMATCHED-SALE",
+                    exception_amount=Decimal("10"),
+                    estimated_exposure=Decimal("10"),
+                    severity="Medium",
+                    confidence="High",
+                    close_impact="Yes",
+                ),
+                Recommendation(
+                    id="recommendation-shadow-c2",
+                    case_id="c2",
+                    investigation_id="investigation-shadow-c2",
+                    disposition_type="Timing",
+                    action_class="test",
+                    expected_workflow="review",
+                    financial_impact=Decimal("0"),
+                    confidence="High",
+                ),
+                AuditEvent(
+                    id="run-c2",
+                    event_type="AGENT_RUN",
+                    actor="investigation-agent",
+                    object_type="Case",
+                    object_id="c2",
+                    case_id="c2",
+                    action_description="Cross-store run",
+                    after_state={"result": None},
+                    created_at=now,
+                ),
+                HumanDecision(
+                    id="decision-c2",
+                    case_id="c2",
+                    recommendation_id="recommendation-shadow-c2",
+                    decision_type="Approval",
+                    decision="Rejected",
+                    actor="finance-other-store",
+                    authority_check="Authorized",
+                    created_at=now,
+                ),
             ])
             await db.commit()
 
-            report = await shadow(db, {"role": "finance", "store_ids": None})
+            report = await shadow(db, {
+                "role": "finance", "store_scoped": True, "stores": ["S1"],
+            })
 
             assert report["total"] == {
                 "cases": 1,
