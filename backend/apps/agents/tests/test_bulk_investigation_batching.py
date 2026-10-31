@@ -1,5 +1,6 @@
 """Bulk investigations load their exception evidence with one grouped query."""
 import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import event
@@ -195,7 +196,8 @@ def test_bulk_advance_batches_workflows_and_selects_oldest_pending_records(monke
                         "validating-1": ["wf-v1-a", "wf-v1-z"],
                         "validating-2": ["wf-v2"],
                     }[case_id]
-                    for workflow_id in workflow_ids:
+                    created_at = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                    for workflow_index, workflow_id in enumerate(workflow_ids):
                         db.add(Workflow(
                             id=workflow_id,
                             case_id=case_id,
@@ -204,6 +206,7 @@ def test_bulk_advance_batches_workflows_and_selects_oldest_pending_records(monke
                             state="Pending",
                             definition_version="v1",
                             current_step="Awaiting action",
+                            created_at=created_at + timedelta(seconds=workflow_index),
                         ))
                     if case_id.startswith("validating"):
                         for workflow_id in workflow_ids:
@@ -215,6 +218,7 @@ def test_bulk_advance_batches_workflows_and_selects_oldest_pending_records(monke
                                 expected_observation="Updated source record",
                                 due_window_hours=24,
                                 verification_rule="Fresh source evidence",
+                                created_at=created_at + timedelta(seconds=workflow_ids.index(workflow_id)),
                             ))
                 await db.commit()
 
