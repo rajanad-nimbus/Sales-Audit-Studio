@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.exports import routes
-from models import Base, Case, ExportBatch, ExportDestination, ExportItem, HumanDecision, Recommendation, ValidationObligation, Workflow
+from models import AuditEvent, Base, Case, ExportBatch, ExportDestination, ExportItem, HumanDecision, Recommendation, ValidationObligation, Workflow
 
 
 def test_export_selection_skips_reserved_and_ineligible_cases_before_limit(monkeypatch):
@@ -101,6 +101,54 @@ def test_adjustment_requires_matching_approved_verified_workflow():
                 assert len(records) == 1
                 assert records[0]["approved_by"] == "correct approver"
                 assert records[0]["amount"] == "10.00"
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_closed_case_context_selects_latest_records_per_case():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            session = async_sessionmaker(engine, expire_on_commit=False)
+            async with session() as db:
+                case = Case(id="c1", case_number="C1", case_type="test", status="Closed",
+                            store_id="S1", business_date="2026-10-01")
+                db.add(case)
+                for identifier, created_at in (("old", datetime(2026, 10, 1, tzinfo=timezone.utc)),
+                                               ("new", datetime(2026, 10, 2, tzinfo=timezone.utc))):
+                    db.add(Recommendation(
+                        id=f"r-{identifier}", case_id=case.id, investigation_id="i", status="Approved",
+                        disposition_type=identifier, action_class="test", expected_workflow="test",
+                        financial_impact=Decimal("1"), confidence="High", created_at=created_at,
+                    ))
+                    db.add(HumanDecision(
+                        id=f"h-{identifier}", case_id=case.id, recommendation_id=f"r-{identifier}",
+                        decision_type="human", decision="Approved", actor=identifier,
+                        authority_check="Approved", created_at=created_at,
+                    ))
+                    db.add(ValidationObligation(
+                        id=f"v-{identifier}", case_id=case.id, workflow_id=f"w-{identifier}",
+                        status="Complete", verification_result=identifier, expected_observation="test",
+                        due_window_hours=1, verification_rule="test", created_at=created_at,
+                    ))
+                for seq, event_hash in ((1, "old-hash"), (2, "new-hash")):
+                    db.add(AuditEvent(
+                        id=f"event-{seq}", event_type="CASE_UPDATED", actor="test", object_type="Case",
+                        object_id=case.id, case_id=case.id, action_description="updated", seq=seq,
+                        hash=event_hash,
+                    ))
+                await db.commit()
+
+                context = await routes.closed_case_context(db, [case])
+
+                assert context["recs"][case.id].id == "r-new"
+                assert context["decs"][case.id].id == "h-new"
+                assert context["vals"][case.id].id == "v-new"
+                assert context["refs"][case.id] == "new-hash"
         finally:
             await engine.dispose()
 

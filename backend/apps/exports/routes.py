@@ -188,24 +188,64 @@ def verified_adjustment_evidence():
 
 async def closed_case_context(db, cases: list[Case], positive_recommendations: bool = False) -> dict:
     ids = [c.id for c in cases]
+    if not ids:
+        return {"recs": {}, "decs": {}, "vals": {}, "refs": {}}
+
     if positive_recommendations:
-        evidence = (await db.execute(verified_adjustment_evidence().where(Recommendation.case_id.in_(ids)).order_by(
-            Recommendation.created_at, Recommendation.id, HumanDecision.created_at, HumanDecision.id,
-            ValidationObligation.created_at, ValidationObligation.id))).all()
+        ranked_evidence = verified_adjustment_evidence().where(
+            Recommendation.case_id.in_(ids)
+        ).add_columns(func.row_number().over(
+            partition_by=Recommendation.case_id,
+            order_by=(Recommendation.created_at.desc(), Recommendation.id.desc(),
+                      HumanDecision.created_at.desc(), HumanDecision.id.desc(),
+                      ValidationObligation.created_at.desc(), ValidationObligation.id.desc()),
+        ).label("case_rank")).subquery()
+        recommendation = aliased(Recommendation, ranked_evidence)
+        decision = aliased(HumanDecision, ranked_evidence)
+        obligation = aliased(ValidationObligation, ranked_evidence)
+        evidence = (await db.execute(select(recommendation, decision, obligation).where(
+            ranked_evidence.c.case_rank == 1,
+        ))).all()
         recs = {r.case_id: r for r, _, _ in evidence}
         decs = {r.case_id: d for r, d, _ in evidence}
         vals = {r.case_id: v for r, _, v in evidence}
     else:
-        recs = {r.case_id: r for r in (await db.execute(select(Recommendation).where(
-            Recommendation.case_id.in_(ids), Recommendation.status == "Approved").order_by(
-            Recommendation.created_at, Recommendation.id))).scalars().all()}
-        decs = {d.case_id: d for d in (await db.execute(select(HumanDecision).where(
-            HumanDecision.case_id.in_(ids), HumanDecision.decision == "Approved"))).scalars().all()}
-        vals = {v.case_id: v for v in (await db.execute(select(ValidationObligation).where(
-            ValidationObligation.case_id.in_(ids), ValidationObligation.status == "Complete"))).scalars().all()}
-    refs = dict((await db.execute(
-        select(AuditEvent.case_id, AuditEvent.hash).where(AuditEvent.case_id.in_(ids)).order_by(AuditEvent.seq))).all())
+        recs = await _latest_case_records(
+            db, Recommendation, ids, Recommendation.status == "Approved",
+        )
+        decs = await _latest_case_records(
+            db, HumanDecision, ids, HumanDecision.decision == "Approved",
+        )
+        vals = await _latest_case_records(
+            db, ValidationObligation, ids, ValidationObligation.status == "Complete",
+        )
+    latest_event_ids = select(
+        AuditEvent.id.label("id"),
+        func.row_number().over(
+            partition_by=AuditEvent.case_id,
+            order_by=(AuditEvent.seq.desc(), AuditEvent.id.desc()),
+        ).label("case_rank"),
+    ).where(AuditEvent.case_id.in_(ids)).subquery()
+    latest_events = (await db.execute(select(AuditEvent).join(
+        latest_event_ids, AuditEvent.id == latest_event_ids.c.id,
+    ).where(latest_event_ids.c.case_rank == 1))).scalars().all()
+    refs = {event.case_id: event.hash for event in latest_events}
     return {"recs": recs, "decs": decs, "vals": vals, "refs": refs}
+
+
+async def _latest_case_records(db, model, case_ids: list[str], *conditions) -> dict:
+    """Fetch one deterministic latest matching row per case, with ranking in the database."""
+    ranked_ids = select(
+        model.id.label("id"),
+        func.row_number().over(
+            partition_by=model.case_id,
+            order_by=(model.created_at.desc(), model.id.desc()),
+        ).label("case_rank"),
+    ).where(model.case_id.in_(case_ids), *conditions).subquery()
+    rows = (await db.execute(select(model).join(
+        ranked_ids, model.id == ranked_ids.c.id,
+    ).where(ranked_ids.c.case_rank == 1))).scalars().all()
+    return {row.case_id: row for row in rows}
 
 
 async def build(db, dest: ExportDestination, dataset: str, scope: str = "all", *, lock_cases: bool = False) -> tuple[list[dict], list[tuple[str, str]], int | None, int | None]:
