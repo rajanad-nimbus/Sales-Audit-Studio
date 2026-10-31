@@ -181,7 +181,7 @@ async def finish_delivery(db: AsyncSession, batch: ExportBatch, dest_name: str, 
 
 
 @router.get("/datasets")
-async def datasets(_: dict = Depends(require_role("finance", "it"))):
+async def datasets(_: dict = Depends(require_role("finance", "it", "auditor"))):
     return [{"key": k, "description": v} for k, v in DATASETS.items()]
 
 
@@ -215,7 +215,7 @@ async def ensure_defaults(db):
 
 
 @router.get("/destinations")
-async def list_destinations(db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
+async def list_destinations(db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it", "auditor"))):
     await ensure_defaults(db)
     reveal_url = user["role"] in {"it", "admin"}
     return [dest_view(d, reveal_url=reveal_url) for d in (await db.execute(select(ExportDestination).order_by(ExportDestination.name))).scalars().all()]
@@ -356,14 +356,14 @@ async def reserve_export_batch(db: AsyncSession, body: RunIn, destination: Expor
 
 @router.get("/batches")
 async def batches(limit: int = Query(50, ge=1, le=200), db: AsyncSession = Depends(get_db),
-                  _: dict = Depends(require_role("finance", "it"))):
+                  _: dict = Depends(require_role("finance", "it", "auditor"))):
     rows = (await db.execute(select(ExportBatch, ExportDestination.name).join(
         ExportDestination, ExportDestination.id == ExportBatch.destination_id).order_by(ExportBatch.created_at.desc()).limit(limit))).all()
     return [batch_view(b, n) for b, n in rows]
 
 
 @router.get("/batches/{batch_id}/payload")
-async def payload(batch_id: str, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
+async def payload(batch_id: str, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it", "auditor"))):
     from fastapi.responses import Response
     b = (await db.execute(select(ExportBatch).where(ExportBatch.id == batch_id))).scalar_one_or_none()
     if not b or b.payload is None:
@@ -497,7 +497,7 @@ async def tracking(destination_id: str, dataset: str,
                    q: Annotated[str, Query(max_length=120)] = "",
                    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
                    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
-                   db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
+                   db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it", "auditor"))):
     if dataset not in DATASETS:
         raise HTTPException(status_code=400, detail="Unknown dataset")
     if state and state not in TRACK_STATES:

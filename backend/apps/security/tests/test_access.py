@@ -72,7 +72,9 @@ def _endpoint_roles():
 def test_the_route_walk_actually_sees_the_api():
     declared = _endpoint_roles()
     assert len(declared) > 60                                    # a walk that finds nothing would pass every check below
-    assert declared[("GET", "/api/exports/batches")] == ("finance", "it")
+    assert declared[("GET", "/api/exports/batches")] == ("finance", "it", "auditor")
+    assert declared[("GET", "/api/exports/destinations")] == ("finance", "it", "auditor")
+    assert declared[("POST", "/api/exports/run")] == ("it",)
     assert ("GET", "/api/transactions") in declared and ("GET", "/api/store-days") in declared
     assert declared[("GET", "/api/ingest/stats")] == ("analyst", "it", "auditor")
 
