@@ -135,25 +135,47 @@ async def run_via_sdk(db, case, exceptions, label: str, known_causes: list[str],
     return {"result": result, "trace": trace}
 
 
-async def run(db, case, exceptions, label: str, known_causes: list[str], client=None, model: str | None = None,
-              enabled_tools: list[str] | None = None, ontology_context=None):
-    """Return {'result', 'trace'} or None when unavailable or failed.
-
-    Prefers the Claude Agent SDK (Claude Code OAuth token); falls back to the Messages API with an API key.
-    """
-    key = os.getenv("ANTHROPIC_API_KEY")
-    owns_client = False
-    if client is None:
-        if os.getenv("CLAUDE_CODE_OAUTH_TOKEN"):
-            out = await run_via_sdk(db, case, exceptions, label, known_causes, model, enabled_tools, ontology_context=ontology_context)
-            if out and out["result"] or not key:
-                return out
-            # SDK path produced no findings and an API key exists: try the Messages API before giving up.
-        if not key:
+async def _messages_api_loop(client, model, specs, messages, tools, trace):
+    for _ in range(MAX_TURNS):
+        msg = await client.messages.create(
+            model=model,
+            max_tokens=MAX_OUTPUT_TOKENS,
+            system=SYSTEM,
+            tools=specs + [CONCLUDE],
+            messages=messages,
+        )
+        usage = getattr(msg, "usage", None)
+        trace["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+        trace["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+        tool_uses = [block for block in msg.content if getattr(block, "type", "") == "tool_use"]
+        if not tool_uses:
             return None
-        import anthropic
-        client = anthropic.AsyncAnthropic(api_key=key)
-        owns_client = True
+        for tool_use in tool_uses:
+            if tool_use.name == "submit_findings":
+                return validate(dict(tool_use.input), tools.seen_ids)
+
+        messages.append({"role": "assistant", "content": msg.content})
+        results = []
+        for tool_use in tool_uses:
+            result = await tools.call(tool_use.name, tool_use.input)
+            trace["tool_calls"].append({"tool": tool_use.name, "args": tool_use.input})
+            results.append({"type": "tool_result", "tool_use_id": tool_use.id, "content": dumps(result)})
+        messages.append({"role": "user", "content": results})
+    return None
+
+
+async def _run_with_messages_api(
+    db,
+    case,
+    exceptions,
+    label: str,
+    known_causes: list[str],
+    client,
+    owns_client: bool,
+    model: str | None,
+    enabled_tools: list[str] | None,
+    ontology_context,
+):
     model = model or os.getenv("NIMBUS_LLM_MODEL", DEFAULT_MODEL)
     allowed = set(enabled_tools) if enabled_tools is not None else {t["name"] for t in TOOL_SPECS}
     specs = [t for t in TOOL_SPECS if t["name"] in allowed]
@@ -164,37 +186,59 @@ async def run(db, case, exceptions, label: str, known_causes: list[str], client=
         f"Candidate causes: {json.dumps(known_causes)}." + ontology_prompt(ontology_context))}]
     trace = {"model": model, "tool_calls": [], "input_tokens": 0, "output_tokens": 0}
 
-    async def loop():
-        for _ in range(MAX_TURNS):
-            msg = await client.messages.create(model=model, max_tokens=MAX_OUTPUT_TOKENS, system=SYSTEM,
-                                               tools=specs + [CONCLUDE], messages=messages)
-            usage = getattr(msg, "usage", None)
-            trace["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
-            trace["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
-            uses = [b for b in msg.content if getattr(b, "type", "") == "tool_use"]
-            if not uses:
-                return None
-            for u in uses:
-                if u.name == "submit_findings":
-                    return validate(dict(u.input), tools.seen_ids)
-            messages.append({"role": "assistant", "content": msg.content})
-            results = []
-            for u in uses:
-                out = await tools.call(u.name, u.input)
-                trace["tool_calls"].append({"tool": u.name, "args": u.input})
-                results.append({"type": "tool_result", "tool_use_id": u.id, "content": dumps(out)})
-            messages.append({"role": "user", "content": results})
-        return None
-
+    result = None
     try:
-        result = await asyncio.wait_for(loop(), TIMEOUT_S)
+        result = await asyncio.wait_for(
+            _messages_api_loop(client, model, specs, messages, tools, trace),
+            TIMEOUT_S,
+        )
     except Exception as exc:  # fall back to the deterministic path, but leave a trace
         trace["error"] = type(exc).__name__
-        return {"result": None, "trace": trace}
     finally:
         if owns_client:
-            await client.close()
+            try:
+                await client.close()
+            except Exception as exc:
+                trace["client_close_error"] = type(exc).__name__
     return {"result": result, "trace": trace}
+
+
+async def run(db, case, exceptions, label: str, known_causes: list[str], client=None, model: str | None = None,
+              enabled_tools: list[str] | None = None, ontology_context=None):
+    """Return {'result', 'trace'} or None when unavailable or failed.
+
+    Prefers the Claude Agent SDK (Claude Code OAuth token); falls back to the Messages API with an API key.
+    """
+    key = os.getenv("ANTHROPIC_API_KEY")
+    owns_client = False
+    if client is None:
+        if os.getenv("CLAUDE_CODE_OAUTH_TOKEN"):
+            outcome = await run_via_sdk(
+                db, case, exceptions, label, known_causes, model, enabled_tools,
+                ontology_context=ontology_context,
+            )
+            if outcome and outcome["result"] or not key:
+                return outcome
+            # The SDK had no findings; use the Messages API when an API key is available.
+        if not key:
+            return None
+        import anthropic
+
+        client = anthropic.AsyncAnthropic(api_key=key)
+        owns_client = True
+
+    return await _run_with_messages_api(
+        db,
+        case,
+        exceptions,
+        label,
+        known_causes,
+        client,
+        owns_client,
+        model,
+        enabled_tools,
+        ontology_context,
+    )
 
 
 def render(result: dict) -> str:

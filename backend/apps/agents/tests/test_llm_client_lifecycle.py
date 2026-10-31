@@ -64,3 +64,27 @@ def test_investigator_closes_only_clients_it_creates(monkeypatch):
     asyncio.run(run())
     assert len(FakeAnthropicClient.instances) == 1
     assert FakeAnthropicClient.instances[0].closed
+
+
+def test_owned_client_close_failure_is_traced_without_overriding_agent_result(monkeypatch):
+    configure_fake_provider(monkeypatch)
+
+    async def broken_close(self):
+        self.closed = True
+        raise RuntimeError("close failed")
+
+    monkeypatch.setattr(FakeAnthropicClient, "close", broken_close)
+
+    async def run():
+        return await investigator.run(
+            db=None,
+            case=SimpleNamespace(case_number="CASE-1", store_id="S1", business_date="2026-10-01"),
+            exceptions=[],
+            label="Amount mismatch",
+            known_causes=[],
+        )
+
+    result = asyncio.run(run())
+    assert result["result"] is None
+    assert result["trace"]["client_close_error"] == "RuntimeError"
+    assert FakeAnthropicClient.instances[0].closed
