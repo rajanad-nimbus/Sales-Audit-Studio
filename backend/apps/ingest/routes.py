@@ -14,6 +14,7 @@ from sqlalchemy import case, func, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.database_errors import violates_unique_constraint
 from apps.security import scope
 from apps.ingest import reconciliation
 from apps.ingest import service as ingest
@@ -182,6 +183,14 @@ def profile_view(profile: SourceFeedProfile) -> dict:
     return {"id": profile.id, "name": profile.name, "source_system": profile.source_system,
             "schedule": profile.schedule, "column_mapping": profile.column_mapping,
             "enabled": profile.enabled, "updated_at": profile.updated_at}
+
+
+def _is_duplicate_profile_name(exc: IntegrityError) -> bool:
+    return violates_unique_constraint(
+        exc,
+        constraint_names={"source_feed_profiles_name_key"},
+        sqlite_messages={"UNIQUE constraint failed: source_feed_profiles.name"},
+    )
 
 
 def schedule_window_hours(schedule: str | None) -> int | None:
@@ -507,7 +516,9 @@ async def create_source_profile(body: SourceFeedProfileRequest, db: AsyncSession
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="A source-feed profile with this name already exists") from exc
+        if _is_duplicate_profile_name(exc):
+            raise HTTPException(status_code=409, detail="A source-feed profile with this name already exists") from exc
+        raise
     await db.refresh(profile)
     return profile_view(profile)
 
