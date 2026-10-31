@@ -14,6 +14,8 @@ interface SearchSelectProps {
   value: string;
   onChange: (value: string) => void;
   options: SearchOption[];
+  /** Notify a parent to fetch matching options from a remote source. */
+  onSearch?: (query: string) => void;
   /** Accessible name. */
   label: string;
   placeholder?: string;
@@ -29,6 +31,7 @@ export function SearchSelect({
   value,
   onChange,
   options,
+  onSearch,
   label,
   placeholder = 'Search…',
   emptyLabel,
@@ -109,6 +112,7 @@ export function SearchSelect({
         onClick={() => setOpen(true)}
         onChange={(e) => {
           setQuery(e.target.value);
+          onSearch?.(e.target.value);
           setOpen(true);
         }}
         onKeyDown={onKey}

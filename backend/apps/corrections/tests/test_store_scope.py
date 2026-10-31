@@ -9,7 +9,7 @@ from apps.corrections import routes
 from apps.ingest.service import ingest
 from apps.transactions import routes as transactions_routes
 from models import Base, CanonicalTransaction, TransactionAdjustment
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 
 def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
@@ -18,6 +18,14 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
         try:
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
+            facets_queries = []
+            track_facet_queries = False
+
+            @event.listens_for(engine.sync_engine, "before_cursor_execute")
+            def record_facet_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+                if track_facet_queries and "foundation_references" in statement.lower():
+                    facets_queries.append(statement)
+
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 common = {"record_type": "Sale", "event_time": "2026-10-01T10:00:00Z", "amount": "10"}
                 await ingest(db, "POS", "delivery", [
@@ -39,7 +47,12 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
                 user = {"user": "scoped", "store_scoped": True, "stores": ["S1"]}
                 assert [row["store_id"] for row in await routes.search_transactions("common", 12, db, user)] == ["S1"]
                 assert await routes.search_transactions("__", 12, db, user) == []
-                assert (await routes.transaction_facets(db, user))["stores"] == ["S1"]
+                track_facet_queries = True
+                transaction_facets = await routes.transaction_facets(db, user)
+                track_facet_queries = False
+                assert transaction_facets["stores"] == ["S1"]
+                assert "items" not in transaction_facets
+                assert not facets_queries
                 listing = await transactions_routes.list_transactions(db=db, _=user)
                 assert listing["total"] == 1 and listing["net_amount"] == "10.00"
                 assert listing["by_status"] == {"Unmatched": 1}

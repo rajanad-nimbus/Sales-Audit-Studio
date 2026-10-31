@@ -22,7 +22,7 @@ type Tx = {
   payment_reference: string | null;
   reconciliation_status: string;
 };
-type Facets = { stores: string[]; tenders: string[]; transaction_types: string[]; items: string[] };
+type Facets = { stores: string[]; tenders: string[]; transaction_types: string[] };
 
 export default function NewCorrectionPage() {
   const router = useRouter();
@@ -32,8 +32,9 @@ export default function NewCorrectionPage() {
     stores: [],
     tenders: [],
     transaction_types: [],
-    items: [],
   });
+  const [itemQuery, setItemQuery] = useState('');
+  const [itemOptions, setItemOptions] = useState<{ value: string; label: string }[]>([]);
   const [kind, setKind] = useState<Kind>('Amount');
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<Tx[]>([]);
@@ -56,6 +57,33 @@ export default function NewCorrectionPage() {
       .then((r) => setFacets(r.data))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const query = itemQuery.trim();
+    if (query.length < 2) {
+      setItemOptions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.get('/api/foundation', { params: { category: 'Item', q: query, limit: 50 } })
+        .then((response) => {
+          if (!cancelled) {
+            setItemOptions(response.data.items.map((item: { code: string; name: string }) => ({
+              value: item.code,
+              label: `${item.code} · ${item.name}`,
+            })));
+          }
+        })
+        .catch((e: any) => {
+          if (!cancelled) setError(e?.response?.data?.detail ?? 'Unable to search item references.');
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [itemQuery]);
 
   const missing = kind === 'MissingTransaction';
   const active = KINDS.find((x) => x.key === kind)!;
@@ -338,7 +366,8 @@ export default function NewCorrectionPage() {
                   label="Correct item"
                   value={value}
                   onChange={setValue}
-                  options={facets.items.map((t) => ({ value: t }))}
+                  options={itemOptions}
+                  onSearch={setItemQuery}
                   placeholder="Search items"
                   allowCustom
                 />

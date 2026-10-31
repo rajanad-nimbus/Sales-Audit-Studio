@@ -20,7 +20,7 @@ from apps.corrections.effects import effective_amounts
 from apps.corrections.reconciliation import invalidate_case_evidence, linked_cases, related_exception_ids, requeue_linked_exceptions
 from apps.transactions.detail import MAX_MONEY, cent_value, money
 from database import get_db
-from models import CanonicalTransaction, FoundationReference, SourceRecord, TransactionAdjustment, utcnow
+from models import CanonicalTransaction, SourceRecord, TransactionAdjustment, utcnow
 from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/transaction-adjustments", tags=["Transaction corrections"])
@@ -139,8 +139,7 @@ async def transaction_facets(db: AsyncSession = Depends(get_db), user: dict = De
     stores = (await db.execute(scope.restrict(select(CanonicalTransaction.store_id), user, CanonicalTransaction.store_id).distinct().order_by(CanonicalTransaction.store_id))).scalars().all()
     tenders = (await db.execute(scope.restrict(select(CanonicalTransaction.tender_type), user, CanonicalTransaction.store_id).where(CanonicalTransaction.tender_type.is_not(None)).distinct().order_by(CanonicalTransaction.tender_type))).scalars().all()
     types = (await db.execute(scope.restrict(select(CanonicalTransaction.transaction_type), user, CanonicalTransaction.store_id).distinct().order_by(CanonicalTransaction.transaction_type))).scalars().all()
-    items = (await db.execute(select(FoundationReference.code).where(FoundationReference.category == "Item", FoundationReference.active == True).order_by(FoundationReference.code))).scalars().all()  # noqa: E712
-    return {"stores": stores, "tenders": tenders, "transaction_types": types, "items": items}
+    return {"stores": stores, "tenders": tenders, "transaction_types": types}
 
 @router.get("/transactions/{transaction_id}")
 async def get_transaction(transaction_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
