@@ -11,7 +11,17 @@ from sqlalchemy.pool import StaticPool
 
 from apps.agents import investigator
 from apps.agents.agent_tools import EvidenceTools
-from models import Base, Case, CanonicalTransaction, EvidenceSnapshot, Exception as Exc, SourceRecord
+from models import (
+    AuditEvent,
+    Base,
+    Case,
+    CanonicalTransaction,
+    EvidenceSnapshot,
+    Exception as Exc,
+    HumanDecision,
+    Recommendation,
+    SourceRecord,
+)
 
 
 def run(c):
@@ -302,6 +312,90 @@ def test_shadow_report_classifies_agreement():
         decisions={"a": "Approved", "b": "Approved", "c": "Rejected", "d": "Approved"},
         types={k: "T" for k in "abcde"})
     assert rep["by_exception_type"]["T"] == {"cases": 4, "agree": 1, "missed": 1, "overconfident": 1, "agent_failed": 1}
+
+
+def test_shadow_endpoint_streams_latest_run_and_decision_per_case():
+    async def go():
+        from apps.agents.routes import shadow
+
+        Session, _case, _exc, _ids = await seed()
+        now = datetime.now(timezone.utc)
+        async with Session() as db:
+            db.add(Recommendation(
+                id="recommendation-shadow",
+                case_id="c1",
+                investigation_id="investigation-shadow",
+                disposition_type="Timing",
+                action_class="test",
+                expected_workflow="review",
+                financial_impact=Decimal("0"),
+                confidence="High",
+            ))
+            db.add_all([
+                AuditEvent(
+                    id="run-old",
+                    event_type="AGENT_RUN",
+                    actor="investigation-agent",
+                    object_type="Case",
+                    object_id="c1",
+                    case_id="c1",
+                    action_description="Old run",
+                    after_state={"result": None},
+                    created_at=now.replace(year=now.year - 1),
+                ),
+                AuditEvent(
+                    id="run-new",
+                    event_type="AGENT_RUN",
+                    actor="investigation-agent",
+                    object_type="Case",
+                    object_id="c1",
+                    case_id="c1",
+                    action_description="Latest run",
+                    after_state={"result": {"hypotheses": [{"verdict": "supported", "cited_ids": ["source"]}]}},
+                    created_at=now,
+                ),
+                HumanDecision(
+                    id="decision-old",
+                    case_id="c1",
+                    recommendation_id="recommendation-shadow",
+                    decision_type="Approval",
+                    decision="Rejected",
+                    actor="finance-old",
+                    authority_check="Authorized",
+                    created_at=now.replace(year=now.year - 1),
+                ),
+                HumanDecision(
+                    id="decision-new",
+                    case_id="c1",
+                    recommendation_id="recommendation-shadow",
+                    decision_type="Approval",
+                    decision="Approved",
+                    actor="finance-new",
+                    authority_check="Authorized",
+                    created_at=now,
+                ),
+            ])
+            await db.commit()
+
+            report = await shadow(db, {"role": "finance", "store_ids": None})
+
+            assert report["total"] == {
+                "cases": 1,
+                "agree": 1,
+                "missed": 0,
+                "overconfident": 0,
+                "agent_failed": 0,
+            }
+            assert report["by_exception_type"]["UNMATCHED_SALE"]["cases"] == 1
+
+    run(go())
+
+
+def test_agent_supported_ignores_malformed_result_shapes():
+    from apps.agents.routes import agent_supported
+
+    assert not agent_supported(["unexpected"])
+    assert not agent_supported({"hypotheses": [None, "unexpected"]})
 
 
 def test_eligibility_requires_all_permit_conditions_and_grounded_finding():

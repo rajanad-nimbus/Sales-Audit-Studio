@@ -22,7 +22,17 @@ router = APIRouter(prefix="/api/agent")
 
 
 def agent_supported(result: dict | None) -> bool:
-    return any(h.get("verdict") == "supported" and h.get("cited_ids") for h in (result or {}).get("hypotheses", []))
+    if not isinstance(result, dict):
+        return False
+    hypotheses = result.get("hypotheses")
+    if not isinstance(hypotheses, list):
+        return False
+    return any(
+        isinstance(hypothesis, dict)
+        and hypothesis.get("verdict") == "supported"
+        and hypothesis.get("cited_ids")
+        for hypothesis in hypotheses
+    )
 
 
 def shadow_report(runs: dict, decisions: dict, types: dict) -> dict:
@@ -32,22 +42,34 @@ def shadow_report(runs: dict, decisions: dict, types: dict) -> dict:
     'overconfident' = agent supported but human rejected (the dangerous cell)."""
     out = defaultdict(lambda: {"cases": 0, "agree": 0, "missed": 0, "overconfident": 0, "agent_failed": 0})
     for case_id, result in runs.items():
-        d = decisions.get(case_id)
-        if d is None:
-            continue
-        row = out[types.get(case_id, "UNKNOWN")]
-        row["cases"] += 1
-        if result is None:
-            row["agent_failed"] += 1
-            continue
-        sup, approved = agent_supported(result), d == "Approved"
-        if sup == approved:
-            row["agree"] += 1
-        elif approved:
-            row["missed"] += 1
-        else:
-            row["overconfident"] += 1
-    total = {k: sum(r[k] for r in out.values()) for k in ("cases", "agree", "missed", "overconfident", "agent_failed")}
+        add_shadow_case(out, decisions.get(case_id), result, types.get(case_id))
+    return shadow_report_totals(out)
+
+
+def add_shadow_case(out: dict, decision: str | None, result: dict | None, exception_type: str | None) -> None:
+    """Add one compared case to a bounded aggregate keyed only by exception type."""
+    if decision is None:
+        return
+    row = out[exception_type or "UNKNOWN"]
+    row["cases"] += 1
+    if result is None:
+        row["agent_failed"] += 1
+        return
+    supported, approved = agent_supported(result), decision == "Approved"
+    if supported == approved:
+        row["agree"] += 1
+    elif approved:
+        row["missed"] += 1
+    else:
+        row["overconfident"] += 1
+
+
+def shadow_report_totals(out: dict) -> dict:
+    """Format incremental shadow counts using the stable report response shape."""
+    total = {
+        key: sum(row[key] for row in out.values())
+        for key in ("cases", "agree", "missed", "overconfident", "agent_failed")
+    }
     return {"total": total, "by_exception_type": dict(out)}
 
 
@@ -61,10 +83,6 @@ async def shadow(db: AsyncSession = Depends(get_db), _: dict = Depends(require_r
             order_by=(AuditEvent.created_at.desc(), AuditEvent.id.desc()),
         ).label("row_number"),
     ).where(AuditEvent.event_type == "AGENT_RUN", AuditEvent.case_id.is_not(None)).subquery()
-    run_rows = (await db.execute(select(ranked_runs.c.case_id, ranked_runs.c.after_state)
-                                 .where(ranked_runs.c.row_number == 1))).all()
-    runs = {case_id: (state or {}).get("result") for case_id, state in run_rows}
-
     ranked_decisions = select(
         HumanDecision.case_id.label("case_id"),
         HumanDecision.decision.label("decision"),
@@ -73,20 +91,36 @@ async def shadow(db: AsyncSession = Depends(get_db), _: dict = Depends(require_r
             order_by=(HumanDecision.created_at.desc(), HumanDecision.id.desc()),
         ).label("row_number"),
     ).subquery()
-    decision_rows = (await db.execute(select(ranked_decisions.c.case_id, ranked_decisions.c.decision)
-                                      .where(ranked_decisions.c.row_number == 1))).all()
-    decisions = dict(decision_rows)
-
-    compared_case_ids = set(runs) & set(decisions)
-    types = {}
-    if compared_case_ids:
-        type_rows = (await db.execute(
-            select(DBException.case_id, func.min(DBException.exception_type))
-            .where(DBException.case_id.in_(compared_case_ids))
-            .group_by(DBException.case_id)
-        )).all()
-        types = dict(type_rows)
-    return shadow_report(runs, decisions, types)
+    exception_types = (
+        select(DBException.case_id.label("case_id"), func.min(DBException.exception_type).label("exception_type"))
+        .group_by(DBException.case_id)
+        .subquery()
+    )
+    query = select(
+        ranked_runs.c.after_state,
+        ranked_decisions.c.decision,
+        exception_types.c.exception_type,
+    ).join(
+        ranked_decisions,
+        ranked_decisions.c.case_id == ranked_runs.c.case_id,
+    ).outerjoin(
+        exception_types,
+        exception_types.c.case_id == ranked_runs.c.case_id,
+    ).where(
+        ranked_runs.c.row_number == 1,
+        ranked_decisions.c.row_number == 1,
+    )
+    result = await db.stream(query.execution_options(yield_per=500))
+    counts = defaultdict(lambda: {
+        "cases": 0, "agree": 0, "missed": 0, "overconfident": 0, "agent_failed": 0,
+    })
+    try:
+        async for state, decision, exception_type in result:
+            agent_result = state.get("result") if isinstance(state, dict) else None
+            add_shadow_case(counts, decision, agent_result, exception_type)
+    finally:
+        await result.close()
+    return shadow_report_totals(counts)
 
 
 def eligible(case, rec, result) -> bool:
