@@ -23,13 +23,19 @@ async def lifespan(_app: FastAPI):
             try:
                 export_limits = httpx.Limits(max_connections=50, max_keepalive_connections=10)
                 export_timeout = httpx.Timeout(15.0, connect=3.0, pool=2.0)
-                async with httpx.AsyncClient(timeout=export_timeout, limits=export_limits) as export_client:
+                async with httpx.AsyncClient(
+                    timeout=export_timeout, limits=export_limits
+                ) as export_client:
                     _app.state.export_http_client = export_client
                     try:
                         async with async_session() as db:
                             await ensure_default_connectors(db)
                         await ontology_integration.refresh()
-                        sync_schedule = asyncio.create_task(shopify_scheduler.loop()) if shopify_scheduler.enabled() else None
+                        sync_schedule = (
+                            asyncio.create_task(shopify_scheduler.loop())
+                            if shopify_scheduler.enabled()
+                            else None
+                        )
                         try:
                             yield
                         finally:

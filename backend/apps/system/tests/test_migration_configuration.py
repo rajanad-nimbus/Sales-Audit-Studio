@@ -17,11 +17,18 @@ def assert_migration_schema_matches_models(sql: str) -> None:
     unique_constraints = set()
     unique_constraint_names = {}
     check_constraints = set()
-    _parse_create_tables(sql, columns_by_table, foreign_keys, unique_constraints,
-                         unique_constraint_names, check_constraints)
+    _parse_create_tables(
+        sql,
+        columns_by_table,
+        foreign_keys,
+        unique_constraints,
+        unique_constraint_names,
+        check_constraints,
+    )
     _parse_alter_table_columns(sql, columns_by_table)
-    _parse_alter_table_constraints(sql, foreign_keys, unique_constraints,
-                                   unique_constraint_names, check_constraints)
+    _parse_alter_table_constraints(
+        sql, foreign_keys, unique_constraints, unique_constraint_names, check_constraints
+    )
 
     _assert_migration_columns(columns_by_table)
     _assert_migration_indexes(sql)
@@ -48,15 +55,23 @@ def _parse_create_tables(sql, columns, foreign_keys, unique_constraints, unique_
         for line in body.splitlines():
             match = re.match(r"\s+" + identifier + r"\s+(.+)", line)
             if match and (match.group(1) or match.group(2)).upper() not in {
-                "PRIMARY", "FOREIGN", "CONSTRAINT", "UNIQUE", "CHECK"
+                "PRIMARY",
+                "FOREIGN",
+                "CONSTRAINT",
+                "UNIQUE",
+                "CHECK",
             }:
-                _record_migration_column(columns, table, match.group(1) or match.group(2), match.group(3))
+                _record_migration_column(
+                    columns, table, match.group(1) or match.group(2), match.group(3)
+                )
         for constrained, referred, referred_columns, actions in re.findall(
             r"FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s+(\w+)\s*\(([^)]+)\)([^,\n)]*)",
             body,
             re.I,
         ):
-            foreign_keys.add(_foreign_key_signature(table, constrained, referred, referred_columns, actions))
+            foreign_keys.add(
+                _foreign_key_signature(table, constrained, referred, referred_columns, actions)
+            )
         for constraint_name, constrained in re.findall(
             r"(?:CONSTRAINT\s+(\w+)\s+)?UNIQUE\s*\(([^)]+)\)", body, re.I
         ):
@@ -73,7 +88,9 @@ def _parse_create_tables(sql, columns, foreign_keys, unique_constraints, unique_
 def _parse_alter_table_columns(sql, columns):
     identifier = r'(?:"([^"]+)"|([a-zA-Z_]\w*))'
     for match in re.finditer(r"ALTER TABLE (\w+) ADD COLUMN " + identifier + r"\s+([^;]+);", sql):
-        _record_migration_column(columns, match.group(1), match.group(2) or match.group(3), match.group(4))
+        _record_migration_column(
+            columns, match.group(1), match.group(2) or match.group(3), match.group(4)
+        )
     for pattern, not_null in (
         (r"ALTER TABLE (\w+) ALTER COLUMN (\w+) DROP NOT NULL", False),
         (r"ALTER TABLE (\w+) ALTER COLUMN (\w+) SET NOT NULL", True),
@@ -81,9 +98,7 @@ def _parse_alter_table_columns(sql, columns):
         for table, column in re.findall(pattern, sql):
             type_name, _, default = columns[table][column]
             columns[table][column] = (type_name, not_null, default)
-    default_pattern = (
-        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) (SET DEFAULT\s+([^;]+)|DROP DEFAULT)"
-    )
+    default_pattern = r"ALTER TABLE (\w+) ALTER COLUMN (\w+) (SET DEFAULT\s+([^;]+)|DROP DEFAULT)"
     for match in re.finditer(default_pattern, sql, re.I):
         table, column = match.group(1), match.group(2)
         type_name, not_null, _ = columns[table][column]
@@ -104,10 +119,10 @@ def _parse_alter_table_constraints(sql, foreign_keys, unique_constraints, unique
     for table, constrained, referred, referred_columns, actions in re.findall(
         foreign_key_pattern, sql, re.I
     ):
-        foreign_keys.add(_foreign_key_signature(table, constrained, referred, referred_columns, actions))
-    unique_pattern = (
-        r"ALTER TABLE\s+(\w+)\s+ADD CONSTRAINT\s+(\w+)\s+UNIQUE\s*\(([^)]+)\)"
-    )
+        foreign_keys.add(
+            _foreign_key_signature(table, constrained, referred, referred_columns, actions)
+        )
+    unique_pattern = r"ALTER TABLE\s+(\w+)\s+ADD CONSTRAINT\s+(\w+)\s+UNIQUE\s*\(([^)]+)\)"
     for table, constraint_name, constrained in re.findall(unique_pattern, sql, re.I):
         names = _column_names(constrained)
         unique_constraints.add((table, names))
@@ -128,14 +143,19 @@ def _assert_migration_columns(columns_by_table: dict) -> None:
             actual_type, actual_not_null, actual_default = columns_by_table[table.name][column.name]
             expected_type = str(column.type.compile(dialect=postgresql.dialect()))
             assert actual_type.upper().replace(" ", "") == expected_type.upper().replace(" ", ""), (
-                table.name, column.name, actual_type, expected_type
+                table.name,
+                column.name,
+                actual_type,
+                expected_type,
             )
             assert actual_not_null == (not column.nullable), (table.name, column.name)
             expected_default = _default_value(
                 str(CreateColumn(column).compile(dialect=postgresql.dialect())), expected_type
             )
             if actual_default != expected_default:
-                default_mismatches.append((table.name, column.name, actual_default, expected_default))
+                default_mismatches.append(
+                    (table.name, column.name, actual_default, expected_default)
+                )
     assert not default_mismatches, default_mismatches
 
 
@@ -155,9 +175,11 @@ def _assert_migration_indexes(sql: str) -> None:
             tuple(column.name for column in index.columns),
             index.unique,
             _normalize_predicate(
-                str(index.dialect_options["postgresql"]["where"].compile(
-                    dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-                ))
+                str(
+                    index.dialect_options["postgresql"]["where"].compile(
+                        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+                    )
+                )
                 if index.dialect_options["postgresql"]["where"] is not None
                 else None
             ),
@@ -284,19 +306,17 @@ def _named_check_constraints(statement: str) -> list[tuple[str, str]]:
     for match in re.finditer(r"(?:CONSTRAINT\s+(\w+)\s+)?CHECK\s*\(", statement, re.I):
         opening = statement.find("(", match.start())
         closing = _matching_parenthesis(statement, opening)
-        constraints.append((match.group(1) or "", statement[opening + 1:closing]))
+        constraints.append((match.group(1) or "", statement[opening + 1 : closing]))
     return constraints
 
 
 def _alter_table_checks(sql: str) -> list[tuple[str, str, str]]:
     constraints = []
-    pattern = re.compile(
-        r"ALTER TABLE\s+(\w+)\s+ADD CONSTRAINT\s+(\w+)\s+CHECK\s*\(", re.I
-    )
+    pattern = re.compile(r"ALTER TABLE\s+(\w+)\s+ADD CONSTRAINT\s+(\w+)\s+CHECK\s*\(", re.I)
     for match in pattern.finditer(sql):
         opening = sql.find("(", match.start())
         closing = _matching_parenthesis(sql, opening)
-        constraints.append((match.group(1), match.group(2), sql[opening + 1:closing]))
+        constraints.append((match.group(1), match.group(2), sql[opening + 1 : closing]))
     return constraints
 
 

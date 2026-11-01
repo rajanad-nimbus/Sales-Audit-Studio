@@ -17,8 +17,14 @@ router = APIRouter()
 async def list_connectors(db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(Connector).order_by(Connector.name))).scalars().all()
     return [
-        {"id": row.id, "name": row.name, "state": row.state, "mode": row.mode,
-         "last_error": row.last_error, "last_checked_at": row.last_checked_at}
+        {
+            "id": row.id,
+            "name": row.name,
+            "state": row.state,
+            "mode": row.mode,
+            "last_error": row.last_error,
+            "last_checked_at": row.last_checked_at,
+        }
         for row in rows
     ]
 

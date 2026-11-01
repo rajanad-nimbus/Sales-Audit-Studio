@@ -22,8 +22,7 @@ def test_pre_commit_propagates_failures(tmp_path, failing_step):
         executable = tmp_path / path
         executable.parent.mkdir(parents=True, exist_ok=True)
         executable.write_text(
-            f'#!/bin/sh\necho {name} >> "$CHECK_LOG"\n'
-            f'[ "$FAILING_STEP" != {name} ]\n'
+            f'#!/bin/sh\necho {name} >> "$CHECK_LOG"\n[ "$FAILING_STEP" != {name} ]\n'
         )
         executable.chmod(0o755)
 
@@ -32,10 +31,17 @@ def test_pre_commit_propagates_failures(tmp_path, failing_step):
     test_file.touch()
     (tmp_path / "backend/integrations").mkdir()
     log = tmp_path / "checks.log"
-    env = {**os.environ, "FAILING_STEP": failing_step, "CHECK_LOG": str(log),
-           "PATH": f"{tmp_path / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"}
+    env = {
+        **os.environ,
+        "FAILING_STEP": failing_step,
+        "CHECK_LOG": str(log),
+        "PATH": f"{tmp_path / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}",
+    }
 
     result = subprocess.run(["sh", str(HOOK)], cwd=tmp_path, env=env, check=False)
 
     assert result.returncode != 0
-    assert log.read_text().splitlines() == list(tools.values())[: list(tools.values()).index(failing_step) + 1]
+    assert (
+        log.read_text().splitlines()
+        == list(tools.values())[: list(tools.values()).index(failing_step) + 1]
+    )

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class Connector(Base):
     """Integration connector health and automation mode"""
+
     __tablename__ = "connectors"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
