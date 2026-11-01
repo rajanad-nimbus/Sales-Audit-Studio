@@ -99,3 +99,44 @@ def test_failed_revision_commit_rolls_back_day_invalidation_and_audit(monkeypatc
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_stale_revision_update_cannot_overwrite_newer_definition():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                user = {"user": "finance.user"}
+                original = await create_definition(
+                    TotalDefinitionBody(name="POS Net", description="initial"), db, user
+                )
+                latest = await update_definition(
+                    original["id"], TotalDefinitionBody(name="Ignored", description="latest"), db, user
+                )
+
+                with pytest.raises(HTTPException) as error:
+                    await update_definition(
+                        original["id"],
+                        TotalDefinitionBody(name="Ignored", description="stale edit"),
+                        db,
+                        user,
+                    )
+
+                assert error.value.status_code == 409
+                assert "stale" in error.value.detail
+                rows = (
+                    await db.execute(
+                        select(AuditTotalDefinition)
+                        .where(AuditTotalDefinition.name == "POS Net")
+                        .order_by(AuditTotalDefinition.revision)
+                    )
+                ).scalars().all()
+                assert len(rows) == 2
+                assert rows[-1].id == latest["id"]
+                assert rows[-1].description == "latest"
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())

@@ -227,6 +227,11 @@ async def update_definition(
             )
         )
     ).scalar() or current.revision
+    if current.revision != latest:
+        raise HTTPException(
+            status_code=409,
+            detail="This total definition revision is stale; load the latest revision before updating",
+        )
     start_date, end_date = affected_date_range(current, body)
     await invalidate_configuration(
         db,
