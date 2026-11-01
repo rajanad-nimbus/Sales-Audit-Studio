@@ -28,38 +28,20 @@ from apps.store_days.rule_evaluation import (
     evaluate_configured_rules,
     prepare_rule_evaluation,
 )
+from apps.store_days.service import (
+    OPTIONAL_COMPARISON_TOTALS,
+    REQUIRED_COMPARISON_TOTALS,
+    comparison_blockers,
+    get_day,
+    store_day_view,
+    total_view,
+)
 from apps.totals.calculation import calculate_store_day, effective_definitions
 from apps.totals.currency import single_currency
 from apps.transactions.models import CanonicalTransaction
 
 router = APIRouter(prefix="/api/store-days", tags=["Store days"])
-REQUIRED_COMPARISON_TOTALS = {"Processor to Bank Variance", "POS to GL Variance"}
-OPTIONAL_COMPARISON_TOTALS = {"POS Control Declared"}
 MAX_STORE_DAY_HISTORY_ITEMS = 200
-
-
-def comparison_blockers(day: StoreDay, totals: list[AuditTotal]) -> list[str]:
-    comparisons = [
-        total
-        for total in totals
-        if total.level == "Store"
-        and total.total_name in REQUIRED_COMPARISON_TOTALS | OPTIONAL_COMPARISON_TOTALS
-    ]
-    present = {total.total_name for total in comparisons}
-    blockers = []
-    if day.totals_stale:
-        blockers.append("totals are stale; re-total the store day")
-    if (
-        day.audit_version < 1
-        or not REQUIRED_COMPARISON_TOTALS <= present
-        or any(total.variance_amount is None for total in comparisons)
-    ):
-        blockers.append("current reconciliation totals are missing")
-    if any(
-        total.variance_amount is not None and total.variance_amount != 0 for total in comparisons
-    ):
-        blockers.append("unresolved reconciliation variance")
-    return blockers
 
 
 class OpenStoreDayBody(BaseModel):
@@ -162,63 +144,6 @@ class ClosureRequestBody(BaseModel):
 
 class ClosureReviewBody(BaseModel):
     rationale: str = Field(min_length=1, max_length=2000)
-
-
-def total_view(total: AuditTotal) -> dict:
-    return {
-        "id": total.id,
-        "version": total.audit_version,
-        "name": total.total_name,
-        "definition_id": total.definition_id,
-        "definition_revision": total.definition_revision,
-        "level": total.level,
-        "dimension": total.dimension_key,
-        "calculated_amount": total.calculated_amount,
-        "declared_amount": total.declared_amount,
-        "variance_amount": total.variance_amount,
-        "currency": total.currency,
-    }
-
-
-def store_day_view(day: StoreDay) -> dict:
-    return {
-        "id": day.id,
-        "store_id": day.store_id,
-        "business_date": day.business_date,
-        "status": day.status,
-        "audit_version": day.audit_version,
-        "closed_at": day.closed_at,
-        "totals_stale": day.totals_stale,
-        "closed_by": day.closed_by,
-        "reopened_by": day.reopened_by,
-        "reopened_reason": day.reopened_reason,
-        "updated_at": day.updated_at,
-    }
-
-
-async def get_day(
-    db: AsyncSession, store_id: str, business_date: str, *, lock: bool = False
-) -> StoreDay:
-    if not store_id or len(store_id) > 50 or store_id != store_id.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="store_id must contain 1 to 50 characters without surrounding whitespace",
-        )
-    try:
-        validate_business_date(business_date)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    query = select(StoreDay).where(
-        StoreDay.store_id == store_id, StoreDay.business_date == business_date
-    )
-    if lock:
-        query = query.with_for_update().execution_options(populate_existing=True)
-    day = (await db.execute(query)).scalar_one_or_none()
-    if not day:
-        raise HTTPException(
-            status_code=404, detail="Store day not found; an IT administrator must open it first"
-        )
-    return day
 
 
 @router.get("")
