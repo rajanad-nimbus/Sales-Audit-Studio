@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.corrections.effects import effective_amounts, effective_taxes
 from apps.totals.combined import calculate_combined
+from apps.totals.sources import source_lineage_for
 from apps.transactions.models import CanonicalTransaction
 from apps.controls.foundation.models import FoundationReference
 from apps.totals.models import AuditTotalDefinition
@@ -95,10 +96,10 @@ async def calculate_definitions(
 
 def matching_transactions(definition: AuditTotalDefinition, rows: list[CanonicalTransaction]):
     """Select transactions included by a definition's source, type, and tender filters."""
+    source_lineage = source_lineage_for(definition.source_system)
     return [
         row for row in rows
-        if (not definition.source_system
-            or row.source_lineage.startswith(definition.source_system.lower()))
+        if (source_lineage is None or row.source_lineage == source_lineage)
         and (not definition.transaction_types or row.transaction_type in definition.transaction_types)
         and (not definition.tender_type or row.tender_type == definition.tender_type)
     ]

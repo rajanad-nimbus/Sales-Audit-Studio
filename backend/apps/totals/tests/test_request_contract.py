@@ -6,6 +6,7 @@ from apps.totals.schemas import TotalDefinitionBody
 
 def test_total_name_is_trimmed_before_persistence():
     assert TotalDefinitionBody(name="  POS Net  ").name == "POS Net"
+    assert TotalDefinitionBody(name="Net", source_system=" pos ").source_system == "POS"
 
 
 @pytest.mark.parametrize("payload", [
@@ -13,6 +14,7 @@ def test_total_name_is_trimmed_before_persistence():
     {"name": "x" * 101},
     {"name": "Total", "category": "x" * 51},
     {"name": "Total", "source_system": "x" * 51},
+    {"name": "Total", "source_system": "P"},
     {"name": "Total", "description": "x" * 5001},
     {"name": "Total", "transaction_types": ["Sale"] * 101},
     {"name": "Total", "realms": [{}] * 101},

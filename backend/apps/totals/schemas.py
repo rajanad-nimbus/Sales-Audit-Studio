@@ -4,6 +4,8 @@ import json
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from apps.totals.sources import normalize_source_system
+
 
 class TotalDefinitionBody(BaseModel):
     name: str = Field(min_length=1, max_length=100)
@@ -38,6 +40,11 @@ class TotalDefinitionBody(BaseModel):
     location_traits: list[str] = Field(default_factory=list, max_length=100)
     usages: list[dict] = Field(default_factory=list, max_length=100)
     sql_statement: str | None = Field(default=None, max_length=10000)
+
+    @field_validator("source_system")
+    @classmethod
+    def validate_source_system(cls, value: str | None) -> str | None:
+        return normalize_source_system(value)
 
     @field_validator("name")
     @classmethod
