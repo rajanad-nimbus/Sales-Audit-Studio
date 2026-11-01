@@ -4,7 +4,6 @@ import hashlib
 import os
 import re
 import uuid
-from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -13,12 +12,14 @@ from database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.audit.models import AuditEvent
 from apps.database_errors import violates_unique_constraint
+from apps.exports.batch_state import batch_view as batch_view
+from apps.exports.batch_state import mark_delivered as mark_delivered
 from apps.exports.delivery import (
     deliver as perform_delivery,
 )
@@ -50,11 +51,30 @@ from apps.exports.destinations import (
     webhook_origin as webhook_origin,
 )
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem, TestSinkReceipt
+from apps.exports.resolution_routes import (
+    cancel_batch as cancel_batch,
+)
+from apps.exports.resolution_routes import (
+    reconcile_failed_batch as reconcile_failed_batch,
+)
+from apps.exports.resolution_routes import (
+    recover_interrupted_batch as recover_interrupted_batch,
+)
+from apps.exports.resolution_routes import (
+    resolve_failed_export as resolve_failed_export,
+)
+from apps.exports.resolution_routes import (
+    router as resolution_router,
+)
 from apps.exports.schemas import (
     AckIn,
-    FailedExportResolution,
-    InterruptedExportRecovery,
     RunIn,
+)
+from apps.exports.schemas import (
+    FailedExportResolution as FailedExportResolution,
+)
+from apps.exports.schemas import (
+    InterruptedExportRecovery as InterruptedExportRecovery,
 )
 from apps.exports.selection import (
     MAX_BATCH,
@@ -79,6 +99,7 @@ from apps.security.authentication import require_role
 
 router = APIRouter(prefix="/api/exports")
 router.include_router(destinations_router)
+router.include_router(resolution_router)
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))
 MAX_SINK_BODY_BYTES = 25 * 1024 * 1024
 DATASETS = {
@@ -86,6 +107,15 @@ DATASETS = {
     "adjustments": "Approved financial adjustments from validated cases (journal lines for ERP/GL)",
     "audit": "Audit trail events since the last delivery (with hashes)",
 }
+
+
+async def deliver(
+    destination: ExportDestination,
+    batch: ExportBatch,
+    client: httpx.AsyncClient | None = None,
+) -> None:
+    """Deliver using the configured export root and optional shared HTTP client."""
+    await perform_delivery(destination, batch, client, EXPORT_DIR)
 
 
 async def require_test_sink_enabled() -> None:
@@ -110,48 +140,6 @@ def _is_sink_receipt_conflict(exc: IntegrityError) -> bool:
         exc,
         constraint_names={"test_sink_receipts_pkey"},
         sqlite_messages={"UNIQUE constraint failed: test_sink_receipts.idempotency_key"},
-    )
-
-
-def batch_view(b: ExportBatch, dest_name: str | None = None) -> dict:
-    return {
-        "id": b.id,
-        "destination_id": b.destination_id,
-        "destination": dest_name,
-        "dataset": b.dataset,
-        "status": b.status,
-        "record_count": b.record_count,
-        "payload_hash": b.payload_hash,
-        "audit_head_hash": b.audit_head_hash,
-        "created_by": b.created_by,
-        "created_at": b.created_at,
-        "sent_at": b.sent_at,
-        "acked_at": b.acked_at,
-        "response_code": b.response_code,
-        "response_ref": b.response_ref,
-        "error": b.error,
-        "retries": b.retries,
-        "range_from": b.range_from,
-        "range_to": b.range_to,
-        "backposted_count": b.backposted_count or 0,
-        "attempt_started_at": b.attempt_started_at,
-    }
-
-
-async def deliver(
-    destination: ExportDestination,
-    batch: ExportBatch,
-    client: httpx.AsyncClient | None = None,
-) -> None:
-    """Run delivery using the configured export root and shared HTTP client."""
-    await perform_delivery(destination, batch, client, EXPORT_DIR)
-
-
-async def mark_delivered(db: AsyncSession, batch_id: str) -> None:
-    await db.execute(
-        update(ExportItem)
-        .where(ExportItem.batch_id == batch_id, ExportItem.state == "Pending")
-        .values(state="Delivered", delivered_at=utcnow())
     )
 
 
@@ -473,167 +461,6 @@ async def retry(
     else:
         await deliver(dest, b, client)
     return await finish_delivery(db, b, dest.name, retrying=True)
-
-
-@router.post("/batches/{batch_id}/recover")
-async def recover_interrupted_batch(
-    batch_id: str,
-    body: InterruptedExportRecovery,
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("it")),
-):
-    """Fence an abandoned attempt after an operator verifies its worker stopped."""
-    batch = (
-        await db.execute(select(ExportBatch).where(ExportBatch.id == batch_id))
-    ).scalar_one_or_none()
-    if not batch:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    if batch.status != "Pending":
-        raise HTTPException(status_code=409, detail="Only pending batches can be recovered")
-    evidence = body.evidence.strip()
-    if not body.worker_stopped or not evidence or len(evidence) > 2000:
-        raise HTTPException(
-            status_code=422,
-            detail="Confirm the delivery worker stopped and provide evidence (up to 2000 characters)",
-        )
-    started = batch.attempt_started_at or batch.created_at
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=UTC)
-    if started > utcnow() - timedelta(minutes=5):
-        raise HTTPException(status_code=409, detail="The delivery attempt is too recent to recover")
-    attempt_id = batch.delivery_attempt_id
-    claimed = (
-        await db.execute(
-            update(ExportBatch)
-            .where(
-                ExportBatch.id == batch_id,
-                ExportBatch.status == "Pending",
-                ExportBatch.delivery_attempt_id == attempt_id,
-            )
-            .values(
-                status="Failed",
-                delivery_attempt_id=None,
-                error="Interrupted delivery: verify the downstream outcome before resolving this batch",
-            )
-            .returning(ExportBatch.id)
-            .execution_options(synchronize_session=False)
-        )
-    ).scalar_one_or_none()
-    if claimed is None:
-        await db.rollback()
-        raise HTTPException(
-            status_code=409, detail="Delivery attempt is no longer available for recovery"
-        )
-    audit(
-        db,
-        "EXPORT_ATTEMPT_RECOVERED",
-        None,
-        "ExportBatch",
-        batch_id,
-        "Interrupted delivery fenced; downstream outcome requires reconciliation",
-        actor=user["user"] or "demo.user",
-        after={"attempt_id": attempt_id, "evidence": evidence},
-    )
-    await db.commit()
-    await db.refresh(batch)
-    return batch_view(batch)
-
-
-@router.post("/batches/{batch_id}/cancel")
-async def cancel_batch(
-    batch_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("it")),
-    body: FailedExportResolution | None = None,
-):
-    """Release a failed batch only after its downstream outcome has been checked."""
-    return await resolve_failed_export(batch_id, body, db, user, require_not_received=True)
-
-
-@router.post("/batches/{batch_id}/reconcile")
-async def reconcile_failed_batch(
-    batch_id: str,
-    body: FailedExportResolution,
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("it")),
-):
-    return await resolve_failed_export(batch_id, body, db, user)
-
-
-async def resolve_failed_export(
-    batch_id: str,
-    body: FailedExportResolution | None,
-    db: AsyncSession,
-    user: dict,
-    *,
-    require_not_received: bool = False,
-):
-    b = (
-        await db.execute(select(ExportBatch).where(ExportBatch.id == batch_id))
-    ).scalar_one_or_none()
-    if not b:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    if b.status != "Failed":
-        raise HTTPException(
-            status_code=409, detail=f"Only failed batches can be cancelled (this one is {b.status})"
-        )
-    if body is None or not body.evidence.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="Verify the downstream outcome and provide evidence before resolving this batch",
-        )
-    if len(body.evidence.strip()) > 2000:
-        raise HTTPException(status_code=422, detail="Evidence must be at most 2000 characters")
-    if require_not_received and body.outcome != "not_received":
-        raise HTTPException(
-            status_code=422,
-            detail="Cancellation requires confirmation that the batch was not received",
-        )
-    original_key = b.idempotency_key
-    values = (
-        {"status": "Cancelled"}
-        if body.outcome == "not_received"
-        else {"status": "Acknowledged", "acked_at": utcnow(), "sent_at": utcnow(), "error": None}
-    )
-    claimed = (
-        await db.execute(
-            update(ExportBatch)
-            .where(ExportBatch.id == batch_id, ExportBatch.status == "Failed")
-            .values(**values)
-            .returning(ExportBatch.id)
-            .execution_options(synchronize_session=False)
-        )
-    ).scalar_one_or_none()
-    if claimed is None:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="Batch is no longer available for cancellation")
-    released = 0
-    if body.outcome == "not_received":
-        released = (
-            await db.execute(
-                delete(ExportItem).where(ExportItem.batch_id == b.id, ExportItem.state == "Pending")
-            )
-        ).rowcount or 0
-    else:
-        await mark_delivered(db, b.id)
-    await db.refresh(b)
-    audit(
-        db,
-        "EXPORT_CANCELLED" if body.outcome == "not_received" else "EXPORT_RECONCILED_RECEIVED",
-        None,
-        "ExportBatch",
-        b.id,
-        f"Failed export reconciled as {body.outcome}; {released} record(s) released",
-        actor=user["user"] or "demo.user",
-        after={
-            "outcome": body.outcome,
-            "evidence": body.evidence.strip(),
-            "original_idempotency_key": original_key,
-            "released": released,
-        },
-    )
-    await db.commit()
-    return {**batch_view(b), "released": released}
 
 
 # ---- Tracking: which records were exported, which are waiting, which are not eligible and why -----------------
