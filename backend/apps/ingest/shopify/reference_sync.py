@@ -71,9 +71,23 @@ def _required_text(value, size: int, response: str, fallback=None) -> str:
     raise ShopifyAPIError(f"Shopify returned an invalid {response} response")
 
 
+def _required_shopify_id(value, response: str) -> str:
+    """Accept only positive Shopify REST identifiers without truncation."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ShopifyAPIError(f"Shopify returned an invalid {response} response")
+    text = str(value).strip()
+    if not text.isascii() or not text.isdecimal() or len(text) > 20:
+        raise ShopifyAPIError(f"Shopify returned an invalid {response} response")
+    identifier = int(text)
+    if not 0 < identifier <= (1 << 64) - 1:
+        raise ShopifyAPIError(f"Shopify returned an invalid {response} response")
+    return str(identifier)
+
+
 def shop_to_store(shop: dict, store_code: str) -> dict:
     """The shop itself is the store that Shopify orders are booked to (SHOPIFY_STORE_ID)."""
     code = _required_text(store_code, 100, "shop")
+    _required_shopify_id(shop.get("id"), "shop")
     return {
         "category": "Store",
         "code": code,
@@ -90,14 +104,17 @@ def shop_to_store(shop: dict, store_code: str) -> dict:
 
 
 def location_to_store(location: dict) -> dict:
-    location_id = _required_text(location.get("id"), 100, "locations")
+    location_id = _required_shopify_id(location.get("id"), "locations")
+    active = location.get("active")
+    if not isinstance(active, bool):
+        raise ShopifyAPIError("Shopify returned an invalid locations response")
     return {
         "category": "Store",
         "code": _clip(f"SHOPIFY-LOC-{location_id}", 100),
         "name": _required_text(
             location.get("name"), 255, "locations", fallback=f"Location {location_id}"
         ),
-        "active": bool(location.get("active", True)),
+        "active": active,
         "attributes": {
             "source": SOURCE,
             "kind": "location",
@@ -111,15 +128,31 @@ def location_to_store(location: dict) -> dict:
 
 def product_to_items(product: dict) -> list[dict]:
     """One Item per variant, keyed by SKU (falling back to the variant id)."""
-    product_id = _required_text(product.get("id"), 100, "products")
+    product_id = _required_shopify_id(product.get("id"), "products")
     product_name = _required_text(
         product.get("title"), 255, "products", fallback=f"Product {product_id}"
     )
+    status = product.get("status")
+    variants = product.get("variants")
+    if (
+        status not in ("active", "archived", "draft")
+        or not isinstance(variants, list)
+        or not variants
+    ):
+        raise ShopifyAPIError("Shopify returned an invalid products response")
     items = []
-    for variant in product.get("variants") or []:
-        sku = (variant.get("sku") or "").strip()
-        label = (variant.get("title") or "").strip()
-        variant_id = _required_text(variant.get("id"), 100, "products")
+    for variant in variants:
+        if not isinstance(variant, dict):
+            raise ShopifyAPIError("Shopify returned an invalid products response")
+        sku = variant.get("sku")
+        label = variant.get("title")
+        if (sku is not None and not isinstance(sku, str)) or (
+            label is not None and not isinstance(label, str)
+        ):
+            raise ShopifyAPIError("Shopify returned an invalid products response")
+        sku = (sku or "").strip()
+        label = (label or "").strip()
+        variant_id = _required_shopify_id(variant.get("id"), "products")
         name = product_name
         if label and label != "Default Title":
             name = f"{name} - {label}"
@@ -128,7 +161,7 @@ def product_to_items(product: dict) -> list[dict]:
                 "category": "Item",
                 "code": _required_text(sku, 100, "products", fallback=f"SHOPIFY-VAR-{variant_id}"),
                 "name": _clip(name, 255),
-                "active": product.get("status", "active") == "active",
+                "active": status == "active",
                 "attributes": {
                     "source": SOURCE,
                     "shopify_product_id": product_id,

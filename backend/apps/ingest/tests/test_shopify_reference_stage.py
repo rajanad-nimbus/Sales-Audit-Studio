@@ -49,7 +49,7 @@ class CatalogAdapter:
         return {"id": 1, "name": "Shop"}
 
     async def fetch_locations(self):
-        yield {"id": 3, "name": "Store 3"}
+        yield {"id": 3, "name": "Store 3", "active": True}
 
     async def fetch_products(self):
         yield {
@@ -248,6 +248,7 @@ def test_invalid_next_link_discards_partial_catalog_without_changing_live_refere
                             {
                                 "id": 10,
                                 "title": "Partial",
+                                "status": "active",
                                 "variants": [{"id": 101, "sku": "SKU-1"}],
                             }
                         ]
@@ -281,6 +282,62 @@ def test_invalid_next_link_discards_partial_catalog_without_changing_live_refere
 
             live = await db.get(FoundationReference, "old")
             assert live.name == "Original" and live.active
+            assert (await db.execute(select(ShopifyReferenceStage))).scalars().all() == []
+
+    run(go())
+
+
+@pytest.mark.parametrize("problem", ["missing_variants", "missing_status", "invalid_location"])
+def test_incomplete_catalog_is_discarded_without_changing_live_references(monkeypatch, problem):
+    class IncompleteCatalog(CatalogAdapter):
+        async def fetch_locations(self):
+            if problem == "invalid_location":
+                yield {"id": 3, "name": "Store 3", "active": "false"}
+            else:
+                async for location in super().fetch_locations():
+                    yield location
+
+        async def fetch_products(self):
+            if problem == "missing_variants":
+                yield {"id": 10, "title": "Product", "status": "active"}
+            elif problem == "missing_status":
+                yield {"id": 10, "title": "Product", "variants": [{"id": 101, "sku": "SKU-1"}]}
+            else:
+                async for product in super().fetch_products():
+                    yield product
+
+    async def go():
+        monkeypatch.setattr(reference_sync, "STAGE_BATCH_SIZE", 1)
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        _engines.append(engine)
+        Session = await make_session(engine)
+        async with Session() as db:
+            db.add_all(
+                [
+                    FoundationReference(
+                        id="old-item",
+                        category="Item",
+                        code="SKU-1",
+                        name="Original",
+                        active=True,
+                        attributes={"source": "Shopify"},
+                    ),
+                    FoundationReference(
+                        id="old-location",
+                        category="Store",
+                        code="SHOPIFY-LOC-3",
+                        name="Store 3",
+                        active=False,
+                        attributes={"source": "Shopify"},
+                    ),
+                ]
+            )
+            await db.commit()
+            with pytest.raises(shopify_adapter.ShopifyAPIError, match="invalid .* response"):
+                await reference_sync.stage(IncompleteCatalog(), db, "incomplete", "SHOPIFY-MAIN")
+
+            assert (await db.get(FoundationReference, "old-item")).active is True
+            assert (await db.get(FoundationReference, "old-location")).active is False
             assert (await db.execute(select(ShopifyReferenceStage))).scalars().all() == []
 
     run(go())
