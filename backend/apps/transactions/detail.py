@@ -224,9 +224,13 @@ def summarize_line_taxes(lines: list[dict]) -> list[dict]:
 
 def totals(detail: dict) -> dict:
     """Sums of a normalized detail block, signed like the header."""
-    gross = sum((l["gross_amount"] for l in detail["lines"]), Decimal("0"))
+    gross = sum((line["gross_amount"] for line in detail["lines"]), Decimal("0"))
     disc = sum((d["amount"] for d in detail["discounts"]), Decimal("0"))
-    tax = sum((l["tax_amount"] for l in detail["lines"]), Decimal("0")) if detail["lines"] else sum((t["tax_amount"] for t in detail["taxes"]), Decimal("0"))
+    tax = (
+        sum((line["tax_amount"] for line in detail["lines"]), Decimal("0"))
+        if detail["lines"]
+        else sum((tax_line["tax_amount"] for tax_line in detail["taxes"]), Decimal("0"))
+    )
     tendered = sum((t["amount"] for t in detail["tenders"]), Decimal("0"))
     return {"gross": gross, "discounts": disc, "tax": tax, "net": gross - disc, "expected_total": gross - disc + tax, "tendered": tendered}
 

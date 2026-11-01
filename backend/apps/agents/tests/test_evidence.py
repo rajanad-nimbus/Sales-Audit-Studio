@@ -6,9 +6,20 @@ from integrations.ontology import ontology
 
 
 def rows():
-    mk = lambda src, typ, i: (NS(id=f"t-{i}", transaction_type=typ), NS(id=f"r-{i}", source_system=src))
-    return [mk("POS", "Sale", 1), mk("Processor", "Sale", 2), mk("Processor", "Refund", 3), mk("Bank", "Deposit", 4),
-            mk("ERP", "Posting", 5), mk("Shopify", "Order", 6)]
+    def make_row(source, transaction_type, index):
+        return (
+            NS(id=f"t-{index}", transaction_type=transaction_type),
+            NS(id=f"r-{index}", source_system=source),
+        )
+
+    return [
+        make_row("POS", "Sale", 1),
+        make_row("Processor", "Sale", 2),
+        make_row("Processor", "Refund", 3),
+        make_row("Bank", "Deposit", 4),
+        make_row("ERP", "Posting", 5),
+        make_row("Shopify", "Order", 6),
+    ]
 
 
 def sources(req, **kw):

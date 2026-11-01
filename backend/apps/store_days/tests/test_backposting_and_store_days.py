@@ -67,10 +67,22 @@ def test_build_flags_late_additions_and_late_closures_but_not_same_day_resolutio
         async with Session() as db:
             dest = ExportDestination(id="d1", name="ERP", kind="file", format="json", config={})
             db.add(dest)
-            mk = lambda cid, store, bd: Case(id=cid, case_number=cid.upper(), case_type="x", business_date=bd, store_id=store, status="Closed")
-            db.add_all([mk("c-sent", "S1", old), mk("c-late", "S1", old),      # same store/day: one already exported, one resolves later
-                        mk("c-old", "S2", old),                                # never exported, closed after its business date
-                        mk("c-now", "S3", today)])                             # resolved on its own business day
+            def make_case(case_id, store_id, business_date):
+                return Case(
+                    id=case_id,
+                    case_number=case_id.upper(),
+                    case_type="x",
+                    business_date=business_date,
+                    store_id=store_id,
+                    status="Closed",
+                )
+
+            db.add_all([
+                make_case("c-sent", "S1", old),
+                make_case("c-late", "S1", old),
+                make_case("c-old", "S2", old),
+                make_case("c-now", "S3", today),
+            ])
             db.add(ExportBatch(id="batch-0001-xyz", destination_id="d1", dataset="resolutions", status="Acknowledged",
                                idempotency_key="k1", created_by="it", record_count=1))
             await db.flush()
@@ -376,9 +388,24 @@ def test_adjustment_ineligibility_reasons_are_specific():
             for cid in ("a", "b", "c", "d"):
                 db.add(Case(id=cid, case_number=cid.upper(), case_type="x", business_date="2026-10-01", store_id="S1", status="Closed"))
             await db.flush()
-            rec = lambda cid, impact: Recommendation(id="r" + cid, case_id=cid, investigation_id="i", disposition_type="Correction", action_class="x",
-                                                     expected_workflow="w", financial_impact=Decimal(impact), confidence="High", status="Approved")
-            db.add_all([rec("b", "0"), rec("c", "50"), rec("d", "50")])
+            def make_recommendation(case_id, impact):
+                return Recommendation(
+                    id="r" + case_id,
+                    case_id=case_id,
+                    investigation_id="i",
+                    disposition_type="Correction",
+                    action_class="x",
+                    expected_workflow="w",
+                    financial_impact=Decimal(impact),
+                    confidence="High",
+                    status="Approved",
+                )
+
+            db.add_all([
+                make_recommendation("b", "0"),
+                make_recommendation("c", "50"),
+                make_recommendation("d", "50"),
+            ])
             db.add(HumanDecision(id="h1", case_id="d", recommendation_id="rd", decision_type="human",
                                  decision="Approved", actor="finance", authority_check="Approved"))
             db.add(Workflow(id="w", case_id="d", recommendation_id="rd", workflow_type="Correction",

@@ -157,10 +157,36 @@ def test_returns_link_to_the_original_sale_and_detect_over_returns():
         Session = await session()
         async with Session() as db:
             await ingest.ingest(db, "POS", "d1", [sale()])      # sold 2 x SKU-1
-            ret = lambda rid, qty, ref="POS-1": {**sale(rid=rid, amount="56.50", ref="PAY-" + rid, tenders=[{"tender_type": "Card", "amount": "56.50"}]),
-                                                 "record_type": "Return", "original_reference": ref, "return_reason": "Faulty",
-                                                 "lines": [{"item_code": "SKU-1", "quantity": qty, "unit_price": "50.00", "tax_code": "VAT13", "tax_rate": "0.13", "tax_amount": "6.50", "return_reason": "Faulty"}]}
-            stats = await ingest.ingest(db, "POS", "d2", [ret("R-1", "1"), ret("R-2", "2"), ret("R-LOST", "1", ref="POS-NOPE")])
+
+            def make_return(record_id, quantity, reference="POS-1"):
+                return {
+                    **sale(
+                        rid=record_id,
+                        amount="56.50",
+                        ref="PAY-" + record_id,
+                        tenders=[{"tender_type": "Card", "amount": "56.50"}],
+                    ),
+                    "record_type": "Return",
+                    "original_reference": reference,
+                    "return_reason": "Faulty",
+                    "lines": [
+                        {
+                            "item_code": "SKU-1",
+                            "quantity": quantity,
+                            "unit_price": "50.00",
+                            "tax_code": "VAT13",
+                            "tax_rate": "0.13",
+                            "tax_amount": "6.50",
+                            "return_reason": "Faulty",
+                        }
+                    ],
+                }
+
+            stats = await ingest.ingest(db, "POS", "d2", [
+                make_return("R-1", "1"),
+                make_return("R-2", "2"),
+                make_return("R-LOST", "1", reference="POS-NOPE"),
+            ])
             await db.commit()
             assert stats["returns_linked"] == 2
             by = {s: t for t, s in (await db.execute(select(CanonicalTransaction, SourceRecord.source_record_id).join(

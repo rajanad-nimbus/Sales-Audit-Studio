@@ -282,7 +282,10 @@ async def return_context(db, tx: CanonicalTransaction) -> dict:
     for r in rets:
         rl = return_lines[r.id]
         out.append({"id": r.id, "business_date": r.business_date, "amount": r.signed_amount, "reason": r.return_reason, "status": r.reconciliation_status,
-                    "items": [{"item_code": l.item_code, "quantity": fmt_qty(abs(l.quantity))} for l in rl],
+                    "items": [
+                        {"item_code": line.item_code, "quantity": fmt_qty(abs(line.quantity))}
+                        for line in rl
+                    ],
                     "items_truncated": r.id in return_lines_truncated})
     return {"is_return": False, "returns": out, "returns_truncated": returns_truncated}
 
@@ -395,9 +398,22 @@ async def transaction_detail(transaction_id: str, db: AsyncSession = Depends(get
     out["detail"] = {
         "status": summary["status"],
         "line_count": line_count, "lines_truncated": lines_truncated,
-        "lines": [{"line_no": l.line_no, "item_code": l.item_code, "description": l.description, "quantity": l.quantity, "unit_price": l.unit_price,
-                   "gross_amount": l.gross_amount, "tax_code": l.tax_code, "tax_rate": l.tax_rate, "tax_amount": l.tax_amount,
-                   "discount_amount": line_discount_totals.get(l.line_no, Decimal("0")), "return_reason": l.return_reason} for l in lines],
+        "lines": [
+            {
+                "line_no": line.line_no,
+                "item_code": line.item_code,
+                "description": line.description,
+                "quantity": line.quantity,
+                "unit_price": line.unit_price,
+                "gross_amount": line.gross_amount,
+                "tax_code": line.tax_code,
+                "tax_rate": line.tax_rate,
+                "tax_amount": line.tax_amount,
+                "discount_amount": line_discount_totals.get(line.line_no, Decimal("0")),
+                "return_reason": line.return_reason,
+            }
+            for line in lines
+        ],
         "discount_count": discount_count, "discounts_truncated": discounts_truncated,
         "discounts": [{"kind": d.kind, "code": d.code, "description": d.description, "line_no": d.line_no, "amount": d.amount} for d in discounts],
         "tax_count": tax_count, "taxes_truncated": taxes_truncated,
