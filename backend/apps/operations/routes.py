@@ -1,5 +1,6 @@
 """HTTP endpoints for production operations and retention controls."""
 
+import logging
 import uuid
 from datetime import timedelta
 from typing import Annotated
@@ -24,6 +25,7 @@ from apps.operations.retention import (
 from apps.security.authentication import require_role
 
 router = APIRouter(prefix="/api/operations", tags=["Production operations"])
+logger = logging.getLogger(__name__)
 
 
 class RetentionBody(BaseModel):
@@ -221,6 +223,8 @@ async def execute_retention(
         return {"run_id": run.id, "eligible_records": 0, "message": "No records eligible"}
     archive_path = None
     archive_hash = None
+    commit_started = False
+    run_id = run.id
     try:
         if policy.archive_before_purge:
             (
@@ -244,10 +248,20 @@ async def execute_retention(
             run.purged_records = await purge_retention_candidates(db, model, record_ids)
         db.add(run)
         audit_retention_run(db, run, dataset)
+        await db.flush()
+        commit_started = True
         await db.commit()
     except BaseException:
         if archive_path is not None:
-            archive_path.unlink(missing_ok=True)
+            if commit_started:
+                logger.warning(
+                    "Retention commit outcome is unknown for run %s; archive retained at %s",
+                    run_id,
+                    archive_path,
+                    exc_info=True,
+                )
+            else:
+                archive_path.unlink(missing_ok=True)
         raise
     return {
         "run_id": run.id,

@@ -302,6 +302,78 @@ def test_retention_removes_archive_when_purge_fails(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("committed", [False, True])
+def test_retention_preserves_archive_when_commit_outcome_is_unknown(
+    tmp_path, monkeypatch, caplog, committed
+):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setenv("NIMBUS_ARCHIVE_DIR", str(tmp_path))
+        try:
+            async with sessions() as db:
+                old = utcnow() - timedelta(days=45)
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="source_records",
+                        retain_days=30,
+                        archive_before_purge=True,
+                        updated_by="it",
+                    )
+                )
+                db.add(
+                    SourceRecord(
+                        id="src-1",
+                        source_system="POS",
+                        source_version="1",
+                        source_record_id="src-1",
+                        delivery_id="delivery",
+                        payload=b"{}",
+                        payload_hash="0" * 64,
+                        received_at=old,
+                        source_event_time=old,
+                        status="Processed",
+                        created_at=old,
+                    )
+                )
+                await db.commit()
+                original_commit = db.commit
+
+                async def uncertain_commit():
+                    if committed:
+                        await original_commit()
+                    raise ConnectionError("simulated lost commit response")
+
+                monkeypatch.setattr(db, "commit", uncertain_commit)
+                with pytest.raises(ConnectionError, match="lost commit response"):
+                    await execute_retention(
+                        "source_records",
+                        RetentionRunBody(confirm_purge=True),
+                        db,
+                        {"user": "it.user"},
+                    )
+
+                await db.rollback()
+                archives = list(tmp_path.rglob("*.jsonl"))
+                assert len(archives) == 1
+                assert json.loads(archives[0].read_text())["id"] == "src-1"
+                assert str(archives[0]) in caplog.text
+                remaining = await db.scalar(select(func.count()).select_from(SourceRecord))
+                assert remaining == (0 if committed else 1)
+                retention_run = (await db.execute(select(RetentionRun))).scalar_one_or_none()
+                if committed:
+                    assert retention_run.archive_location == str(archives[0])
+                else:
+                    assert retention_run is None
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_empty_retention_run_is_written_to_audit_log():
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
