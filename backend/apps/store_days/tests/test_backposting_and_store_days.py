@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from apps.exports import routes as exports
 from apps.ingest import service as ingest
+from apps.store_days import closures
 from apps.store_days import routes as sd
 from fastapi import HTTPException
 from models import (
@@ -180,7 +181,7 @@ def test_store_day_close_acquires_reconciliation_lock_before_loading_day(monkeyp
         raise HTTPException(status_code=404, detail="Store day not found")
 
     monkeypatch.setattr(sd.reconciliation, "lock_reconciliation", lock_reconciliation)
-    monkeypatch.setattr(sd, "get_day", get_day)
+    monkeypatch.setattr(closures, "get_day", get_day)
 
     async def go():
         with pytest.raises(HTTPException) as error:
