@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 import httpx
@@ -17,6 +18,7 @@ from apps.exports.models import ExportBatch, ExportDestination
 
 MAX_RESPONSE_REFERENCE_BYTES = 64 * 1024
 MAX_RESPONSE_REFERENCE_SECONDS = 5
+MAX_WEBHOOK_RESPONSE_SECONDS = 30
 
 
 def sign(secret: str, body: bytes) -> str:
@@ -221,8 +223,15 @@ async def post_webhook(
     body: bytes,
     headers: dict[str, str],
 ) -> tuple[int, bytes | None]:
-    """Send a webhook and bound the optional receiver reference by size and time."""
-    async with client.stream("POST", url, content=body, headers=headers) as response:
+    """Bound the time to receive a status and the optional reference's size and time."""
+    async with AsyncExitStack() as stack:
+        try:
+            async with asyncio.timeout(MAX_WEBHOOK_RESPONSE_SECONDS):
+                response = await stack.enter_async_context(
+                    client.stream("POST", url, content=body, headers=headers)
+                )
+        except TimeoutError as exc:
+            raise httpx.TimeoutException("Webhook response timed out") from exc
         status_code = response.status_code
         if not 200 <= status_code < 300 or status_code == 202:
             return status_code, None

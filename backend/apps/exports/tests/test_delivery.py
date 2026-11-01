@@ -348,6 +348,59 @@ def test_webhook_stops_waiting_for_slow_optional_reference(monkeypatch):
     assert batch.response_ref is None
 
 
+def test_webhook_times_out_while_waiting_for_response_headers(monkeypatch):
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+    monkeypatch.setattr(delivery, "MAX_WEBHOOK_RESPONSE_SECONDS", 0.01)
+    closed = False
+
+    class Client:
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            nonlocal closed
+            try:
+                await asyncio.Event().wait()
+                yield
+            finally:
+                closed = True
+
+    asyncio.run(routes.deliver(destination, batch, Client()))
+
+    assert closed
+    assert batch.status == "Failed"
+    assert batch.error == "Webhook request timed out"
+
+
+def test_webhook_propagates_cancellation_while_waiting_for_response_headers():
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+
+    async def run():
+        started = asyncio.Event()
+        closed = asyncio.Event()
+
+        class Client:
+            @asynccontextmanager
+            async def stream(self, *_args, **_kwargs):
+                try:
+                    started.set()
+                    await asyncio.Event().wait()
+                    yield
+                finally:
+                    closed.set()
+
+        task = asyncio.create_task(routes.deliver(destination, batch, Client()))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert closed.is_set()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("name", ["", ".", ".."])
 def test_file_delivery_rejects_unsafe_directory_names(tmp_path, monkeypatch, name):
     monkeypatch.setattr(routes, "EXPORT_DIR", tmp_path / "exports")
