@@ -15,6 +15,8 @@ from model_base import utcnow
 from apps.csv_export import csv_table
 from apps.exports.models import ExportBatch, ExportDestination
 
+MAX_RESPONSE_REFERENCE_BYTES = 64 * 1024
+
 
 def sign(secret: str, body: bytes) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -196,29 +198,54 @@ async def deliver_webhook(
     }
     if client is None:
         async with httpx.AsyncClient(timeout=15) as owned_client:
-            response = await owned_client.post(config["url"], content=body, headers=headers)
+            status_code, response_body = await post_webhook(
+                owned_client, config["url"], body, headers
+            )
     else:
-        response = await client.post(config["url"], content=body, headers=headers)
-    batch.response_code = response.status_code
-    if 200 <= response.status_code < 300 and response.status_code != 202:
+        status_code, response_body = await post_webhook(client, config["url"], body, headers)
+    batch.response_code = status_code
+    if 200 <= status_code < 300 and status_code != 202:
         batch.status, batch.acked_at = "Acknowledged", utcnow()
-        batch.response_ref = response_reference(response)
-    elif response.status_code == 202:
+        batch.response_ref = response_reference(response_body)
+    elif status_code == 202:
         batch.status = "Sent"
     else:
         batch.status = "Failed"
-        batch.error = f"HTTP {response.status_code}"
+        batch.error = f"HTTP {status_code}"
 
 
-def response_reference(response: httpx.Response) -> str | None:
-    """Extract a bounded receiver reference from a successful JSON response."""
+async def post_webhook(
+    client: httpx.AsyncClient,
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+) -> tuple[int, bytes | None]:
+    """Send a webhook while retaining only a bounded response body."""
+    async with client.stream("POST", url, content=body, headers=headers) as response:
+        status_code = response.status_code
+        response_body = bytearray()
+        oversized = False
+        async for chunk in response.aiter_bytes():
+            remaining = MAX_RESPONSE_REFERENCE_BYTES - len(response_body)
+            if remaining <= 0:
+                oversized = True
+                continue
+            response_body.extend(chunk[:remaining])
+            oversized |= len(chunk) > remaining
+    return status_code, None if oversized else bytes(response_body)
+
+
+def response_reference(response_body: bytes | None) -> str | None:
+    """Extract a bounded receiver reference from a bounded JSON response."""
+    if response_body is None:
+        return None
     try:
-        response_body = response.json()
+        response_data = json.loads(response_body)
     except ValueError:
         return None
-    if not isinstance(response_body, dict):
+    if not isinstance(response_data, dict):
         return None
-    return str(response_body.get("reference", ""))[:255] or None
+    return str(response_data.get("reference", ""))[:255] or None
 
 
 async def deliver_file(

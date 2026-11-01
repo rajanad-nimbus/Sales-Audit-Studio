@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 from models import ExportBatch, ExportDestination
 
 from apps.exports import routes
-from apps.exports.delivery import render
+from apps.exports.delivery import MAX_RESPONSE_REFERENCE_BYTES, render
 
 WEBHOOK_SECRET = "s" * 32
 
@@ -79,9 +80,12 @@ def test_webhook_sends_body_and_metadata_signatures(monkeypatch):
         async def __aexit__(self, *_args):
             pass
 
-        async def post(self, _url, *, content, headers):
+        @asynccontextmanager
+        async def stream(self, _method, _url, *, content, headers):
             captured.update(body=content, headers=headers)
-            return type("Response", (), {"status_code": 202})()
+            response = type("Response", (), {"status_code": 202})()
+            response.aiter_bytes = lambda: async_bytes(b"")
+            yield response
 
     monkeypatch.setattr(routes.httpx, "AsyncClient", Client)
     asyncio.run(routes.deliver(destination, batch))
@@ -110,10 +114,11 @@ def test_webhook_failure_does_not_persist_receiver_response_body(monkeypatch):
         async def __aexit__(self, *_args):
             pass
 
-        async def post(self, *_args, **_kwargs):
-            return type(
-                "Response", (), {"status_code": 500, "text": "secret payload echoed by receiver"}
-            )()
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            response = type("Response", (), {"status_code": 500})()
+            response.aiter_bytes = lambda: async_bytes(b"secret payload echoed by receiver")
+            yield response
 
     monkeypatch.setattr(routes.httpx, "AsyncClient", Client)
     asyncio.run(routes.deliver(destination, batch))
@@ -141,8 +146,10 @@ def test_webhook_transport_error_does_not_persist_url_credentials(monkeypatch):
         async def __aexit__(self, *_args):
             pass
 
-        async def post(self, url, **_kwargs):
+        @asynccontextmanager
+        async def stream(self, _method, url, **_kwargs):
             raise routes.httpx.ConnectError(f"connection failed for {url}")
+            yield
 
     monkeypatch.setattr(routes.httpx, "AsyncClient", Client)
     asyncio.run(routes.deliver(destination, batch))
@@ -173,13 +180,17 @@ def test_webhook_acknowledges_success_even_when_response_reference_is_unusable(
         async def __aexit__(self, *_args):
             pass
 
-        async def post(self, *_args, **_kwargs):
-            def parse_json():
-                if isinstance(response_body, Exception):
-                    raise response_body
-                return response_body
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            if isinstance(response_body, Exception):
+                body = b"invalid JSON"
+            else:
+                import json
 
-            return type("Response", (), {"status_code": 200, "json": staticmethod(parse_json)})()
+                body = json.dumps(response_body).encode()
+            response = type("Response", (), {"status_code": 200})()
+            response.aiter_bytes = lambda: async_bytes(body)
+            yield response
 
     monkeypatch.setattr(routes.httpx, "AsyncClient", Client)
     asyncio.run(routes.deliver(destination, batch))
@@ -195,8 +206,11 @@ def test_webhook_acknowledges_successful_responses_without_pending_work(monkeypa
     destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
 
     class Client:
-        async def post(self, *_args, **_kwargs):
-            return type("Response", (), {"status_code": status_code, "json": lambda _self: {}})()
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            response = type("Response", (), {"status_code": status_code})()
+            response.aiter_bytes = lambda: async_bytes(b"{}")
+            yield response
 
     asyncio.run(routes.deliver(destination, batch, Client()))
 
@@ -214,7 +228,7 @@ def test_webhook_with_invalid_persisted_secret_fails_closed(monkeypatch, secret)
         pytest.fail("webhook must not be sent with an invalid signing secret")
 
     class Client:
-        post = unexpected_post
+        stream = unexpected_post
 
     asyncio.run(routes.deliver(destination, batch, Client()))
 
@@ -226,6 +240,35 @@ def test_envelope_signature_interoperability_vector():
     assert routes.sign_envelope("secret", "resolutions", "a" * 64, b"payload") == (
         "sha256=04e3620ad0ae650d3bf9c7d6963ff6cf625fc79a1bad6345372295eae080edbb"
     )
+
+
+def async_bytes(*chunks):
+    async def iterate():
+        for chunk in chunks:
+            yield chunk
+
+    return iterate()
+
+
+def test_webhook_does_not_retain_oversized_receiver_response(monkeypatch):
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+
+    class Client:
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            response = type("Response", (), {"status_code": 200})()
+            response.aiter_bytes = lambda: async_bytes(
+                b'{"reference":"valid-but-too-large",',
+                b" " * MAX_RESPONSE_REFERENCE_BYTES,
+            )
+            yield response
+
+    asyncio.run(routes.deliver(destination, batch, Client()))
+
+    assert batch.status == "Acknowledged"
+    assert batch.response_ref is None
 
 
 @pytest.mark.parametrize("name", ["", ".", ".."])
