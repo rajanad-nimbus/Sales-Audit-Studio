@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class AuditTotalDefinition(Base):
     """Retailer-defined total evaluated against immutable canonical transactions."""
+
     __tablename__ = "audit_total_definitions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
@@ -16,18 +17,24 @@ class AuditTotalDefinition(Base):
     description: Mapped[str | None] = mapped_column(Text)
     start_date: Mapped[str | None] = mapped_column(String(10))
     end_date: Mapped[str | None] = mapped_column(String(10))
-    category: Mapped[str] = mapped_column(String(50), default="Miscellaneous", server_default="Miscellaneous")
+    category: Mapped[str] = mapped_column(
+        String(50), default="Miscellaneous", server_default="Miscellaneous"
+    )
     over_short_group: Mapped[str | None] = mapped_column(String(32))
     over_short_operator: Mapped[str | None] = mapped_column(String(8))
     calculation_basis: Mapped[str] = mapped_column(String(32), default="Raw", server_default="Raw")
     status: Mapped[str] = mapped_column(String(24), default="Worksheet", server_default="Worksheet")
     aggregation: Mapped[str] = mapped_column(String(16), default="Sum")
-    measure: Mapped[str] = mapped_column(String(16), default="Amount", server_default="Amount")  # Amount (header amount) | Tax (tax recorded in the detail)
+    measure: Mapped[str] = mapped_column(
+        String(16), default="Amount", server_default="Amount"
+    )  # Amount (header amount) | Tax (tax recorded in the detail)
     source_system: Mapped[str | None] = mapped_column(String(50))
     transaction_types: Mapped[list] = mapped_column(JSON, default=list)
     tender_type: Mapped[str | None] = mapped_column(String(50))
     level: Mapped[str] = mapped_column(String(24), default="Store")
-    corresponds_to_rtlog: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    corresponds_to_rtlog: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     system_calculated: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_with_wizard: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     required_by_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
@@ -44,9 +51,14 @@ class AuditTotalDefinition(Base):
     sql_statement: Mapped[str | None] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
-    __table_args__ = (Index("ix_audit_total_definitions_name_revision", "name", "revision", unique=True),)
+    __table_args__ = (
+        Index("ix_audit_total_definitions_name_revision", "name", "revision", unique=True),
+    )
+
 
 class SalesAuditErrorDefinition(Base):
     __tablename__ = "sales_audit_error_definitions"

@@ -3,9 +3,19 @@ from types import SimpleNamespace
 from apps.totals.domain import validate_definition
 from apps.totals.standard import STANDARD_TOTALS, TAX_TOTALS
 
-DEFAULTS = {"measure": "Amount", "level": "Store", "status": "Active", "calculation_basis": "Raw", "over_short_group": None,
-            "over_short_operator": None, "combined_total_ids": [], "tender_type": None,
-            "start_date": None, "end_date": None, "combined_operator": None}
+DEFAULTS = {
+    "measure": "Amount",
+    "level": "Store",
+    "status": "Active",
+    "calculation_basis": "Raw",
+    "over_short_group": None,
+    "over_short_operator": None,
+    "combined_total_ids": [],
+    "tender_type": None,
+    "start_date": None,
+    "end_date": None,
+    "combined_operator": None,
+}
 
 
 def test_every_standard_total_is_valid():
@@ -22,5 +32,10 @@ def test_names_are_unique_and_the_required_store_over_short_total_exists():
 
 def test_tax_measure_must_be_a_sum():
     import pytest
+
     with pytest.raises(ValueError, match="tax total must be a Sum"):
-        validate_definition(SimpleNamespace(**{**DEFAULTS, "measure": "Tax", "aggregation": "Count", "category": "Tax"}))
+        validate_definition(
+            SimpleNamespace(
+                **{**DEFAULTS, "measure": "Tax", "aggregation": "Count", "category": "Tax"}
+            )
+        )

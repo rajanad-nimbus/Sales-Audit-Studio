@@ -1,4 +1,5 @@
 """Currency checks for calculations without an exchange-rate policy."""
+
 import re
 from collections.abc import Iterable
 
@@ -13,5 +14,7 @@ def single_currency(currencies: Iterable[object]) -> str:
     """Return the sole currency, or the legacy default for an empty store day."""
     codes = {validate_currency(currency) for currency in currencies}
     if len(codes) > 1:
-        raise ValueError("Cannot calculate totals across multiple currencies without an exchange-rate policy")
+        raise ValueError(
+            "Cannot calculate totals across multiple currencies without an exchange-rate policy"
+        )
     return next(iter(codes), "USD")

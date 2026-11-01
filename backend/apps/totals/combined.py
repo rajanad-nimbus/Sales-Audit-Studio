@@ -1,4 +1,5 @@
 """Evaluate combined definitions against their explicitly referenced revisions."""
+
 from decimal import Decimal
 
 from apps.totals.models import AuditTotalDefinition
@@ -21,19 +22,30 @@ def calculate_combined(
             raise ValueError(f"Missing calculated values for {definition.name}")
         ids = definition.combined_total_ids
         if len(ids) != 2 or len(set(ids)) != 2 or definition.combined_operator not in {"+", "-"}:
-            raise ValueError(f"Combined total {definition.name} requires two distinct totals and an operator")
+            raise ValueError(
+                f"Combined total {definition.name} requires two distinct totals and an operator"
+            )
         references = [by_id.get(item) for item in ids]
         if any(reference is None for reference in references):
-            raise ValueError(f"Combined total {definition.name} references an inactive or ineffective revision")
+            raise ValueError(
+                f"Combined total {definition.name} references an inactive or ineffective revision"
+            )
         left, right = references
-        if any(reference.level != definition.level or reference.rollups != definition.rollups for reference in references):
-            raise ValueError(f"Combined total {definition.name} has incompatible levels or roll-ups")
+        if any(
+            reference.level != definition.level or reference.rollups != definition.rollups
+            for reference in references
+        ):
+            raise ValueError(
+                f"Combined total {definition.name} has incompatible levels or roll-ups"
+            )
         visiting.add(definition.id)
         first, second = evaluate(left), evaluate(right)
         visiting.remove(definition.id)
         sign = 1 if definition.combined_operator == "+" else -1
-        values[definition.id] = {key: first.get(key, Decimal(0)) + sign * second.get(key, Decimal(0))
-                                 for key in first.keys() | second.keys()}
+        values[definition.id] = {
+            key: first.get(key, Decimal(0)) + sign * second.get(key, Decimal(0))
+            for key in first.keys() | second.keys()
+        }
         return values[definition.id]
 
     for definition in definitions:

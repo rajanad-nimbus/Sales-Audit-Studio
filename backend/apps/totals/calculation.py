@@ -1,4 +1,5 @@
 """Shared calculation of versioned total definitions for previews and store days."""
+
 from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
@@ -38,18 +39,40 @@ async def effective_definitions(
     *,
     validate_all_combined: bool = False,
 ) -> list[AuditTotalDefinition]:
-    revisions = (select(AuditTotalDefinition.name, func.max(AuditTotalDefinition.revision).label("revision"))
-        .where((AuditTotalDefinition.start_date.is_(None)) | (AuditTotalDefinition.start_date <= business_date),
-               (AuditTotalDefinition.end_date.is_(None)) | (AuditTotalDefinition.end_date >= business_date))
-        .group_by(AuditTotalDefinition.name).subquery())
-    definitions = list((await db.execute(select(AuditTotalDefinition).join(
-        revisions, (AuditTotalDefinition.name == revisions.c.name)
-        & (AuditTotalDefinition.revision == revisions.c.revision))
-        .where(AuditTotalDefinition.active.is_(True)))).scalars().all())
+    revisions = (
+        select(AuditTotalDefinition.name, func.max(AuditTotalDefinition.revision).label("revision"))
+        .where(
+            (AuditTotalDefinition.start_date.is_(None))
+            | (AuditTotalDefinition.start_date <= business_date),
+            (AuditTotalDefinition.end_date.is_(None))
+            | (AuditTotalDefinition.end_date >= business_date),
+        )
+        .group_by(AuditTotalDefinition.name)
+        .subquery()
+    )
+    definitions = list(
+        (
+            await db.execute(
+                select(AuditTotalDefinition)
+                .join(
+                    revisions,
+                    (AuditTotalDefinition.name == revisions.c.name)
+                    & (AuditTotalDefinition.revision == revisions.c.revision),
+                )
+                .where(AuditTotalDefinition.active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
     if any(definition.location_traits for definition in definitions):
         traits = await store_location_traits(db, store_id)
-        definitions = [definition for definition in definitions
-                       if not definition.location_traits or set(definition.location_traits).intersection(traits)]
+        definitions = [
+            definition
+            for definition in definitions
+            if not definition.location_traits
+            or set(definition.location_traits).intersection(traits)
+        ]
     if validate_all_combined:
         # Validate dependencies even when a store day has no transactions to calculate.
         validation_values = {
@@ -63,23 +86,40 @@ async def effective_definitions(
 
 async def store_location_traits(db: AsyncSession, store_id: str) -> set[str]:
     """Read trait membership from the active Store reference's location_traits attribute."""
-    store = (await db.execute(select(FoundationReference).where(
-        FoundationReference.category == "Store", FoundationReference.code == store_id,
-        FoundationReference.active.is_(True)))).scalar_one_or_none()
+    store = (
+        await db.execute(
+            select(FoundationReference).where(
+                FoundationReference.category == "Store",
+                FoundationReference.code == store_id,
+                FoundationReference.active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
     if store is None:
-        raise ValueError(f"An active store reference is required to resolve location traits for {store_id}")
-    traits = store.attributes.get("location_traits", []) if isinstance(store.attributes, dict) else None
-    if not isinstance(traits, list) or any(not isinstance(trait, str) or not trait.strip() for trait in traits):
+        raise ValueError(
+            f"An active store reference is required to resolve location traits for {store_id}"
+        )
+    traits = (
+        store.attributes.get("location_traits", []) if isinstance(store.attributes, dict) else None
+    )
+    if not isinstance(traits, list) or any(
+        not isinstance(trait, str) or not trait.strip() for trait in traits
+    ):
         raise ValueError(f"Store {store_id} has invalid location_traits")
     return set(traits)
 
 
 async def calculate_definitions(
-    db: AsyncSession, definitions: list[AuditTotalDefinition], rows: list[CanonicalTransaction],
+    db: AsyncSession,
+    definitions: list[AuditTotalDefinition],
+    rows: list[CanonicalTransaction],
     amounts: dict[str, Decimal] | None = None,
 ) -> tuple[dict[str, dict[str | None, Decimal]], dict[str, int]]:
     taxes: dict[str, Decimal] = {}
-    if any(definition.measure == "Tax" and definition.calculation_basis != "Combined" for definition in definitions):
+    if any(
+        definition.measure == "Tax" and definition.calculation_basis != "Combined"
+        for definition in definitions
+    ):
         taxes = await effective_taxes(db, rows)
     values: dict[str, dict[str | None, Decimal]] = {}
     counts: dict[str, int] = {}
@@ -98,21 +138,30 @@ def matching_transactions(definition: AuditTotalDefinition, rows: list[Canonical
     """Select transactions included by a definition's source, type, and tender filters."""
     source_lineage = source_lineage_for(definition.source_system)
     return [
-        row for row in rows
+        row
+        for row in rows
         if (source_lineage is None or row.source_lineage == source_lineage)
-        and (not definition.transaction_types or row.transaction_type in definition.transaction_types)
+        and (
+            not definition.transaction_types or row.transaction_type in definition.transaction_types
+        )
         and (not definition.tender_type or row.tender_type == definition.tender_type)
     ]
 
 
-def validate_definition_transactions(definition: AuditTotalDefinition, rows: list[CanonicalTransaction]) -> None:
+def validate_definition_transactions(
+    definition: AuditTotalDefinition, rows: list[CanonicalTransaction]
+) -> None:
     """Validate transaction attributes required by a definition's balancing level."""
     if definition.level == "Cashier" and any(not row.cashier_id for row in rows):
-        raise ValueError(f"Total {definition.name} requires cashier IDs on all matching transactions")
+        raise ValueError(
+            f"Total {definition.name} requires cashier IDs on all matching transactions"
+        )
 
 
 def aggregate_definition(
-    definition: AuditTotalDefinition, rows: list[CanonicalTransaction], taxes: dict[str, Decimal],
+    definition: AuditTotalDefinition,
+    rows: list[CanonicalTransaction],
+    taxes: dict[str, Decimal],
     amounts: dict[str, Decimal] | None,
 ) -> dict[str | None, Decimal]:
     """Aggregate matching transactions by the definition's dimension."""
@@ -140,12 +189,16 @@ def definition_dimension(definition: AuditTotalDefinition, row: CanonicalTransac
 
 
 async def calculate_store_day(
-    db: AsyncSession, store_id: str, business_date: str,
+    db: AsyncSession,
+    store_id: str,
+    business_date: str,
     definitions: list[AuditTotalDefinition],
 ) -> StoreDayCalculation:
     """Aggregate one store day in bounded pages, including approved corrections and configured totals."""
     totals: dict[tuple[str, str, str | None], Decimal] = defaultdict(Decimal)
-    definition_totals: dict[str, dict[str | None, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    definition_totals: dict[str, dict[str | None, Decimal]] = defaultdict(
+        lambda: defaultdict(Decimal)
+    )
     counts: dict[str, int] = defaultdict(int)
     currencies: set[str] = set()
     transaction_count = 0
@@ -170,7 +223,9 @@ async def calculate_store_day(
         totals.pop(("Approved Adjustment Net", "Store", None), None)
     return StoreDayCalculation(
         source_totals=totals,
-        configured_totals={identifier: dict(values) for identifier, values in definition_totals.items()},
+        configured_totals={
+            identifier: dict(values) for identifier, values in definition_totals.items()
+        },
         definition_counts=dict(counts),
         currencies=currencies,
         transaction_count=transaction_count,
@@ -178,7 +233,10 @@ async def calculate_store_day(
 
 
 async def load_transaction_batch(
-    db: AsyncSession, store_id: str, business_date: str, last_id: str | None,
+    db: AsyncSession,
+    store_id: str,
+    business_date: str,
+    last_id: str | None,
 ) -> list[CanonicalTransaction]:
     """Fetch the next stable, bounded page of transactions for one store day."""
     query = select(CanonicalTransaction).where(
@@ -187,8 +245,7 @@ async def load_transaction_batch(
     )
     if last_id is not None:
         query = query.where(CanonicalTransaction.id > last_id)
-    result = await db.execute(
-        query.order_by(CanonicalTransaction.id).limit(TRANSACTION_BATCH_SIZE))
+    result = await db.execute(query.order_by(CanonicalTransaction.id).limit(TRANSACTION_BATCH_SIZE))
     return list(result.scalars().all())
 
 
@@ -201,8 +258,12 @@ def aggregate_source_totals(rows, amounts, totals) -> set[str]:
         if source_total:
             totals[(source_total, "Store", None)] += amounts[transaction.id]
         if transaction.source_lineage == "pos-map-v1":
-            totals[("POS Net", "Tender", transaction.tender_type or "Unspecified")] += amounts[transaction.id]
-            totals[("POS Net", "Register", transaction.register_id or "Unspecified")] += amounts[transaction.id]
+            totals[("POS Net", "Tender", transaction.tender_type or "Unspecified")] += amounts[
+                transaction.id
+            ]
+            totals[("POS Net", "Register", transaction.register_id or "Unspecified")] += amounts[
+                transaction.id
+            ]
         totals[("Approved Adjustment Net", "Store", None)] += (
             amounts[transaction.id] - transaction.signed_amount
         )
@@ -210,8 +271,12 @@ def aggregate_source_totals(rows, amounts, totals) -> set[str]:
 
 
 async def aggregate_configured_totals(
-    db: AsyncSession, definitions: list[AuditTotalDefinition], rows: list[CanonicalTransaction],
-    amounts: dict[str, Decimal], totals: dict[str, dict[str | None, Decimal]], counts: dict[str, int],
+    db: AsyncSession,
+    definitions: list[AuditTotalDefinition],
+    rows: list[CanonicalTransaction],
+    amounts: dict[str, Decimal],
+    totals: dict[str, dict[str | None, Decimal]],
+    counts: dict[str, int],
 ) -> None:
     """Calculate one page of configured totals and add it to the running aggregates."""
     definition_values, batch_counts = await calculate_definitions(db, definitions, rows, amounts)
@@ -223,7 +288,8 @@ async def aggregate_configured_totals(
 
 
 def dependencies_for_preview(
-    target: AuditTotalDefinition, effective: list[AuditTotalDefinition],
+    target: AuditTotalDefinition,
+    effective: list[AuditTotalDefinition],
 ) -> list[AuditTotalDefinition]:
     """Include only the target and its effective, explicitly pinned dependencies."""
     available = {row.id: row for row in effective if row.name != target.name}

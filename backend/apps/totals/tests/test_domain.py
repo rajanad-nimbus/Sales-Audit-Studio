@@ -35,14 +35,19 @@ def test_over_short_requires_group_and_operator():
 
 
 def test_valid_definition_is_accepted():
-    validate_definition(definition(category="Over/Short", over_short_group="Accounted For", over_short_operator="+"))
+    validate_definition(
+        definition(category="Over/Short", over_short_group="Accounted For", over_short_operator="+")
+    )
 
 
-@pytest.mark.parametrize("dates", [
-    {"start_date": "2026-02-30"},
-    {"end_date": "20261001"},
-    {"start_date": "2026-10-02", "end_date": "2026-10-01"},
-])
+@pytest.mark.parametrize(
+    "dates",
+    [
+        {"start_date": "2026-02-30"},
+        {"end_date": "20261001"},
+        {"start_date": "2026-10-02", "end_date": "2026-10-01"},
+    ],
+)
 def test_invalid_effective_dates_are_rejected(dates):
     with pytest.raises(ValueError):
         validate_definition(definition(**dates))

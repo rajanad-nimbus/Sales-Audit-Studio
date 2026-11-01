@@ -26,18 +26,26 @@ def test_total_definition_revisions_are_audited_without_store_days():
                 )
 
                 events = (
-                    await db.execute(
-                        select(AuditEvent).where(
-                            AuditEvent.object_type == "AuditTotalDefinition"
+                    (
+                        await db.execute(
+                            select(AuditEvent).where(
+                                AuditEvent.object_type == "AuditTotalDefinition"
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
 
                 assert created["revision"] == 1
                 assert revised["revision"] == 2
                 assert len(events) == 2
-                creation = next(event for event in events if event.event_type == "TOTAL_DEFINITION_CREATED")
-                revision = next(event for event in events if event.event_type == "TOTAL_DEFINITION_REVISED")
+                creation = next(
+                    event for event in events if event.event_type == "TOTAL_DEFINITION_CREATED"
+                )
+                revision = next(
+                    event for event in events if event.event_type == "TOTAL_DEFINITION_REVISED"
+                )
                 assert creation.object_id == created["id"]
                 assert creation.actor == "finance.user"
                 assert len(creation.after_state["configuration_hash"]) == 64
@@ -88,12 +96,11 @@ def test_failed_revision_commit_rolls_back_day_invalidation_and_audit(monkeypatc
                         TotalDefinitionBody(name="POS Net"), db, {"user": "finance.user"}
                     )
 
-                assert await db.scalar(
-                    select(StoreDay.totals_stale).where(StoreDay.id == "day-1")
-                ) is False
-                assert await db.scalar(
-                    select(func.count()).select_from(AuditTotalDefinition)
-                ) == 0
+                assert (
+                    await db.scalar(select(StoreDay.totals_stale).where(StoreDay.id == "day-1"))
+                    is False
+                )
+                assert await db.scalar(select(func.count()).select_from(AuditTotalDefinition)) == 0
                 assert await db.scalar(select(func.count()).select_from(AuditEvent)) == 0
         finally:
             await engine.dispose()
@@ -113,7 +120,10 @@ def test_stale_revision_update_cannot_overwrite_newer_definition():
                     TotalDefinitionBody(name="POS Net", description="initial"), db, user
                 )
                 latest = await update_definition(
-                    original["id"], TotalDefinitionBody(name="Ignored", description="latest"), db, user
+                    original["id"],
+                    TotalDefinitionBody(name="Ignored", description="latest"),
+                    db,
+                    user,
                 )
 
                 with pytest.raises(HTTPException) as error:
@@ -127,12 +137,16 @@ def test_stale_revision_update_cannot_overwrite_newer_definition():
                 assert error.value.status_code == 409
                 assert "stale" in error.value.detail
                 rows = (
-                    await db.execute(
-                        select(AuditTotalDefinition)
-                        .where(AuditTotalDefinition.name == "POS Net")
-                        .order_by(AuditTotalDefinition.revision)
+                    (
+                        await db.execute(
+                            select(AuditTotalDefinition)
+                            .where(AuditTotalDefinition.name == "POS Net")
+                            .order_by(AuditTotalDefinition.revision)
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 assert len(rows) == 2
                 assert rows[-1].id == latest["id"]
                 assert rows[-1].description == "latest"

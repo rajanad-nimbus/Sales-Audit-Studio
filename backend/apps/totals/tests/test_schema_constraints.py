@@ -13,10 +13,12 @@ def test_total_definition_name_and_revision_are_unique_in_model_schema():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add_all([
-                    AuditTotalDefinition(id="first", name="Retail sales", revision=1),
-                    AuditTotalDefinition(id="duplicate", name="Retail sales", revision=1),
-                ])
+                db.add_all(
+                    [
+                        AuditTotalDefinition(id="first", name="Retail sales", revision=1),
+                        AuditTotalDefinition(id="duplicate", name="Retail sales", revision=1),
+                    ]
+                )
                 with pytest.raises(IntegrityError):
                     await db.commit()
         finally:

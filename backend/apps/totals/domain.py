@@ -4,6 +4,7 @@ This module deliberately has no database or web dependencies.  The route layer
 adapts HTTP payloads and persistence to these rules, so the business invariants
 can be tested without starting FastAPI or a database.
 """
+
 from datetime import date
 from typing import Protocol
 
@@ -88,7 +89,10 @@ def validate_combination(definition: TotalDefinitionLike) -> None:
         len(definition.combined_total_ids) != 2 or len(set(definition.combined_total_ids)) != 2
     ):
         raise ValueError("Combined totals require two distinct existing totals")
-    if definition.calculation_basis == "Combined" and definition.combined_operator not in VALID_OPERATORS:
+    if (
+        definition.calculation_basis == "Combined"
+        and definition.combined_operator not in VALID_OPERATORS
+    ):
         raise ValueError("Combined totals require an addition or subtraction operator")
 
 
