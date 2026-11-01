@@ -1,4 +1,5 @@
 """Archive source deliveries, validate records, and create canonical transactions."""
+
 import hashlib
 import json
 import uuid
@@ -41,10 +42,16 @@ STRING_FIELD_LIMITS = {
 @dataclass(slots=True)
 class IngestResult:
     """Accumulated persistence effects for one source delivery."""
-    stats: dict[str, int] = dataclass_field(default_factory=lambda: {
-        "received": 0, "archived": 0, "duplicates_skipped": 0,
-        "quarantined": 0, "canonical_created": 0,
-    })
+
+    stats: dict[str, int] = dataclass_field(
+        default_factory=lambda: {
+            "received": 0,
+            "archived": 0,
+            "duplicates_skipped": 0,
+            "quarantined": 0,
+            "canonical_created": 0,
+        }
+    )
     changed_days: set[tuple[str, str]] = dataclass_field(default_factory=set)
     return_reference_keys: set[tuple[str, str]] = dataclass_field(default_factory=set)
 
@@ -52,6 +59,7 @@ class IngestResult:
 @dataclass(slots=True)
 class PreparedRecord:
     """Validated and serialized delivery record ready for transactional persistence."""
+
     record: dict
     payload: bytes
     digest: str
@@ -66,9 +74,13 @@ def prepare_record(source: str, record: dict) -> PreparedRecord:
     identity = shopify_ingest.identity_payload(record) if source == "Shopify" else record
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
     supplied_id = record.get("source_record_id")
-    record_id = (supplied_id if isinstance(supplied_id, str) and supplied_id.strip()
-                 and len(supplied_id) <= STRING_FIELD_LIMITS["source_record_id"]
-                 else f"unknown-{digest[:12]}")
+    record_id = (
+        supplied_id
+        if isinstance(supplied_id, str)
+        and supplied_id.strip()
+        and len(supplied_id) <= STRING_FIELD_LIMITS["source_record_id"]
+        else f"unknown-{digest[:12]}"
+    )
     parsed, parse_error = None, None
     try:
         parsed = parse(source, record)
@@ -103,7 +115,9 @@ async def lock_delivery_store_days(db, prepared: list[PreparedRecord]):
 
 
 async def load_prior_record_hashes(
-    db, source: str, prepared: list[PreparedRecord],
+    db,
+    source: str,
+    prepared: list[PreparedRecord],
 ) -> dict[str, set[str]]:
     """Lock record identities and load existing payload hashes in bounded queries."""
     record_ids = {prepared_record.record_id for prepared_record in prepared}
@@ -111,16 +125,24 @@ async def load_prior_record_hashes(
     prior_hashes: dict[str, set[str]] = defaultdict(set)
     ordered_ids = sorted(record_ids)
     for offset in range(0, len(ordered_ids), 500):
-        result = await db.execute(select(SourceRecord.source_record_id, SourceRecord.payload_hash).where(
-            SourceRecord.source_system == source,
-            SourceRecord.source_record_id.in_(ordered_ids[offset:offset + 500])))
+        result = await db.execute(
+            select(SourceRecord.source_record_id, SourceRecord.payload_hash).where(
+                SourceRecord.source_system == source,
+                SourceRecord.source_record_id.in_(ordered_ids[offset : offset + 500]),
+            )
+        )
         for record_id, digest in result.all():
             prior_hashes[record_id].add(digest)
     return prior_hashes
 
 
 def persist_prepared_records(
-    db, source, delivery_id, prepared: list[PreparedRecord], prior_hashes, days,
+    db,
+    source,
+    delivery_id,
+    prepared: list[PreparedRecord],
+    prior_hashes,
+    days,
 ) -> IngestResult:
     """Apply idempotency, archive accepted records, and create canonical transactions."""
     result = IngestResult()
@@ -161,12 +183,18 @@ def archive_source_record(db, source, delivery_id, prepared_record: PreparedReco
     elif prepared_record.parse_error is not None:
         reason, parsed = prepared_record.parse_error, None
     source_record = SourceRecord(
-        id=str(uuid.uuid4()), source_system=source,
-        source_version="1.0", source_record_id=prepared_record.record_id,
-        delivery_id=delivery_id, payload=prepared_record.payload,
-        payload_hash=prepared_record.digest, received_at=utcnow(),
+        id=str(uuid.uuid4()),
+        source_system=source,
+        source_version="1.0",
+        source_record_id=prepared_record.record_id,
+        delivery_id=delivery_id,
+        payload=prepared_record.payload,
+        payload_hash=prepared_record.digest,
+        received_at=utcnow(),
         source_event_time=parsed["ts"] if parsed else utcnow(),
-        status="Quarantined" if reason else "Archived", quarantine_reason=reason)
+        status="Quarantined" if reason else "Archived",
+        quarantine_reason=reason,
+    )
     db.add(source_record)
     prior.add(prepared_record.digest)
     return None if reason else (source_record, parsed)
@@ -176,16 +204,27 @@ def create_canonical_transaction(db, source, record, parsed, source_record):
     """Create a canonical transaction and persist its validated transaction details."""
     timestamp = parsed["ts"]
     transaction = CanonicalTransaction(
-        id=str(uuid.uuid4()), business_date=timestamp.date().isoformat(), transaction_date=timestamp,
-        event_timestamp=timestamp, processing_timestamp=utcnow(),
-        settlement_date=parsed["settlement_date"], transaction_type=record["record_type"],
-        source_lineage=LINEAGE[source], currency=record.get("currency", "USD"),
-        signed_amount=SIGN[record["record_type"]] * parsed["amount"], store_id=record["store_id"],
-        register_id=record.get("register_id"), cashier_id=record.get("cashier_id"),
-        channel_id=record.get("channel_id") or "store", tender_type=record.get("tender_type"),
+        id=str(uuid.uuid4()),
+        business_date=timestamp.date().isoformat(),
+        transaction_date=timestamp,
+        event_timestamp=timestamp,
+        processing_timestamp=utcnow(),
+        settlement_date=parsed["settlement_date"],
+        transaction_type=record["record_type"],
+        source_lineage=LINEAGE[source],
+        currency=record.get("currency", "USD"),
+        signed_amount=SIGN[record["record_type"]] * parsed["amount"],
+        store_id=record["store_id"],
+        register_id=record.get("register_id"),
+        cashier_id=record.get("cashier_id"),
+        channel_id=record.get("channel_id") or "store",
+        tender_type=record.get("tender_type"),
         payment_reference=record.get("payment_reference"),
-        settlement_reference=record.get("settlement_reference"), source_record_id=source_record.id,
-        reconciliation_status="Unmatched", disposition="Open")
+        settlement_reference=record.get("settlement_reference"),
+        source_record_id=source_record.id,
+        reconciliation_status="Unmatched",
+        disposition="Open",
+    )
     db.add(transaction)
     store_detail(db, transaction, parsed.get("detail"))
     return transaction
@@ -207,12 +246,18 @@ async def lock_source_record_identities(db, source: str, record_ids: set[str]) -
         return
     ordered_ids = sorted(record_ids)
     for offset in range(0, len(ordered_ids), 500):
-        identity_keys = [f"source-record:{source}:{record_id}" for record_id in ordered_ids[offset:offset + 500]]
-        await db.execute(text(
-            "SELECT pg_advisory_xact_lock(hashtextextended(identity_key, 0)) "
-            "FROM unnest(CAST(:identity_keys AS text[])) AS lock_keys(identity_key) "
-            "ORDER BY identity_key"
-        ), {"identity_keys": identity_keys})
+        identity_keys = [
+            f"source-record:{source}:{record_id}"
+            for record_id in ordered_ids[offset : offset + 500]
+        ]
+        await db.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended(identity_key, 0)) "
+                "FROM unnest(CAST(:identity_keys AS text[])) AS lock_keys(identity_key) "
+                "ORDER BY identity_key"
+            ),
+            {"identity_keys": identity_keys},
+        )
 
 
 def parse(source: str, rec: dict) -> dict:
@@ -234,8 +279,12 @@ def validate_source_identifiers(rec: dict) -> None:
     """Validate required and optional identifier fields against database constraints."""
     for field in ("source_record_id", "store_id"):
         value = rec.get(field)
-        if (not isinstance(value, str) or not value.strip() or value != value.strip()
-                or len(value) > STRING_FIELD_LIMITS[field]):
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or value != value.strip()
+            or len(value) > STRING_FIELD_LIMITS[field]
+        ):
             raise ValueError(
                 f"{field} must be a non-empty string without surrounding whitespace and at most "
                 f"{STRING_FIELD_LIMITS[field]} characters"
@@ -270,8 +319,12 @@ def parse_manifest(rec: dict) -> dict:
         total = transaction_detail.cent_value(rec["declared_total"], "declared_total")
         if abs(total) > transaction_detail.MAX_MONEY:
             raise ValueError("invalid manifest values")
-        return {"manifest": True, "count": count, "total": total,
-                "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00")}
+        return {
+            "manifest": True,
+            "count": count,
+            "total": total,
+            "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00"),
+        }
     except (ValueError, TypeError, InvalidOperation, OverflowError):
         raise ValueError("invalid manifest values") from None
 
@@ -328,7 +381,7 @@ async def link_returns(db, reference_keys: set[tuple[str, str]]) -> int:
     ordered_keys = sorted(reference_keys)
 
     for offset in range(0, len(ordered_keys), reference_batch_size):
-        batch_keys = ordered_keys[offset:offset + reference_batch_size]
+        batch_keys = ordered_keys[offset : offset + reference_batch_size]
         last_id = ""
         while True:
             pending = await load_pending_return_page(db, batch_keys, last_id, return_page_size)
@@ -341,13 +394,21 @@ async def link_returns(db, reference_keys: set[tuple[str, str]]) -> int:
 
 async def load_pending_return_page(db, batch_keys, last_id: str, page_size: int):
     """Load the next locked page of unlinked returns for a reference batch."""
-    query = select(CanonicalTransaction).where(
-        CanonicalTransaction.transaction_type == "Return",
-        CanonicalTransaction.original_reference.is_not(None),
-        CanonicalTransaction.original_transaction_id.is_(None),
-        CanonicalTransaction.id > last_id,
-        tuple_(CanonicalTransaction.store_id, CanonicalTransaction.original_reference).in_(batch_keys),
-    ).order_by(CanonicalTransaction.id).limit(page_size).with_for_update()
+    query = (
+        select(CanonicalTransaction)
+        .where(
+            CanonicalTransaction.transaction_type == "Return",
+            CanonicalTransaction.original_reference.is_not(None),
+            CanonicalTransaction.original_transaction_id.is_(None),
+            CanonicalTransaction.id > last_id,
+            tuple_(CanonicalTransaction.store_id, CanonicalTransaction.original_reference).in_(
+                batch_keys
+            ),
+        )
+        .order_by(CanonicalTransaction.id)
+        .limit(page_size)
+        .with_for_update()
+    )
     return (await db.execute(query)).scalars().all()
 
 
@@ -377,7 +438,10 @@ async def link_return_page(db, pending: list[CanonicalTransaction]) -> int:
     returns_by_reference: dict[tuple[str, str], list[CanonicalTransaction]] = defaultdict(list)
     remaining = 0
     for return_transaction in pending:
-        if return_transaction.original_transaction_id is None and return_transaction.original_reference:
+        if (
+            return_transaction.original_transaction_id is None
+            and return_transaction.original_reference
+        ):
             key = (return_transaction.store_id, return_transaction.original_reference)
             returns_by_reference[key].append(return_transaction)
             remaining += 1

@@ -1,4 +1,5 @@
 """CSV ingestion should enforce limits as rows are parsed."""
+
 import pytest
 from apps.ingest import contracts
 
@@ -27,10 +28,13 @@ def test_csv_parser_rejects_header_without_data_rows():
         contracts.parse_csv_delivery("id,amount\n")
 
 
-@pytest.mark.parametrize("csv_data", [
-    "id,id\nfirst,second\n",
-    ",amount\nfirst,10.00\n",
-])
+@pytest.mark.parametrize(
+    "csv_data",
+    [
+        "id,id\nfirst,second\n",
+        ",amount\nfirst,10.00\n",
+    ],
+)
 def test_csv_parser_rejects_duplicate_or_blank_headers(csv_data):
     with pytest.raises(ValueError, match="column headers"):
         contracts.parse_csv_delivery(csv_data)

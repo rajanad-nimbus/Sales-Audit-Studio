@@ -21,18 +21,54 @@ def test_reconciliation_flags_all_transactions_when_a_reference_is_ambiguous():
                     "store_id": "S1",
                     "payment_reference": "REUSED-REFERENCE",
                 }
-                await service.ingest(db, "POS", "pos-delivery", [
-                    {**common, "source_record_id": "pos-1", "record_type": "Sale", "amount": "10", "register_id": "R1"},
-                    {**common, "source_record_id": "pos-2", "record_type": "Sale", "amount": "10", "register_id": "R2"},
-                ])
-                await service.ingest(db, "Processor", "processor-delivery", [
-                    {**common, "source_record_id": "processor-1", "record_type": "Capture", "amount": "10"},
-                    {**common, "source_record_id": "processor-2", "record_type": "Capture", "amount": "10"},
-                ])
+                await service.ingest(
+                    db,
+                    "POS",
+                    "pos-delivery",
+                    [
+                        {
+                            **common,
+                            "source_record_id": "pos-1",
+                            "record_type": "Sale",
+                            "amount": "10",
+                            "register_id": "R1",
+                        },
+                        {
+                            **common,
+                            "source_record_id": "pos-2",
+                            "record_type": "Sale",
+                            "amount": "10",
+                            "register_id": "R2",
+                        },
+                    ],
+                )
+                await service.ingest(
+                    db,
+                    "Processor",
+                    "processor-delivery",
+                    [
+                        {
+                            **common,
+                            "source_record_id": "processor-1",
+                            "record_type": "Capture",
+                            "amount": "10",
+                        },
+                        {
+                            **common,
+                            "source_record_id": "processor-2",
+                            "record_type": "Capture",
+                            "amount": "10",
+                        },
+                    ],
+                )
                 await db.commit()
 
                 result = await reconciliation.reconcile(db, "2026-10-01")
-                statuses = (await db.execute(select(CanonicalTransaction.reconciliation_status))).scalars().all()
+                statuses = (
+                    (await db.execute(select(CanonicalTransaction.reconciliation_status)))
+                    .scalars()
+                    .all()
+                )
 
                 assert result["matched_pairs"] == 0
                 assert result["exceptions"]["UNMATCHED_SALE"] == 2

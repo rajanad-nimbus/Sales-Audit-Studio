@@ -1,4 +1,5 @@
 """Stage complete Shopify snapshots, then atomically reconcile retail references."""
+
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -28,13 +29,18 @@ class ShopifyReferenceStageError(RuntimeError):
 @dataclass(slots=True)
 class StageAccumulator:
     """Deduplicate one Shopify snapshot and flush references in bounded batches."""
+
     db: AsyncSession
     sync_id: str
     generation: int
     pending: dict[tuple[str, str], dict] = field(default_factory=dict)
-    counts: dict[str, int] = field(default_factory=lambda: {
-        "stores": 0, "items": 0, "duplicates": 0,
-    })
+    counts: dict[str, int] = field(
+        default_factory=lambda: {
+            "stores": 0,
+            "items": 0,
+            "duplicates": 0,
+        }
+    )
 
     async def add(self, reference: dict) -> None:
         key = (reference["category"], reference["code"])
@@ -68,20 +74,39 @@ def _required_text(value, size: int, response: str, fallback=None) -> str:
 def shop_to_store(shop: dict, store_code: str) -> dict:
     """The shop itself is the store that Shopify orders are booked to (SHOPIFY_STORE_ID)."""
     code = _required_text(store_code, 100, "shop")
-    return {"category": "Store", "code": code,
-            "name": _required_text(shop.get("name"), 255, "shop", fallback=code),
-            "active": True, "attributes": {"source": SOURCE, "kind": "shop", "shopify_id": shop.get("id"),
-                                           "currency": shop.get("currency"), "timezone": shop.get("iana_timezone")}}
+    return {
+        "category": "Store",
+        "code": code,
+        "name": _required_text(shop.get("name"), 255, "shop", fallback=code),
+        "active": True,
+        "attributes": {
+            "source": SOURCE,
+            "kind": "shop",
+            "shopify_id": shop.get("id"),
+            "currency": shop.get("currency"),
+            "timezone": shop.get("iana_timezone"),
+        },
+    }
 
 
 def location_to_store(location: dict) -> dict:
     location_id = _required_text(location.get("id"), 100, "locations")
-    return {"category": "Store", "code": _clip(f"SHOPIFY-LOC-{location_id}", 100),
-            "name": _required_text(location.get("name"), 255, "locations", fallback=f"Location {location_id}"),
-            "active": bool(location.get("active", True)),
-            "attributes": {"source": SOURCE, "kind": "location", "shopify_id": location["id"],
-                           "city": location.get("city"), "province": location.get("province"),
-                           "country": location.get("country_code") or location.get("country")}}
+    return {
+        "category": "Store",
+        "code": _clip(f"SHOPIFY-LOC-{location_id}", 100),
+        "name": _required_text(
+            location.get("name"), 255, "locations", fallback=f"Location {location_id}"
+        ),
+        "active": bool(location.get("active", True)),
+        "attributes": {
+            "source": SOURCE,
+            "kind": "location",
+            "shopify_id": location["id"],
+            "city": location.get("city"),
+            "province": location.get("province"),
+            "country": location.get("country_code") or location.get("country"),
+        },
+    }
 
 
 def product_to_items(product: dict) -> list[dict]:
@@ -98,11 +123,22 @@ def product_to_items(product: dict) -> list[dict]:
         name = product_name
         if label and label != "Default Title":
             name = f"{name} - {label}"
-        items.append({"category": "Item", "code": _required_text(sku, 100, "products", fallback=f"SHOPIFY-VAR-{variant_id}"),
-                      "name": _clip(name, 255), "active": product.get("status", "active") == "active",
-                      "attributes": {"source": SOURCE, "shopify_product_id": product_id,
-                                     "shopify_variant_id": variant_id, "price": variant.get("price"),
-                                     "vendor": product.get("vendor"), "product_type": product.get("product_type")}})
+        items.append(
+            {
+                "category": "Item",
+                "code": _required_text(sku, 100, "products", fallback=f"SHOPIFY-VAR-{variant_id}"),
+                "name": _clip(name, 255),
+                "active": product.get("status", "active") == "active",
+                "attributes": {
+                    "source": SOURCE,
+                    "shopify_product_id": product_id,
+                    "shopify_variant_id": variant_id,
+                    "price": variant.get("price"),
+                    "vendor": product.get("vendor"),
+                    "product_type": product.get("product_type"),
+                },
+            }
+        )
     return items
 
 
@@ -118,18 +154,26 @@ async def _flush_stage(
     ]
     dialect = db.get_bind().dialect.name
     if dialect == "postgresql":
-        statement = postgresql_insert(ShopifyReferenceStage).values(values).on_conflict_do_nothing(
-            constraint="uq_shopify_reference_stage_sync_code",
+        statement = (
+            postgresql_insert(ShopifyReferenceStage)
+            .values(values)
+            .on_conflict_do_nothing(
+                constraint="uq_shopify_reference_stage_sync_code",
+            )
         )
     elif dialect == "sqlite":
-        statement = sqlite_insert(ShopifyReferenceStage).values(values).on_conflict_do_nothing(
-            index_elements=["sync_id", "category", "code"],
+        statement = (
+            sqlite_insert(ShopifyReferenceStage)
+            .values(values)
+            .on_conflict_do_nothing(
+                index_elements=["sync_id", "category", "code"],
+            )
         )
     else:
         raise RuntimeError(f"Unsupported database dialect for Shopify reference staging: {dialect}")
-    inserted_categories = (await db.execute(
-        statement.returning(ShopifyReferenceStage.category)
-    )).scalars().all()
+    inserted_categories = (
+        (await db.execute(statement.returning(ShopifyReferenceStage.category))).scalars().all()
+    )
     await db.commit()
     counts = {
         "stores": sum(category == "Store" for category in inserted_categories),
@@ -147,11 +191,18 @@ async def discard(db: AsyncSession, sync_id: str) -> None:
 
 async def stage(adapter, db: AsyncSession, sync_id: str, store_code: str) -> dict:
     """Fetch and persist a complete Shopify catalog before any live reference is changed."""
-    generation = (await db.execute(update(ShopifyReferenceSyncState).where(
-        ShopifyReferenceSyncState.key == SOURCE,
-    ).values(generation=ShopifyReferenceSyncState.generation + 1).returning(
-        ShopifyReferenceSyncState.generation,
-    ))).scalar_one()
+    generation = (
+        await db.execute(
+            update(ShopifyReferenceSyncState)
+            .where(
+                ShopifyReferenceSyncState.key == SOURCE,
+            )
+            .values(generation=ShopifyReferenceSyncState.generation + 1)
+            .returning(
+                ShopifyReferenceSyncState.generation,
+            )
+        )
+    ).scalar_one()
     cutoff = datetime.now(UTC) - ORPHAN_RETENTION
     await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.created_at < cutoff))
     await db.commit()
@@ -187,33 +238,65 @@ async def _apply_staged_rows(db: AsyncSession, sync_id: str, actor: str, counts:
     last_id = ""
     affected_stores: set[str] = set()
     while True:
-        rows = (await db.execute(select(ShopifyReferenceStage).where(
-            ShopifyReferenceStage.sync_id == sync_id,
-            ShopifyReferenceStage.id > last_id,
-        ).order_by(ShopifyReferenceStage.id).limit(STAGE_BATCH_SIZE))).scalars().all()
+        rows = (
+            (
+                await db.execute(
+                    select(ShopifyReferenceStage)
+                    .where(
+                        ShopifyReferenceStage.sync_id == sync_id,
+                        ShopifyReferenceStage.id > last_id,
+                    )
+                    .order_by(ShopifyReferenceStage.id)
+                    .limit(STAGE_BATCH_SIZE)
+                )
+            )
+            .scalars()
+            .all()
+        )
         if not rows:
             return affected_stores
         keys = [(row.category, row.code) for row in rows]
-        existing = {(row.category, row.code): row for row in (await db.execute(select(FoundationReference).where(
-            tuple_(FoundationReference.category, FoundationReference.code).in_(keys),
-        ))).scalars().all()}
+        existing = {
+            (row.category, row.code): row
+            for row in (
+                await db.execute(
+                    select(FoundationReference).where(
+                        tuple_(FoundationReference.category, FoundationReference.code).in_(keys),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        }
         for staged in rows:
             key = (staged.category, staged.code)
             row = existing.get(key)
             if row is None:
-                db.add(FoundationReference(
-                    id=str(uuid.uuid4()), category=staged.category, code=staged.code, name=staged.name,
-                    active=staged.active, attributes=staged.attributes, updated_by=actor,
-                ))
+                db.add(
+                    FoundationReference(
+                        id=str(uuid.uuid4()),
+                        category=staged.category,
+                        code=staged.code,
+                        name=staged.name,
+                        active=staged.active,
+                        attributes=staged.attributes,
+                        updated_by=actor,
+                    )
+                )
                 if staged.category == "Store":
                     affected_stores.add(staged.code)
                 counts["created"] += 1
             elif (row.attributes or {}).get("source") != SOURCE:
                 counts["skipped_manual"] += 1
-            elif (row.name, row.active, row.attributes) != (staged.name, staged.active, staged.attributes):
+            elif (row.name, row.active, row.attributes) != (
+                staged.name,
+                staged.active,
+                staged.attributes,
+            ):
                 if staged.category == "Store" and (
                     row.active != staged.active
-                    or _store_location_traits(row.attributes) != _store_location_traits(staged.attributes)
+                    or _store_location_traits(row.attributes)
+                    != _store_location_traits(staged.attributes)
                 ):
                     affected_stores.add(staged.code)
                 row.name, row.active, row.attributes = staged.name, staged.active, staged.attributes
@@ -232,21 +315,37 @@ async def apply(
     db: AsyncSession, sync_id: str, generation: int, actor: str, duplicate_count: int = 0
 ) -> dict:
     """Atomically upsert the complete staged snapshot and deactivate missing Shopify references."""
-    counts = {"created": 0, "updated": 0, "deactivated": 0,
-              "skipped_manual": 0, "duplicates": duplicate_count, "superseded": False}
-    state = (await db.execute(select(ShopifyReferenceSyncState).where(
-        ShopifyReferenceSyncState.key == SOURCE,
-    ).with_for_update())).scalar_one()
+    counts = {
+        "created": 0,
+        "updated": 0,
+        "deactivated": 0,
+        "skipped_manual": 0,
+        "duplicates": duplicate_count,
+        "superseded": False,
+    }
+    state = (
+        await db.execute(
+            select(ShopifyReferenceSyncState)
+            .where(
+                ShopifyReferenceSyncState.key == SOURCE,
+            )
+            .with_for_update()
+        )
+    ).scalar_one()
     if generation < state.generation or generation <= state.applied_generation:
         counts["superseded"] = True
-        await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.sync_id == sync_id))
+        await db.execute(
+            delete(ShopifyReferenceStage).where(ShopifyReferenceStage.sync_id == sync_id)
+        )
         return counts
 
-    staged_generations = (await db.execute(
-        select(ShopifyReferenceStage.generation, func.count())
-        .where(ShopifyReferenceStage.sync_id == sync_id)
-        .group_by(ShopifyReferenceStage.generation)
-    )).all()
+    staged_generations = (
+        await db.execute(
+            select(ShopifyReferenceStage.generation, func.count())
+            .where(ShopifyReferenceStage.sync_id == sync_id)
+            .group_by(ShopifyReferenceStage.generation)
+        )
+    ).all()
     if (
         len(staged_generations) != 1
         or staged_generations[0][0] != generation
@@ -259,19 +358,27 @@ async def apply(
     await lock_configuration(db, exclusive=True)
     affected_stores = await _apply_staged_rows(db, sync_id, actor, counts)
 
-    staged_match = select(ShopifyReferenceStage.id).where(
-        ShopifyReferenceStage.sync_id == sync_id,
-        ShopifyReferenceStage.category == FoundationReference.category,
-        ShopifyReferenceStage.code == FoundationReference.code,
-    ).exists()
-    result = await db.execute(update(FoundationReference).where(
-        FoundationReference.category.in_(("Store", "Item")),
-        FoundationReference.active.is_(True),
-        FoundationReference.attributes["source"].as_string() == SOURCE,
-        ~staged_match,
-    ).values(active=False, updated_by=actor, updated_at=utcnow())
-      .returning(FoundationReference.category, FoundationReference.code)
-      .execution_options(synchronize_session=False))
+    staged_match = (
+        select(ShopifyReferenceStage.id)
+        .where(
+            ShopifyReferenceStage.sync_id == sync_id,
+            ShopifyReferenceStage.category == FoundationReference.category,
+            ShopifyReferenceStage.code == FoundationReference.code,
+        )
+        .exists()
+    )
+    result = await db.execute(
+        update(FoundationReference)
+        .where(
+            FoundationReference.category.in_(("Store", "Item")),
+            FoundationReference.active.is_(True),
+            FoundationReference.attributes["source"].as_string() == SOURCE,
+            ~staged_match,
+        )
+        .values(active=False, updated_by=actor, updated_at=utcnow())
+        .returning(FoundationReference.category, FoundationReference.code)
+        .execution_options(synchronize_session=False)
+    )
     deactivated = result.all()
     counts["deactivated"] = len(deactivated)
     affected_stores.update(code for category, code in deactivated if category == "Store")

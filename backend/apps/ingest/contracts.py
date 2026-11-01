@@ -79,7 +79,9 @@ def validate_profile_mapping(value: dict[str, str] | None) -> dict[str, str] | N
     return normalized
 
 
-def parse_csv_delivery(csv_data: str, mapping: dict[str, str] | None = None) -> list[dict[str, str | None]]:
+def parse_csv_delivery(
+    csv_data: str, mapping: dict[str, str] | None = None
+) -> list[dict[str, str | None]]:
     """Parse a structurally unambiguous CSV within the configured record cap."""
     rows = []
     try:
@@ -96,7 +98,8 @@ def parse_csv_delivery(csv_data: str, mapping: dict[str, str] | None = None) -> 
                 raise ValueError(f"CSV row {index + 2} has more fields than its header")
             rows.append(
                 {canonical: row.get(source_column) for canonical, source_column in mapping.items()}
-                if mapping else row
+                if mapping
+                else row
             )
     except csv.Error as exc:
         raise ValueError(f"Invalid CSV structure: {exc}") from exc
@@ -162,10 +165,11 @@ class ReconciliationPolicyRequest(BaseModel):
 
 
 class ManualMatchRequest(BaseModel):
-    transaction_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(min_length=2, max_length=100)
+    transaction_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(
+        min_length=2, max_length=100
+    )
     match_type: str = Field(default="Manual Match", min_length=1, max_length=50)
     rationale: str = Field(min_length=1, max_length=2000)
-
 
 
 def schedule_window_hours(schedule: str | None) -> int | None:
@@ -187,8 +191,8 @@ class SourceSettingPatch(BaseModel):
     in_daily_batch: bool | None = None
     manual_sync: bool | None = None
     sync_frequency: Literal["off", "daily", "weekly"] | None = None
-    sync_time: str | None = None          # HH:MM, 24 hour
-    sync_weekday: int | None = Field(default=None, ge=0, le=6)   # 0 = Monday
+    sync_time: str | None = None  # HH:MM, 24 hour
+    sync_weekday: int | None = Field(default=None, ge=0, le=6)  # 0 = Monday
     sync_timezone: str | None = Field(default=None, max_length=64)
 
     @field_validator("sync_time")
@@ -205,6 +209,7 @@ class SourceSettingPatch(BaseModel):
             try:
                 ZoneInfo(v)
             except (ZoneInfoNotFoundError, ValueError) as exc:
-                raise ValueError("sync_timezone must be an IANA time zone such as Europe/London") from exc
+                raise ValueError(
+                    "sync_timezone must be an IANA time zone such as Europe/London"
+                ) from exc
         return v
-

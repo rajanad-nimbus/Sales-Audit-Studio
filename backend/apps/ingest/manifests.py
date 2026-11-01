@@ -38,12 +38,18 @@ async def iter_manifests(db, business_date: str | None, statuses: tuple[str, ...
     """Yield matching manifests in bounded primary-key pages."""
     last_id = ""
     while True:
-        page = (await db.execute(
-            manifest_query(business_date, statuses)
-            .where(SourceRecord.id > last_id)
-            .order_by(SourceRecord.id)
-            .limit(MANIFEST_PAGE_SIZE)
-        )).scalars().all()
+        page = (
+            (
+                await db.execute(
+                    manifest_query(business_date, statuses)
+                    .where(SourceRecord.id > last_id)
+                    .order_by(SourceRecord.id)
+                    .limit(MANIFEST_PAGE_SIZE)
+                )
+            )
+            .scalars()
+            .all()
+        )
         if not page:
             return
         for manifest in page:

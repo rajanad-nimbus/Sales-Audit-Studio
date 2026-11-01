@@ -1,4 +1,5 @@
 """Daily feed reconciliation keeps composite-scope queries within bind limits."""
+
 import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -24,18 +25,36 @@ def test_daily_feed_actual_and_expected_queries_batch_composite_scopes(monkeypat
                 for index in range(5):
                     store_id = f"STORE-{index}"
                     feed_row = CanonicalTransaction(
-                        id=f"bank-{index}", business_date="2026-10-01", transaction_date=timestamp,
-                        event_timestamp=timestamp, processing_timestamp=timestamp, settlement_date="2026-10-01",
-                        transaction_type="Deposit", source_lineage="bank-map-v1", currency="USD",
-                        signed_amount=Decimal("10.00"), store_id=store_id, channel_id="store",
-                        reconciliation_status="Unmatched", disposition="Open",
+                        id=f"bank-{index}",
+                        business_date="2026-10-01",
+                        transaction_date=timestamp,
+                        event_timestamp=timestamp,
+                        processing_timestamp=timestamp,
+                        settlement_date="2026-10-01",
+                        transaction_type="Deposit",
+                        source_lineage="bank-map-v1",
+                        currency="USD",
+                        signed_amount=Decimal("10.00"),
+                        store_id=store_id,
+                        channel_id="store",
+                        reconciliation_status="Unmatched",
+                        disposition="Open",
                     )
                     expected_row = CanonicalTransaction(
-                        id=f"processor-{index}", business_date="2026-10-01", transaction_date=timestamp,
-                        event_timestamp=timestamp, processing_timestamp=timestamp, settlement_date="2026-10-01",
-                        transaction_type="Capture", source_lineage="processor-map-v1", currency="USD",
-                        signed_amount=Decimal("10.00"), store_id=store_id, channel_id="store",
-                        reconciliation_status="Matched", disposition="Closed",
+                        id=f"processor-{index}",
+                        business_date="2026-10-01",
+                        transaction_date=timestamp,
+                        event_timestamp=timestamp,
+                        processing_timestamp=timestamp,
+                        settlement_date="2026-10-01",
+                        transaction_type="Capture",
+                        source_lineage="processor-map-v1",
+                        currency="USD",
+                        signed_amount=Decimal("10.00"),
+                        store_id=store_id,
+                        channel_id="store",
+                        reconciliation_status="Matched",
+                        disposition="Closed",
                     )
                     feed.append(feed_row)
                     transactions.extend((feed_row, expected_row))
@@ -44,20 +63,26 @@ def test_daily_feed_actual_and_expected_queries_batch_composite_scopes(monkeypat
 
                 scoped_queries = []
 
-                def capture_scoped_query(_connection, _cursor, statement, parameters, _context, _executemany):
+                def capture_scoped_query(
+                    _connection, _cursor, statement, parameters, _context, _executemany
+                ):
                     normalized = statement.lower()
-                    if " in (values " in normalized and "canonical_transactions.store_id" in normalized:
+                    if (
+                        " in (values " in normalized
+                        and "canonical_transactions.store_id" in normalized
+                    ):
                         scoped_queries.append((statement, parameters))
 
                 event.listen(engine.sync_engine, "before_cursor_execute", capture_scoped_query)
                 try:
-                    actual, expected = await reconciliation.collect_daily_feed_amounts(db, feed, "Processor")
+                    actual, expected = await reconciliation.collect_daily_feed_amounts(
+                        db, feed, "Processor"
+                    )
                 finally:
                     event.remove(engine.sync_engine, "before_cursor_execute", capture_scoped_query)
 
                 assert actual == {
-                    (f"STORE-{index}", "USD", "2026-10-01"): Decimal("10.00")
-                    for index in range(5)
+                    (f"STORE-{index}", "USD", "2026-10-01"): Decimal("10.00") for index in range(5)
                 }
                 assert expected == actual
                 assert len(scoped_queries) == 12  # 3 scope batches, with a terminal page per query.

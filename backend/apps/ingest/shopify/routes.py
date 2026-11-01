@@ -1,4 +1,5 @@
 """REST endpoints for Shopify integration."""
+
 import hashlib
 import json
 import logging
@@ -85,17 +86,27 @@ async def sync_shopify(
     setting = await source_settings.lock_source_settings(db, "Shopify", shared=True)
     state = source_settings.effective("Shopify", setting)
     if not state["enabled"]:
-        raise HTTPException(status_code=409, detail="Shopify was switched off while the sync was fetching data")
+        raise HTTPException(
+            status_code=409, detail="Shopify was switched off while the sync was fetching data"
+        )
     if not state["manual_sync"]:
-        raise HTTPException(status_code=409, detail="Manual sync was switched off while Shopify was fetching data")
+        raise HTTPException(
+            status_code=409, detail="Manual sync was switched off while Shopify was fetching data"
+        )
 
     delivery_id = f"SHOPIFY-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
 
     try:
         stats = await ingest.ingest(db, "Shopify", delivery_id, feed.get("Shopify", []))
-        audit(db, "SHOPIFY_SYNC_COMPLETED", None, "ShopifySync", delivery_id,
-              f"Shopify sync for store {store_id}: {stats['canonical_created']} transactions created",
-              actor="shopify-connector")
+        audit(
+            db,
+            "SHOPIFY_SYNC_COMPLETED",
+            None,
+            "ShopifySync",
+            delivery_id,
+            f"Shopify sync for store {store_id}: {stats['canonical_created']} transactions created",
+            actor="shopify-connector",
+        )
         await db.commit()
     except shopify_adapter.ShopifyAPIError as e:
         await db.rollback()
@@ -145,9 +156,14 @@ async def sync_reference(
         setting = await source_settings.lock_source_settings(db, "Shopify", shared=True)
         state = source_settings.effective("Shopify", setting)
         if not state["enabled"]:
-            raise HTTPException(status_code=409, detail="Shopify was switched off while the sync was fetching data")
+            raise HTTPException(
+                status_code=409, detail="Shopify was switched off while the sync was fetching data"
+            )
         if not state["manual_sync"]:
-            raise HTTPException(status_code=409, detail="Manual sync was switched off while Shopify was fetching data")
+            raise HTTPException(
+                status_code=409,
+                detail="Manual sync was switched off while Shopify was fetching data",
+            )
         counts = await reference_sync.apply(
             db, sync_id, staged["generation"], actor, staged["duplicates"]
         )
@@ -184,7 +200,9 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     signature = request.headers.get("X-Shopify-Hmac-SHA256", "")
     topic = request.headers.get("X-Shopify-Topic", "unknown")
 
-    if not shopify_adapter.verify_webhook_signature(os.getenv("SHOPIFY_WEBHOOK_SECRET"), body, signature):
+    if not shopify_adapter.verify_webhook_signature(
+        os.getenv("SHOPIFY_WEBHOOK_SECRET"), body, signature
+    ):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     if not (await source_settings.load(db))["Shopify"]["enabled"]:
@@ -215,12 +233,21 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         delivery_id = f"SHOPIFY-WH-{hashlib.sha256(body).hexdigest()}"
     elif len(delivery_id) > 255:
         delivery_id = f"SHOPIFY-WH-ID-{hashlib.sha256(delivery_id.encode()).hexdigest()}"
-    audit_id = delivery_id if len(delivery_id) <= 36 else str(uuid.uuid5(uuid.NAMESPACE_URL, delivery_id))
+    audit_id = (
+        delivery_id if len(delivery_id) <= 36 else str(uuid.uuid5(uuid.NAMESPACE_URL, delivery_id))
+    )
     try:
         stats = await ingest.ingest(db, "Shopify", delivery_id, [record])
-        audit(db, "SHOPIFY_WEBHOOK_RECEIVED", None, "ShopifyWebhook", audit_id,
-              f"Webhook {topic} for {record['source_record_id']}: {stats['canonical_created']} created, "
-              f"{stats['quarantined']} quarantined", actor="shopify-webhook")
+        audit(
+            db,
+            "SHOPIFY_WEBHOOK_RECEIVED",
+            None,
+            "ShopifyWebhook",
+            audit_id,
+            f"Webhook {topic} for {record['source_record_id']}: {stats['canonical_created']} created, "
+            f"{stats['quarantined']} quarantined",
+            actor="shopify-webhook",
+        )
         await db.commit()
     except shopify_adapter.ShopifyAPIError as e:
         await db.rollback()
@@ -242,17 +269,36 @@ STALE_AFTER_HOURS = 26
 
 
 @router.get("/status")
-async def shopify_status(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("it", "finance"))):
+async def shopify_status(
+    db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("it", "finance"))
+):
     """Get Shopify connector health and last sync status."""
-    last_sync = (await db.execute(select(func.max(SourceRecord.extracted_at)).where(
-        SourceRecord.source_system == "Shopify", SourceRecord.status == "Processed"))).scalar()
-    last_received = (await db.execute(select(func.max(SourceRecord.received_at)).where(
-        SourceRecord.source_system == "Shopify"))).scalar()
-    quarantined = (await db.execute(select(func.count()).select_from(SourceRecord).where(
-        SourceRecord.source_system == "Shopify", SourceRecord.status == "Quarantined"))).scalar()
+    last_sync = (
+        await db.execute(
+            select(func.max(SourceRecord.extracted_at)).where(
+                SourceRecord.source_system == "Shopify", SourceRecord.status == "Processed"
+            )
+        )
+    ).scalar()
+    last_received = (
+        await db.execute(
+            select(func.max(SourceRecord.received_at)).where(
+                SourceRecord.source_system == "Shopify"
+            )
+        )
+    ).scalar()
+    quarantined = (
+        await db.execute(
+            select(func.count())
+            .select_from(SourceRecord)
+            .where(SourceRecord.source_system == "Shopify", SourceRecord.status == "Quarantined")
+        )
+    ).scalar()
 
     hours = (utcnow() - last_sync).total_seconds() / 3600 if last_sync else None
-    status = "no_syncs" if last_sync is None else "stale" if hours > STALE_AFTER_HOURS else "healthy"
+    status = (
+        "no_syncs" if last_sync is None else "stale" if hours > STALE_AFTER_HOURS else "healthy"
+    )
     return {
         "connector": "shopify",
         "status": status,

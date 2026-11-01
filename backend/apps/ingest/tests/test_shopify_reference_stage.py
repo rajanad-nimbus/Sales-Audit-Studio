@@ -1,4 +1,5 @@
 """Database tests for atomic, bounded Shopify reference snapshot reconciliation."""
+
 import asyncio
 
 import pytest
@@ -27,6 +28,7 @@ def run(coro):
         finally:
             while _engines:
                 await _engines.pop().dispose()
+
     return asyncio.run(with_cleanup())
 
 
@@ -50,10 +52,15 @@ class CatalogAdapter:
         yield {"id": 3, "name": "Store 3"}
 
     async def fetch_products(self):
-        yield {"id": 10, "title": "New name", "status": "active", "variants": [
-            {"id": 101, "sku": "SKU-1", "price": "12.00"},
-            {"id": 102, "sku": "SKU-2", "price": "15.00"},
-        ]}
+        yield {
+            "id": 10,
+            "title": "New name",
+            "status": "active",
+            "variants": [
+                {"id": 101, "sku": "SKU-1", "price": "12.00"},
+                {"id": 102, "sku": "SKU-2", "price": "15.00"},
+            ],
+        }
 
 
 def test_staged_snapshot_updates_and_deactivates_atomically():
@@ -62,19 +69,41 @@ def test_staged_snapshot_updates_and_deactivates_atomically():
         _engines.append(engine)
         Session = await make_session(engine)
         async with Session() as db:
-            db.add_all([
-                FoundationReference(id="old", category="Item", code="SKU-1", name="Old name", active=True,
-                                    attributes={"source": "Shopify"}),
-                FoundationReference(id="gone", category="Item", code="GONE", name="Gone", active=True,
-                                    attributes={"source": "Shopify"}),
-                FoundationReference(id="manual", category="Item", code="SKU-2", name="Manual", active=True,
-                                    attributes={"source": "operator"}),
-            ])
+            db.add_all(
+                [
+                    FoundationReference(
+                        id="old",
+                        category="Item",
+                        code="SKU-1",
+                        name="Old name",
+                        active=True,
+                        attributes={"source": "Shopify"},
+                    ),
+                    FoundationReference(
+                        id="gone",
+                        category="Item",
+                        code="GONE",
+                        name="Gone",
+                        active=True,
+                        attributes={"source": "Shopify"},
+                    ),
+                    FoundationReference(
+                        id="manual",
+                        category="Item",
+                        code="SKU-2",
+                        name="Manual",
+                        active=True,
+                        attributes={"source": "operator"},
+                    ),
+                ]
+            )
             await db.commit()
 
             staged = await reference_sync.stage(CatalogAdapter(), db, "sync-1", "SHOPIFY-MAIN")
             assert {key: staged[key] for key in ("stores", "items", "duplicates")} == {
-                "stores": 2, "items": 2, "duplicates": 0,
+                "stores": 2,
+                "items": 2,
+                "duplicates": 0,
             }
             assert staged["generation"] == 1
             assert (await db.get(FoundationReference, "old")).name == "Old name"
@@ -84,14 +113,21 @@ def test_staged_snapshot_updates_and_deactivates_atomically():
                 db, "sync-1", staged["generation"], "test-actor", staged["duplicates"]
             )
             await db.commit()
-            assert counts == {"created": 2, "updated": 1, "deactivated": 1,
-                              "skipped_manual": 1, "duplicates": 0, "superseded": False}
+            assert counts == {
+                "created": 2,
+                "updated": 1,
+                "deactivated": 1,
+                "skipped_manual": 1,
+                "duplicates": 0,
+                "superseded": False,
+            }
             assert (await db.get(FoundationReference, "old")).name == "New name"
             gone = await db.get(FoundationReference, "gone")
             await db.refresh(gone)
             assert gone.active is False
             assert (await db.get(FoundationReference, "manual")).name == "Manual"
             assert (await db.execute(select(ShopifyReferenceStage))).scalars().all() == []
+
     run(go())
 
 
@@ -101,31 +137,52 @@ def test_apply_invalidates_days_when_shopify_store_traits_change_or_store_deacti
         _engines.append(engine)
         Session = await make_session(engine)
         async with Session() as db:
-            db.add_all([
-                FoundationReference(
-                    id="shop", category="Store", code="SHOPIFY-MAIN", name="Shop",
-                    active=True, attributes={"source": "Shopify", "location_traits": ["North"]},
-                ),
-                FoundationReference(
-                    id="removed-shop", category="Store", code="OLD-LOCATION", name="Old location",
-                    active=True, attributes={"source": "Shopify"},
-                ),
-                StoreDay(
-                    id="trait-day", store_id="SHOPIFY-MAIN", business_date="2026-10-01",
-                    audit_version=2, totals_stale=False,
-                ),
-                StoreDay(
-                    id="removed-day", store_id="OLD-LOCATION", business_date="2026-10-01",
-                    audit_version=1, totals_stale=False,
-                ),
-                StoreDayClosureRequest(
-                    id="closure", store_day_id="trait-day", requested_by="finance",
-                    evidence_basis="reviewed", status="Pending",
-                ),
-            ])
+            db.add_all(
+                [
+                    FoundationReference(
+                        id="shop",
+                        category="Store",
+                        code="SHOPIFY-MAIN",
+                        name="Shop",
+                        active=True,
+                        attributes={"source": "Shopify", "location_traits": ["North"]},
+                    ),
+                    FoundationReference(
+                        id="removed-shop",
+                        category="Store",
+                        code="OLD-LOCATION",
+                        name="Old location",
+                        active=True,
+                        attributes={"source": "Shopify"},
+                    ),
+                    StoreDay(
+                        id="trait-day",
+                        store_id="SHOPIFY-MAIN",
+                        business_date="2026-10-01",
+                        audit_version=2,
+                        totals_stale=False,
+                    ),
+                    StoreDay(
+                        id="removed-day",
+                        store_id="OLD-LOCATION",
+                        business_date="2026-10-01",
+                        audit_version=1,
+                        totals_stale=False,
+                    ),
+                    StoreDayClosureRequest(
+                        id="closure",
+                        store_day_id="trait-day",
+                        requested_by="finance",
+                        evidence_basis="reviewed",
+                        status="Pending",
+                    ),
+                ]
+            )
             await db.commit()
 
-            staged = await reference_sync.stage(CatalogAdapter(), db, "store-change", "SHOPIFY-MAIN")
+            staged = await reference_sync.stage(
+                CatalogAdapter(), db, "store-change", "SHOPIFY-MAIN"
+            )
             counts = await reference_sync.apply(
                 db, "store-change", staged["generation"], "test-actor", staged["duplicates"]
             )
@@ -142,9 +199,14 @@ def test_apply_invalidates_days_when_shopify_store_traits_change_or_store_deacti
 def test_failed_fetch_discards_stage_without_changing_live_references(monkeypatch):
     class FailingCatalog(CatalogAdapter):
         async def fetch_products(self):
-            yield {"id": 10, "title": "Partial", "status": "active", "variants": [
-                {"id": 101, "sku": "SKU-1"},
-            ]}
+            yield {
+                "id": 10,
+                "title": "Partial",
+                "status": "active",
+                "variants": [
+                    {"id": 101, "sku": "SKU-1"},
+                ],
+            }
             raise shopify_adapter.ShopifyAPIError("page fetch failed")
 
     async def go():
@@ -153,8 +215,16 @@ def test_failed_fetch_discards_stage_without_changing_live_references(monkeypatc
         _engines.append(engine)
         Session = await make_session(engine)
         async with Session() as db:
-            db.add(FoundationReference(id="old", category="Item", code="SKU-1", name="Original", active=True,
-                                       attributes={"source": "Shopify"}))
+            db.add(
+                FoundationReference(
+                    id="old",
+                    category="Item",
+                    code="SKU-1",
+                    name="Original",
+                    active=True,
+                    attributes={"source": "Shopify"},
+                )
+            )
             await db.commit()
 
             with pytest.raises(shopify_adapter.ShopifyAPIError, match="page fetch failed"):
@@ -162,6 +232,7 @@ def test_failed_fetch_discards_stage_without_changing_live_references(monkeypatc
 
             assert (await db.get(FoundationReference, "old")).name == "Original"
             assert (await db.execute(select(ShopifyReferenceStage))).scalars().all() == []
+
     run(go())
 
 
@@ -181,6 +252,7 @@ def test_stage_cleanup_error_does_not_mask_original_failure(monkeypatch):
             monkeypatch.setattr(reference_sync, "discard", broken_discard)
             with pytest.raises(shopify_adapter.ShopifyAPIError, match="catalog unavailable"):
                 await reference_sync.stage(BrokenCatalog(), db, "broken-sync", "SHOPIFY-MAIN")
+
     run(go())
 
 
@@ -293,9 +365,14 @@ def test_reference_route_rechecks_manual_permission_before_apply(monkeypatch):
         "lock_source_settings",
         lambda *_args, **_kwargs: asyncio.sleep(0, result=object()),
     )
-    monkeypatch.setattr(shopify_routes.source_settings, "effective", lambda *_args: {
-        "enabled": True, "manual_sync": False,
-    })
+    monkeypatch.setattr(
+        shopify_routes.source_settings,
+        "effective",
+        lambda *_args: {
+            "enabled": True,
+            "manual_sync": False,
+        },
+    )
     monkeypatch.setattr(shopify_routes.reference_sync, "stage", stage)
     monkeypatch.setattr(shopify_routes.reference_sync, "apply", apply)
     monkeypatch.setattr(shopify_routes.reference_sync, "discard", discard)
@@ -313,8 +390,18 @@ def test_reference_route_rechecks_manual_permission_before_apply(monkeypatch):
 def test_duplicate_skus_keep_first_staged_variant(monkeypatch):
     class DuplicateCatalog(CatalogAdapter):
         async def fetch_products(self):
-            yield {"id": 10, "title": "First", "status": "active", "variants": [{"id": 101, "sku": "DUP"}]}
-            yield {"id": 11, "title": "Second", "status": "active", "variants": [{"id": 201, "sku": "DUP"}]}
+            yield {
+                "id": 10,
+                "title": "First",
+                "status": "active",
+                "variants": [{"id": 101, "sku": "DUP"}],
+            }
+            yield {
+                "id": 11,
+                "title": "Second",
+                "status": "active",
+                "variants": [{"id": 201, "sku": "DUP"}],
+            }
 
     async def go():
         monkeypatch.setattr(reference_sync, "STAGE_BATCH_SIZE", 1)
@@ -322,16 +409,23 @@ def test_duplicate_skus_keep_first_staged_variant(monkeypatch):
         _engines.append(engine)
         Session = await make_session(engine)
         async with Session() as db:
-            staged = await reference_sync.stage(DuplicateCatalog(), db, "duplicate-sync", "SHOPIFY-MAIN")
+            staged = await reference_sync.stage(
+                DuplicateCatalog(), db, "duplicate-sync", "SHOPIFY-MAIN"
+            )
             assert staged["duplicates"] == 1
             await reference_sync.apply(
                 db, "duplicate-sync", staged["generation"], "test-actor", staged["duplicates"]
             )
             await db.commit()
-            row = (await db.execute(select(FoundationReference).where(
-                FoundationReference.code == "DUP",
-            ))).scalar_one()
+            row = (
+                await db.execute(
+                    select(FoundationReference).where(
+                        FoundationReference.code == "DUP",
+                    )
+                )
+            ).scalar_one()
             assert row.name == "First"
+
     run(go())
 
 
@@ -341,17 +435,26 @@ def test_older_snapshot_cannot_overwrite_a_newer_applied_snapshot():
             self.name = name
 
         async def fetch_products(self):
-            yield {"id": 10, "title": self.name, "status": "active", "variants": [
-                {"id": 101, "sku": "SKU-1"},
-            ]}
+            yield {
+                "id": 10,
+                "title": self.name,
+                "status": "active",
+                "variants": [
+                    {"id": 101, "sku": "SKU-1"},
+                ],
+            }
 
     async def go():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
         _engines.append(engine)
         Session = await make_session(engine)
         async with Session() as db:
-            older = await reference_sync.stage(NamedCatalog("Older"), db, "older-sync", "SHOPIFY-MAIN")
-            newer = await reference_sync.stage(NamedCatalog("Newer"), db, "newer-sync", "SHOPIFY-MAIN")
+            older = await reference_sync.stage(
+                NamedCatalog("Older"), db, "older-sync", "SHOPIFY-MAIN"
+            )
+            newer = await reference_sync.stage(
+                NamedCatalog("Newer"), db, "newer-sync", "SHOPIFY-MAIN"
+            )
             assert newer["generation"] > older["generation"]
 
             newest_counts = await reference_sync.apply(
@@ -363,12 +466,17 @@ def test_older_snapshot_cannot_overwrite_a_newer_applied_snapshot():
             )
             await db.commit()
 
-            row = (await db.execute(select(FoundationReference).where(
-                FoundationReference.code == "SKU-1",
-            ))).scalar_one()
+            row = (
+                await db.execute(
+                    select(FoundationReference).where(
+                        FoundationReference.code == "SKU-1",
+                    )
+                )
+            ).scalar_one()
             assert newest_counts["superseded"] is False
             assert stale_counts["superseded"] is True
             assert row.name == "Newer"
+
     run(go())
 
 
@@ -378,26 +486,39 @@ def test_older_snapshot_is_not_applied_while_newer_generation_is_staging():
             self.name = name
 
         async def fetch_products(self):
-            yield {"id": 10, "title": self.name, "status": "active", "variants": [
-                {"id": 101, "sku": "SKU-1"},
-            ]}
+            yield {
+                "id": 10,
+                "title": self.name,
+                "status": "active",
+                "variants": [
+                    {"id": 101, "sku": "SKU-1"},
+                ],
+            }
 
     async def go():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
         _engines.append(engine)
         Session = await make_session(engine)
         async with Session() as db:
-            older = await reference_sync.stage(NamedCatalog("Older"), db, "older-inflight", "SHOPIFY-MAIN")
-            newer = await reference_sync.stage(NamedCatalog("Newer"), db, "newer-inflight", "SHOPIFY-MAIN")
+            older = await reference_sync.stage(
+                NamedCatalog("Older"), db, "older-inflight", "SHOPIFY-MAIN"
+            )
+            newer = await reference_sync.stage(
+                NamedCatalog("Newer"), db, "newer-inflight", "SHOPIFY-MAIN"
+            )
 
             stale_counts = await reference_sync.apply(
                 db, "older-inflight", older["generation"], "test-actor", older["duplicates"]
             )
             await db.commit()
 
-            row = (await db.execute(select(FoundationReference).where(
-                FoundationReference.code == "SKU-1",
-            ))).scalar_one_or_none()
+            row = (
+                await db.execute(
+                    select(FoundationReference).where(
+                        FoundationReference.code == "SKU-1",
+                    )
+                )
+            ).scalar_one_or_none()
             assert stale_counts["superseded"] is True
             assert row is None
 
@@ -405,9 +526,13 @@ def test_older_snapshot_is_not_applied_while_newer_generation_is_staging():
                 db, "newer-inflight", newer["generation"], "test-actor", newer["duplicates"]
             )
             await db.commit()
-            row = (await db.execute(select(FoundationReference).where(
-                FoundationReference.code == "SKU-1",
-            ))).scalar_one()
+            row = (
+                await db.execute(
+                    select(FoundationReference).where(
+                        FoundationReference.code == "SKU-1",
+                    )
+                )
+            ).scalar_one()
             assert newest_counts["superseded"] is False
             assert row.name == "Newer"
 
@@ -420,20 +545,30 @@ def test_apply_rejects_missing_or_mismatched_stage_without_deactivating_referenc
         _engines.append(engine)
         Session = await make_session(engine)
         async with Session() as db:
-            db.add(FoundationReference(
-                id="keep", category="Item", code="KEEP", name="Keep", active=True,
-                attributes={"source": "Shopify"},
-            ))
+            db.add(
+                FoundationReference(
+                    id="keep",
+                    category="Item",
+                    code="KEEP",
+                    name="Keep",
+                    active=True,
+                    attributes={"source": "Shopify"},
+                )
+            )
             state = (await db.execute(select(ShopifyReferenceSyncState))).scalar_one()
             state.generation = 1
             await db.commit()
 
-            with pytest.raises(reference_sync.ShopifyReferenceStageError, match="snapshot is missing"):
+            with pytest.raises(
+                reference_sync.ShopifyReferenceStageError, match="snapshot is missing"
+            ):
                 await reference_sync.apply(db, "missing-stage", 1, "test-actor")
             await db.rollback()
             assert (await db.get(FoundationReference, "keep")).active is True
 
-            staged = await reference_sync.stage(CatalogAdapter(), db, "mismatched-stage", "SHOPIFY-MAIN")
+            staged = await reference_sync.stage(
+                CatalogAdapter(), db, "mismatched-stage", "SHOPIFY-MAIN"
+            )
             with pytest.raises(reference_sync.ShopifyReferenceStageError, match="does not match"):
                 await reference_sync.apply(
                     db, "mismatched-stage", staged["generation"] + 1, "test-actor"

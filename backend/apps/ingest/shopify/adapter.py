@@ -1,4 +1,5 @@
 """Shopify REST API adapter for fetching orders and refunds."""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,6 +22,7 @@ from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 
 class ShopifyAPIError(Exception):
     """Shopify API error."""
+
     pass
 
 
@@ -160,9 +162,13 @@ class ShopifyAdapter:
         """Get or create aiohttp session."""
         if self.session is None or self.session.closed:
             if self.access_token:
-                self.session = aiohttp.ClientSession(headers={"X-Shopify-Access-Token": self.access_token})
+                self.session = aiohttp.ClientSession(
+                    headers={"X-Shopify-Access-Token": self.access_token}
+                )
             else:
-                self.session = aiohttp.ClientSession(auth=aiohttp.BasicAuth(self.api_key, self.api_password))
+                self.session = aiohttp.ClientSession(
+                    auth=aiohttp.BasicAuth(self.api_key, self.api_password)
+                )
         return self.session
 
     async def close(self):
@@ -170,7 +176,9 @@ class ShopifyAdapter:
         if self.session:
             await self.session.close()
 
-    async def _request_full(self, method: str, endpoint: str, params: dict = None) -> tuple[dict, dict]:
+    async def _request_full(
+        self, method: str, endpoint: str, params: dict = None
+    ) -> tuple[dict, dict]:
         """Make an authenticated request with retries. Returns (json body, response headers)."""
         url = f"{self.base_url}{endpoint}"
         session = await self._get_session()
@@ -185,7 +193,9 @@ class ShopifyAdapter:
                     if resp.status == 429 or resp.status >= 500:
                         last_error = f"Status {resp.status}"
                         if not last:
-                            await asyncio.sleep(retry_delay(resp.headers.get("Retry-After"), attempt))
+                            await asyncio.sleep(
+                                retry_delay(resp.headers.get("Retry-After"), attempt)
+                            )
                             continue
                         raise ShopifyAPIError(f"{last_error} after {self.max_retries} attempts")
 
@@ -198,7 +208,9 @@ class ShopifyAdapter:
                 if not last:
                     await asyncio.sleep(retry_delay(None, attempt))
                     continue
-                raise ShopifyAPIError(f"Request failed after {self.max_retries} attempts: {last_error}") from e
+                raise ShopifyAPIError(
+                    f"Request failed after {self.max_retries} attempts: {last_error}"
+                ) from e
 
         raise ShopifyAPIError(f"Request failed after {self.max_retries} attempts: {last_error}")
 
@@ -227,7 +239,7 @@ class ShopifyAdapter:
             "created_at_min": created_at_min.isoformat(),
             "created_at_max": created_at_max.isoformat(),
             "fields": "id,order_number,created_at,updated_at,financial_status,fulfillment_status,"
-                      "total_price,currency,customer,note,tax_lines",
+            "total_price,currency,customer,note,tax_lines",
         }
         pagination = _ShopifyPagination()
 
@@ -244,7 +256,9 @@ class ShopifyAdapter:
 
     async def fetch_shop(self) -> dict:
         """Fetch the shop record (its name labels the store the orders belong to)."""
-        data = await self._request("GET", "/shop.json", params={"fields": "id,name,currency,iana_timezone"})
+        data = await self._request(
+            "GET", "/shop.json", params={"fields": "id,name,currency,iana_timezone"}
+        )
         shop = data.get("shop") if isinstance(data, dict) else None
         if not isinstance(shop, dict) or not shop.get("id"):
             raise ShopifyAPIError("Shopify returned an invalid shop response")
@@ -341,7 +355,9 @@ async def fetch_shopify_feed(
             raise ShopifyFeedLimitError(
                 f"Shopify feed exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit"
             )
-        encoded_size = len(json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        encoded_size = len(
+            json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        )
         next_size = payload_size + encoded_size + bool(records)
         if next_size > MAX_DELIVERY_BYTES:
             raise ShopifyFeedLimitError(
@@ -356,7 +372,9 @@ async def fetch_shopify_feed(
 
             if order.get("financial_status") in ("refunded", "partially_refunded"):
                 for refund in await adapter.fetch_refunds(order["id"]):
-                    append_record(normalize_refund(refund, order["id"], order.get("currency"), store_id))
+                    append_record(
+                        normalize_refund(refund, order["id"], order.get("currency"), store_id)
+                    )
 
         return {"Shopify": records}
     finally:
@@ -366,19 +384,34 @@ async def fetch_shopify_feed(
 def _tax(code: str, name: str, rate, amount) -> dict:
     # Preserve source precision. The ingestion validator must quarantine values the
     # database cannot represent instead of silently changing Shopify's figures.
-    return {"tax_code": code[:30], "tax_name": name[:100], "rate": str(Decimal(str(rate or 0))),
-            "tax_amount": str(abs(Decimal(str(amount or 0))))}
+    return {
+        "tax_code": code[:30],
+        "tax_name": name[:100],
+        "rate": str(Decimal(str(rate or 0))),
+        "tax_amount": str(abs(Decimal(str(amount or 0)))),
+    }
 
 
 def order_taxes(order: dict) -> list[dict]:
     """Tax lines Shopify reports on an order, one entry per tax."""
-    return [_tax(str(t.get("title") or "TAX"), str(t.get("title") or "TAX"), t.get("rate"), t.get("price"))
-            for t in order.get("tax_lines") or [] if Decimal(str(t.get("price") or 0)) != 0]
+    return [
+        _tax(
+            str(t.get("title") or "TAX"),
+            str(t.get("title") or "TAX"),
+            t.get("rate"),
+            t.get("price"),
+        )
+        for t in order.get("tax_lines") or []
+        if Decimal(str(t.get("price") or 0)) != 0
+    ]
 
 
 def refund_taxes(refund: dict) -> list[dict]:
     """Tax returned with a refund: the tax on its refunded line items, as one entry."""
-    total = sum((Decimal(str(li.get("total_tax") or 0)) for li in refund.get("refund_line_items") or []), Decimal("0"))
+    total = sum(
+        (Decimal(str(li.get("total_tax") or 0)) for li in refund.get("refund_line_items") or []),
+        Decimal("0"),
+    )
     return [_tax("TAX", "Refunded tax", 0, total)] if total else []
 
 
@@ -403,21 +436,34 @@ def normalize_order(order: dict, store_id: str) -> dict:
 
 def refund_amount(refund: dict) -> Decimal:
     """Money actually refunded: successful refund transactions, else line-item subtotals."""
-    txns = [t for t in refund.get("transactions") or []
-            if t.get("kind") == "refund" and t.get("status", "success") == "success"]
+    txns = [
+        t
+        for t in refund.get("transactions") or []
+        if t.get("kind") == "refund" and t.get("status", "success") == "success"
+    ]
     if txns:
         return sum((Decimal(str(t.get("amount", "0"))) for t in txns), Decimal("0"))
     return sum(
-        (Decimal(str(li.get("subtotal") if li.get("subtotal") is not None
-                      else Decimal(str(li.get("quantity", 0))) * Decimal(str((li.get("line_item") or {}).get("price", "0")))))
-         for li in refund.get("refund_line_items") or []),
+        (
+            Decimal(
+                str(
+                    li.get("subtotal")
+                    if li.get("subtotal") is not None
+                    else Decimal(str(li.get("quantity", 0)))
+                    * Decimal(str((li.get("line_item") or {}).get("price", "0")))
+                )
+            )
+            for li in refund.get("refund_line_items") or []
+        ),
         Decimal("0"),
     )
 
 
 def normalize_refund(refund: dict, order_id, currency: str | None, store_id: str) -> dict:
     """Convert a Shopify refund (REST or webhook payload) to ingest format."""
-    txn_currency = next((t.get("currency") for t in refund.get("transactions") or [] if t.get("currency")), None)
+    txn_currency = next(
+        (t.get("currency") for t in refund.get("transactions") or [] if t.get("currency")), None
+    )
     return {
         "source_record_id": f"SHREF-{refund['id']}",
         "record_type": "Refund",

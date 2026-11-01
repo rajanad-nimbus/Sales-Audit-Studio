@@ -5,6 +5,7 @@ and a time of day in Data Pipeline, Sources, and a loop started with the applica
 when a run is due. Ingest de-duplicates by record identity, so overlapping windows are safe. A database lock keeps two
 copies of the application from running the same sync.
 """
+
 import asyncio
 import logging
 import os
@@ -53,7 +54,9 @@ def zone(row) -> ZoneInfo:
 
 
 def scheduled(row) -> bool:
-    return bool(row is not None and row.enabled and row.sync_frequency in FREQUENCIES and row.sync_time)
+    return bool(
+        row is not None and row.enabled and row.sync_frequency in FREQUENCIES and row.sync_time
+    )
 
 
 def _occurrence(row, day) -> datetime:
@@ -106,25 +109,39 @@ def describe(row) -> str:
     if not scheduled(row):
         return "Off"
     when = f"{row.sync_time} {row.sync_timezone or 'UTC'}"
-    return f"Every day at {when}" if row.sync_frequency == "daily" else f"Every {WEEKDAYS[row.sync_weekday or 0]} at {when}"
+    return (
+        f"Every day at {when}"
+        if row.sync_frequency == "daily"
+        else f"Every {WEEKDAYS[row.sync_weekday or 0]} at {when}"
+    )
 
 
 async def _claim(session_factory, now: datetime) -> tuple[datetime, datetime] | None:
     """Under a lock, decide whether a run is due and mark it started, so no other copy picks it up. Returns the window."""
     async with session_factory() as db:
-        got = (await db.execute(text("SELECT pg_try_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": LOCK_KEY})).scalar()
+        got = (
+            await db.execute(
+                text("SELECT pg_try_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": LOCK_KEY}
+            )
+        ).scalar()
         if not got or not source_settings.shopify_configured():
             return None
         row = await source_settings.lock_source_settings(db, SOURCE)
         if not scheduled(row):
             return None
-        if row.last_scheduled_run_at is None:   # a schedule counts from when it was set, never backfills
+        if (
+            row.last_scheduled_run_at is None
+        ):  # a schedule counts from when it was set, never backfills
             row.last_scheduled_run_at = now
             await db.commit()
             return None
         if not is_due(row, now):
             return None
-        row.last_scheduled_run_at, row.last_scheduled_status, row.last_scheduled_message = now, "Running", None
+        row.last_scheduled_run_at, row.last_scheduled_status, row.last_scheduled_message = (
+            now,
+            "Running",
+            None,
+        )
         window = (now - lookback(row), now)
         await db.commit()
         return window
@@ -132,17 +149,19 @@ async def _claim(session_factory, now: datetime) -> tuple[datetime, datetime] | 
 
 async def _record_outcome(db, claimed_at: datetime, status: str, message: str) -> bool:
     """Update status only while the schedule still belongs to this claimed run."""
-    updated = (await db.execute(
-        update(SourceSetting)
-        .where(
-            SourceSetting.source_system == SOURCE,
-            SourceSetting.last_scheduled_run_at == claimed_at,
-            SourceSetting.last_scheduled_status == "Running",
+    updated = (
+        await db.execute(
+            update(SourceSetting)
+            .where(
+                SourceSetting.source_system == SOURCE,
+                SourceSetting.last_scheduled_run_at == claimed_at,
+                SourceSetting.last_scheduled_status == "Running",
+            )
+            .values(last_scheduled_status=status, last_scheduled_message=message[:255])
+            .returning(SourceSetting.source_system)
+            .execution_options(synchronize_session=False)
         )
-        .values(last_scheduled_status=status, last_scheduled_message=message[:255])
-        .returning(SourceSetting.source_system)
-        .execution_options(synchronize_session=False)
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     return updated is not None
 
 
@@ -150,7 +169,9 @@ async def _lock_enabled_source(db) -> None:
     """Serialize the final enabled check with source-setting updates through ingest commit."""
     row = await source_settings.lock_source_settings(db, SOURCE, shared=True)
     if row is not None and not row.enabled:
-        raise SourceDisabledDuringSync("Shopify was switched off while the scheduled sync was fetching data")
+        raise SourceDisabledDuringSync(
+            "Shopify was switched off while the scheduled sync was fetching data"
+        )
 
 
 async def run_if_due(session_factory=async_session, now: datetime | None = None) -> str | None:
@@ -164,12 +185,22 @@ async def run_if_due(session_factory=async_session, now: datetime | None = None)
     needs_outcome_record = False
     async with session_factory() as db:
         try:
-            feed = await shopify_adapter.fetch_shopify_feed(store_id, created_at_min=window[0], created_at_max=window[1])
+            feed = await shopify_adapter.fetch_shopify_feed(
+                store_id, created_at_min=window[0], created_at_max=window[1]
+            )
             await _lock_enabled_source(db)
-            delivery = f"SHOPIFY-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"   # same shape as a manual sync; fits the audit column
+            delivery = f"SHOPIFY-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"  # same shape as a manual sync; fits the audit column
             stats = await ingest.ingest(db, SOURCE, delivery, feed.get(SOURCE, []))
             message = f"{stats['received']} received, {stats['canonical_created']} new, {stats['quarantined']} quarantined"
-            audit(db, "SHOPIFY_SCHEDULED_SYNC", None, "ShopifySync", delivery, f"Scheduled Shopify sync: {message}", actor=ACTOR)
+            audit(
+                db,
+                "SHOPIFY_SCHEDULED_SYNC",
+                None,
+                "ShopifySync",
+                delivery,
+                f"Scheduled Shopify sync: {message}",
+                actor=ACTOR,
+            )
             await _record_outcome(db, now, status, message)
             await db.commit()
         except Exception as exc:  # a failed run is recorded and retried at the next scheduled time; it must never stop the loop
@@ -182,8 +213,20 @@ async def run_if_due(session_factory=async_session, now: datetime | None = None)
         async with session_factory() as db:
             claimed = await _record_outcome(db, now, status, message)
             if claimed:
-                event = "SHOPIFY_SCHEDULED_SYNC_FAILED" if status == "Failed" else "SHOPIFY_SCHEDULED_SYNC_SKIPPED"
-                audit(db, event, None, "ShopifySync", SOURCE, f"Scheduled Shopify sync {status.lower()}: {message}"[:500], actor=ACTOR)
+                event = (
+                    "SHOPIFY_SCHEDULED_SYNC_FAILED"
+                    if status == "Failed"
+                    else "SHOPIFY_SCHEDULED_SYNC_SKIPPED"
+                )
+                audit(
+                    db,
+                    event,
+                    None,
+                    "ShopifySync",
+                    SOURCE,
+                    f"Scheduled Shopify sync {status.lower()}: {message}"[:500],
+                    actor=ACTOR,
+                )
             await db.commit()
     return status
 

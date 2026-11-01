@@ -6,10 +6,13 @@ CsvIngestRequest = contracts.CsvIngestRequest
 IngestRequest = contracts.IngestRequest
 
 
-@pytest.mark.parametrize("model, values", [
-    (IngestRequest, {"records": []}),
-    (CsvIngestRequest, {"csv_data": "source_record_id\n1"}),
-])
+@pytest.mark.parametrize(
+    "model, values",
+    [
+        (IngestRequest, {"records": []}),
+        (CsvIngestRequest, {"csv_data": "source_record_id\n1"}),
+    ],
+)
 def test_ingest_requests_reject_blank_or_oversized_identifiers(model, values):
     for field, invalid in (
         ("source_system", " "),

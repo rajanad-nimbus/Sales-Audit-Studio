@@ -17,10 +17,20 @@ def test_subcent_transaction_detail_is_quarantined_without_rounding(field):
                 await connection.run_sync(Base.metadata.create_all)
             session_factory = async_sessionmaker(engine, expire_on_commit=False)
             record = {
-                "source_record_id": f"subcent-{field}", "event_time": "2026-10-01T10:00:00Z",
-                "record_type": "Sale", "amount": "10.00", "store_id": "S1",
-                "lines": [{"item_code": "SKU-1", "quantity": "1", "unit_price": "10.00",
-                           "gross_amount": "10.00", "tax_amount": "0.00"}],
+                "source_record_id": f"subcent-{field}",
+                "event_time": "2026-10-01T10:00:00Z",
+                "record_type": "Sale",
+                "amount": "10.00",
+                "store_id": "S1",
+                "lines": [
+                    {
+                        "item_code": "SKU-1",
+                        "quantity": "1",
+                        "unit_price": "10.00",
+                        "gross_amount": "10.00",
+                        "tax_amount": "0.00",
+                    }
+                ],
                 "tenders": [{"tender_type": "Card", "amount": "10.00"}],
             }
             record["lines"][0][field] = "10.005"

@@ -1,4 +1,5 @@
 """Shopify-specific ingestion parsing and validation."""
+
 from datetime import UTC, datetime
 from decimal import InvalidOperation
 
@@ -8,7 +9,13 @@ from apps.transactions.detail import MAX_MONEY
 SHOPIFY_VALID_RECORD_TYPES = {"Order", "Refund"}
 
 SHOPIFY_FINANCIAL_STATUSES = {
-    "authorized", "pending", "paid", "partially_paid", "refunded", "voided", "partially_refunded"
+    "authorized",
+    "pending",
+    "paid",
+    "partially_paid",
+    "refunded",
+    "voided",
+    "partially_refunded",
 }
 
 SHOPIFY_FULFILLMENT_STATUSES = {"unshipped", "partial", "shipped", "delivered", "restocked"}
@@ -18,8 +25,15 @@ SHOPIFY_FULFILLMENT_STATUSES = {"unshipped", "partial", "shipped", "delivered", 
 # time, so they are excluded from the dedup hash; otherwise every re-sync of an updated order would
 # be quarantined as a "conflicting resubmission".
 IMMUTABLE_FIELDS = (
-    "source_record_id", "record_type", "store_id", "event_time", "amount", "currency",
-    "payment_reference", "order_id", "refund_id",
+    "source_record_id",
+    "record_type",
+    "store_id",
+    "event_time",
+    "amount",
+    "currency",
+    "payment_reference",
+    "order_id",
+    "refund_id",
 )
 
 
@@ -82,7 +96,14 @@ def parse_shopify_order(rec: dict) -> dict:
 
 def parse_shopify_refund(rec: dict) -> dict:
     """Validate and normalize a Shopify refund record."""
-    required = ["source_record_id", "event_time", "amount", "store_id", "payment_reference", "order_id"]
+    required = [
+        "source_record_id",
+        "event_time",
+        "amount",
+        "store_id",
+        "payment_reference",
+        "order_id",
+    ]
     missing = [k for k in required if rec.get(k) in (None, "")]
     if missing:
         raise ValueError(f"missing fields: {', '.join(missing)}")

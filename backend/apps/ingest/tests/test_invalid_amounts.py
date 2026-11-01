@@ -17,10 +17,17 @@ def test_invalid_amount_is_quarantined(source, amount):
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
             session = async_sessionmaker(engine, expire_on_commit=False)
-            record = {"source_record_id": "1", "event_time": "2026-10-01T10:00:00Z",
-                      "record_type": "Order" if source == "Shopify" else "Sale", "amount": amount,
-                      "store_id": "S1", "payment_reference": "P1", "business_date": "2026-10-01",
-                      "declared_count": 1, "declared_total": amount}
+            record = {
+                "source_record_id": "1",
+                "event_time": "2026-10-01T10:00:00Z",
+                "record_type": "Order" if source == "Shopify" else "Sale",
+                "amount": amount,
+                "store_id": "S1",
+                "payment_reference": "P1",
+                "business_date": "2026-10-01",
+                "declared_count": 1,
+                "declared_total": amount,
+            }
             async with session() as db:
                 stats = await service.ingest(db, source, "d1", [record])
                 assert stats["quarantined"] == 1

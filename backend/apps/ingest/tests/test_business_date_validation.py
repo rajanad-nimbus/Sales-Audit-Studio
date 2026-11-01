@@ -14,7 +14,9 @@ class NoDatabase:
         raise AssertionError("invalid dates must be rejected before database access")
 
 
-@pytest.mark.parametrize("invalid", ["", "2026-02-30", "20261001", "2026-10-01T00:00:00", "not-a-date"])
+@pytest.mark.parametrize(
+    "invalid", ["", "2026-02-30", "20261001", "2026-10-01T00:00:00", "not-a-date"]
+)
 def test_invalid_dates_are_rejected_before_database_access(invalid):
     async def run():
         with pytest.raises(ValueError):
