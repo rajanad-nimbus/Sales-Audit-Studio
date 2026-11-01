@@ -4,25 +4,31 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from integrations.ontology import nimbus, ontology
+from model_base import utcnow
 from sqlalchemy import and_, func, or_, select, true
-from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from apps.agents import investigation_service
-from apps.cases.service import locked_scoped_case
+from apps.audit.models import AuditEvent
 from apps.cases.lineage import case_creation_has_transactions, case_transaction_ids_table
+from apps.cases.models import Case, CaseNote, EvidenceRequest, EvidenceSnapshot, Recommendation
+from apps.cases.models import Exception as DBException
+from apps.cases.schemas import (
+    CaseNoteCreate,
+    EvidenceOverride,
+    EvidenceProvide,
+    EvidenceReject,
+    EvidenceRequestCreate,
+)
+from apps.cases.service import locked_scoped_case
+from apps.ingest.models import SourceRecord
 from apps.security import scope
 from apps.security.authentication import require_role
-from database import get_db
-from integrations.ontology import nimbus, ontology
-from apps.audit.models import AuditEvent
 from apps.transactions.models import CanonicalTransaction
-from apps.ingest.models import SourceRecord
-from model_base import utcnow
-from apps.cases.models import (Case, CaseNote, EvidenceRequest, EvidenceSnapshot,
-                                Exception as DBException, Recommendation)
-from apps.cases.schemas import EvidenceOverride, EvidenceProvide, EvidenceReject, EvidenceRequestCreate, CaseNoteCreate
 
 router = APIRouter()
 MAX_CASE_HISTORY_ITEMS = 200

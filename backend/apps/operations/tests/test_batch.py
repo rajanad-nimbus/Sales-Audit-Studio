@@ -2,15 +2,14 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from pydantic import ValidationError
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.ingest.contracts import json_payload_size
 from apps.operations import batch, batch_routes
 from apps.operations.batch_routes import RunRequest
 from models import AuditEvent, Base, BatchRun, utcnow
+from pydantic import ValidationError
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_batch_feed_size_validation_counts_utf8_and_enforces_limit(monkeypatch):

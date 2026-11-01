@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from apps.ingest import contracts
+from pydantic import ValidationError
 
 CsvIngestRequest = contracts.CsvIngestRequest
 IngestRequest = contracts.IngestRequest

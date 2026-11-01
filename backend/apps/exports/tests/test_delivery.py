@@ -3,10 +3,10 @@ import hashlib
 from pathlib import Path
 
 import pytest
+from models import ExportBatch, ExportDestination
 
 from apps.exports import routes
 from apps.exports.delivery import render
-from models import ExportBatch, ExportDestination
 
 WEBHOOK_SECRET = "s" * 32
 

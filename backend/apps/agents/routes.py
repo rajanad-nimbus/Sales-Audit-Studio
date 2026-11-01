@@ -1,22 +1,24 @@
 """Shadow-mode report: how often the Investigation agent's verdict agrees with the human decision."""
 from collections import defaultdict
 
+from database import get_db
 from fastapi import APIRouter, Depends, Request
+from integrations.ontology import nimbus
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.security.authentication import require_role
-from database import get_db
 from apps.agents import agent_settings, investigator, llm
-from apps.security import scope
-from integrations.ontology import nimbus
 from apps.audit.models import AuditEvent
 from apps.cases.models import (
     Case,
-    Exception as DBException,
     HumanDecision,
     Recommendation,
 )
+from apps.cases.models import (
+    Exception as DBException,
+)
+from apps.security import scope
+from apps.security.authentication import require_role
 
 router = APIRouter(prefix="/api/agent")
 MAX_ELIGIBLE_CASES = 100
@@ -284,8 +286,8 @@ async def agent_config(request: Request, db: AsyncSession = Depends(get_db), _: 
 async def agent_ontology(db: AsyncSession = Depends(get_db),
                          _: dict = Depends(require_role("finance", "it", "admin"))):
     """Compare active enterprise definitions with actual agent behavior and persistence."""
-    from integrations.ontology.ontology_integration import integration
     from integrations.ontology.ontology_bindings import database_bindings
+    from integrations.ontology.ontology_integration import integration
     context = integration.context()
     return {"integration": integration.status(),
             "agents": agent_registry(await agent_settings.load(db)),

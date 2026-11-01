@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from models import AuditTotal, AuditTotalDefinition, Base, FoundationReference, StoreDay
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -9,7 +10,6 @@ from sqlalchemy.pool import StaticPool
 from apps.ingest.service import ingest
 from apps.store_days.routes import retotal_store_day
 from apps.totals.routes import preview_definition
-from models import AuditTotal, AuditTotalDefinition, Base, FoundationReference, StoreDay
 
 
 def test_location_traits_limit_totals_and_overlap_does_not_duplicate():

@@ -4,14 +4,14 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from fastapi import HTTPException
+from models import AuditEvent, Base, ExportBatch, ExportDestination, ExportItem, utcnow
 from sqlalchemy import create_engine, inspect, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.exports import routes
-from models import AuditEvent, Base, ExportBatch, ExportDestination, ExportItem, utcnow
 
 
 def test_recovery_fences_late_worker_and_keeps_reservation(tmp_path, monkeypatch):

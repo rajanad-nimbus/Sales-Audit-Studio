@@ -1,7 +1,6 @@
 """Stage complete Shopify reference snapshots before applying them."""
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0059"
 down_revision = "0058"

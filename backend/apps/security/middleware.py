@@ -2,11 +2,12 @@
 
 from collections.abc import Awaitable, Callable
 
-from apps.security import access, scope
-from apps.security.authentication import current_user
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
+
+from apps.security import access, scope
+from apps.security.authentication import current_user
 
 
 async def ontology_authentication(

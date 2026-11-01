@@ -3,19 +3,20 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.agents import action_center, bulk_actions
 from models import (
     Base,
     Case,
-    Exception as DBException,
     Recommendation,
     ValidationObligation,
     Workflow,
 )
+from models import (
+    Exception as DBException,
+)
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_bulk_investigation_fetches_exceptions_once_and_groups_them_by_case(monkeypatch):

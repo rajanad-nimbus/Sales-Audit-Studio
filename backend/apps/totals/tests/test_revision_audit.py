@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from models import AuditEvent, AuditTotalDefinition, Base, StoreDay
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -9,7 +10,6 @@ from sqlalchemy.pool import StaticPool
 
 from apps.totals.routes import create_definition, update_definition
 from apps.totals.schemas import TotalDefinitionBody
-from models import AuditEvent, AuditTotalDefinition, Base, StoreDay
 
 
 def test_total_definition_revisions_are_audited_without_store_days():

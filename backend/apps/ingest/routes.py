@@ -1,16 +1,20 @@
 import uuid
-from decimal import Decimal
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Annotated
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
+from integrations.ontology.nimbus import audit
+from model_base import utcnow
 from sqlalchemy import case, func, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.database_errors import violates_unique_constraint
-from apps.security import scope
-from apps.ingest import reconciliation
+from apps.ingest import reconciliation, source_settings
+from apps.ingest import service as ingest
+from apps.ingest.common import VALID_TYPES
 from apps.ingest.contracts import (
     CsvIngestRequest,
     IngestRequest,
@@ -24,20 +28,20 @@ from apps.ingest.contracts import (
     schedule_window_hours,
     validate_profile_mapping,  # noqa: F401 - preserve the existing import path
 )
-from apps.ingest import service as ingest
-from apps.ingest.common import VALID_TYPES
-from apps.ingest.simulation import simulate_feed
-from apps.ingest import source_settings
-from apps.ingest.shopify import scheduler
 from apps.ingest.manifests import validate_business_date
-from apps.totals.currency import validate_currency
-from integrations.ontology.nimbus import audit
+from apps.ingest.models import (
+    ReconciliationMatch,
+    ReconciliationPolicy,
+    SourceFeedProfile,
+    SourceRecord,
+    SourceSetting,
+)
+from apps.ingest.shopify import scheduler
+from apps.ingest.simulation import simulate_feed
+from apps.security import scope
 from apps.security.authentication import require_role
-from database import get_db
+from apps.totals.currency import validate_currency
 from apps.transactions.models import CanonicalTransaction
-from model_base import utcnow
-from apps.ingest.models import (ReconciliationMatch, ReconciliationPolicy,
-                                SourceFeedProfile, SourceRecord, SourceSetting)
 
 router = APIRouter()
 

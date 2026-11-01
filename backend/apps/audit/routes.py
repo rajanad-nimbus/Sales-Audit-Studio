@@ -3,17 +3,17 @@ import json
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.security.authentication import require_role
-from apps.search import contains_literal
-from apps.csv_export import csv_row
-from database import get_db
 from apps.audit.models import AuditEvent
 from apps.audit.schemas import AuditEventSchema
+from apps.csv_export import csv_row
+from apps.search import contains_literal
+from apps.security.authentication import require_role
 
 router = APIRouter(prefix="/api/audit")
 MAX_EXPORT_EVENTS = 100000

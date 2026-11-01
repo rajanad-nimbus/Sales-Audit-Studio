@@ -3,7 +3,10 @@ import uuid
 from datetime import timedelta
 from typing import Annotated
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
+from integrations.ontology.nimbus import audit
+from model_base import utcnow
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,9 +21,6 @@ from apps.operations.retention import (
     retention_candidates,
 )
 from apps.security.authentication import require_role
-from database import get_db
-from integrations.ontology.nimbus import audit
-from model_base import utcnow
 
 router = APIRouter(prefix="/api/operations", tags=["Production operations"])
 

@@ -5,23 +5,25 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from fastapi import HTTPException
+from integrations.ontology import nimbus, ontology
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import agent_settings, investigator, llm
-from integrations.ontology import nimbus, ontology
+from apps.cases.models import (
+    Case,
+    EvidenceRequest,
+    Recommendation,
+)
+from apps.cases.models import (
+    Exception as DBException,
+)
+from apps.ingest.models import SourceRecord
 from apps.store_days.models import (
     AuditTotal,
     StoreDay,
 )
-from apps.cases.models import (
-    Case,
-    Exception as DBException,
-    EvidenceRequest,
-    Recommendation,
-)
 from apps.transactions.models import CanonicalTransaction
-from apps.ingest.models import SourceRecord
 
 logger = logging.getLogger(__name__)
 MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE = 100

@@ -3,21 +3,23 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from integrations.ontology import ontology
 from sqlalchemy import func, or_, select
 
-from apps.security import scope
-from integrations.ontology import ontology
 from apps.audit.models import AuditEvent
-from apps.operations.models import BatchRun
 from apps.cases.models import (
     Case,
-    Exception as DBException,
     Finding,
+    PolicyEvaluation,
     Recommendation,
     ValidationObligation,
     Workflow,
 )
-from apps.cases.models import PolicyEvaluation
+from apps.cases.models import (
+    Exception as DBException,
+)
+from apps.operations.models import BatchRun
+from apps.security import scope
 from apps.system.models import Connector
 
 CASE_REF = re.compile(r"\b(Z[AS]-[A-Z0-9]{4,8}-?[A-Z0-9]{0,8}(?:-[A-Z0-9]+)?)\b", re.I)

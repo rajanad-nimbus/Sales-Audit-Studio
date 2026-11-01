@@ -1,12 +1,11 @@
 import asyncio
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.cases.models import Case
 from apps.development.routes import clear_scale_demo
 from models import Base
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_scale_demo_cleanup_deletes_only_reserved_synthetic_case_numbers():

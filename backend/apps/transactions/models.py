@@ -3,10 +3,9 @@
 from datetime import datetime
 from decimal import Decimal
 
+from model_base import Base, utcnow
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column
-
-from model_base import Base, utcnow
 
 
 class CanonicalTransaction(Base):

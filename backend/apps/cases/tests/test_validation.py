@@ -3,26 +3,27 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
-from pydantic import ValidationError
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.cases.workflows import run_validation, validation_candidates
+from fastapi import HTTPException
 from models import (
     AuditEvent,
     Base,
     CanonicalTransaction,
     Case,
     EvidenceSnapshot,
-    Exception as DBException,
     SourceRecord,
     ValidationObligation,
     Workflow,
     utcnow,
 )
+from models import (
+    Exception as DBException,
+)
+from pydantic import ValidationError
 from schemas import ValidationRunRequest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def transaction(record_id: str, store_id: str, received_at, transaction_id: str):

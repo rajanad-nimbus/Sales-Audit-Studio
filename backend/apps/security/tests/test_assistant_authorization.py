@@ -1,12 +1,12 @@
 import asyncio
 
 import httpx
+import main
 import pytest
 
-from apps.security import authentication as auth
-import main
-from apps.assistant import chat
 from apps.agents import llm
+from apps.assistant import chat
+from apps.security import authentication as auth
 from apps.security import middleware
 
 

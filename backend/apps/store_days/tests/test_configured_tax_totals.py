@@ -2,16 +2,22 @@ import asyncio
 from decimal import Decimal
 
 import pytest
+from apps.controls.rules.models import ConfiguredAuditRule
+from apps.ingest import service
+from apps.store_days import routes
+from apps.totals.routes import preview_definition
 from fastapi import HTTPException
+from models import (
+    AuditTotal,
+    AuditTotalDefinition,
+    Base,
+    CanonicalTransaction,
+    StoreDay,
+    TransactionAdjustment,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import service
-from apps.store_days import routes
-from apps.controls.rules.models import ConfiguredAuditRule
-from apps.totals.routes import preview_definition
-from models import AuditTotal, AuditTotalDefinition, Base, CanonicalTransaction, StoreDay, TransactionAdjustment
 
 
 def test_retotal_sums_tax_details_by_register_and_preserves_return_sign():

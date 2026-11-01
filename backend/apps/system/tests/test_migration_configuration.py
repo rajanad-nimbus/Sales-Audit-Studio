@@ -4,11 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from models import Base
 from sqlalchemy import CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateColumn
-
-from models import Base
 
 
 def assert_migration_schema_matches_models(sql: str) -> None:

@@ -1,10 +1,9 @@
 import asyncio
 
 import pytest
+from models import AuditTotalDefinition, Base
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from models import AuditTotalDefinition, Base
 
 
 def test_total_definition_name_and_revision_are_unique_in_model_schema():

@@ -3,16 +3,15 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.agents import action_center
 from apps.assistant import chat
+from fastapi import HTTPException
 from main import update_case
 from models import Base, Case
 from schemas import CaseUpdate
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_summary_groups_and_bulk_respect_store_and_currency():

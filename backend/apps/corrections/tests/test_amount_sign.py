@@ -2,12 +2,12 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from models import Base, CanonicalTransaction, TransactionAdjustment
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.corrections.routes import approve_adjustment
 from apps.ingest.service import ingest
-from models import Base, CanonicalTransaction, TransactionAdjustment
 
 
 @pytest.mark.parametrize(

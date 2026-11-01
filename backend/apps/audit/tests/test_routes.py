@@ -5,15 +5,15 @@ import json
 from datetime import datetime, timezone
 
 import httpx
+from database import get_db
 from fastapi import FastAPI
+from models import AuditEvent, Base
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.security import authentication as auth
 from apps.audit import routes
 from apps.csv_export import csv_row
-from database import get_db
-from models import AuditEvent, Base
+from apps.security import authentication as auth
 
 
 def test_csv_export_neutralizes_spreadsheet_formulas():

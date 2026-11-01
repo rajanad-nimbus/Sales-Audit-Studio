@@ -1,6 +1,5 @@
-from sqlalchemy.exc import IntegrityError
-
 from apps.controls.foundation.routes import _is_duplicate_reference_code
+from sqlalchemy.exc import IntegrityError
 
 
 def test_duplicate_foundation_code_matches_category_code_constraint():

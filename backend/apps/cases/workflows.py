@@ -4,22 +4,28 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
+from database import get_db
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from integrations.ontology import nimbus
+from model_base import utcnow
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import investigation_service
+from apps.cases.models import (
+    Case,
+    EvidenceSnapshot,
+    PolicyEvaluation,
+    ValidationObligation,
+    Workflow,
+)
+from apps.cases.models import Exception as DBException
+from apps.cases.schemas import Recommendation as RecommendationSchema
+from apps.cases.schemas import ValidationRunRequest
+from apps.ingest.models import SourceRecord
 from apps.security import scope
 from apps.security.authentication import require_role
-from database import get_db
-from integrations.ontology import nimbus
 from apps.transactions.models import CanonicalTransaction
-from apps.ingest.models import SourceRecord
-from model_base import utcnow
-from apps.cases.models import PolicyEvaluation
-from apps.cases.models import (Case, EvidenceSnapshot, Exception as DBException,
-                                ValidationObligation, Workflow)
-from apps.cases.schemas import Recommendation as RecommendationSchema, ValidationRunRequest
 
 router = APIRouter()
 

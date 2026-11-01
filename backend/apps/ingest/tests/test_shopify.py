@@ -6,7 +6,6 @@ import hmac
 from decimal import Decimal
 
 import pytest
-
 from apps.ingest.shopify import adapter as sa
 from apps.ingest.shopify import ingest as si
 

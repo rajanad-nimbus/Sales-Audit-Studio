@@ -2,10 +2,9 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class ExportDestination(Base):

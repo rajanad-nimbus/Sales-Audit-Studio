@@ -1,6 +1,5 @@
-from sqlalchemy.exc import IntegrityError
-
 from apps.ingest.routes import _is_active_reconciliation_policy_conflict
+from sqlalchemy.exc import IntegrityError
 
 
 def test_active_policy_race_matches_sqlite_partial_unique_index():

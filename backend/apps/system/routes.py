@@ -1,13 +1,13 @@
 """System endpoints used by platform health checks and deployment readiness."""
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.security.authentication import AUTH_ENABLED, require_role
-from database import get_db
-from integrations.ontology.ontology_integration import integration as ontology_integration
 from apps.ingest.models import SourceRecord
+from apps.security.authentication import AUTH_ENABLED, require_role
 from apps.system.models import Connector
 
 router = APIRouter()

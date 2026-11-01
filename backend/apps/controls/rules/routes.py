@@ -1,19 +1,22 @@
 """Safe retailer-configured Sales Audit rules."""
 import uuid
 from decimal import Decimal
+
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.controls.rules.models import ConfiguredAuditRule
 from apps.database_errors import violates_unique_constraint
 from apps.security.authentication import require_role
-from database import get_db
-from apps.totals.models import AuditTotalDefinition
-from apps.controls.rules.models import ConfiguredAuditRule
-from apps.totals.currency import validate_currency
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
+from apps.totals.currency import validate_currency
+from apps.totals.models import AuditTotalDefinition
 from apps.transactions.detail import MAX_MONEY, cent_value
+
 router = APIRouter(prefix="/api/audit-rules", tags=["Audit rules"])
 class RuleBody(BaseModel):
     name: str = Field(min_length=1, max_length=150)

@@ -1,11 +1,10 @@
 import asyncio
 
+from apps.store_days.freshness import invalidate_totals_many, lock_store_days
+from models import AuditEvent, Base, StoreDay, StoreDayClosureRequest
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.store_days.freshness import invalidate_totals_many, lock_store_days
-from models import AuditEvent, Base, StoreDay, StoreDayClosureRequest
 
 
 def test_lock_store_days_uses_bounded_selects_for_many_identities():

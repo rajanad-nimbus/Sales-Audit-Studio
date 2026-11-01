@@ -1,7 +1,6 @@
 """Index tender facets and transaction tender filtering."""
 from alembic import op
 
-
 revision = "0060"
 down_revision = "0059"
 branch_labels = None

@@ -4,7 +4,6 @@ import asyncio
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
-
 from apps.ingest.shopify import adapter as sa
 
 

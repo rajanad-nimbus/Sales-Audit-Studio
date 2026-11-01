@@ -1,12 +1,11 @@
 import asyncio
 
-from sqlalchemy import event, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.ingest import reconciliation, service
 from apps.ingest.manifests import iter_manifests, manifest_query
 from models import Base, CanonicalTransaction, SourceRecord, TransactionAdjustment
+from sqlalchemy import event, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_reconciliation_loads_only_requested_manifest_date():

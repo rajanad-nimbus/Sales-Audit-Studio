@@ -5,12 +5,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
+from apps.corrections.models import TransactionAdjustment
 from apps.transactions.detail import MAX_MONEY, cent_value
 from apps.transactions.models import (
     CanonicalTransaction,
     TransactionTax,
 )
-from apps.corrections.models import TransactionAdjustment
 
 
 def _approved_value(adjustment: TransactionAdjustment, allowed_fields: set[str]) -> tuple[str, Decimal]:

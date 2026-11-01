@@ -3,7 +3,9 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+from database import get_db
 from fastapi import APIRouter, Depends, Query
+from model_base import utcnow
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,8 +17,6 @@ from apps.operations.batch import run_daily_batch
 from apps.operations.models import BatchRun
 from apps.security.authentication import require_role
 from apps.transactions.models import CanonicalTransaction
-from database import get_db
-from model_base import utcnow
 
 router = APIRouter(prefix="/api/batch")
 STALE_AFTER_HOURS = 26

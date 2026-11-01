@@ -3,22 +3,24 @@ import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException
+from integrations.ontology.nimbus import audit, sla_due
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.audit.models import AuditEvent
 from apps.cases.identifiers import generate_case_number
 from apps.cases.lineage import (
     audit_json_boolean_is,
     case_creation_parent_ids_query,
     linked_follow_up_child_ids_query,
 )
-from apps.security import scope
-from integrations.ontology.nimbus import audit, sla_due
-from apps.audit.models import AuditEvent
 from apps.cases.models import (
     Case,
+)
+from apps.cases.models import (
     Exception as CaseException,
 )
+from apps.security import scope
 
 EXCEPTION_COPY_PAGE_SIZE = 500
 

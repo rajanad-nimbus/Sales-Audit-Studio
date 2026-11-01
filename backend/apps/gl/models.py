@@ -2,10 +2,9 @@
 
 from datetime import datetime
 
+from model_base import Base, utcnow
 from sqlalchemy import Boolean, DateTime, Index, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
-
-from model_base import Base, utcnow
 
 
 class GLCrossReference(Base):

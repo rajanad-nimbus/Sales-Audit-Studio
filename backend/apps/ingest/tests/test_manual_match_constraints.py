@@ -1,11 +1,10 @@
 import asyncio
 
 import pytest
+from models import Base, ReconciliationMatch
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from models import Base, ReconciliationMatch
 
 
 def test_manual_match_status_is_limited_to_review_state_machine():

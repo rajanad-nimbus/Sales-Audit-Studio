@@ -3,9 +3,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
-
 from apps.ingest import source_settings as ss
+from fastapi import HTTPException
 
 
 def row(**kw):

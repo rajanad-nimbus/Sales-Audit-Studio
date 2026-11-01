@@ -3,10 +3,22 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Index,
+    Integer,
+    LargeBinary,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class SourceRecord(Base):

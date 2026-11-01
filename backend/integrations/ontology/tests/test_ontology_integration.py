@@ -4,8 +4,7 @@ import asyncio
 import httpx
 import pytest
 
-from integrations.ontology.ontology_integration import OntologyIntegration, RULE_CODES
-
+from integrations.ontology.ontology_integration import RULE_CODES, OntologyIntegration
 
 META = {"workspaceId": 7, "releaseId": 12, "approved": True, "version": "1.0",
         "contentHash": "abc", "releaseHash": "abc"}
@@ -133,8 +132,9 @@ def test_database_bindings_cover_audit_and_case_relationships():
 
 
 def test_audit_preserves_pinned_run_context():
-    from integrations.ontology import nimbus
     from types import SimpleNamespace
+
+    from integrations.ontology import nimbus
     events = []
     context = {"source": "ontology-integration", "ontology": META}
     nimbus.audit(SimpleNamespace(add=events.append), "AGENT_RUN", "c1", "Case", "c1",

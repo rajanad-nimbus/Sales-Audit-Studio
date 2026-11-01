@@ -3,10 +3,9 @@
 import asyncio
 
 import pytest
+from models import Base, FoundationReference
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from models import Base, FoundationReference
 
 
 @pytest.mark.parametrize("field", ["category", "code", "name"])

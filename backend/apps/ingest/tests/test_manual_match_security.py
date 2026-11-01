@@ -1,13 +1,12 @@
 import asyncio
 
 import pytest
+from apps.ingest import routes, service
 from fastapi import HTTPException
+from models import Base, CanonicalTransaction, ReconciliationMatch
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import routes, service
-from models import Base, CanonicalTransaction, ReconciliationMatch
 
 
 def test_manual_matches_scope_reviews_and_filter_before_limit():

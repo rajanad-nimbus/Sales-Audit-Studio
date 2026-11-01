@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from apps.ingest.routes import SourceFeedProfilePatch, SourceFeedProfileRequest
+from pydantic import ValidationError
 
 
 def test_profile_create_normalizes_bounded_fields():

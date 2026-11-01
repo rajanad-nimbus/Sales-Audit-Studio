@@ -12,18 +12,19 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.agents import investigator
-from integrations.ontology import ontology
-from models import Base
 from apps.cases.models import (
     Case,
+)
+from apps.cases.models import (
     Exception as Exc,
 )
-from apps.transactions.models import CanonicalTransaction
 from apps.ingest.models import SourceRecord
+from apps.transactions.models import CanonicalTransaction
+from integrations.ontology import ontology
+from models import Base
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 async def run_scenario(sc):

@@ -1,6 +1,6 @@
 import pytest
-
-from apps.ingest.shopify import adapter, reference_sync as rs
+from apps.ingest.shopify import adapter
+from apps.ingest.shopify import reference_sync as rs
 
 
 def test_shop_and_location_become_stores():

@@ -1,10 +1,10 @@
 import asyncio
 
 import httpx
+import main
 from fastapi import Depends, FastAPI
 
 from apps.security import authentication as auth
-import main
 
 
 def test_request_authenticates_once_and_dependencies_use_same_identity(monkeypatch):

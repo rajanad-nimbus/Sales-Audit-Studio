@@ -2,11 +2,9 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, JSON, String
-
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import JSON, DateTime, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class AgentSetting(Base):

@@ -2,13 +2,12 @@ import asyncio
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.ingest import service
 from apps.ingest.shopify import adapter as shopify_adapter
 from models import Base, CanonicalTransaction, TransactionTax
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 ORDER = {"id": 1, "created_at": "2026-10-01T10:00:00Z", "total_price": "113.00", "currency": "USD", "financial_status": "paid",
          "tax_lines": [{"title": "VAT", "rate": 0.13, "price": "13.00"}]}

@@ -92,7 +92,13 @@ async def chat_via_agent_sdk(system: str, history: list[dict], message: str, que
     try:
         import asyncio
 
-        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            ResultMessage,
+            TextBlock,
+            query,
+        )
 
         options = ClaudeAgentOptions(
             system_prompt=system, model=os.getenv("NIMBUS_CHAT_MODEL", os.getenv("NIMBUS_LLM_MODEL", "claude-sonnet-5-5")),

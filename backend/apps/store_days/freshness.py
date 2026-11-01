@@ -1,10 +1,10 @@
 """Invalidate store-day totals and closure evidence after source changes."""
 from collections import defaultdict
 
+from integrations.ontology.nimbus import audit
 from sqlalchemy import case, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from integrations.ontology.nimbus import audit
 from apps.store_days.models import StoreDay, StoreDayClosureRequest
 
 CONFIGURATION_LOCK_KEY = 665302210171

@@ -6,32 +6,34 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Annotated
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
+from integrations.ontology.nimbus import audit, sla_due
+from model_base import utcnow
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.cases.identifiers import generate_case_number
-from apps.ingest import reconciliation
-from apps.ingest.manifests import iter_manifests, validate_business_date
-from apps.security import scope
-from apps.store_days.freshness import lock_configuration, lock_store_day_identity
-from apps.totals.calculation import calculate_store_day, effective_definitions
-from apps.totals.currency import single_currency
-from apps.security.authentication import require_role
-from database import get_db
 from apps.audit.models import AuditEvent
-from apps.transactions.models import CanonicalTransaction
+from apps.cases.identifiers import generate_case_number
 from apps.cases.models import (
     Case,
     EvidenceRequest,
+)
+from apps.cases.models import (
     Exception as DBException,
 )
-from model_base import utcnow
 from apps.controls.foundation.models import FoundationReference
 from apps.controls.rules.models import ConfiguredAuditRule
+from apps.ingest import reconciliation
+from apps.ingest.manifests import iter_manifests, validate_business_date
+from apps.security import scope
+from apps.security.authentication import require_role
+from apps.store_days.freshness import lock_configuration, lock_store_day_identity
 from apps.store_days.models import AuditTotal, StoreDay, StoreDayClosureRequest
-from integrations.ontology.nimbus import audit, sla_due
+from apps.totals.calculation import calculate_store_day, effective_definitions
+from apps.totals.currency import single_currency
+from apps.transactions.models import CanonicalTransaction
 
 router = APIRouter(prefix="/api/store-days", tags=["Store days"])
 REQUIRED_COMPARISON_TOTALS = {"Processor to Bank Variance", "POS to GL Variance"}

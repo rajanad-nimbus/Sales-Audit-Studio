@@ -1,12 +1,11 @@
 """Search and pagination behavior for the Foundation Data endpoint."""
 import asyncio
 
+from apps.controls.foundation.routes import list_references
 from fastapi import HTTPException
+from models import Base, FoundationReference
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.controls.foundation.routes import list_references
-from models import Base, FoundationReference
 
 
 def test_foundation_reference_search_returns_bounded_page_and_global_counts():

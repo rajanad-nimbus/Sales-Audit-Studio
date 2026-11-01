@@ -2,11 +2,11 @@ import asyncio
 from datetime import timedelta
 from decimal import Decimal
 
+from apps.cases.routes_lifecycle import MAX_CASE_DETAIL_ITEMS, get_case_detail, get_case_history
+from models import Base, Case, utcnow
+from models import Exception as DBException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.cases.routes_lifecycle import MAX_CASE_DETAIL_ITEMS, get_case_detail, get_case_history
-from models import Base, Case, Exception as DBException, utcnow
 
 
 def test_case_detail_bounds_child_history_and_reports_truncation():

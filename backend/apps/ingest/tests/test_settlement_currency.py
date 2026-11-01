@@ -2,12 +2,11 @@ import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from apps.ingest import reconciliation, service
+from models import Base, CanonicalTransaction, Case
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import reconciliation, service
-from models import Base, CanonicalTransaction, Case
 
 
 def test_settlement_batches_separate_dates_currencies_and_apply_tolerance():

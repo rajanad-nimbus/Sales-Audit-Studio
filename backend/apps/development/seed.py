@@ -1,25 +1,28 @@
 """Deterministic end-to-end Nimbus Sales Audit demonstration data."""
-import asyncio, uuid
+import asyncio
+import uuid
 from decimal import Decimal
-from sqlalchemy import func, select
+
 from database import async_session
-from apps.ingest import service as ingest
-from apps.ingest import reconciliation
-from apps.ingest.simulation import simulate_feed
+from fastapi import HTTPException
+from sqlalchemy import func, select
+
 from apps.agents import investigation_service
+from apps.cases.models import Case
+from apps.cash.models import (
+  CashControl,
+  CashDeposit,
+)
+from apps.controls.foundation.models import FoundationReference
+from apps.controls.rules.models import ConfiguredAuditRule
+from apps.gl.models import GLCrossReference
+from apps.ingest import reconciliation
+from apps.ingest import service as ingest
+from apps.ingest.models import ReconciliationPolicy
+from apps.ingest.simulation import simulate_feed
+from apps.store_days.routes import open_store_day_record, retotal_store_day
 from apps.totals.models import AuditTotalDefinition
 from apps.transactions.models import CanonicalTransaction
-from apps.cash.models import (
-    CashControl,
-    CashDeposit,
-)
-from apps.cases.models import Case
-from apps.controls.rules.models import ConfiguredAuditRule
-from apps.controls.foundation.models import FoundationReference
-from apps.gl.models import GLCrossReference
-from apps.ingest.models import ReconciliationPolicy
-from fastapi import HTTPException
-from apps.store_days.routes import open_store_day_record, retotal_store_day
 
 DAY = "2026-10-06"
 USER = {"user": "demo.finance", "role": "finance"}

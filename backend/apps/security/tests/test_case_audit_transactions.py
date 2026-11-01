@@ -1,15 +1,13 @@
 import asyncio
 
+import main
 import pytest
 from fastapi import HTTPException
+from models import AuditEvent, Base, Case
+from schemas import CaseCreate, CaseUpdate
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-import main
-from models import AuditEvent, Base, Case
-from schemas import CaseCreate, CaseUpdate
-
 
 USER = {"user": "finance@example.test", "role": "finance"}
 

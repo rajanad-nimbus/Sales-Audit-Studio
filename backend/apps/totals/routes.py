@@ -4,13 +4,19 @@ import hashlib
 import json
 import uuid
 from decimal import Decimal
+
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, func
+from integrations.ontology.nimbus import audit
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from apps.security import scope
+
 from apps.database_errors import violates_unique_constraint
 from apps.ingest.manifests import validate_business_date
+from apps.security import scope
+from apps.security.authentication import require_role
+from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from apps.totals.calculation import (
     calculate_store_day,
     dependencies_for_preview,
@@ -18,12 +24,9 @@ from apps.totals.calculation import (
     store_location_traits,
 )
 from apps.totals.currency import single_currency
-from apps.store_days.freshness import invalidate_configuration, lock_configuration
-from apps.security.authentication import require_role
-from database import get_db
 from apps.totals.models import AuditTotalDefinition, SalesAuditErrorDefinition
 from apps.totals.schemas import TotalDefinitionBody
-from integrations.ontology.nimbus import audit
+
 from .domain import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])

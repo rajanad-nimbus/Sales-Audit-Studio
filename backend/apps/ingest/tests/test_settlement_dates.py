@@ -1,12 +1,11 @@
 import asyncio
 
 import pytest
+from apps.ingest import reconciliation, service
+from models import Base, CanonicalTransaction, SourceRecord
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import reconciliation, service
-from models import Base, CanonicalTransaction, SourceRecord
 
 
 @pytest.mark.parametrize("settled_on", ["not-a-date", "2026-02-30", "2026-10-01junk"])

@@ -4,14 +4,13 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from apps.ingest.routes import SourceSettingPatch
+from apps.ingest.shopify import scheduler as sch
+from models import Base, SourceSetting
 from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest.routes import SourceSettingPatch
-from apps.ingest.shopify import scheduler as sch
-from models import Base, SourceSetting
 
 UTC = timezone.utc
 # Sunday 1 Nov 2026, noon UTC (a Sunday: weekday() == 6)

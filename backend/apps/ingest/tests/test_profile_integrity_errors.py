@@ -1,6 +1,5 @@
-from sqlalchemy.exc import IntegrityError
-
 from apps.ingest.routes import _is_duplicate_profile_name
+from sqlalchemy.exc import IntegrityError
 
 
 def test_profile_name_conflict_matches_unique_name_constraint():

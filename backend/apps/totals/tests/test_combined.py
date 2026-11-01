@@ -1,9 +1,9 @@
 from decimal import Decimal
 
 import pytest
+from models import AuditTotalDefinition
 
 from apps.totals.combined import calculate_combined
-from models import AuditTotalDefinition
 
 
 def combined(identifier, left, right, operator="+"):

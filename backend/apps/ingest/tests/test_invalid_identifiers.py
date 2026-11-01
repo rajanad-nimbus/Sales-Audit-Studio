@@ -3,12 +3,11 @@
 import asyncio
 
 import pytest
+from apps.ingest import service
+from models import Base, CanonicalTransaction, SourceRecord
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import service
-from models import Base, CanonicalTransaction, SourceRecord
 
 
 @pytest.mark.parametrize(("field", "value"), [

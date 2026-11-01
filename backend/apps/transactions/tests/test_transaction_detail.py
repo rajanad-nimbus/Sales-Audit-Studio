@@ -5,16 +5,23 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from apps.ingest import reconciliation
+from apps.ingest import service as ingest
+from apps.ingest.simulation import simulate_feed
+from apps.transactions import detail as td
+from apps.transactions import routes as rt
+from models import (
+    Base,
+    CanonicalTransaction,
+    SourceRecord,
+    TransactionDiscount,
+    TransactionLine,
+    TransactionTax,
+    TransactionTender,
+)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import reconciliation, service as ingest
-from apps.ingest.simulation import simulate_feed
-from apps.transactions import routes as rt
-from apps.transactions import detail as td
-from models import (Base, CanonicalTransaction, SourceRecord, TransactionDiscount, TransactionLine,
-                    TransactionTax, TransactionTender)
 
 USER = {"user": "x", "role": "finance"}
 D = Decimal

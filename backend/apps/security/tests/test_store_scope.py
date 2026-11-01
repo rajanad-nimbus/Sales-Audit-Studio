@@ -5,15 +5,15 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from models import Base, CashControl, CashDeposit, StoreDay
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.security import authentication as auth
 from apps.cash import routes as cash
-from apps.store_days import routes as sd
+from apps.security import authentication as auth
 from apps.security import scope
-from models import Base, CashControl, CashDeposit, StoreDay
+from apps.store_days import routes as sd
 
 D = Decimal
 
@@ -236,8 +236,9 @@ def test_me_carries_both_the_name_and_the_email(monkeypatch):
 
 # ---- sign out -----------------------------------------------------------------------------------------------------
 def _logout(monkeypatch, cookie="abc", upstream_ok=True):
-    from apps.security import routes as ri
     from starlette.requests import Request
+
+    from apps.security import routes as ri
     calls = []
 
     class Client:

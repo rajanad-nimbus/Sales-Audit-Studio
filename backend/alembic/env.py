@@ -7,11 +7,10 @@ import asyncio
 import logging
 
 from alembic import context
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from database import DATABASE_URL
 from models import Base
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 target_metadata = Base.metadata
 logger = logging.getLogger("alembic.runtime.migration")

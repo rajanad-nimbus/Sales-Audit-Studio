@@ -1,9 +1,8 @@
 """Request validation for normalized foundation reference identifiers."""
 
 import pytest
-from pydantic import ValidationError
-
 from apps.controls.foundation.routes import ReferenceBody
+from pydantic import ValidationError
 
 
 @pytest.mark.parametrize("field", ["category", "code", "name"])

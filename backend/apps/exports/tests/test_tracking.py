@@ -1,12 +1,12 @@
 import asyncio
 from datetime import datetime, timezone
 
+from models import Base, Case, ExportBatch, ExportDestination, ExportItem
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.exports.routes import tracking_page
-from models import Base, Case, ExportBatch, ExportDestination, ExportItem
 
 
 def test_tracking_projection_counts_states_and_returns_a_stable_page():

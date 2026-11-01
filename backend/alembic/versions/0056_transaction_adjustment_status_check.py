@@ -1,7 +1,6 @@
 """Restrict correction review states to the supported state machine."""
 from alembic import op
 
-
 revision = "0056"
 down_revision = "0055"
 branch_labels = None

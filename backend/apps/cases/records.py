@@ -2,20 +2,28 @@
 
 import uuid
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
+from integrations.ontology import nimbus
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.cases.models import Case, Finding, HumanDecision, Recommendation
+from apps.cases.models import Exception as DBException
+from apps.cases.schemas import Exception as ExceptionSchema
+from apps.cases.schemas import (
+    ExceptionCreate,
+    FindingCreate,
+    HumanDecisionCreate,
+    RecommendationCreate,
+)
+from apps.cases.schemas import Finding as FindingSchema
+from apps.cases.schemas import HumanDecision as HumanDecisionSchema
+from apps.cases.schemas import Recommendation as RecommendationSchema
 from apps.cases.service import locked_scoped_case
 from apps.security import scope
 from apps.security.authentication import require_role
-from database import get_db
-from integrations.ontology import nimbus
-from integrations.ontology.ontology_integration import integration as ontology_integration
-from apps.cases.models import Case, Exception as DBException, Finding, HumanDecision, Recommendation
-from apps.cases.schemas import (ExceptionCreate, Exception as ExceptionSchema, FindingCreate, Finding as FindingSchema,
-                     HumanDecisionCreate, HumanDecision as HumanDecisionSchema, RecommendationCreate,
-                     Recommendation as RecommendationSchema)
 
 router = APIRouter()
 

@@ -3,12 +3,11 @@
 import asyncio
 from datetime import timedelta
 
+from apps.cases.evidence import case_evidence
 from fastapi import Response
+from models import Base, Case, EvidenceSnapshot, utcnow
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.cases.evidence import case_evidence
-from models import Base, Case, EvidenceSnapshot, utcnow
 
 
 def test_case_evidence_is_paginated_with_total_headers():

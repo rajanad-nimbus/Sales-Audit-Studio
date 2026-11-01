@@ -2,13 +2,13 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from models import AuditTotalDefinition, Base, CanonicalTransaction, TransactionAdjustment
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.ingest import service
 from apps.totals.routes import preview_definition
-from models import AuditTotalDefinition, Base, CanonicalTransaction, TransactionAdjustment
 
 
 def preview(measure, *, adjustment_values=None, adjustment_status="Approved"):

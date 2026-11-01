@@ -3,21 +3,24 @@
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+
 from fastapi import HTTPException
+from integrations.ontology import nimbus
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import investigation_service
 from apps.cases.models import (
     Case,
-    Exception as DBException,
     HumanDecision,
     Recommendation,
     ValidationObligation,
     Workflow,
 )
-from integrations.ontology import nimbus
-from integrations.ontology.ontology_integration import integration as ontology_integration
+from apps.cases.models import (
+    Exception as DBException,
+)
 
 BULK_LIMIT = 1000
 HEAVY_LIMIT = 200

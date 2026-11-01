@@ -1,13 +1,13 @@
 """Database projection and pagination for export delivery tracking."""
 
-from sqlalchemy import String, and_, case as sql_case, cast, func, literal, or_, select
+from sqlalchemy import String, and_, cast, func, literal, or_, select
+from sqlalchemy import case as sql_case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from apps.cases.models import Case, Recommendation
 from apps.exports.eligibility import verified_adjustment_evidence
 from apps.exports.models import ExportBatch, ExportItem
-
 
 TRACK_STATES = ("delivered", "in_batch", "waiting", "not_eligible")
 

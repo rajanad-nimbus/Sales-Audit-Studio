@@ -1,7 +1,6 @@
 """Allow only one fallback GL account mapping per transaction type."""
-from alembic import context, op
 import sqlalchemy as sa
-
+from alembic import context, op
 
 revision = "0044"
 down_revision = "0043"

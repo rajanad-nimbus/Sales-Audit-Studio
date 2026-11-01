@@ -3,10 +3,20 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, text
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class Exception(Base):

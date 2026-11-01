@@ -7,10 +7,9 @@ import uuid
 from pathlib import Path
 
 import pytest
+from models import AuditEvent, Base
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from models import AuditEvent, Base
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="ZETSA_TEST_POSTGRES_URL not configured")

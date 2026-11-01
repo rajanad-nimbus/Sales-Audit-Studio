@@ -6,12 +6,13 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from fastapi import HTTPException
+from models import Base, Case, ExportBatch, ExportDestination
+from models import TestSinkReceipt as SinkReceipt
 from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.requests import Request
 
 from apps.exports import routes
-from models import Base, Case, ExportBatch, ExportDestination, TestSinkReceipt as SinkReceipt
 
 
 def test_finance_destination_view_redacts_webhook_url_credentials():

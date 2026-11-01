@@ -3,10 +3,9 @@
 import asyncio
 from types import SimpleNamespace
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from apps.ingest.service import link_return_page, return_candidate_query
 from models import Base
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 class SaleStream:

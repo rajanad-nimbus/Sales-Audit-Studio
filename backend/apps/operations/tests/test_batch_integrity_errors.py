@@ -1,8 +1,7 @@
 from types import SimpleNamespace
 
-from sqlalchemy.exc import IntegrityError
-
 from apps.operations.batch import _is_active_batch_conflict
+from sqlalchemy.exc import IntegrityError
 
 
 def test_active_batch_conflict_matches_the_business_date_constraint():

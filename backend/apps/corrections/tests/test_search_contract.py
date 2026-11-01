@@ -2,14 +2,14 @@
 import asyncio
 
 import httpx
+from database import get_db
 from fastapi import FastAPI
+from models import Base
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.corrections import routes
 from apps.security import authentication
-from database import get_db
-from models import Base
 
 
 def test_transaction_search_bounds_query_length():

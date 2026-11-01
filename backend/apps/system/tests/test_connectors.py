@@ -2,14 +2,14 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from main import connector_action
+from models import Base, Connector
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.system.connectors import DEFAULT_CONNECTORS, ensure_default_connectors
 from apps.assistant.chat import rule_answer
-from main import connector_action
-from models import Base, Connector
+from apps.system.connectors import DEFAULT_CONNECTORS, ensure_default_connectors
 
 
 def test_default_connectors_do_not_claim_unverified_health():

@@ -3,12 +3,11 @@ import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from apps.cases.evidence import case_reconciliation
+from models import AuditEvent, Base, CanonicalTransaction, Case
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.cases.evidence import case_reconciliation
-from models import AuditEvent, Base, CanonicalTransaction, Case
 
 
 def test_case_reconciliation_paginates_large_linked_id_sets_in_database():

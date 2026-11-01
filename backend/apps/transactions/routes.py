@@ -5,23 +5,28 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import aliased
-from sqlalchemy import String, case as sql_case, cast, func, literal, or_, select, union
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from apps.security.authentication import require_role
-from apps.cases.lineage import case_creation_mentions_transaction
 from database import get_db
-from apps.search import contains_literal
-from apps.transactions import detail as detail_math
-from apps.security import scope
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import String, cast, func, literal, or_, select, union
+from sqlalchemy import case as sql_case
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+
 from apps.audit.models import AuditEvent
+from apps.cases.lineage import case_creation_mentions_transaction
 from apps.cases.models import Case
-from apps.ingest.models import SourceRecord
 from apps.corrections.models import TransactionAdjustment
+from apps.ingest.models import SourceRecord
+from apps.search import contains_literal
+from apps.security import scope
+from apps.security.authentication import require_role
+from apps.transactions import detail as detail_math
 from apps.transactions.models import (
-    CanonicalTransaction, TransactionDiscount, TransactionLine, TransactionTax, TransactionTender,
+    CanonicalTransaction,
+    TransactionDiscount,
+    TransactionLine,
+    TransactionTax,
+    TransactionTender,
 )
 
 router = APIRouter(prefix="/api/transactions", tags=["Transactions"])

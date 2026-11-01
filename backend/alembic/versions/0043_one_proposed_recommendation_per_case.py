@@ -1,7 +1,6 @@
 """Enforce one active recommendation for each case."""
-from alembic import context, op
 import sqlalchemy as sa
-
+from alembic import context, op
 
 revision = "0043"
 down_revision = "0042"

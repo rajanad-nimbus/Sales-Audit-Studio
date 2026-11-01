@@ -4,12 +4,12 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from model_base import utcnow
 from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model_base import utcnow
 from apps.controls.foundation.models import FoundationReference
 from apps.ingest.models import ShopifyReferenceStage, ShopifyReferenceSyncState
 from apps.ingest.shopify.adapter import ShopifyAPIError

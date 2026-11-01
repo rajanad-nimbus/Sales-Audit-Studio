@@ -1,12 +1,11 @@
 import asyncio
 
 import pytest
+from apps.ingest import reconciliation, service
+from models import Base, CanonicalTransaction
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import reconciliation, service
-from models import Base, CanonicalTransaction
 
 
 def test_reconciliation_refuses_oversized_scope_before_mutating_rows(monkeypatch):

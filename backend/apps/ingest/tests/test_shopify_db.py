@@ -8,17 +8,17 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from apps.ingest import reconciliation
+from apps.ingest import service as ingest
+from apps.ingest.shopify import routes as routes_shopify
+from database import get_db
 from fastapi import FastAPI, HTTPException
+from models import Base, CanonicalTransaction, Case, SourceRecord
+from pydantic import ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import reconciliation, service as ingest
-from apps.ingest.shopify import routes as routes_shopify
-from database import get_db
-from models import Base, CanonicalTransaction, Case, SourceRecord
-from pydantic import ValidationError
 
 _engines = []
 

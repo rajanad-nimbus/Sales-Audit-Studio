@@ -1,6 +1,6 @@
 """Record the arithmetic operation for combined totals."""
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0034"
 down_revision = "0033"

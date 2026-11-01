@@ -3,19 +3,21 @@
 import uuid
 from datetime import datetime, timezone
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.security.authentication import require_role
-from database import get_db
 from apps.audit.models import AuditEvent
 from apps.cases.models import (
     Case,
-    Exception as DBException,
     Finding,
     Recommendation,
 )
+from apps.cases.models import (
+    Exception as DBException,
+)
+from apps.security.authentication import require_role
 
 router = APIRouter(tags=["Development"])
 

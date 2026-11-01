@@ -10,10 +10,10 @@ import tempfile
 from pathlib import Path
 
 import httpx
+from model_base import utcnow
 
 from apps.csv_export import csv_table
 from apps.exports.models import ExportBatch, ExportDestination
-from model_base import utcnow
 
 
 def sign(secret: str, body: bytes) -> str:

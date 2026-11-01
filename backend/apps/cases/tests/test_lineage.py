@@ -1,7 +1,3 @@
-from sqlalchemy import select, true
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import aliased
-
 from apps.cases.lineage import (
     audit_json_boolean_is,
     case_creation_has_transactions,
@@ -11,6 +7,9 @@ from apps.cases.lineage import (
     linked_follow_up_child_ids_query,
 )
 from models import AuditEvent
+from sqlalchemy import select, true
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import aliased
 
 
 def test_postgres_lineage_predicate_uses_exact_indexable_json_array_containment():

@@ -12,15 +12,15 @@ import uuid
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from database import async_session
+from integrations.ontology.nimbus import audit
+from model_base import utcnow
 from sqlalchemy import text, update
 
 from apps.ingest import service as ingest
 from apps.ingest import source_settings
-from apps.ingest.shopify import adapter as shopify_adapter
-from database import async_session
-from integrations.ontology.nimbus import audit
-from model_base import utcnow
 from apps.ingest.models import SourceSetting
+from apps.ingest.shopify import adapter as shopify_adapter
 
 log = logging.getLogger(__name__)
 

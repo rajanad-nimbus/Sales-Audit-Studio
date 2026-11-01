@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.agents import llm
 from apps.assistant import chat
 from apps.security.authentication import require_role
-from database import get_db
 
 router = APIRouter()
 

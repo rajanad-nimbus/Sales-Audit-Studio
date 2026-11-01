@@ -2,15 +2,14 @@ import asyncio
 from decimal import Decimal
 
 import pytest
+from apps.controls.rules.routes import RuleBody, create_rule
+from apps.ingest import reconciliation, routes, service
+from apps.store_days.routes import retotal_store_day
 from fastapi import HTTPException
+from models import AuditTotalDefinition, Base, Case, ConfiguredAuditRule, StoreDay
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.controls.rules.routes import RuleBody, create_rule
-from apps.ingest import routes, reconciliation, service
-from apps.store_days.routes import retotal_store_day
-from models import AuditTotalDefinition, Base, Case, ConfiguredAuditRule, StoreDay
 
 
 def test_rules_apply_to_configured_currency_and_count_rules_are_dimensionless():

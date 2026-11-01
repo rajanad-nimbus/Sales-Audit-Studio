@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 HOOK = Path(__file__).resolve().parents[4] / ".husky" / "pre-commit"
 
 

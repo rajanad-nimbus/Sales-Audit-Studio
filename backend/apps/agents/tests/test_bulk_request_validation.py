@@ -1,9 +1,8 @@
 """Bulk request validation rejects unsupported actions and filter payloads."""
 
 import pytest
-from pydantic import ValidationError
-
 from apps.agents.action_center import BulkRequest
+from pydantic import ValidationError
 
 
 @pytest.mark.parametrize(

@@ -1,34 +1,40 @@
 """Deterministic transaction matching and sales audit control evaluation."""
+import json
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
-import json
-import uuid
 
+from integrations.ontology import ontology
+from integrations.ontology.nimbus import audit, sla_due
 from sqlalchemy import and_, func, or_, select, text, tuple_, update
 
 from apps.cases.identifiers import generate_case_number
+from apps.cases.models import (
+    Case,
+)
+from apps.cases.models import (
+    Exception as DBException,
+)
 from apps.corrections.effects import effective_amounts
 from apps.ingest.common import (
-    COMPOSITE_SCOPE_BATCH_SIZE, LINEAGE, MAX_SETTLEMENT_GROUPS,
-    RECONCILIATION_LOCK_KEY, SETTLEMENT_QUERY_PAGE_SIZE,
-    SHOPIFY_ORDER_KEY_BATCH_SIZE, ReconciliationCapacityError,
+    COMPOSITE_SCOPE_BATCH_SIZE,
+    LINEAGE,
+    MAX_SETTLEMENT_GROUPS,
+    RECONCILIATION_LOCK_KEY,
+    SETTLEMENT_QUERY_PAGE_SIZE,
+    SHOPIFY_ORDER_KEY_BATCH_SIZE,
+    ReconciliationCapacityError,
 )
 from apps.ingest.limits import MAX_RECONCILIATION_TRANSACTIONS
 from apps.ingest.manifests import iter_manifests, validate_business_date
+from apps.ingest.models import ReconciliationPolicy, SourceRecord
 from apps.transactions import detail as transaction_detail
-from integrations.ontology import ontology
-from integrations.ontology.nimbus import audit, sla_due
 from apps.transactions.models import (
     CanonicalTransaction,
     TransactionDiscount,
     TransactionTender,
 )
-from apps.cases.models import (
-    Case,
-    Exception as DBException,
-)
-from apps.ingest.models import ReconciliationPolicy, SourceRecord
 
 
 async def lock_reconciliation(db) -> None:

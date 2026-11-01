@@ -5,13 +5,14 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from integrations.ontology.nimbus import audit
+from models import Base, Case
+from models import Exception as CaseException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.corrections.follow_up import create_follow_up
 from apps.corrections.reconciliation import linked_cases
-from integrations.ontology.nimbus import audit
-from models import Base, Case, Exception as CaseException
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="ZETSA_TEST_POSTGRES_URL not configured")

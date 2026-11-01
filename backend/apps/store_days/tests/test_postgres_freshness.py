@@ -4,17 +4,14 @@ import os
 import uuid
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from apps.ingest.service import ingest
+from apps.controls.rules.routes import RuleBody, create_rule
 from apps.ingest.reconciliation import lock_reconciliation
+from apps.ingest.service import ingest
 from apps.store_days.freshness import lock_configuration, lock_store_day
 from apps.store_days.routes import close_store_day, open_store_day_record, retotal_store_day
-from apps.controls.rules.routes import RuleBody, create_rule
 from apps.totals.routes import create_definition
 from apps.totals.schemas import TotalDefinitionBody
+from fastapi import HTTPException
 from models import (
     AuditTotal,
     AuditTotalDefinition,
@@ -23,7 +20,8 @@ from models import (
     StoreDay,
     StoreDayClosureRequest,
 )
-
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="ZETSA_TEST_POSTGRES_URL not configured")

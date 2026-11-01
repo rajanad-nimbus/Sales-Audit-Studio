@@ -3,10 +3,9 @@
 from datetime import datetime
 from decimal import Decimal
 
+from model_base import Base, utcnow
 from sqlalchemy import DateTime, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
-
-from model_base import Base, utcnow
 
 
 class CashControl(Base):

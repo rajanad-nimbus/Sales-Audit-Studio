@@ -1,6 +1,5 @@
 """CSV ingestion should enforce limits as rows are parsed."""
 import pytest
-
 from apps.ingest import contracts
 
 

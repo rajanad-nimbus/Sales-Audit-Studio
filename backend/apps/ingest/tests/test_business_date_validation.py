@@ -1,13 +1,12 @@
 import asyncio
 
 import pytest
-from fastapi import HTTPException
-
 from apps.ingest import reconciliation
 from apps.ingest.manifests import manifest_query, validate_business_date
 from apps.ingest.routes import run_reconciliation
 from apps.operations.batch import run_daily_batch
 from apps.operations.batch_routes import RunRequest, run_batch
+from fastapi import HTTPException
 
 
 class NoDatabase:

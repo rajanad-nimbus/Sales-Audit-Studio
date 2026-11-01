@@ -16,7 +16,6 @@ from apps.cases.models import (
 from apps.exports.eligibility import completed_case_evidence, verified_adjustment_evidence
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem
 
-
 MAX_BATCH = 5000
 SQLITE_BIND_BATCH_SIZE = 300
 POSTGRES_BIND_PARAMETER_BUDGET = 30_000

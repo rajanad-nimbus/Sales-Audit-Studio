@@ -5,13 +5,13 @@ import uuid
 
 import pytest
 from fastapi import HTTPException
+from models import Base, CanonicalTransaction, Case, ExportDestination, TransactionAdjustment
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.corrections.routes import approve_adjustment
 from apps.exports import routes as exports
 from apps.ingest import reconciliation, service
-from models import Base, CanonicalTransaction, Case, ExportDestination, TransactionAdjustment
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="ZETSA_TEST_POSTGRES_URL not configured")

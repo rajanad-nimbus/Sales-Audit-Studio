@@ -3,12 +3,11 @@ import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from apps.ingest import reconciliation
+from models import Base, CanonicalTransaction
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.ingest import reconciliation
-from models import Base, CanonicalTransaction
 
 
 def test_daily_feed_actual_and_expected_queries_batch_composite_scopes(monkeypatch):

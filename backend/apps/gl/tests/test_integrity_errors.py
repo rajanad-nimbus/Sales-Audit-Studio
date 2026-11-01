@@ -1,8 +1,7 @@
 from types import SimpleNamespace
 
-from sqlalchemy.exc import IntegrityError
-
 from apps.gl.routes import _is_duplicate_cross_reference
+from sqlalchemy.exc import IntegrityError
 
 
 def test_mapping_conflict_matches_transaction_tender_unique_constraint():

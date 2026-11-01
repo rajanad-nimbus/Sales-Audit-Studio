@@ -3,17 +3,20 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from decimal import InvalidOperation
 
+from model_base import utcnow
 from sqlalchemy import and_, or_, select, text, tuple_
 
-from apps.ingest.shopify import ingest as shopify_ingest
 from apps.ingest.common import COMPOSITE_SCOPE_BATCH_SIZE, LINEAGE, REQUIRED, SIGN, VALID_TYPES
 from apps.ingest.manifests import validate_business_date
-from apps.totals.currency import validate_currency
+from apps.ingest.models import SourceRecord
+from apps.ingest.shopify import ingest as shopify_ingest
 from apps.store_days.freshness import invalidate_totals_many, lock_store_days
+from apps.totals.currency import validate_currency
 from apps.transactions import detail as transaction_detail
 from apps.transactions.models import (
     CanonicalTransaction,
@@ -22,8 +25,6 @@ from apps.transactions.models import (
     TransactionTax,
     TransactionTender,
 )
-from model_base import utcnow
-from apps.ingest.models import SourceRecord
 
 STRING_FIELD_LIMITS = {
     "source_record_id": 255,

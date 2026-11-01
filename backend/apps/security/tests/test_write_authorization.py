@@ -1,10 +1,10 @@
 import asyncio
 
 import httpx
+import main
 import pytest
 
 from apps.security import authentication as auth
-import main
 from apps.security import middleware
 
 

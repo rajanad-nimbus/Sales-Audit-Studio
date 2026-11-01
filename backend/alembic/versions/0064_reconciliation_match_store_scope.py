@@ -1,8 +1,7 @@
 """Persist manual-match store scope for indexed authorization filters."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0064"
 down_revision = "0063"

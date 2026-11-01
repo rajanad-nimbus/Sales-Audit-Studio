@@ -1,6 +1,5 @@
-from sqlalchemy.exc import IntegrityError
-
 from apps.controls.rules.routes import _is_duplicate_rule_name
+from sqlalchemy.exc import IntegrityError
 
 
 def test_rule_name_conflict_matches_sqlite_unique_constraint():

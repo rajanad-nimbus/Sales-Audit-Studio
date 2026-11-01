@@ -2,14 +2,14 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from models import Base, CanonicalTransaction, TransactionAdjustment
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.corrections import routes
 from apps.ingest.service import ingest
 from apps.transactions import routes as transactions_routes
-from models import Base, CanonicalTransaction, TransactionAdjustment
-from sqlalchemy import event, select
 
 
 def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():

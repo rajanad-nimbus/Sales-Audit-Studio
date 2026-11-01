@@ -1,7 +1,6 @@
 """Constrain manual reconciliation matches to supported review states."""
 from alembic import op
 
-
 revision = "0058"
 down_revision = "0057"
 branch_labels = None

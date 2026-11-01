@@ -5,9 +5,9 @@ Deliberately NOT settable here: autonomy limits, policy thresholds, roles. Those
 import os
 
 from fastapi import HTTPException
+from integrations.ontology import nimbus
 from sqlalchemy import select
 
-from integrations.ontology import nimbus
 from apps.agents.agent_tools import TOOL_SPECS
 from apps.agents.models import AgentSetting
 

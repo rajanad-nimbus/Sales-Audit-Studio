@@ -2,7 +2,6 @@
 
 from alembic import context, op
 
-
 revision = "0067"
 down_revision = "0066"
 branch_labels = None

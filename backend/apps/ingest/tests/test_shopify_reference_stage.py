@@ -2,10 +2,6 @@
 import asyncio
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.shopify import reference_sync
 from apps.ingest.shopify import routes as shopify_routes
@@ -17,6 +13,9 @@ from models import (
     StoreDay,
     StoreDayClosureRequest,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 _engines = []
 

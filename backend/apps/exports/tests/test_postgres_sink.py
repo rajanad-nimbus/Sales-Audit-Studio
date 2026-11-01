@@ -4,12 +4,13 @@ import os
 import uuid
 
 import pytest
+from models import Base
+from models import TestSinkReceipt as SinkReceipt
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.requests import Request
 
 from apps.exports import routes
-from models import Base, TestSinkReceipt as SinkReceipt
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="ZETSA_TEST_POSTGRES_URL not configured")

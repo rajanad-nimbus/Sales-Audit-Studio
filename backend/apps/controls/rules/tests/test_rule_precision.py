@@ -1,9 +1,8 @@
 from decimal import Decimal
 
 import pytest
-from pydantic import ValidationError
-
 from apps.controls.rules.routes import RuleBody
+from pydantic import ValidationError
 
 
 @pytest.mark.parametrize("threshold", ["1.001", "10000000000000", "NaN"])

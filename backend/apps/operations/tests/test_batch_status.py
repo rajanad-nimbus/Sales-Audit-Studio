@@ -1,11 +1,10 @@
 import asyncio
 from datetime import timedelta
 
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.operations.batch_routes import status
 from models import Base, BatchRun, utcnow
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_batch_status_does_not_expose_run_errors_or_source_counts():

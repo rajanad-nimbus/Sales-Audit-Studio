@@ -6,12 +6,12 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.controls.foundation.models import FoundationReference
 from apps.corrections.effects import effective_amounts, effective_taxes
 from apps.totals.combined import calculate_combined
+from apps.totals.models import AuditTotalDefinition
 from apps.totals.sources import source_lineage_for
 from apps.transactions.models import CanonicalTransaction
-from apps.controls.foundation.models import FoundationReference
-from apps.totals.models import AuditTotalDefinition
 
 TRANSACTION_BATCH_SIZE = 500
 SOURCE_TOTALS = {

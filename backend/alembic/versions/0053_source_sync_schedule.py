@@ -1,7 +1,6 @@
 """Scheduled sync (daily or weekly at a time of day) for sources that Nimbus pulls itself."""
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0053"
 down_revision = "0052"

@@ -1,6 +1,6 @@
 """Preserve the definition revision used for each configured total."""
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0035"
 down_revision = "0034"

@@ -1,12 +1,11 @@
 import asyncio
 from datetime import timedelta
 
+from apps.cases.routes_lifecycle import list_cases_by_status
 from fastapi import Response
+from models import Base, Case, utcnow
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.cases.routes_lifecycle import list_cases_by_status
-from models import Base, Case, utcnow
 
 
 def test_status_case_list_has_stable_pages_and_total_headers():

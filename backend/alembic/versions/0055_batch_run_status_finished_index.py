@@ -1,7 +1,6 @@
 """Index the latest successful batch status lookup."""
 from alembic import op
 
-
 revision = "0055"
 down_revision = "0054"
 branch_labels = None

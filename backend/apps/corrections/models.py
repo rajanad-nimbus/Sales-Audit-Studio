@@ -2,10 +2,9 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, JSON, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class TransactionAdjustment(Base):

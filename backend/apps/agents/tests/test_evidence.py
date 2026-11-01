@@ -1,8 +1,8 @@
 """Evidence retrieval uses each requirement's declared source, never a guess from its wording."""
 from types import SimpleNamespace as NS
 
-from integrations.ontology import ontology
 from apps.agents.investigation_service import evidence_for_requirement
+from integrations.ontology import ontology
 
 
 def rows():
@@ -56,13 +56,20 @@ def test_provided_evidence_closes_a_gap_and_supersedes_the_old_recommendation():
     from datetime import datetime, timezone
     from decimal import Decimal
 
+    from apps.agents import investigation_service as svc
+    from models import (
+        Base,
+        CanonicalTransaction,
+        Case,
+        EvidenceRequest,
+        EvidenceSnapshot,
+        Recommendation,
+        SourceRecord,
+    )
+    from models import Exception as Exc
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import StaticPool
-
-    from apps.agents import investigation_service as svc
-    from models import (Base, CanonicalTransaction, Case, EvidenceRequest, EvidenceSnapshot, Exception as Exc,
-                        Recommendation, SourceRecord)
 
     async def go():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
@@ -115,14 +122,13 @@ def test_closed_case_rejects_new_evidence_and_collaboration_exposes_override_det
     import asyncio
     from decimal import Decimal
 
+    import main
     import pytest
     from fastapi import HTTPException
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from sqlalchemy.pool import StaticPool
-
-    import main
     from models import Base, Case, EvidenceRequest
     from schemas import EvidenceProvide
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
 
     async def go():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
@@ -152,12 +158,11 @@ def test_closed_case_rejects_new_evidence_and_collaboration_exposes_override_det
 def test_case_collaboration_bounds_notes_and_requests():
     import asyncio
 
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from sqlalchemy.pool import StaticPool
-
     import main
     from apps.cases import evidence
     from models import Base, Case, CaseNote, EvidenceRequest
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
 
     async def go():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)

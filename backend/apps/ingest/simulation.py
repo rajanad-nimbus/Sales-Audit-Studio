@@ -1,9 +1,9 @@
 """Synthetic source feeds for local demos, examples, and integration tests."""
+import random
+import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-import random
-import uuid
 
 from apps.transactions import detail as transaction_detail
 

@@ -6,23 +6,23 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from database import async_session, get_db
 from fastapi import APIRouter, Depends, HTTPException, Request
+from integrations.ontology.nimbus import audit
+from model_base import utcnow
 from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.ingest import service as ingest
-from apps.ingest.shopify import adapter as shopify_adapter
-from apps.ingest.limits import MAX_DELIVERY_BYTES
 from apps.ingest import source_settings
+from apps.ingest.limits import MAX_DELIVERY_BYTES
+from apps.ingest.models import SourceRecord
+from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.shopify import reference_sync
 from apps.request_body import read_limited_body
 from apps.security.authentication import require_role
-from database import async_session, get_db
-from model_base import utcnow
-from apps.ingest.models import SourceRecord
-from integrations.ontology.nimbus import audit
 
 router = APIRouter(prefix="/api/ingest/shopify")
 logger = logging.getLogger(__name__)

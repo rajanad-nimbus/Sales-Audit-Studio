@@ -2,10 +2,9 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class AuditEvent(Base):

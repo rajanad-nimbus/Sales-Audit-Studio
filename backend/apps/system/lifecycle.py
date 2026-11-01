@@ -4,12 +4,12 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 
 import httpx
+from database import async_session, engine
 from fastapi import FastAPI
+from integrations.ontology.ontology_integration import integration as ontology_integration
 
 from apps.ingest.shopify import scheduler as shopify_scheduler
 from apps.system.connectors import ensure_default_connectors
-from database import async_session, engine
-from integrations.ontology.ontology_integration import integration as ontology_integration
 
 
 @asynccontextmanager

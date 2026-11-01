@@ -5,23 +5,24 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace as NS
 
-from sqlalchemy import event, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.agents import investigator
 from apps.agents.agent_tools import EvidenceTools
 from models import (
     AuditEvent,
     Base,
-    Case,
     CanonicalTransaction,
+    Case,
     EvidenceSnapshot,
-    Exception as Exc,
     HumanDecision,
     Recommendation,
     SourceRecord,
 )
+from models import (
+    Exception as Exc,
+)
+from sqlalchemy import event, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def run(c):
@@ -513,6 +514,7 @@ def test_eligible_endpoint_returns_bounded_highest_exposure_cases(monkeypatch):
 
 def test_eligibility_requires_all_permit_conditions_and_grounded_finding():
     from decimal import Decimal as D
+
     from apps.agents.routes import eligible
     sup = {"hypotheses": [{"verdict": "supported", "cited_ids": ["x"]}]}
     case = NS(status="In Review", evidence_completeness=100, total_exception_amount=D("100"), currency="USD")
@@ -530,8 +532,8 @@ def test_eligibility_requires_all_permit_conditions_and_grounded_finding():
 def test_settings_update_persists_and_is_audited_and_gates_tools():
     async def go():
         from apps.agents import agent_settings
-        from sqlalchemy import select
         from models import AuditEvent
+        from sqlalchemy import select
         Session, case, exc, ids = await seed()
         async with Session() as db:
             cfg = await agent_settings.update(db, {"model": "claude-opus-5-5", "tools": ["get_store_day_totals"]}, "root@x")

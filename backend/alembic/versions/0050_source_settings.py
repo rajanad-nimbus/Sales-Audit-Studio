@@ -1,7 +1,6 @@
 """Per-source switches for the daily batch and manual sync."""
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0050"
 down_revision = "0049"

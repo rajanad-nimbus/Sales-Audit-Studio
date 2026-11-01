@@ -2,12 +2,12 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from models import AuditTotalDefinition, Base
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from apps.totals.routes import validate_combined_references
 from apps.totals.schemas import TotalDefinitionBody
-from models import AuditTotalDefinition, Base
 
 
 def test_combined_references_must_exist_and_have_matching_dimensions():

@@ -6,8 +6,8 @@ from apps.agents.action_center import router as action_router
 from apps.agents.routes import router as agent_router
 from apps.assistant.routes import router as assistant_router
 from apps.audit.routes import router as audit_router
-from apps.cash.routes import router as cash_router
 from apps.cases.routes import router as cases_router
+from apps.cash.routes import router as cash_router
 from apps.controls.foundation.routes import router as foundation_router
 from apps.controls.rules.routes import router as rules_router
 from apps.corrections.routes import router as corrections_router
@@ -16,9 +16,9 @@ from apps.exports.routes import router as exports_router
 from apps.gl.routes import router as gl_router
 from apps.ingest.routes import router as ingest_router
 from apps.ingest.shopify.routes import router as shopify_router
+from apps.ontology.routes import router as ontology_router
 from apps.operations.batch_routes import router as batch_router
 from apps.operations.routes import router as operations_router
-from apps.ontology.routes import router as ontology_router
 from apps.security.middleware import ontology_authentication
 from apps.security.routes import router as security_router
 from apps.store_days.routes import router as store_day_router

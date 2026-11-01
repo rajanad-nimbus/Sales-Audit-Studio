@@ -4,7 +4,6 @@ import os
 import httpx
 from fastapi import Depends, Header, HTTPException, Request
 
-
 ONTOLOGY_AUTH_URL = os.getenv("NIMBUS_ONTOLOGY_AUTH_URL", "").rstrip("/")
 AUTH_ENABLED = bool(ONTOLOGY_AUTH_URL)
 IMPERSONABLE = {"finance", "it", "analyst", "auditor", "store_manager"}

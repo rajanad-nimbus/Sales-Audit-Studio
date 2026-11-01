@@ -4,8 +4,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.security import scope
 from apps.cases.models import Case
+from apps.security import scope
 
 
 async def locked_scoped_case(db: AsyncSession, case_id: str, user: dict) -> Case:

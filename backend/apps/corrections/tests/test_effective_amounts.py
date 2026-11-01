@@ -2,17 +2,24 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+from fastapi import HTTPException
+from models import (
+    AuditTotal,
+    AuditTotalDefinition,
+    Base,
+    CanonicalTransaction,
+    StoreDay,
+    TransactionAdjustment,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-from fastapi import HTTPException
-import pytest
 
 from apps.corrections.routes import approve_adjustment, validate_missing_transaction
 from apps.ingest.service import ingest
 from apps.store_days.routes import retotal_store_day
 from apps.totals.routes import preview_definition
-from models import AuditTotal, AuditTotalDefinition, Base, CanonicalTransaction, StoreDay, TransactionAdjustment
 
 
 def test_retotal_and_preview_apply_approved_corrections_in_order_by_source():

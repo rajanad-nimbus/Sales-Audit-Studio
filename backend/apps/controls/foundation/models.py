@@ -2,11 +2,9 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, JSON, String, UniqueConstraint
-
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class FoundationReference(Base):

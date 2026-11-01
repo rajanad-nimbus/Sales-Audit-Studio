@@ -1,12 +1,11 @@
 import asyncio
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.ingest import reconciliation, service
 from apps.ingest.routes import run_reconciliation
 from models import Base, CanonicalTransaction, Case, SourceRecord
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_store_scoped_reconciliation_only_changes_assigned_store_data():

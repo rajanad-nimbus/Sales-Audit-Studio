@@ -1,5 +1,4 @@
 import pytest
-
 from apps.ingest.service import parse
 
 

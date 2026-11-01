@@ -4,13 +4,12 @@ The remote API is advisory to availability, never to safety: if it is not
 configured, unavailable, or returns an incomplete approved release, Nimbus
 continues with its built-in deterministic controls.
 """
-import os
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 
 import httpx
-
 
 RULE_CODES = frozenset({
     "NSA-EVIDENCE-REQUIRED", "NSA-APPROVAL-BOUND", "NSA-VALIDATION-CLOSE",

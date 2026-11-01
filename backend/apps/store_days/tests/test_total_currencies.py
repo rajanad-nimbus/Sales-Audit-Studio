@@ -1,15 +1,14 @@
 import asyncio
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.ingest.service import ingest
 from apps.store_days.routes import retotal_store_day
 from apps.totals.routes import preview_definition
+from fastapi import HTTPException
 from models import AuditTotal, AuditTotalDefinition, Base, StoreDay
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_retotal_and_preview_preserve_currency_and_reject_mixed_sources():

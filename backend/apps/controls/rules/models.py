@@ -1,14 +1,11 @@
 """Persistence model for configured Sales Audit rules."""
 
 from datetime import datetime
-
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Numeric, String
-
-from sqlalchemy.orm import Mapped, mapped_column
-
 from model_base import Base, utcnow
+from sqlalchemy import Boolean, DateTime, Numeric, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class ConfiguredAuditRule(Base):

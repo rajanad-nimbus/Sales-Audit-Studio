@@ -1,10 +1,10 @@
 """Read and refresh the configured retail ontology context."""
 
 from fastapi import APIRouter, Depends, HTTPException
-
-from apps.security.authentication import require_role
 from integrations.ontology import ontology
 from integrations.ontology.ontology_integration import integration as ontology_integration
+
+from apps.security.authentication import require_role
 
 router = APIRouter()
 

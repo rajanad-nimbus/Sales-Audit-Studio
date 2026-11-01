@@ -4,11 +4,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import event, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from apps.cash.routes import (
     CashControlBody,
     CashDepositBody,
@@ -16,7 +11,11 @@ from apps.cash.routes import (
     expected_cash_deposit,
     record_deposit,
 )
+from fastapi import HTTPException
 from models import AuditEvent, Base, CanonicalTransaction, CashControl, CashDeposit, StoreDay
+from sqlalchemy import event, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_register_wide():

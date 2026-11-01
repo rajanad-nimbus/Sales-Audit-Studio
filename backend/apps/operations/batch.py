@@ -5,22 +5,22 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+
 from fastapi import HTTPException
+from integrations.ontology.nimbus import audit
+from model_base import utcnow
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import agent_settings, investigation_service
 from apps.database_errors import violates_unique_constraint
-from apps.ingest import reconciliation
+from apps.ingest import reconciliation, source_settings
 from apps.ingest import service as ingest
-from apps.ingest.simulation import simulate_feed
-from apps.ingest import source_settings
-from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.manifests import validate_business_date
-from model_base import utcnow
+from apps.ingest.shopify import adapter as shopify_adapter
+from apps.ingest.simulation import simulate_feed
 from apps.operations.models import BatchRun
-from integrations.ontology.nimbus import audit
 
 RUN_STALE_AFTER_HOURS = 26
 logger = logging.getLogger(__name__)

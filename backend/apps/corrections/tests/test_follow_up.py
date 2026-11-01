@@ -2,17 +2,21 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from integrations.ontology.nimbus import audit
+from models import AuditEvent, Base, Case, ExportDestination, Recommendation
+from models import Exception as CaseException
 from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.corrections.follow_up import create_child_case, create_follow_up
-from apps.corrections.follow_up import load_follow_up_state, parent_lineage_events
-from apps.corrections.reconciliation import linked_cases
+from apps.corrections.follow_up import (
+    create_child_case,
+    create_follow_up,
+    load_follow_up_state,
+    parent_lineage_events,
+)
+from apps.corrections.reconciliation import invalidate_case_evidence, linked_cases
 from apps.exports.routes import build, tracking_page
-from integrations.ontology.nimbus import audit
-from models import AuditEvent, Base, Case, Exception as CaseException, ExportDestination, Recommendation
-from apps.corrections.reconciliation import invalidate_case_evidence
 
 
 def test_closed_case_follow_up_is_scoped_idempotent_and_preserves_history():

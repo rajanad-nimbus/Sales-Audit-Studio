@@ -6,14 +6,8 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-import pytest
-from fastapi import HTTPException
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from models import (AuditEvent, Base, CanonicalTransaction, RetentionPolicy, RetentionRun, SourceRecord,
-                    TransactionLine, utcnow)
+import pytest
 from apps.operations.retention import serialise_row
 from apps.operations.routes import (
     RetentionBody,
@@ -22,6 +16,20 @@ from apps.operations.routes import (
     preview_retention,
     set_retention,
 )
+from fastapi import HTTPException
+from models import (
+    AuditEvent,
+    Base,
+    CanonicalTransaction,
+    RetentionPolicy,
+    RetentionRun,
+    SourceRecord,
+    TransactionLine,
+    utcnow,
+)
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 def test_archive_serialization_preserves_scalar_types():

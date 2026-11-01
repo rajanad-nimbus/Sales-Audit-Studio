@@ -1,12 +1,12 @@
 import asyncio
 from decimal import Decimal
 
+from apps.assistant.chat import CASE_CONTEXT_RECORD_LIMIT, build_context, case_context
+from models import AuditEvent, Base, Case
+from models import Exception as DBException
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.assistant.chat import CASE_CONTEXT_RECORD_LIMIT, build_context, case_context
-from models import AuditEvent, Base, Case, Exception as DBException
 
 
 def test_case_context_bounds_child_records_and_marks_truncation():

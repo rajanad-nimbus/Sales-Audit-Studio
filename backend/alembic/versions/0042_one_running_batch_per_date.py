@@ -1,6 +1,6 @@
 """Allow at most one active daily batch per business date."""
-from alembic import context, op
 import sqlalchemy as sa
+from alembic import context, op
 
 revision = "0042"
 down_revision = "0041"

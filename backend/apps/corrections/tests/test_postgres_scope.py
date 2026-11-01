@@ -4,11 +4,11 @@ import os
 import uuid
 
 import pytest
+from models import Base, TransactionAdjustment
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.corrections.routes import list_adjustments
-from models import Base, TransactionAdjustment
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="ZETSA_TEST_POSTGRES_URL not configured")

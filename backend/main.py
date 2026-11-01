@@ -2,14 +2,11 @@
 
 import os
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
 from apps.audit.routes import list_recent_events as list_audit_events
 from apps.cases.routes import (
     add_case_note,
-    approve_evidence_override,
     apply_evidence_override,
+    approve_evidence_override,
     case_collaboration,
     case_evidence,
     case_reconciliation,
@@ -48,6 +45,8 @@ from apps.request_body import RequestBodyLimitMiddleware
 from apps.router_registry import register_routes
 from apps.system.lifecycle import lifespan
 from apps.system.routes import connector_action, list_connectors
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="Sales Audit Studio API",

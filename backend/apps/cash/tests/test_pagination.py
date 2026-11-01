@@ -3,14 +3,13 @@
 import asyncio
 
 import httpx
+from apps.cash import routes
+from apps.security import authentication as auth
+from database import get_db
 from fastapi import FastAPI
+from models import Base, CashControl, CashDeposit
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
-from apps.security import authentication as auth
-from apps.cash import routes
-from database import get_db
-from models import Base, CashControl, CashDeposit
 
 
 def test_cash_lists_paginate_and_report_consistent_totals():
