@@ -1,6 +1,5 @@
 """Export destination configuration and administration endpoints."""
 
-import re
 import uuid
 from urllib.parse import urlsplit
 
@@ -128,9 +127,9 @@ async def create_destination(
 ):
     if body.kind not in ("webhook", "file") or body.format not in ("json", "csv"):
         raise HTTPException(status_code=400, detail="kind must be webhook|file and format json|csv")
-    if body.kind == "webhook" and not (body.url and re.match(r"^https?://", body.url)):
+    if body.kind == "webhook" and body.url is None:
         raise HTTPException(status_code=400, detail="A webhook needs an http(s) URL")
-    config = {"url": body.url, "secret": body.secret or ""} if body.kind == "webhook" else {}
+    config = {"url": str(body.url), "secret": body.secret or ""} if body.kind == "webhook" else {}
     destination = ExportDestination(
         id=str(uuid.uuid4()),
         name=body.name.strip(),

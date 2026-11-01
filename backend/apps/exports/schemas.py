@@ -2,14 +2,14 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator, model_validator
 
 
 class DestIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     kind: str = Field(min_length=1, max_length=20)
     format: str = Field(default="json", min_length=1, max_length=10)
-    url: str | None = Field(default=None, max_length=2048)
+    url: AnyHttpUrl | None = Field(default=None, max_length=2048)
     secret: str | None = Field(default=None, max_length=4096)
 
     @field_validator("name")
