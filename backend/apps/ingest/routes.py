@@ -7,7 +7,7 @@ from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
-from sqlalchemy import case, func, select, tuple_
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,8 @@ from apps.ingest.contracts import (
     schedule_window_hours,
     validate_profile_mapping,
 )
+from apps.ingest.deliveries import delivery_history
+from apps.ingest.deliveries import router as deliveries_router
 from apps.ingest.manifests import validate_business_date
 from apps.ingest.manual_matches import (
     approve_manual_match as approve_manual_match,
@@ -77,6 +79,7 @@ __all__ = [
     "SourceFeedProfileRequest",
     "_is_duplicate_profile_name",
     "create_source_profile",
+    "delivery_history",
     "feed_health",
     "json_payload_size",
     "list_source_profiles",
@@ -88,6 +91,7 @@ __all__ = [
 
 router = APIRouter()
 router.include_router(manual_matches_router)
+router.include_router(deliveries_router)
 
 
 def _is_active_reconciliation_policy_conflict(exc: IntegrityError) -> bool:
@@ -96,100 +100,6 @@ def _is_active_reconciliation_policy_conflict(exc: IntegrityError) -> bool:
         constraint_names={"uq_reconciliation_policies_one_active"},
         sqlite_messages={"UNIQUE constraint failed: reconciliation_policies.active"},
     )
-
-
-@router.get("/api/ingest/deliveries")
-async def delivery_history(
-    limit: Annotated[int, Query(ge=1, le=100)] = 25,
-    db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("it", "finance")),
-):
-    """Operational history grouped by immutable source delivery ID."""
-    recent = (
-        select(
-            SourceRecord.source_system.label("source_system"),
-            SourceRecord.delivery_id.label("delivery_id"),
-            func.max(SourceRecord.received_at).label("received_at"),
-        )
-        .group_by(SourceRecord.source_system, SourceRecord.delivery_id)
-        .order_by(
-            func.max(SourceRecord.received_at).desc(),
-            SourceRecord.source_system,
-            SourceRecord.delivery_id,
-        )
-        .limit(limit)
-        .subquery()
-    )
-    delivery_keys = (
-        await db.execute(select(recent.c.source_system, recent.c.delivery_id, recent.c.received_at))
-    ).all()
-    if not delivery_keys:
-        return []
-
-    keys = [(source_system, delivery_id) for source_system, delivery_id, _ in delivery_keys]
-    counts = (
-        await db.execute(
-            select(
-                SourceRecord.source_system,
-                SourceRecord.delivery_id,
-                func.count().label("records"),
-                func.sum(case((SourceRecord.status == "Processed", 1), else_=0)).label("processed"),
-                func.sum(case((SourceRecord.status == "Quarantined", 1), else_=0)).label(
-                    "quarantined"
-                ),
-            )
-            .where(tuple_(SourceRecord.source_system, SourceRecord.delivery_id).in_(keys))
-            .group_by(SourceRecord.source_system, SourceRecord.delivery_id)
-        )
-    ).all()
-
-    ranked_errors = (
-        select(
-            SourceRecord.source_system.label("source_system"),
-            SourceRecord.delivery_id.label("delivery_id"),
-            SourceRecord.quarantine_reason.label("last_error"),
-            func.row_number()
-            .over(
-                partition_by=(SourceRecord.source_system, SourceRecord.delivery_id),
-                order_by=(SourceRecord.received_at.desc(), SourceRecord.id.desc()),
-            )
-            .label("row_number"),
-        )
-        .where(
-            tuple_(SourceRecord.source_system, SourceRecord.delivery_id).in_(keys),
-            SourceRecord.status == "Quarantined",
-        )
-        .subquery()
-    )
-    errors = (
-        await db.execute(
-            select(
-                ranked_errors.c.source_system,
-                ranked_errors.c.delivery_id,
-                ranked_errors.c.last_error,
-            ).where(ranked_errors.c.row_number == 1)
-        )
-    ).all()
-    count_by_key = {
-        (source, delivery): (records, processed, quarantined)
-        for source, delivery, records, processed, quarantined in counts
-    }
-    error_by_key = {(source, delivery): error for source, delivery, error in errors}
-    result = []
-    for source, delivery, received_at in delivery_keys:
-        records, processed, quarantined = count_by_key[(source, delivery)]
-        result.append(
-            {
-                "source_system": source,
-                "delivery_id": delivery,
-                "received_at": received_at,
-                "records": records,
-                "processed": processed,
-                "quarantined": quarantined,
-                "last_error": error_by_key.get((source, delivery)),
-            }
-        )
-    return result
 
 
 @router.get("/api/reconciliation/policy")
