@@ -4,11 +4,13 @@ import asyncio
 import hashlib
 import json
 import os
+import stat
 import tempfile
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from apps.operations import retention
 from apps.operations.retention import serialise_row
 from apps.operations.routes import (
     RetentionBody,
@@ -53,6 +55,43 @@ def test_archive_serialization_preserves_scalar_types():
         "payload": "ZGF0YQ==",
         "missing": None,
     }
+
+
+def test_archive_writer_syncs_new_directories_and_published_file(tmp_path, monkeypatch):
+    archive_path = tmp_path / "archives" / "source_records" / "batch.jsonl"
+    calls = []
+    original_fsync = os.fsync
+    original_replace = os.replace
+    original_sync_directory = retention.sync_directory
+
+    def record_fsync(fd):
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            calls.append(("file", None))
+        original_fsync(fd)
+
+    def record_replace(source, destination):
+        calls.append(("replace", destination))
+        original_replace(source, destination)
+
+    def record_directory(directory):
+        calls.append(("directory", directory))
+        original_sync_directory(directory)
+
+    monkeypatch.setattr(retention.os, "fsync", record_fsync)
+    monkeypatch.setattr(retention.os, "replace", record_replace)
+    monkeypatch.setattr(retention, "sync_directory", record_directory)
+
+    with retention.RetentionArchiveWriter(archive_path) as writer:
+        assert writer.write({"id": "src-1"})
+
+    assert calls == [
+        ("directory", tmp_path),
+        ("directory", tmp_path / "archives"),
+        ("file", None),
+        ("replace", archive_path),
+        ("directory", archive_path.parent),
+    ]
+    assert json.loads(archive_path.read_text())["id"] == "src-1"
 
 
 def test_retention_archives_without_purging_until_confirmed():
@@ -358,6 +397,68 @@ def test_retention_removes_archive_when_purge_fails(tmp_path, monkeypatch):
                 await db.rollback()
                 assert await db.scalar(select(func.count()).select_from(SourceRecord)) == 1
                 assert list(tmp_path.rglob("*.jsonl")) == []
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_retention_does_not_purge_if_archive_directory_sync_fails(tmp_path, monkeypatch):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setenv("NIMBUS_ARCHIVE_DIR", str(tmp_path))
+        archive_dir = tmp_path / "source_records"
+        archive_dir.mkdir()
+        original_sync = retention.sync_directory
+
+        def fail_published_directory(directory):
+            if directory == archive_dir:
+                raise OSError("simulated directory sync failure")
+            original_sync(directory)
+
+        monkeypatch.setattr(retention, "sync_directory", fail_published_directory)
+        try:
+            async with sessions() as db:
+                old = utcnow() - timedelta(days=45)
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="source_records",
+                        retain_days=30,
+                        archive_before_purge=True,
+                        updated_by="it",
+                    )
+                )
+                db.add(
+                    SourceRecord(
+                        id="src-1",
+                        source_system="POS",
+                        source_version="1",
+                        source_record_id="src-1",
+                        delivery_id="delivery",
+                        payload=b"{}",
+                        payload_hash="0" * 64,
+                        received_at=old,
+                        source_event_time=old,
+                        status="Processed",
+                        created_at=old,
+                    )
+                )
+                await db.commit()
+                with pytest.raises(OSError, match="directory sync failure"):
+                    await execute_retention(
+                        "source_records",
+                        RetentionRunBody(confirm_purge=True),
+                        db,
+                        {"user": "it.user"},
+                    )
+                await db.rollback()
+                assert await db.scalar(select(func.count()).select_from(SourceRecord)) == 1
+                assert await db.scalar(select(func.count()).select_from(RetentionRun)) == 0
+                assert not list(tmp_path.rglob("*.jsonl"))
         finally:
             await engine.dispose()
 

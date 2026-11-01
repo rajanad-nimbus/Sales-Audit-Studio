@@ -51,6 +51,29 @@ async def lock_retention_policy(
     return (await db.execute(query)).scalar_one_or_none()
 
 
+def sync_directory(directory: Path) -> None:
+    """Persist directory entry changes before an archived record can be purged."""
+    fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def ensure_archive_directory(directory: Path) -> None:
+    """Create missing archive directories and persist each new parent entry."""
+    missing = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for path in reversed(missing):
+        path.mkdir(exist_ok=True)
+        sync_directory(path.parent)
+    if not missing:
+        sync_directory(directory.parent)
+
+
 class RetentionArchiveWriter:
     """Write a JSONL archive incrementally and publish it only after it is complete."""
 
@@ -75,7 +98,7 @@ class RetentionArchiveWriter:
                 )
             return False
         if self.archive is None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            ensure_archive_directory(self.path.parent)
             self.archive = tempfile.NamedTemporaryFile(
                 dir=self.path.parent, prefix=".retention-", delete=False
             )
@@ -97,6 +120,7 @@ class RetentionArchiveWriter:
                     self.archive.close()
             if exc_type is None and self.temporary_path is not None:
                 os.replace(self.temporary_path, self.path)
+                sync_directory(self.path.parent)
         finally:
             if self.temporary_path is not None:
                 self.temporary_path.unlink(missing_ok=True)
