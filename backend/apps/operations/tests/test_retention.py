@@ -244,6 +244,53 @@ def test_empty_retention_run_is_written_to_audit_log():
     asyncio.run(run())
 
 
+def test_retention_policy_changes_are_audited():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with Session() as db:
+                user = {"user": "it.user"}
+                created = await set_retention(
+                    "source_records", RetentionBody(retain_days=90), db, user
+                )
+                updated = await set_retention(
+                    "source_records",
+                    RetentionBody(retain_days=120, archive_before_purge=False),
+                    db,
+                    user,
+                )
+
+                events = (
+                    await db.execute(
+                        select(AuditEvent)
+                        .where(AuditEvent.object_type == "RetentionPolicy")
+                        .order_by(AuditEvent.created_at, AuditEvent.id)
+                    )
+                ).scalars().all()
+
+                assert created["id"] == updated["id"]
+                assert [event.event_type for event in events] == [
+                    "RETENTION_POLICY_CREATED",
+                    "RETENTION_POLICY_UPDATED",
+                ]
+                assert events[0].after_state["previous_settings"] is None
+                assert events[0].after_state["retain_days"] == 90
+                assert events[1].after_state["previous_settings"] == {
+                    "retain_days": 90,
+                    "archive_before_purge": True,
+                }
+                assert events[1].after_state["retain_days"] == 120
+                assert events[1].after_state["archive_before_purge"] is False
+                assert all(event.actor == "it.user" for event in events)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_retention_refuses_to_purge_transactions_with_referenced_details(tmp_path, monkeypatch):
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)

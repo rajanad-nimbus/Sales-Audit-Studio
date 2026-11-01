@@ -19,9 +19,11 @@ from apps.operations.retention import (
 )
 from apps.security.authentication import require_role
 from database import get_db
+from integrations.ontology.nimbus import audit
 from model_base import utcnow
 
 router = APIRouter(prefix="/api/operations", tags=["Production operations"])
+
 
 class RetentionBody(BaseModel):
     retain_days: int
@@ -70,6 +72,14 @@ async def set_retention(
     row = (
         await db.execute(select(RetentionPolicy).where(RetentionPolicy.dataset == dataset))
     ).scalar_one_or_none()
+    previous_settings = (
+        {
+            "retain_days": row.retain_days,
+            "archive_before_purge": row.archive_before_purge,
+        }
+        if row is not None
+        else None
+    )
     if row is None:
         row = RetentionPolicy(
             id=str(uuid.uuid4()),
@@ -81,6 +91,20 @@ async def set_retention(
     row.retain_days = body.retain_days
     row.archive_before_purge = body.archive_before_purge
     row.updated_by = user["user"] or "ontology.user"
+    audit(
+        db,
+        "RETENTION_POLICY_UPDATED" if previous_settings is not None else "RETENTION_POLICY_CREATED",
+        None,
+        "RetentionPolicy",
+        row.id,
+        f"Retention policy for {dataset}: keep {body.retain_days} days",
+        actor=row.updated_by,
+        after={
+            "previous_settings": previous_settings,
+            "retain_days": row.retain_days,
+            "archive_before_purge": row.archive_before_purge,
+        },
+    )
     await db.commit()
     await db.refresh(row)
     return view(row)
