@@ -15,6 +15,7 @@ from apps.totals.sources import source_lineage_for
 from apps.transactions.models import CanonicalTransaction
 
 TRANSACTION_BATCH_SIZE = 500
+TotalKey = tuple[str, str, str | None]
 SOURCE_TOTALS = {
     "pos-map-v1": "POS Net",
     "processor-map-v1": "Processor Net",
@@ -25,7 +26,7 @@ SOURCE_TOTALS = {
 
 @dataclass(slots=True)
 class StoreDayCalculation:
-    source_totals: dict[tuple[str, str, str | None], Decimal]
+    source_totals: dict[TotalKey, Decimal]
     configured_totals: dict[str, dict[str | None, Decimal]]
     definition_counts: dict[str, int]
     currencies: set[str]
