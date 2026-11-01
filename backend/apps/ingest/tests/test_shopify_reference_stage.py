@@ -301,3 +301,45 @@ def test_older_snapshot_cannot_overwrite_a_newer_applied_snapshot():
             assert stale_counts["superseded"] is True
             assert row.name == "Newer"
     run(go())
+
+
+def test_older_snapshot_is_not_applied_while_newer_generation_is_staging():
+    class NamedCatalog(CatalogAdapter):
+        def __init__(self, name):
+            self.name = name
+
+        async def fetch_products(self):
+            yield {"id": 10, "title": self.name, "status": "active", "variants": [
+                {"id": 101, "sku": "SKU-1"},
+            ]}
+
+    async def go():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        _engines.append(engine)
+        Session = await make_session(engine)
+        async with Session() as db:
+            older = await reference_sync.stage(NamedCatalog("Older"), db, "older-inflight", "SHOPIFY-MAIN")
+            newer = await reference_sync.stage(NamedCatalog("Newer"), db, "newer-inflight", "SHOPIFY-MAIN")
+
+            stale_counts = await reference_sync.apply(
+                db, "older-inflight", older["generation"], "test-actor", older["duplicates"]
+            )
+            await db.commit()
+
+            row = (await db.execute(select(FoundationReference).where(
+                FoundationReference.code == "SKU-1",
+            ))).scalar_one_or_none()
+            assert stale_counts["superseded"] is True
+            assert row is None
+
+            newest_counts = await reference_sync.apply(
+                db, "newer-inflight", newer["generation"], "test-actor", newer["duplicates"]
+            )
+            await db.commit()
+            row = (await db.execute(select(FoundationReference).where(
+                FoundationReference.code == "SKU-1",
+            ))).scalar_one()
+            assert newest_counts["superseded"] is False
+            assert row.name == "Newer"
+
+    run(go())

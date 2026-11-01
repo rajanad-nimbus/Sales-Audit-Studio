@@ -233,7 +233,7 @@ async def apply(
     state = (await db.execute(select(ShopifyReferenceSyncState).where(
         ShopifyReferenceSyncState.key == SOURCE,
     ).with_for_update())).scalar_one()
-    if generation <= state.applied_generation:
+    if generation < state.generation or generation <= state.applied_generation:
         counts["superseded"] = True
         await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.sync_id == sync_id))
         return counts
