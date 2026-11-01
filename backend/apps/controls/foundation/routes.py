@@ -1,7 +1,7 @@
 """Retail foundation data used by Sales Audit controls."""
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,11 +17,21 @@ router = APIRouter(prefix="/api/foundation", tags=["Retail foundation data"])
 VALID_CATEGORIES = {"Store", "Register", "Cashier", "Tender", "Item", "BankAccount", "GLAccount", "TaxCode", "BusinessCalendar"}
 
 class ReferenceBody(BaseModel):
-    category: str
+    category: str = Field(min_length=1, max_length=50)
     code: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=255)
     active: bool = True
     attributes: dict = {}
+
+    @field_validator("category", "code", "name", mode="before")
+    @classmethod
+    def normalize_required_text(cls, value):
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Value cannot be blank")
+        return normalized
 
 def view(row: FoundationReference):
     return {"id": row.id, "category": row.category, "code": row.code, "name": row.name,
