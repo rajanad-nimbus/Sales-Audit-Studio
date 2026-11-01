@@ -114,6 +114,18 @@ async def invalidate_configuration(
     if stores is not None and not stores:
         return
     await lock_configuration(db, exclusive=True)
+    await invalidate_configuration_locked(
+        db, actor=actor, reason=reason, start_date=start_date, end_date=end_date, stores=stores
+    )
+
+
+async def invalidate_configuration_locked(
+    db: AsyncSession, *, actor: str, reason: str, start_date: str | None = None,
+    end_date: str | None = None, stores: set[str] | None = None,
+) -> None:
+    """Invalidate days when the caller already owns the exclusive configuration lock."""
+    if stores is not None and not stores:
+        return
     conditions = []
     if start_date is not None:
         conditions.append(StoreDay.business_date >= start_date)

@@ -13,6 +13,7 @@ from model_base import utcnow
 from apps.controls.foundation.models import FoundationReference
 from apps.ingest.models import ShopifyReferenceStage, ShopifyReferenceSyncState
 from apps.ingest.shopify.adapter import ShopifyAPIError
+from apps.store_days.freshness import invalidate_configuration_locked, lock_configuration
 
 SOURCE = "Shopify"
 STAGE_BATCH_SIZE = 500
@@ -177,16 +178,17 @@ async def fetch_catalog_into_stage(adapter, store_code: str, accumulator: StageA
             await accumulator.add(item)
 
 
-async def _apply_staged_rows(db: AsyncSession, sync_id: str, actor: str, counts: dict) -> None:
-    """Apply staged references in bounded pages within the caller's transaction."""
+async def _apply_staged_rows(db: AsyncSession, sync_id: str, actor: str, counts: dict) -> set[str]:
+    """Apply staged references in bounded pages and report Store eligibility changes."""
     last_id = ""
+    affected_stores: set[str] = set()
     while True:
         rows = (await db.execute(select(ShopifyReferenceStage).where(
             ShopifyReferenceStage.sync_id == sync_id,
             ShopifyReferenceStage.id > last_id,
         ).order_by(ShopifyReferenceStage.id).limit(STAGE_BATCH_SIZE))).scalars().all()
         if not rows:
-            return
+            return affected_stores
         keys = [(row.category, row.code) for row in rows]
         existing = {(row.category, row.code): row for row in (await db.execute(select(FoundationReference).where(
             tuple_(FoundationReference.category, FoundationReference.code).in_(keys),
@@ -199,15 +201,27 @@ async def _apply_staged_rows(db: AsyncSession, sync_id: str, actor: str, counts:
                     id=str(uuid.uuid4()), category=staged.category, code=staged.code, name=staged.name,
                     active=staged.active, attributes=staged.attributes, updated_by=actor,
                 ))
+                if staged.category == "Store":
+                    affected_stores.add(staged.code)
                 counts["created"] += 1
             elif (row.attributes or {}).get("source") != SOURCE:
                 counts["skipped_manual"] += 1
             elif (row.name, row.active, row.attributes) != (staged.name, staged.active, staged.attributes):
+                if staged.category == "Store" and (
+                    row.active != staged.active
+                    or _store_location_traits(row.attributes) != _store_location_traits(staged.attributes)
+                ):
+                    affected_stores.add(staged.code)
                 row.name, row.active, row.attributes = staged.name, staged.active, staged.attributes
                 row.updated_by, row.updated_at = actor, utcnow()
                 counts["updated"] += 1
         last_id = rows[-1].id
         await db.flush()
+
+
+def _store_location_traits(attributes) -> object:
+    """Read the Store attribute that determines total-definition eligibility."""
+    return attributes.get("location_traits") if isinstance(attributes, dict) else None
 
 
 async def apply(
@@ -224,7 +238,8 @@ async def apply(
         await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.sync_id == sync_id))
         return counts
 
-    await _apply_staged_rows(db, sync_id, actor, counts)
+    await lock_configuration(db, exclusive=True)
+    affected_stores = await _apply_staged_rows(db, sync_id, actor, counts)
 
     staged_match = select(ShopifyReferenceStage.id).where(
         ShopifyReferenceStage.sync_id == sync_id,
@@ -236,8 +251,19 @@ async def apply(
         FoundationReference.active.is_(True),
         FoundationReference.attributes["source"].as_string() == SOURCE,
         ~staged_match,
-    ).values(active=False, updated_by=actor, updated_at=utcnow()).execution_options(synchronize_session=False))
-    counts["deactivated"] = result.rowcount or 0
+    ).values(active=False, updated_by=actor, updated_at=utcnow())
+      .returning(FoundationReference.category, FoundationReference.code)
+      .execution_options(synchronize_session=False))
+    deactivated = result.all()
+    counts["deactivated"] = len(deactivated)
+    affected_stores.update(code for category, code in deactivated if category == "Store")
+    if affected_stores:
+        await invalidate_configuration_locked(
+            db,
+            actor=actor,
+            reason="Shopify Store references changed",
+            stores=affected_stores,
+        )
     await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.sync_id == sync_id))
     state.applied_generation = generation
     return counts

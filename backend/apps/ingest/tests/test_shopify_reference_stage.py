@@ -9,7 +9,14 @@ from sqlalchemy.pool import StaticPool
 from apps.ingest.shopify import adapter as shopify_adapter
 from apps.ingest.shopify import reference_sync
 from apps.ingest.shopify import routes as shopify_routes
-from models import Base, FoundationReference, ShopifyReferenceStage, ShopifyReferenceSyncState
+from models import (
+    Base,
+    FoundationReference,
+    ShopifyReferenceStage,
+    ShopifyReferenceSyncState,
+    StoreDay,
+    StoreDayClosureRequest,
+)
 
 _engines = []
 
@@ -86,6 +93,50 @@ def test_staged_snapshot_updates_and_deactivates_atomically():
             assert gone.active is False
             assert (await db.get(FoundationReference, "manual")).name == "Manual"
             assert (await db.execute(select(ShopifyReferenceStage))).scalars().all() == []
+    run(go())
+
+
+def test_apply_invalidates_days_when_shopify_store_traits_change_or_store_deactivates():
+    async def go():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        _engines.append(engine)
+        Session = await make_session(engine)
+        async with Session() as db:
+            db.add_all([
+                FoundationReference(
+                    id="shop", category="Store", code="SHOPIFY-MAIN", name="Shop",
+                    active=True, attributes={"source": "Shopify", "location_traits": ["North"]},
+                ),
+                FoundationReference(
+                    id="removed-shop", category="Store", code="OLD-LOCATION", name="Old location",
+                    active=True, attributes={"source": "Shopify"},
+                ),
+                StoreDay(
+                    id="trait-day", store_id="SHOPIFY-MAIN", business_date="2026-10-01",
+                    audit_version=2, totals_stale=False,
+                ),
+                StoreDay(
+                    id="removed-day", store_id="OLD-LOCATION", business_date="2026-10-01",
+                    audit_version=1, totals_stale=False,
+                ),
+                StoreDayClosureRequest(
+                    id="closure", store_day_id="trait-day", requested_by="finance",
+                    evidence_basis="reviewed", status="Pending",
+                ),
+            ])
+            await db.commit()
+
+            staged = await reference_sync.stage(CatalogAdapter(), db, "store-change", "SHOPIFY-MAIN")
+            counts = await reference_sync.apply(
+                db, "store-change", staged["generation"], "test-actor", staged["duplicates"]
+            )
+            await db.commit()
+
+            assert counts["deactivated"] == 1
+            assert (await db.get(StoreDay, "trait-day")).totals_stale
+            assert (await db.get(StoreDay, "removed-day")).totals_stale
+            assert (await db.get(StoreDayClosureRequest, "closure")).status == "Superseded"
+
     run(go())
 
 

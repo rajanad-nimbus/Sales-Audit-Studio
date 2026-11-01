@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.security.authentication import require_role
 from apps.database_errors import violates_unique_constraint
-from apps.store_days.freshness import invalidate_configuration, lock_configuration
+from apps.store_days.freshness import (
+    invalidate_configuration,
+    invalidate_configuration_locked,
+    lock_configuration,
+)
 from database import get_db
 from model_base import utcnow
 from apps.controls.foundation.models import FoundationReference
@@ -126,7 +130,12 @@ async def update_reference(reference_id: str, body: ReferenceBody, db: AsyncSess
         row.category != body.category or row.code != body.code.strip() or row.active != body.active or old_traits != new_traits
     ):
         stores = ({row.code} if row.category == "Store" else set()) | ({body.code.strip()} if body.category == "Store" else set())
-        await invalidate_configuration(db, actor=user["user"] or "ontology.user", reason="Store location traits changed", stores=stores)
+        await invalidate_configuration_locked(
+            db,
+            actor=user["user"] or "ontology.user",
+            reason="Store location traits changed",
+            stores=stores,
+        )
     row.category, row.code, row.name, row.active, row.attributes, row.updated_by, row.updated_at = body.category, body.code.strip(), body.name.strip(), body.active, body.attributes, user["user"] or "ontology.user", utcnow()
     try:
         await db.commit()
