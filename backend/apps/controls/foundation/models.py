@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, JSON, String, UniqueConstraint
 
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,4 +20,10 @@ class FoundationReference(Base):
     attributes: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_by: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-    __table_args__ = (UniqueConstraint("category", "code", name="uq_foundation_reference_category_code"),)
+    __table_args__ = (
+        UniqueConstraint("category", "code", name="uq_foundation_reference_category_code"),
+        CheckConstraint(
+            "length(trim(category)) > 0 AND length(trim(code)) > 0 AND length(trim(name)) > 0",
+            name="ck_foundation_references_required_text",
+        ),
+    )
