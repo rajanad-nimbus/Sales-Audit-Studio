@@ -7,8 +7,9 @@ from datetime import timedelta
 
 import pytest
 from apps.operations import routes
-from models import Base, RetentionPolicy, SourceRecord, utcnow
-from sqlalchemy import select, text
+from fastapi import HTTPException
+from models import AuditEvent, Base, RetentionPolicy, SourceRecord, utcnow
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
@@ -168,6 +169,97 @@ def test_retention_runs_and_policy_changes_are_serialized(monkeypatch):
                     release_runs.set()
                     results = await asyncio.wait_for(asyncio.gather(*tasks), 5)
                 assert all(result["eligible_records"] == 0 for result in results)
+        finally:
+            if engine:
+                await engine.dispose()
+            async with admin.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            await admin.dispose()
+
+    asyncio.run(run())
+
+
+def test_concurrent_first_policy_creation_returns_a_retryable_conflict(monkeypatch):
+    async def run():
+        schema = "zetsa_test_" + uuid.uuid4().hex
+        admin = create_async_engine(POSTGRES_URL)
+        engine = None
+        try:
+            async with admin.begin() as connection:
+                await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+            engine = create_async_engine(
+                POSTGRES_URL, connect_args={"server_settings": {"search_path": schema}}
+            )
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            original_lock = routes.lock_retention_policy
+            barrier = asyncio.Barrier(2)
+
+            async def synchronize_creators(db, dataset, *, shared=False):
+                policy = await original_lock(db, dataset, shared=shared)
+                assert policy is None
+                await barrier.wait()
+                return policy
+
+            monkeypatch.setattr(routes, "lock_retention_policy", synchronize_creators)
+            async with sessions() as first, sessions() as second:
+                session_list = (first, second)
+                bodies = (
+                    routes.RetentionBody(retain_days=30),
+                    routes.RetentionBody(retain_days=90),
+                )
+                outcomes = await asyncio.wait_for(
+                    asyncio.gather(
+                        *(
+                            routes.set_retention("source_records", body, session, {"user": "it"})
+                            for session, body in zip(session_list, bodies, strict=True)
+                        ),
+                        return_exceptions=True,
+                    ),
+                    10,
+                )
+                conflicts = [
+                    index
+                    for index, result in enumerate(outcomes)
+                    if isinstance(result, HTTPException)
+                ]
+                assert len(conflicts) == 1
+                conflict = outcomes[conflicts[0]]
+                assert conflict.status_code == 409 and "retry" in conflict.detail
+                created = outcomes[1 - conflicts[0]]
+                assert isinstance(created, dict)
+
+                monkeypatch.setattr(routes, "lock_retention_policy", original_lock)
+                retry = await routes.set_retention(
+                    "source_records",
+                    bodies[conflicts[0]],
+                    session_list[conflicts[0]],
+                    {"user": "it"},
+                )
+                assert retry["retain_days"] == bodies[conflicts[0]].retain_days
+
+            async with sessions() as db:
+                assert await db.scalar(select(func.count()).select_from(RetentionPolicy)) == 1
+                events = (
+                    (
+                        await db.execute(
+                            select(AuditEvent)
+                            .where(AuditEvent.object_type == "RetentionPolicy")
+                            .order_by(AuditEvent.seq)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert [event.event_type for event in events] == [
+                    "RETENTION_POLICY_CREATED",
+                    "RETENTION_POLICY_UPDATED",
+                ]
+                assert (
+                    events[1].after_state["previous_settings"]["retain_days"]
+                    == created["retain_days"]
+                )
         finally:
             if engine:
                 await engine.dispose()

@@ -29,6 +29,7 @@ from models import (
     utcnow,
 )
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -519,6 +520,32 @@ def test_retention_policy_changes_are_audited():
                 assert events[1].after_state["retain_days"] == 120
                 assert events[1].after_state["archive_before_purge"] is False
                 assert all(event.actor == "it.user" for event in events)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_retention_policy_creation_propagates_unrelated_integrity_errors(monkeypatch):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with sessions() as db:
+
+                async def fail_commit():
+                    raise IntegrityError(
+                        "insert", {}, Exception("UNIQUE constraint failed: retention_policies.id")
+                    )
+
+                monkeypatch.setattr(db, "commit", fail_commit)
+                with pytest.raises(IntegrityError):
+                    await set_retention(
+                        "source_records", RetentionBody(retain_days=90), db, {"user": "it"}
+                    )
+                assert not db.in_transaction()
         finally:
             await engine.dispose()
 

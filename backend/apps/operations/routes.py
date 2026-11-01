@@ -11,8 +11,10 @@ from integrations.ontology.nimbus import audit
 from model_base import utcnow
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.database_errors import violates_unique_constraint
 from apps.operations.models import RetentionPolicy, RetentionRun
 from apps.operations.retention import (
     DATASETS,
@@ -109,7 +111,20 @@ async def set_retention(
             "archive_before_purge": row.archive_before_purge,
         },
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if previous_settings is None and violates_unique_constraint(
+            exc,
+            constraint_names={"retention_policies_dataset_key"},
+            sqlite_messages={"UNIQUE constraint failed: retention_policies.dataset"},
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Retention policy was created concurrently; retry the update",
+            ) from exc
+        raise
     await db.refresh(row)
     return view(row)
 
