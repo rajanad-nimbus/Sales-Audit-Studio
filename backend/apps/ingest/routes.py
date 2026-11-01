@@ -309,7 +309,7 @@ async def update_source(
         notes.append("schedule " + scheduler.describe(row).lower())
     actor = user.get("user") or "ontology.user"
     row.updated_by = actor
-    if changes:
+    if changes or schedule:
         audit(
             db,
             "SOURCE_SETTING_CHANGED",
