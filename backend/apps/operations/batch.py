@@ -5,34 +5,23 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select, update
+from fastapi import HTTPException
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents import agent_settings, investigation_service
 from apps.database_errors import violates_unique_constraint
 from apps.ingest import reconciliation
-from apps.ingest.contracts import json_payload_size
 from apps.ingest import service as ingest
-from apps.ingest.common import VALID_TYPES
 from apps.ingest.simulation import simulate_feed
 from apps.ingest import source_settings
 from apps.ingest.shopify import adapter as shopify_adapter
-from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 from apps.ingest.manifests import validate_business_date
-from apps.security.authentication import require_role
-from database import get_db
-from apps.transactions.models import CanonicalTransaction
 from model_base import utcnow
 from apps.operations.models import BatchRun
 from integrations.ontology.nimbus import audit
 
-router = APIRouter(prefix="/api/batch")
-STALE_AFTER_HOURS = 26
 RUN_STALE_AFTER_HOURS = 26
 logger = logging.getLogger(__name__)
 
@@ -82,7 +71,6 @@ async def run_daily_batch(
     run = await load_batch(db, run.id)
     run = await run_optional_investigation(db, run, business_date)
     return run
-
 
 def validate_batch_date(business_date: str) -> None:
     """Translate an invalid business date into the batch API's validation response."""
@@ -301,132 +289,3 @@ async def run_optional_investigation(
         await db.rollback()
         return await load_batch(db, run_id)
     return run
-
-
-def view(r: BatchRun) -> dict:
-    return {
-        "id": r.id,
-        "business_date": r.business_date,
-        "status": r.status,
-        "trigger": r.trigger,
-        "started_at": r.started_at,
-        "heartbeat_at": r.heartbeat_at,
-        "finished_at": r.finished_at,
-        "transactions_loaded": r.transactions_loaded,
-        "matched_pairs": r.matched_pairs,
-        "cases_created": r.cases_created,
-        "source_counts": r.source_counts,
-        "error": r.error,
-    }
-
-
-def status_view(run: BatchRun | None) -> dict | None:
-    """Expose only the run metrics required by the all-role freshness banner."""
-    if run is None:
-        return None
-    return {
-        "business_date": run.business_date,
-        "status": run.status,
-        "started_at": run.started_at,
-        "finished_at": run.finished_at,
-        "transactions_loaded": run.transactions_loaded,
-        "matched_pairs": run.matched_pairs,
-        "cases_created": run.cases_created,
-    }
-
-
-class RunRequest(BaseModel):
-    business_date: str | None = None
-    rerun: bool = False
-    feeds: dict[str, list[dict]] | None = Field(default=None, max_length=len(VALID_TYPES))
-
-    @model_validator(mode="after")
-    def validate_feed_payload(self):
-        if self.feeds is None:
-            return self
-        unsupported = set(self.feeds) - set(VALID_TYPES)
-        if unsupported:
-            raise ValueError(f"Unsupported feed sources: {', '.join(sorted(unsupported))}")
-        record_count = sum(len(records) for records in self.feeds.values())
-        if record_count > MAX_DELIVERY_RECORDS:
-            raise ValueError(f"Batch exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit")
-        size = json_payload_size(self.feeds, MAX_DELIVERY_BYTES)
-        if size > MAX_DELIVERY_BYTES:
-            raise ValueError(f"Batch payload exceeds {MAX_DELIVERY_BYTES} bytes")
-        return self
-
-
-@router.post("/run")
-async def run_batch(
-    req: RunRequest, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("it"))
-):
-    bd = req.business_date
-    if bd is None:
-        earliest = (await db.execute(select(func.min(CanonicalTransaction.business_date)))).scalar()
-        bd = (
-            (datetime.fromisoformat(earliest) - timedelta(days=1)).strftime("%Y-%m-%d")
-            if earliest
-            else (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-        )
-    run = await run_daily_batch(db, bd, req.feeds, trigger="api", rerun=req.rerun)
-    return view(run)
-
-
-@router.get("/runs")
-async def runs(
-    limit: Annotated[int, Query(ge=1, le=100)] = 30,
-    db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("finance", "it")),
-):
-    rows = (
-        (
-            await db.execute(
-                select(BatchRun).order_by(BatchRun.started_at.desc()).limit(min(limit, 100))
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [view(r) for r in rows]
-
-
-@router.get("/status")
-async def status(db: AsyncSession = Depends(get_db)):
-    ok = (
-        (
-            await db.execute(
-                select(BatchRun)
-                .where(BatchRun.status == "Succeeded")
-                .order_by(BatchRun.finished_at.desc())
-                .limit(1)
-            )
-        )
-        .scalars()
-        .first()
-    )
-    last = (
-        (await db.execute(select(BatchRun).order_by(BatchRun.started_at.desc()).limit(1)))
-        .scalars()
-        .first()
-    )
-    as_of = (await db.execute(select(func.max(CanonicalTransaction.business_date)))).scalar()
-    if not ok:
-        return {
-            "freshness": "never",
-            "data_as_of": as_of,
-            "last_success": None,
-            "last_run": status_view(last),
-            "last_failed": bool(last and last.status == "Failed"),
-        }
-    finished_at = ok.finished_at
-    if finished_at.tzinfo is None:
-        finished_at = finished_at.replace(tzinfo=timezone.utc)
-    hours = (utcnow() - finished_at).total_seconds() / 3600
-    return {
-        "freshness": "stale" if hours > STALE_AFTER_HOURS else "fresh",
-        "hours_since_success": round(hours, 1),
-        "data_as_of": ok.business_date,
-        "last_success": status_view(ok),
-        "last_run": status_view(last),
-        "last_failed": bool(last and last.status == "Failed"),
-    }

@@ -16,7 +16,7 @@ from apps.exports.routes import router as exports_router
 from apps.gl.routes import router as gl_router
 from apps.ingest.routes import router as ingest_router
 from apps.ingest.shopify.routes import router as shopify_router
-from apps.operations.batch import router as batch_router
+from apps.operations.batch_routes import router as batch_router
 from apps.operations.routes import router as operations_router
 from apps.ontology.routes import router as ontology_router
 from apps.security.middleware import ontology_authentication

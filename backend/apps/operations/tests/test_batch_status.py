@@ -4,7 +4,7 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.operations.batch import status
+from apps.operations.batch_routes import status
 from models import Base, BatchRun, utcnow
 
 
