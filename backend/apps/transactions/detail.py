@@ -47,7 +47,7 @@ def decimal_value(value, field: str) -> Decimal:
     try:
         result = Decimal(str(value))
     except (InvalidOperation, ValueError):
-        raise ValueError(f"{field} is not a decimal")
+        raise ValueError(f"{field} is not a decimal") from None
     if not result.is_finite():
         raise ValueError(f"{field} is not a finite decimal")
     return result

@@ -272,7 +272,7 @@ def parse_manifest(rec: dict) -> dict:
         return {"manifest": True, "count": count, "total": total,
                 "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00")}
     except (ValueError, TypeError, InvalidOperation, OverflowError):
-        raise ValueError("invalid manifest values")
+        raise ValueError("invalid manifest values") from None
 
 
 def parse_transaction(source: str, rec: dict) -> dict:
@@ -289,14 +289,14 @@ def parse_transaction(source: str, rec: dict) -> dict:
         raise ValueError("amount exceeds supported precision")
     try:
         ts = datetime.fromisoformat(str(rec["event_time"]).replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError("event_time is not ISO-8601")
+    except ValueError as exc:
+        raise ValueError("event_time is not ISO-8601") from exc
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     try:
         detail = transaction_detail.extract(rec, SIGN[rec["record_type"]])
-    except (ValueError, InvalidOperation, OverflowError) as e:
-        raise ValueError(f"invalid transaction detail: {e}")
+    except (ValueError, InvalidOperation, OverflowError) as exc:
+        raise ValueError(f"invalid transaction detail: {exc}") from exc
     return {"amount": amount, "ts": ts, "detail": detail}
 
 

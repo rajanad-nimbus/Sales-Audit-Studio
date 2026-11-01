@@ -22,7 +22,7 @@ class SaleStream:
         try:
             row = next(self.rows)
         except StopIteration:
-            raise StopAsyncIteration
+            raise StopAsyncIteration from None
         self.rows_seen += 1
         return row
 

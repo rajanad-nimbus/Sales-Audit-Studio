@@ -193,8 +193,8 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 
     try:
         payload = json.loads(body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Webhook payload must be a JSON object")
 
@@ -207,8 +207,8 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             record = shopify_adapter.normalize_refund(payload, payload["order_id"], None, store_id)
         else:
             record = shopify_adapter.normalize_order(payload, store_id)
-    except (KeyError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=f"Malformed {topic} payload: {e}")
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Malformed {topic} payload: {exc}") from exc
 
     delivery_id = request.headers.get("X-Shopify-Webhook-Id")
     if not delivery_id:

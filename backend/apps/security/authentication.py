@@ -85,7 +85,9 @@ async def fetch_verified_identity(request: Request, headers: dict[str, str]) -> 
             async with httpx.AsyncClient(timeout=5.0) as owned_client:
                 response = await owned_client.get(ONTOLOGY_AUTH_URL, headers=headers)
     except httpx.HTTPError:
-        raise HTTPException(status_code=503, detail="Ontology authentication service is unavailable")
+        raise HTTPException(
+            status_code=503, detail="Ontology authentication service is unavailable"
+        ) from None
     if response.status_code in (401, 403):
         raise HTTPException(status_code=401, detail="Invalid or expired Ontology Studio token",
                             headers={"WWW-Authenticate": "Bearer"})
@@ -106,7 +108,9 @@ def parse_identity_response(response: httpx.Response) -> dict:
         if not isinstance(identity, dict):
             raise TypeError("Ontology user must be an object")
     except (ValueError, KeyError, TypeError):
-        raise HTTPException(status_code=503, detail="Ontology authentication response was invalid")
+        raise HTTPException(
+            status_code=503, detail="Ontology authentication response was invalid"
+        ) from None
     return identity
 
 

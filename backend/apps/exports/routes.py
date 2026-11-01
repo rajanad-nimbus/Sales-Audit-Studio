@@ -567,6 +567,8 @@ async def sink(request: Request, x_nimbus_signature: str | None = Header(default
             raise
         receipt = await db.get(TestSinkReceipt, x_nimbus_idempotency_key)
         if not receipt or receipt.payload_hash != digest or receipt.dataset != x_nimbus_dataset:
-            raise HTTPException(status_code=409, detail="Idempotency key was already used for a different delivery")
+            raise HTTPException(
+                status_code=409, detail="Idempotency key was already used for a different delivery"
+            ) from exc
     await db.commit()
     return {"status": "acknowledged", "reference": f"SINK-{x_nimbus_idempotency_key[:10]}", "bytes": len(body)}

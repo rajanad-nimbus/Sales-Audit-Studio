@@ -35,8 +35,8 @@ def tax_detail(rec: dict, sign: int) -> dict | None:
         return None
     try:
         return transaction_detail.extract({"taxes": taxes}, sign)
-    except (ValueError, InvalidOperation, OverflowError) as e:
-        raise ValueError(f"invalid transaction detail: {e}")
+    except (ValueError, InvalidOperation, OverflowError) as exc:
+        raise ValueError(f"invalid transaction detail: {exc}") from exc
 
 
 def parse_shopify_order(rec: dict) -> dict:
@@ -58,8 +58,8 @@ def parse_shopify_order(rec: dict) -> dict:
 
     try:
         ts = datetime.fromisoformat(str(rec["event_time"]).replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError("event_time is not ISO-8601")
+    except ValueError as exc:
+        raise ValueError("event_time is not ISO-8601") from exc
 
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
@@ -99,8 +99,8 @@ def parse_shopify_refund(rec: dict) -> dict:
 
     try:
         ts = datetime.fromisoformat(str(rec["event_time"]).replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError("event_time is not ISO-8601")
+    except ValueError as exc:
+        raise ValueError("event_time is not ISO-8601") from exc
 
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)

@@ -194,7 +194,9 @@ async def update_reconciliation_policy(body: ReconciliationPolicyRequest, db: As
             raise
         policy = (await db.execute(policy_query)).scalar_one_or_none()
         if policy is None:
-            raise HTTPException(status_code=409, detail="Reconciliation policy changed concurrently")
+            raise HTTPException(
+                status_code=409, detail="Reconciliation policy changed concurrently"
+            ) from exc
         policy.amount_tolerance, policy.settlement_day_tolerance = body.amount_tolerance, body.settlement_day_tolerance
         policy.amount_tolerance_currency = body.amount_tolerance_currency
         policy.gap_min_count, policy.gap_share = body.gap_min_count, Decimal(str(body.gap_share))
