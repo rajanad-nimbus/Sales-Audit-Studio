@@ -1,5 +1,7 @@
 """Retailer-configurable audit total definitions."""
 
+import hashlib
+import json
 import uuid
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,6 +23,7 @@ from apps.security.authentication import require_role
 from database import get_db
 from apps.totals.models import AuditTotalDefinition, SalesAuditErrorDefinition
 from apps.totals.schemas import TotalDefinitionBody
+from integrations.ontology.nimbus import audit
 from .domain import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
@@ -28,6 +31,17 @@ router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
 
 def view(row: AuditTotalDefinition) -> dict[str, object]:
     return serialize_definition(row)
+
+
+def definition_fingerprint(configuration: dict) -> str:
+    """Hash canonical definition data for an audit event without copying full metadata."""
+    serialized = json.dumps(
+        configuration,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
 
 
 def _is_duplicate_total_revision(exc: IntegrityError) -> bool:
@@ -134,6 +148,19 @@ async def create_definition(
         updated_by=user["user"] or "ontology.user",
     )
     db.add(row)
+    audit(
+        db,
+        "TOTAL_DEFINITION_CREATED",
+        None,
+        "AuditTotalDefinition",
+        row.id,
+        f"Created total definition {row.name} revision {row.revision}",
+        actor=row.updated_by,
+        after={
+            "revision": row.revision,
+            "configuration_hash": definition_fingerprint(body.model_dump(exclude={"revision"})),
+        },
+    )
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -217,6 +244,21 @@ async def update_definition(
         updated_by=user["user"] or "ontology.user",
     )
     db.add(row)
+    audit(
+        db,
+        "TOTAL_DEFINITION_REVISED",
+        None,
+        "AuditTotalDefinition",
+        row.id,
+        f"Revised total definition {row.name} from revision {current.revision} to {row.revision}",
+        actor=row.updated_by,
+        after={
+            "previous_definition_id": current.id,
+            "previous_revision": current.revision,
+            "revision": row.revision,
+            "configuration_hash": definition_fingerprint({"name": row.name, **payload}),
+        },
+    )
     try:
         await db.commit()
     except IntegrityError as exc:
