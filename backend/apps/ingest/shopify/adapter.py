@@ -10,12 +10,14 @@ import json
 import math
 import os
 import re
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
+from urllib.parse import parse_qs, urlsplit
 
 import aiohttp
+from multidict import CIMultiDict
 
 from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
 
@@ -44,6 +46,7 @@ def safe_failure_message(error: Exception) -> str:
             r"Shopify feed exceeds the [\d,]+-byte delivery limit",
             r"Shopify pagination exceeded the [\d,]+-page limit",
             r"Shopify returned a repeated pagination cursor",
+            r"Shopify returned an invalid pagination link",
             r"Shopify returned an invalid JSON response",
             r"Shopify returned an invalid (shop|locations|products|orders|refunds|transactions) response",
             r"Status \d+ after \d+ attempts",
@@ -94,12 +97,13 @@ class _ShopifyPagination:
         self._seen_cursors: set[str] = set()
         self._pages_fetched = 0
 
-    def next_params(self, headers: dict, params: dict) -> dict | None:
+    def next_params(self, headers: Mapping[str, str], params: dict) -> dict | None:
         self._pages_fetched += 1
         if self._pages_fetched > MAX_SHOPIFY_PAGES:
             raise ShopifyAPIError(f"Shopify pagination exceeded the {MAX_SHOPIFY_PAGES}-page limit")
 
-        page_info = _next_page_info(headers.get("Link", ""))
+        link_headers = CIMultiDict(headers).getall("Link", [])
+        page_info = _next_page_info(", ".join(link_headers))
         if not page_info:
             return None
         if page_info in self._seen_cursors:
@@ -178,7 +182,7 @@ class ShopifyAdapter:
 
     async def _request_full(
         self, method: str, endpoint: str, params: dict = None
-    ) -> tuple[dict, dict]:
+    ) -> tuple[dict, CIMultiDict[str]]:
         """Make an authenticated request with retries. Returns (json body, response headers)."""
         url = f"{self.base_url}{endpoint}"
         session = await self._get_session()
@@ -202,7 +206,7 @@ class ShopifyAdapter:
                     if resp.status >= 400:
                         raise ShopifyAPIError(f"Shopify API returned HTTP {resp.status}")
 
-                    return await _read_response_json(resp), dict(resp.headers)
+                    return await _read_response_json(resp), CIMultiDict(resp.headers)
             except (TimeoutError, aiohttp.ClientError) as e:
                 last_error = safe_failure_message(e)
                 if not last:
@@ -330,13 +334,35 @@ def verify_webhook_signature(secret: str | None, body: bytes, signature: str) ->
 
 
 def _next_page_info(link_header: str) -> str | None:
-    """Extract page_info of the rel="next" link from a Link header."""
-    for part in link_header.split(","):
-        if 'rel="next"' in part:
-            m = re.search(r"[?&]page_info=([^&>]+)", part)
-            if m:
-                return m.group(1)
-    return None
+    """Extract one decoded next cursor, rejecting ambiguous or malformed links."""
+    if not link_header.strip():
+        return None
+    next_cursor = None
+    for part in re.split(r",(?=\s*<)", link_header):
+        link = re.fullmatch(r"\s*<([^>]*)>(.*)", part)
+        if link is None:
+            raise ShopifyAPIError("Shopify returned an invalid pagination link")
+        relations = re.findall(
+            r'(?:^|;)\s*rel\s*=\s*(?:"([^"]*)"|([^;\s]+))\s*(?=;|$)',
+            link.group(2),
+            flags=re.IGNORECASE,
+        )
+        if len(relations) != 1:
+            raise ShopifyAPIError("Shopify returned an invalid pagination link")
+        relation = (relations[0][0] or relations[0][1]).lower().split()
+        if "next" not in relation:
+            continue
+        try:
+            query = urlsplit(link.group(1)).query
+            if re.search(r"%(?![0-9a-fA-F]{2})", query):
+                raise ValueError("invalid percent encoding")
+            cursors = parse_qs(query, keep_blank_values=True, errors="strict").get("page_info", [])
+        except (UnicodeError, ValueError) as exc:
+            raise ShopifyAPIError("Shopify returned an invalid pagination link") from exc
+        if next_cursor is not None or len(cursors) != 1 or not cursors[0]:
+            raise ShopifyAPIError("Shopify returned an invalid pagination link")
+        next_cursor = cursors[0]
+    return next_cursor
 
 
 async def fetch_shopify_feed(

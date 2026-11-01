@@ -236,6 +236,56 @@ def test_failed_fetch_discards_stage_without_changing_live_references(monkeypatc
     run(go())
 
 
+def test_invalid_next_link_discards_partial_catalog_without_changing_live_references(monkeypatch):
+    class MalformedCatalog(CatalogAdapter):
+        async def fetch_products(self):
+            adapter = shopify_adapter.ShopifyAdapter(require_credentials=False)
+
+            async def request_full(*_args, **_kwargs):
+                return (
+                    {
+                        "products": [
+                            {
+                                "id": 10,
+                                "title": "Partial",
+                                "variants": [{"id": 101, "sku": "SKU-1"}],
+                            }
+                        ]
+                    },
+                    {"link": '<https://shop.test/products.json?limit=250>; rel="next"'},
+                )
+
+            adapter._request_full = request_full
+            async for product in adapter.fetch_products():
+                yield product
+
+    async def go():
+        monkeypatch.setattr(reference_sync, "STAGE_BATCH_SIZE", 1)
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        _engines.append(engine)
+        Session = await make_session(engine)
+        async with Session() as db:
+            db.add(
+                FoundationReference(
+                    id="old",
+                    category="Item",
+                    code="SKU-1",
+                    name="Original",
+                    active=True,
+                    attributes={"source": "Shopify"},
+                )
+            )
+            await db.commit()
+            with pytest.raises(shopify_adapter.ShopifyAPIError, match="invalid pagination link"):
+                await reference_sync.stage(MalformedCatalog(), db, "invalid-sync", "SHOPIFY-MAIN")
+
+            live = await db.get(FoundationReference, "old")
+            assert live.name == "Original" and live.active
+            assert (await db.execute(select(ShopifyReferenceStage))).scalars().all() == []
+
+    run(go())
+
+
 def test_stage_cleanup_error_does_not_mask_original_failure(monkeypatch):
     class BrokenCatalog(CatalogAdapter):
         async def fetch_shop(self):

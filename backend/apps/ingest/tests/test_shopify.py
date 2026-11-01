@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from apps.ingest.shopify import adapter as sa
 from apps.ingest.shopify import ingest as si
+from multidict import CIMultiDict
 
 
 def test_next_page_info_parses_link_header():
@@ -18,6 +19,80 @@ def test_next_page_info_parses_link_header():
     )
     assert sa._next_page_info(link) == "next2"
     assert sa._next_page_info("") is None
+
+
+def test_next_page_info_decodes_the_cursor_and_accepts_unquoted_relations():
+    link = "<https://s/orders.json?page_info=a%2Bb%2Fc%3D>; rel=next"
+    assert sa._next_page_info(link) == "a+b/c="
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        '<https://s/orders.json?limit=250>; rel="next"',
+        '<https://s/orders.json?page_info=>; rel="next"',
+        '<https://s/orders.json?page_info=a&page_info=b>; rel="next"',
+        '<https://s/orders.json?page_info=%ZZ>; rel="next"',
+        '<https://s/orders.json?page_info=%FF>; rel="next"',
+        '<https://s/orders.json?page_info=a>; rel="next", '
+        '<https://s/orders.json?page_info=b>; rel="next"',
+        "<https://s/orders.json?page_info=a>; rel=",
+    ],
+)
+def test_next_page_info_rejects_invalid_or_ambiguous_links(link):
+    with pytest.raises(sa.ShopifyAPIError, match="invalid pagination link"):
+        sa._next_page_info(link)
+
+
+def test_shopify_pagination_reads_case_insensitive_multiple_link_headers():
+    headers = CIMultiDict(
+        [
+            ("link", '<https://s/orders.json?page_info=old>; rel="previous"'),
+            ("LINK", '<https://s/orders.json?page_info=a%2Bb%2Fc%3D>; rel="next"'),
+        ]
+    )
+    params = sa._ShopifyPagination().next_params(headers, {"limit": 250, "fields": "id"})
+    assert params == {"limit": 250, "fields": "id", "page_info": "a+b/c="}
+
+
+def test_request_preserves_repeated_case_insensitive_link_headers(monkeypatch):
+    class Content:
+        async def iter_chunked(self, _chunk_size):
+            yield b'{"locations": []}'
+
+    class Response:
+        status = 200
+        content_length = None
+        content = Content()
+        headers = CIMultiDict(
+            [
+                ("link", '<https://s/locations.json?page_info=old>; rel="previous"'),
+                ("link", '<https://s/locations.json?page_info=new>; rel="next"'),
+            ]
+        )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Session:
+        def request(self, *_args, **_kwargs):
+            return Response()
+
+    async def get_session():
+        return Session()
+
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+    monkeypatch.setattr(adapter, "_get_session", get_session)
+    data, headers = asyncio.run(adapter._request_full("GET", "/locations.json"))
+    assert data == {"locations": []}
+    assert len(headers.getall("LINK")) == 2
+    assert (
+        sa._ShopifyPagination().next_params(headers, {"limit": 250, "fields": "id"})["page_info"]
+        == "new"
+    )
 
 
 def test_shopify_response_json_is_read_within_byte_limit(monkeypatch):

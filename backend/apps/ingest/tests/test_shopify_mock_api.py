@@ -6,6 +6,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from apps.ingest.shopify import adapter as sa
+from multidict import CIMultiDict
 
 
 def make_app(state):
@@ -96,6 +97,42 @@ def test_feed_paginates_retries_and_fetches_refunds_only_when_needed(monkeypatch
     assert set(state["auth"]) == {"tok"}
     refund = recs[3]
     assert refund["amount"] == "4.00" and refund["payment_reference"] == "3"
+
+
+def test_adapter_follows_lowercase_repeated_links_with_encoded_cursor():
+    calls = []
+
+    async def locations(request):
+        cursor = request.query.get("page_info")
+        calls.append(cursor)
+        if cursor is not None:
+            assert cursor == "a+b/c="
+            return web.json_response({"locations": [{"id": 2}]})
+        url = f"{request.scheme}://{request.host}/admin/api/2024-01/locations.json"
+        headers = CIMultiDict(
+            [
+                ("link", f'<{url}?page_info=old>; rel="previous"'),
+                ("link", f'<{url}?page_info=a%2Bb%2Fc%3D>; rel="next"'),
+            ]
+        )
+        return web.json_response({"locations": [{"id": 1}]}, headers=headers)
+
+    async def go():
+        app = web.Application()
+        app.router.add_get("/admin/api/2024-01/locations.json", locations)
+        server = TestServer(app)
+        await server.start_server()
+        adapter = sa.ShopifyAdapter(
+            store_url=f"http://{server.host}:{server.port}", access_token="x"
+        )
+        try:
+            return [location async for location in adapter.fetch_locations()]
+        finally:
+            await adapter.close()
+            await server.close()
+
+    assert asyncio.run(go()) == [{"id": 1}, {"id": 2}]
+    assert calls == [None, "a+b/c="]
 
 
 def test_api_error_propagates():
