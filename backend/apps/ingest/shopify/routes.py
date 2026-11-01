@@ -205,7 +205,8 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     ):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
-    if not (await source_settings.load(db))["Shopify"]["enabled"]:
+    setting = await source_settings.lock_source_settings(db, "Shopify", shared=True)
+    if not source_settings.effective("Shopify", setting)["enabled"]:
         # Acknowledge so Shopify does not keep retrying (and eventually drop the webhook), but ingest nothing.
         return {"status": "ignored", "reason": "Shopify is switched off in Nimbus", "topic": topic}
 

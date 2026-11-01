@@ -212,3 +212,5 @@ def test_middleware_lets_the_right_roles_through_and_keeps_auth_rules(monkeypatc
         assert status == 200 and reached, (role, path)
     assert _call(monkeypatch, None, "/api/cases")[0] == 401  # authentication still comes first
     assert _call(monkeypatch, None, "/api/health")[0] == 200  # health stays public
+    assert _call(monkeypatch, None, "/api/ingest/shopify/webhook", "POST")[0] == 200
+    assert _call(monkeypatch, None, "/api/ingest/shopify/webhook/extra", "POST")[0] == 401

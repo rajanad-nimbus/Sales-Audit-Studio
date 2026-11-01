@@ -17,7 +17,7 @@ async def ontology_authentication(
     """Require an Ontology Studio identity and enforce API/store permissions."""
     if (
         not request.url.path.startswith("/api/")
-        or request.url.path in {"/api/health", "/api/exports/_sink"}
+        or request.url.path in {"/api/health", "/api/exports/_sink", "/api/ingest/shopify/webhook"}
         or request.method == "OPTIONS"
     ):
         return await call_next(request)

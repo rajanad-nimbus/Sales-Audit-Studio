@@ -581,6 +581,15 @@ def test_webhook_signature_and_ingest(monkeypatch):
     ).encode()
     sig = base64.b64encode(hmac.new(b"s3cret", body, hashlib.sha256).digest()).decode()
 
+    lock_calls = []
+    original_lock = routes_shopify.source_settings.lock_source_settings
+
+    async def observe_source_lock(db, source, *, shared=False):
+        lock_calls.append((source, shared))
+        return await original_lock(db, source, shared=shared)
+
+    monkeypatch.setattr(routes_shopify.source_settings, "lock_source_settings", observe_source_lock)
+
     async def go():
         Session = await make_session()
         async with webhook_client(Session) as c:
@@ -609,6 +618,7 @@ def test_webhook_signature_and_ingest(monkeypatch):
                 headers={"X-Shopify-Hmac-SHA256": sig, "X-Shopify-Topic": "products/update"},
             )
             assert ign.json()["status"] == "ignored"
+        assert lock_calls == [("Shopify", True)] * 3
         async with Session() as db:
             rows = (await db.execute(select(SourceRecord))).scalars().all()
             assert len(rows) == 1
