@@ -20,3 +20,26 @@ def test_reference_request_trims_required_text_before_persistence():
     body = ReferenceBody(category=" Store ", code=" S1 ", name=" Store 1 ")
 
     assert (body.category, body.code, body.name) == ("Store", "S1", "Store 1")
+
+
+@pytest.mark.parametrize("traits", [
+    "North",
+    ["North", "  "],
+    ["North", 1],
+    ["North"] * 101,
+])
+def test_store_reference_rejects_invalid_location_traits(traits):
+    with pytest.raises(ValidationError, match="location_traits"):
+        ReferenceBody(
+            category="Store", code="S1", name="Store 1",
+            attributes={"location_traits": traits},
+        )
+
+
+def test_store_reference_normalizes_location_traits():
+    body = ReferenceBody(
+        category="Store", code="S1", name="Store 1",
+        attributes={"location_traits": [" North ", "Mall"]},
+    )
+
+    assert body.attributes["location_traits"] == ["North", "Mall"]

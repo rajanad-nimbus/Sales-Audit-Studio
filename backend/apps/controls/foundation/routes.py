@@ -1,7 +1,7 @@
 """Retail foundation data used by Sales Audit controls."""
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ class ReferenceBody(BaseModel):
     code: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=255)
     active: bool = True
-    attributes: dict = {}
+    attributes: dict = Field(default_factory=dict)
 
     @field_validator("category", "code", "name", mode="before")
     @classmethod
@@ -32,6 +32,22 @@ class ReferenceBody(BaseModel):
         if not normalized:
             raise ValueError("Value cannot be blank")
         return normalized
+
+    @model_validator(mode="after")
+    def normalize_store_location_traits(self):
+        """Keep Store traits in the canonical shape consumed by total calculation."""
+        if self.category != "Store" or "location_traits" not in self.attributes:
+            return self
+        traits = self.attributes["location_traits"]
+        if not isinstance(traits, list) or len(traits) > 100:
+            raise ValueError("Store location_traits must be a list of at most 100 nonblank strings")
+        normalized_traits = []
+        for trait in traits:
+            if not isinstance(trait, str) or not trait.strip():
+                raise ValueError("Store location_traits must contain only nonblank strings")
+            normalized_traits.append(trait.strip())
+        self.attributes = {**self.attributes, "location_traits": normalized_traits}
+        return self
 
 def view(row: FoundationReference):
     return {"id": row.id, "category": row.category, "code": row.code, "name": row.name,
