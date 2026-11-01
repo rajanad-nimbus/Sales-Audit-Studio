@@ -36,15 +36,19 @@ async def run_migrations_online() -> None:
             locked = connection.dialect.name == "postgresql"
             try:
                 if locked:
-                    await connection.execute(text("SELECT pg_advisory_lock(:key1, :key2)"),
-                                             {"key1": MIGRATION_LOCK_KEYS[0], "key2": MIGRATION_LOCK_KEYS[1]})
+                    await connection.execute(
+                        text("SELECT pg_advisory_lock(:key1, :key2)"),
+                        {"key1": MIGRATION_LOCK_KEYS[0], "key2": MIGRATION_LOCK_KEYS[1]},
+                    )
                     await connection.commit()
                 await connection.run_sync(do_run)
             finally:
                 if locked:
                     try:
-                        await connection.execute(text("SELECT pg_advisory_unlock(:key1, :key2)"),
-                                                 {"key1": MIGRATION_LOCK_KEYS[0], "key2": MIGRATION_LOCK_KEYS[1]})
+                        await connection.execute(
+                            text("SELECT pg_advisory_unlock(:key1, :key2)"),
+                            {"key1": MIGRATION_LOCK_KEYS[0], "key2": MIGRATION_LOCK_KEYS[1]},
+                        )
                         await connection.commit()
                     except Exception:
                         logger.exception("Could not release the PostgreSQL migration advisory lock")

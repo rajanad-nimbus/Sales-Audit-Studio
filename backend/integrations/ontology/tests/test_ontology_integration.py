@@ -1,4 +1,5 @@
 """Use Ontology Studio's actual envelope, release pins and cursor protocol."""
+
 import asyncio
 
 import httpx
@@ -6,8 +7,14 @@ import pytest
 
 from integrations.ontology.ontology_integration import RULE_CODES, OntologyIntegration
 
-META = {"workspaceId": 7, "releaseId": 12, "approved": True, "version": "1.0",
-        "contentHash": "abc", "releaseHash": "abc"}
+META = {
+    "workspaceId": 7,
+    "releaseId": 12,
+    "approved": True,
+    "version": "1.0",
+    "contentHash": "abc",
+    "releaseHash": "abc",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -18,14 +25,19 @@ def configured(monkeypatch):
 
 def response(request, meta=None, rows=None, cursor=None):
     if rows is None:
-        rows = ([{"ruleCode": code, "expression": "governed control"} for code in sorted(RULE_CODES)]
-                if request.url.path.endswith("business-rules") else [])
-    return httpx.Response(200, json={"ontology": meta or META, "data": rows,
-                                     "pagination": {"nextCursor": cursor}})
+        rows = (
+            [{"ruleCode": code, "expression": "governed control"} for code in sorted(RULE_CODES)]
+            if request.url.path.endswith("business-rules")
+            else []
+        )
+    return httpx.Response(
+        200, json={"ontology": meta or META, "data": rows, "pagination": {"nextCursor": cursor}}
+    )
 
 
 def test_complete_context_and_pagination_are_pinned():
     calls = []
+
     def handle(request):
         calls.append(request)
         assert request.headers["authorization"] == "Bearer test-key"
@@ -35,6 +47,7 @@ def test_complete_context_and_pagination_are_pinned():
         if request.url.path.endswith("business-rules") and "cursor" not in request.url.params:
             return response(request, rows=[], cursor="next")
         return response(request)
+
     async def go():
         integration = OntologyIntegration()
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
@@ -44,10 +57,13 @@ def test_complete_context_and_pagination_are_pinned():
         copy = integration.context()
         copy["ontology"]["releaseId"] = 99
         assert integration.context()["ontology"]["releaseId"] == 12
+
     asyncio.run(go())
 
 
-@pytest.mark.parametrize("failure", ["unapproved", "mixed", "missing", "cursor", "revoked", "malformed"])
+@pytest.mark.parametrize(
+    "failure", ["unapproved", "mixed", "missing", "cursor", "revoked", "malformed"]
+)
 def test_invalid_refresh_discards_previous_active_context(failure):
     def bad(request):
         if failure == "revoked":
@@ -63,6 +79,7 @@ def test_invalid_refresh_discards_previous_active_context(failure):
         if failure == "cursor":
             return response(request, cursor="repeated")
         return response(request)
+
     async def go():
         integration = OntologyIntegration()
         async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
@@ -76,6 +93,7 @@ def test_invalid_refresh_discards_previous_active_context(failure):
         assert status["last_success_at"] is not None
         assert status["last_error"]
         assert not integration.context()["definitions"]
+
     asyncio.run(go())
 
 
@@ -94,7 +112,9 @@ def test_oversized_ontology_page_is_rejected_before_full_buffering(monkeypatch, 
             pass
 
     async def go():
-        monkeypatch.setattr("integrations.ontology.ontology_integration.MAX_ONTOLOGY_RESPONSE_BYTES", 16)
+        monkeypatch.setattr(
+            "integrations.ontology.ontology_integration.MAX_ONTOLOGY_RESPONSE_BYTES", 16
+        )
 
         def oversized(_request):
             return httpx.Response(
@@ -122,6 +142,7 @@ def test_unconfigured_is_explicit_fallback(monkeypatch):
 
 def test_database_bindings_cover_audit_and_case_relationships():
     from integrations.ontology.ontology_bindings import database_bindings
+
     context = {"definitions": {"entities": [{"id": 2, "name": "SalesAuditCase"}]}}
     bindings = {b["model"]: b for b in database_bindings(context)}
     assert bindings["Case"]["ontology_entity_id"] == 2
@@ -135,19 +156,37 @@ def test_audit_preserves_pinned_run_context():
     from types import SimpleNamespace
 
     from integrations.ontology import nimbus
+
     events = []
     context = {"source": "ontology-integration", "ontology": META}
-    nimbus.audit(SimpleNamespace(add=events.append), "AGENT_RUN", "c1", "Case", "c1",
-                 "run", actor="investigation-agent", after={"ontology_context": context, "result": None})
+    nimbus.audit(
+        SimpleNamespace(add=events.append),
+        "AGENT_RUN",
+        "c1",
+        "Case",
+        "c1",
+        "run",
+        actor="investigation-agent",
+        after={"ontology_context": context, "result": None},
+    )
     assert events[0].after_state["ontology_context"] == context
     assert "result" in events[0].after_state
 
 
 def test_prompt_includes_governed_rules_without_changing_tool_permissions():
     from apps.agents.investigator import ontology_prompt
+
     assert ontology_prompt(None) == ""
-    prompt = ontology_prompt({"ontology": META, "definitions": {
-        "business-rules": [{"ruleCode": "NSA-EVIDENCE-REQUIRED", "expression": "Require evidence"}],
-        "workflows": [{"code": "NSA-CASE-LIFECYCLE"}]}})
+    prompt = ontology_prompt(
+        {
+            "ontology": META,
+            "definitions": {
+                "business-rules": [
+                    {"ruleCode": "NSA-EVIDENCE-REQUIRED", "expression": "Require evidence"}
+                ],
+                "workflows": [{"code": "NSA-CASE-LIFECYCLE"}],
+            },
+        }
+    )
     assert "Require evidence" in prompt and "NSA-CASE-LIFECYCLE" in prompt
     assert "never overrides tool scope" in prompt

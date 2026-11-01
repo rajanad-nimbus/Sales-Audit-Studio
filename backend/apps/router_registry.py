@@ -27,10 +27,28 @@ from apps.totals.routes import router as totals_router
 from apps.transactions.routes import router as transactions_router
 
 ROUTERS = (
-    ingest_router, action_router, batch_router, audit_router, development_router, exports_router,
-    store_day_router, foundation_router, cash_router, cases_router, corrections_router,
-    transactions_router, gl_router, totals_router, rules_router, operations_router,
-    shopify_router, agent_router, assistant_router, ontology_router, security_router, system_router,
+    ingest_router,
+    action_router,
+    batch_router,
+    audit_router,
+    development_router,
+    exports_router,
+    store_day_router,
+    foundation_router,
+    cash_router,
+    cases_router,
+    corrections_router,
+    transactions_router,
+    gl_router,
+    totals_router,
+    rules_router,
+    operations_router,
+    shopify_router,
+    agent_router,
+    assistant_router,
+    ontology_router,
+    security_router,
+    system_router,
 )
 
 

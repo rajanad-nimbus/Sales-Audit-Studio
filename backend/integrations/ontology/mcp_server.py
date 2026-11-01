@@ -1,4 +1,5 @@
 """MCP server exposing the Nimbus ontology to agents. Run: python mcp_server.py (stdio)."""
+
 from mcp.server.mcpserver import MCPServer
 
 from integrations.ontology import ontology
@@ -9,8 +10,13 @@ mcp = MCPServer("nimbus-ontology")
 @mcp.tool()
 def list_exception_types() -> dict:
     """List exception types with their label and family."""
-    return {"version": ontology.ONTOLOGY_VERSION,
-            "types": {k: {"label": v["label"], "family": v["family"]} for k, v in ontology.EXCEPTION_TYPES.items()}}
+    return {
+        "version": ontology.ONTOLOGY_VERSION,
+        "types": {
+            k: {"label": v["label"], "family": v["family"]}
+            for k, v in ontology.EXCEPTION_TYPES.items()
+        },
+    }
 
 
 @mcp.tool()

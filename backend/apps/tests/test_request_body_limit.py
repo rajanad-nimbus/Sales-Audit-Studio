@@ -102,7 +102,9 @@ def test_request_body_limit_replays_drained_body_to_handler():
         await middleware({"type": "http", "method": "POST", "headers": []}, receive, send)
 
         assert received == [{"type": "http.request", "body": b"1234", "more_body": False}]
-        assert [message["status"] for message in sent if message["type"] == "http.response.start"] == [200]
+        assert [
+            message["status"] for message in sent if message["type"] == "http.response.start"
+        ] == [200]
 
     asyncio.run(run())
 
@@ -149,7 +151,9 @@ def test_request_body_limit_checks_unread_body_before_response_start():
 
         await middleware({"type": "http", "method": "POST", "headers": []}, receive, send)
 
-        assert [message["status"] for message in sent if message["type"] == "http.response.start"] == [413]
+        assert [
+            message["status"] for message in sent if message["type"] == "http.response.start"
+        ] == [413]
 
     asyncio.run(run())
 
@@ -184,7 +188,9 @@ def test_request_body_limit_rejects_invalid_content_length_and_handles_non_http_
         await middleware({"type": "websocket"}, receive, send)
 
         assert requests == ["websocket"]
-        assert [message["status"] for message in sent if message["type"] == "http.response.start"] == [400] * 4
+        assert [
+            message["status"] for message in sent if message["type"] == "http.response.start"
+        ] == [400] * 4
 
     asyncio.run(run())
 

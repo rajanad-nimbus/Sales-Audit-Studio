@@ -4,6 +4,7 @@ The remote API is advisory to availability, never to safety: if it is not
 configured, unavailable, or returns an incomplete approved release, Nimbus
 continues with its built-in deterministic controls.
 """
+
 import asyncio
 import json
 import os
@@ -11,14 +12,27 @@ from datetime import UTC, datetime
 
 import httpx
 
-RULE_CODES = frozenset({
-    "NSA-EVIDENCE-REQUIRED", "NSA-APPROVAL-BOUND", "NSA-VALIDATION-CLOSE",
-    "NSA-FINANCIAL-DETERMINISM", "NSA-SOURCE-LINEAGE",
-    "NSA-TRANSACTION-AMOUNT-SIGN", "NSA-TRANSACTION-CURRENCY", "NSA-SOURCE-UNIQUE",
-    "NSA-POS-CONTROL-COMPLETE", "NSA-SETTLEMENT-MATCH", "NSA-REFUND-CONFIRMATION",
-    "NSA-BANK-RECONCILIATION", "NSA-GL-RECONCILIATION", "NSA-STALE-EVIDENCE",
-    "NSA-ACTION-IDEMPOTENCY", "NSA-CLOSE-ELIGIBILITY", "NSA-APPROVAL-AUTHORITY",
-})
+RULE_CODES = frozenset(
+    {
+        "NSA-EVIDENCE-REQUIRED",
+        "NSA-APPROVAL-BOUND",
+        "NSA-VALIDATION-CLOSE",
+        "NSA-FINANCIAL-DETERMINISM",
+        "NSA-SOURCE-LINEAGE",
+        "NSA-TRANSACTION-AMOUNT-SIGN",
+        "NSA-TRANSACTION-CURRENCY",
+        "NSA-SOURCE-UNIQUE",
+        "NSA-POS-CONTROL-COMPLETE",
+        "NSA-SETTLEMENT-MATCH",
+        "NSA-REFUND-CONFIRMATION",
+        "NSA-BANK-RECONCILIATION",
+        "NSA-GL-RECONCILIATION",
+        "NSA-STALE-EVIDENCE",
+        "NSA-ACTION-IDEMPOTENCY",
+        "NSA-CLOSE-ELIGIBILITY",
+        "NSA-APPROVAL-AUTHORITY",
+    }
+)
 MAX_ONTOLOGY_RESPONSE_BYTES = 2 * 1024 * 1024
 ONTOLOGY_RESPONSE_CHUNK_BYTES = 64 * 1024
 
@@ -58,6 +72,7 @@ class OntologyIntegration:
     Definitions are context, never executable code or a substitute for local gates.
     A failed refresh invalidates the active view, including revoked credentials.
     """
+
     SECTIONS = ("business-rules", "entities", "relationships", "metrics", "glossary", "workflows")
 
     def __init__(self):
@@ -74,6 +89,7 @@ class OntologyIntegration:
 
     def context(self) -> dict:
         from copy import deepcopy
+
         if not self.configured or self._snapshot is None:
             return {"source": "built-in-fallback", "ontology": None, "definitions": {}}
         return deepcopy(self._snapshot)
@@ -105,9 +121,14 @@ class OntologyIntegration:
         if not isinstance(payload, dict):
             raise ValueError("Expected ontology envelope")
         meta = payload.get("ontology")
-        if (not isinstance(meta, dict) or meta.get("approved") is not True
-                or not meta.get("workspaceId") or not meta.get("releaseId")
-                or not meta.get("contentHash") or meta.get("releaseHash") != meta["contentHash"]):
+        if (
+            not isinstance(meta, dict)
+            or meta.get("approved") is not True
+            or not meta.get("workspaceId")
+            or not meta.get("releaseId")
+            or not meta.get("contentHash")
+            or meta.get("releaseHash") != meta["contentHash"]
+        ):
             raise ValueError("An unchanged approved release is required")
         return meta
 
@@ -116,8 +137,11 @@ class OntologyIntegration:
             self.last_checked_at = datetime.now(UTC)
             if not self.configured:
                 self._snapshot, self.rule_codes = None, frozenset()
-                missing = [name for name in ("NIMBUS_ONTOLOGY_API_URL", "NIMBUS_ONTOLOGY_API_KEY")
-                           if not os.getenv(name)]
+                missing = [
+                    name
+                    for name in ("NIMBUS_ONTOLOGY_API_URL", "NIMBUS_ONTOLOGY_API_KEY")
+                    if not os.getenv(name)
+                ]
                 self.last_error = "Missing configuration: " + ", ".join(missing)
                 return self.rule_codes
             try:
@@ -126,8 +150,11 @@ class OntologyIntegration:
                         snapshot = await asyncio.wait_for(self._read(owned), timeout=30)
                 else:
                     snapshot = await asyncio.wait_for(self._read(client), timeout=30)
-                codes = frozenset(r.get("ruleCode") for r in snapshot["definitions"]["business-rules"]
-                                  if r.get("ruleCode") in RULE_CODES)
+                codes = frozenset(
+                    r.get("ruleCode")
+                    for r in snapshot["definitions"]["business-rules"]
+                    if r.get("ruleCode") in RULE_CODES
+                )
                 if not RULE_CODES <= codes:
                     raise ValueError("Approved release is missing required Sales Audit controls")
                 self._snapshot, self.rule_codes = snapshot, codes
@@ -156,8 +183,10 @@ class OntologyIntegration:
                     response.raise_for_status()
                     payload = await read_json_response(response)
                 meta = self._release(payload)
-                if release and any(meta.get(k) != release.get(k) for k in
-                                   ("workspaceId", "releaseId", "contentHash", "releaseHash", "version")):
+                if release and any(
+                    meta.get(k) != release.get(k)
+                    for k in ("workspaceId", "releaseId", "contentHash", "releaseHash", "version")
+                ):
                     raise ValueError("Ontology release changed during retrieval")
                 release = release or meta
                 page = payload.get("data")

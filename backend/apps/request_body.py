@@ -63,7 +63,11 @@ class RequestBodyLimitMiddleware:
     def _declared_content_length(scope) -> tuple[int | None, str | None]:
         try:
             value = _content_length(
-                [header for name, header in scope.get("headers", []) if name.lower() == b"content-length"]
+                [
+                    header
+                    for name, header in scope.get("headers", [])
+                    if name.lower() == b"content-length"
+                ]
             )
         except ValueError as exc:
             return None, str(exc)
@@ -131,11 +135,19 @@ class RequestBodyLimitMiddleware:
         status: int = 413,
         detail: str | None = None,
     ) -> None:
-        body = json.dumps({"detail": detail or f"Request body exceeds the {self.max_bytes:,}-byte limit"}).encode("utf-8")
-        await send({"type": "http.response.start", "status": status, "headers": [
-            (b"content-type", b"application/json"),
-            (b"content-length", str(len(body)).encode("ascii")),
-        ]})
+        body = json.dumps(
+            {"detail": detail or f"Request body exceeds the {self.max_bytes:,}-byte limit"}
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": body})
 
 
@@ -150,13 +162,17 @@ async def read_limited_body(request: Request, max_bytes: int) -> bytes:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if content_length is not None and content_length > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Request body exceeds the {max_bytes:,}-byte limit")
+        raise HTTPException(
+            status_code=413, detail=f"Request body exceeds the {max_bytes:,}-byte limit"
+        )
 
     chunks = []
     body_size = 0
     async for chunk in request.stream():
         body_size += len(chunk)
         if body_size > max_bytes:
-            raise HTTPException(status_code=413, detail=f"Request body exceeds the {max_bytes:,}-byte limit")
+            raise HTTPException(
+                status_code=413, detail=f"Request body exceeds the {max_bytes:,}-byte limit"
+            )
         chunks.append(chunk)
     return b"".join(chunks)
