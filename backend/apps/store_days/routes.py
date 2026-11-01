@@ -1,6 +1,7 @@
 """Store-day lifecycle and versioned sales-audit totals."""
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Annotated
@@ -36,6 +37,14 @@ router = APIRouter(prefix="/api/store-days", tags=["Store days"])
 REQUIRED_COMPARISON_TOTALS = {"Processor to Bank Variance", "POS to GL Variance"}
 OPTIONAL_COMPARISON_TOTALS = {"POS Control Declared"}
 MAX_STORE_DAY_HISTORY_ITEMS = 200
+
+
+@dataclass(slots=True)
+class RuleEvaluation:
+    """Rules selected and validated before persisting a totals version."""
+
+    rules: list[ConfiguredAuditRule]
+    observations: dict[str, Decimal]
 
 
 def comparison_blockers(day: StoreDay, totals: list[AuditTotal]) -> list[str]:
@@ -284,7 +293,7 @@ async def retotal_store_day(store_id: str, business_date: str, db: AsyncSession 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     definition_by_key = add_configured_totals(calculated, definitions, calculation.configured_totals)
 
-    await validate_rule_totals(db, calculated, definitions)
+    rule_evaluation = await prepare_rule_evaluation(db, calculated, definitions, currency)
     day.status, day.audit_version = "Re-totaling", day.audit_version + 1
     for (name, level, dimension), amount in calculated.items():
         definition = definition_by_key.get((name, level, dimension))
@@ -308,7 +317,7 @@ async def retotal_store_day(store_id: str, business_date: str, db: AsyncSession 
     db.add(AuditTotal(id=str(uuid.uuid4()), store_day_id=day.id, audit_version=day.audit_version,
                       total_name="POS to GL Variance", level="Store", calculated_amount=pos_net,
                       declared_amount=gl_net, variance_amount=pos_net - gl_net, currency=currency))
-    await evaluate_configured_rules(db, definitions, calculated, store_id, business_date, currency)
+    await evaluate_configured_rules(db, rule_evaluation, store_id, business_date, currency)
     pending_requests = (await db.execute(select(StoreDayClosureRequest).where(
         StoreDayClosureRequest.store_day_id == day.id, StoreDayClosureRequest.status == "Pending"
     ))).scalars().all()
@@ -337,24 +346,25 @@ def add_configured_totals(calculated, definitions, configured_totals):
     return definition_by_key
 
 
-async def evaluate_configured_rules(db, definitions, calculated, store_id, business_date, currency):
-    """Validate applicable total rules and create cases for newly breached controls."""
+async def prepare_rule_evaluation(db, calculated, definitions, currency: str) -> RuleEvaluation:
+    """Select relevant rules once, validate their targets, and capture store totals."""
     totals_by_name: dict[str, dict[str, Decimal]] = {}
     for (name, level, _dimension), amount in calculated.items():
         level_totals = totals_by_name.setdefault(name, {})
         level_totals[level] = level_totals.get(level, Decimal("0")) + amount
 
+    definitions_by_total = {f"Configured: {item.name}": item for item in definitions}
+    for total_name, definition in definitions_by_total.items():
+        totals_by_name.setdefault(total_name, {}).setdefault(definition.level, Decimal("0"))
     applicable_totals = set(totals_by_name)
     if not applicable_totals:
-        return
-    rules = (await db.execute(
-        select(ConfiguredAuditRule).where(
-            ConfiguredAuditRule.enabled.is_(True),
-            ConfiguredAuditRule.total_name.in_(applicable_totals),
-        ).order_by(ConfiguredAuditRule.id)
-    )).scalars().all()
-    definitions_by_total = {f"Configured: {definition.name}": definition for definition in definitions}
+        return RuleEvaluation(rules=[], observations={})
+    rules = list((await db.execute(select(ConfiguredAuditRule).where(
+        ConfiguredAuditRule.enabled.is_(True),
+        ConfiguredAuditRule.total_name.in_(applicable_totals),
+    ).order_by(ConfiguredAuditRule.id))).scalars())
 
+    observations: dict[str, Decimal] = {}
     for rule in rules:
         if not rule_applies_to_currency(rule, currency):
             continue
@@ -370,40 +380,22 @@ async def evaluate_configured_rules(db, definitions, calculated, store_id, busin
         if rule.threshold_currency is None:
             definition = definitions_by_total.get(rule.total_name)
             if definition is None or definition.aggregation != "Count":
-                continue
-        if abs(observed) <= rule.threshold:
-            continue
-        await create_rule_breach(db, rule, observed, store_id, business_date, currency)
-
-
-async def validate_rule_totals(db, calculated, definitions) -> None:
-    """Reject enabled rules whose calculated total cannot be evaluated at store level."""
-    available_levels: dict[str, set[str]] = {}
-    for name, level, _dimension in calculated:
-        available_levels.setdefault(name, set()).add(level)
-    definitions_by_total = {f"Configured: {item.name}": item for item in definitions}
-    for total_name, definition in definitions_by_total.items():
-        available_levels.setdefault(total_name, set()).add(definition.level)
-    names = set(available_levels)
-    if not names:
-        return
-    rules = (await db.execute(select(ConfiguredAuditRule).where(
-        ConfiguredAuditRule.enabled.is_(True),
-        ConfiguredAuditRule.total_name.in_(names),
-    ))).scalars()
-    for rule in rules:
-        if "Store" not in available_levels[rule.total_name]:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Rule {rule.name} requires a Store-level total",
-            )
-        if rule.threshold_currency is None:
-            definition = definitions_by_total.get(rule.total_name)
-            if definition is None or definition.aggregation != "Count":
                 raise HTTPException(
                     status_code=422,
                     detail=f"Currency-free rule {rule.name} requires a Count total",
                 )
+        observations[rule.id] = observed
+    return RuleEvaluation(rules=rules, observations=observations)
+
+
+async def evaluate_configured_rules(
+    db, evaluation: RuleEvaluation, store_id: str, business_date: str, currency: str,
+) -> None:
+    """Create cases for prevalidated rules whose store totals exceed their thresholds."""
+    for rule in evaluation.rules:
+        observed = evaluation.observations.get(rule.id)
+        if observed is not None and abs(observed) > rule.threshold:
+            await create_rule_breach(db, rule, observed, store_id, business_date, currency)
 
 
 def rule_applies_to_currency(rule, currency: str) -> bool:
