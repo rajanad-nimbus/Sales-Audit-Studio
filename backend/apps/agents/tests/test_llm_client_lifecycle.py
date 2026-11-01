@@ -8,8 +8,9 @@ from apps.agents import investigator, llm
 class FakeAnthropicClient:
     instances = []
 
-    def __init__(self, **_kwargs):
+    def __init__(self, **kwargs):
         self.closed = False
+        self.timeout = kwargs.get("timeout")
         self.messages = SimpleNamespace(create=self.create)
         self.instances.append(self)
 
@@ -72,6 +73,7 @@ def test_chat_and_narration_close_owned_api_clients(monkeypatch):
     asyncio.run(run())
     assert len(FakeAnthropicClient.instances) == 2
     assert all(client.closed for client in FakeAnthropicClient.instances)
+    assert all(client.timeout == llm.CHAT_TIMEOUT_S for client in FakeAnthropicClient.instances)
 
 
 def test_investigator_closes_only_clients_it_creates(monkeypatch):

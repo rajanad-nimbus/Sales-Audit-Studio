@@ -33,7 +33,7 @@ async def narrate(
     try:
         import anthropic
 
-        async with anthropic.AsyncAnthropic(api_key=key) as client:
+        async with anthropic.AsyncAnthropic(api_key=key, timeout=CHAT_TIMEOUT_S) as client:
             msg = await client.messages.create(
                 model=os.getenv("NIMBUS_LLM_MODEL", "claude-sonnet-5-5"),
                 max_tokens=250,
@@ -170,7 +170,7 @@ async def chat(context: dict, history: list[dict], message: str, persona: str = 
             if h.get("role") in ("user", "assistant")
         ]
         msgs.append({"role": "user", "content": message})
-        async with anthropic.AsyncAnthropic(api_key=key) as client:
+        async with anthropic.AsyncAnthropic(api_key=key, timeout=CHAT_TIMEOUT_S) as client:
             r = await client.messages.create(
                 model=os.getenv("NIMBUS_LLM_MODEL", "claude-sonnet-5-5"),
                 max_tokens=600,
