@@ -4,6 +4,7 @@ A source record may carry the detail. It is validated when the record arrives (a
 record, like any other bad field) and checked against the header amount. A detail block that does not add up is kept
 and flagged Unbalanced, because that is an audit finding and not a reason to hide the sale.
 """
+
 from __future__ import annotations
 
 import random
@@ -76,12 +77,10 @@ def money(value, field: str, allow_zero=True) -> Decimal:
 
 def has_detail(rec: dict) -> bool:
     supplied_detail = any(
-        key in rec and rec[key] is not None and rec[key] != []
-        for key in DETAIL_KEYS
+        key in rec and rec[key] is not None and rec[key] != [] for key in DETAIL_KEYS
     )
     supplied_return_metadata = any(
-        key in rec and rec[key] is not None
-        for key in ("original_reference", "return_reason")
+        key in rec and rec[key] is not None for key in ("original_reference", "return_reason")
     )
     return supplied_detail or supplied_return_metadata
 
@@ -92,10 +91,13 @@ def extract(rec: dict, sign: int) -> dict | None:
         return None
     validate_detail_collections(rec)
     lines = [parse_line(line, index, sign) for index, line in enumerate(rec.get("lines") or [], 1)]
-    discounts = [parse_discount(item, index, sign, len(lines))
-                 for index, item in enumerate(rec.get("discounts") or [], 1)]
-    tenders = [parse_tender(item, index, sign)
-               for index, item in enumerate(rec.get("tenders") or [], 1)]
+    discounts = [
+        parse_discount(item, index, sign, len(lines))
+        for index, item in enumerate(rec.get("discounts") or [], 1)
+    ]
+    tenders = [
+        parse_tender(item, index, sign) for index, item in enumerate(rec.get("tenders") or [], 1)
+    ]
     taxes = parse_taxes(rec.get("taxes"), lines, sign)
     return {
         "lines": lines,
@@ -114,9 +116,7 @@ def validate_detail_collections(record: dict) -> None:
             raise ValueError(f"{key} must be a list")
     detail_items = sum(len(record.get(key) or []) for key in DETAIL_KEYS)
     if detail_items > MAX_DETAIL_ITEMS_PER_TRANSACTION:
-        raise ValueError(
-            f"transaction detail exceeds {MAX_DETAIL_ITEMS_PER_TRANSACTION:,} items"
-        )
+        raise ValueError(f"transaction detail exceeds {MAX_DETAIL_ITEMS_PER_TRANSACTION:,} items")
 
 
 def normalized_metadata(record: dict, field: str) -> str | None:
@@ -140,19 +140,31 @@ def parse_line(line: dict, number: int, sign: int) -> dict:
     if quantity > MAX_QUANTITY or quantity != quantity.quantize(Decimal("0.001")):
         raise ValueError(f"line {number} quantity exceeds supported precision")
     price = money(line.get("unit_price"), f"line {number} unit_price")
-    gross = (money(line["gross_amount"], f"line {number} gross_amount")
-             if line.get("gross_amount") is not None
-             else money(quantity * price, f"line {number} gross_amount"))
+    gross = (
+        money(line["gross_amount"], f"line {number} gross_amount")
+        if line.get("gross_amount") is not None
+        else money(quantity * price, f"line {number} gross_amount")
+    )
     rate = decimal_value(line.get("tax_rate", 0), f"line {number} tax_rate")
     if rate < 0 or rate > 1 or rate != rate.quantize(Decimal("0.0001")):
         raise ValueError(f"line {number} tax_rate must be between 0 and 1")
-    tax = (money(line["tax_amount"], f"line {number} tax_amount")
-           if line.get("tax_amount") is not None
-           else money(gross * rate, f"line {number} tax_amount"))
-    return {"line_no": number, "item_code": item_code.strip(), "description": description,
-            "quantity": quantity * sign, "unit_price": price, "gross_amount": gross * sign,
-            "tax_code": tax_code, "tax_rate": rate, "tax_amount": tax * sign,
-            "return_reason": return_reason}
+    tax = (
+        money(line["tax_amount"], f"line {number} tax_amount")
+        if line.get("tax_amount") is not None
+        else money(gross * rate, f"line {number} tax_amount")
+    )
+    return {
+        "line_no": number,
+        "item_code": item_code.strip(),
+        "description": description,
+        "quantity": quantity * sign,
+        "unit_price": price,
+        "gross_amount": gross * sign,
+        "tax_code": tax_code,
+        "tax_rate": rate,
+        "tax_amount": tax * sign,
+        "return_reason": return_reason,
+    }
 
 
 def parse_discount(discount: dict, number: int, sign: int, line_count: int) -> dict:
@@ -165,11 +177,14 @@ def parse_discount(discount: dict, number: int, sign: int, line_count: int) -> d
     line_no = discount.get("line_no")
     if line_no is not None and not (type(line_no) is int and 1 <= line_no <= line_count):
         raise ValueError(f"discount {number} refers to a line that does not exist")
-    return {"kind": kind,
-            "code": optional_text(discount.get("code"), "discount code"),
-            "description": optional_text(discount.get("description"), "discount description"),
-            "line_no": line_no,
-            "amount": money(discount.get("amount"), f"discount {number} amount", allow_zero=False) * sign}
+    return {
+        "kind": kind,
+        "code": optional_text(discount.get("code"), "discount code"),
+        "description": optional_text(discount.get("description"), "discount description"),
+        "line_no": line_no,
+        "amount": money(discount.get("amount"), f"discount {number} amount", allow_zero=False)
+        * sign,
+    }
 
 
 def parse_tender(tender: dict, number: int, sign: int) -> dict:
@@ -178,10 +193,12 @@ def parse_tender(tender: dict, number: int, sign: int) -> dict:
         raise ValueError(f"tender {number} must be an object")
     if tender.get("tender_type") not in TENDER_TYPES:
         raise ValueError(f"tender {number} tender_type must be one of {', '.join(TENDER_TYPES)}")
-    return {"tender_type": tender["tender_type"],
-            "reference": optional_text(tender.get("reference"), "tender reference"),
-            "authorization": optional_text(tender.get("authorization"), "tender authorization"),
-            "amount": money(tender.get("amount"), f"tender {number} amount", allow_zero=False) * sign}
+    return {
+        "tender_type": tender["tender_type"],
+        "reference": optional_text(tender.get("reference"), "tender reference"),
+        "authorization": optional_text(tender.get("authorization"), "tender authorization"),
+        "amount": money(tender.get("amount"), f"tender {number} amount", allow_zero=False) * sign,
+    }
 
 
 def parse_taxes(supplied_taxes, lines: list[dict], sign: int) -> list[dict]:
@@ -200,9 +217,14 @@ def parse_tax(tax: dict, number: int, sign: int) -> dict:
     rate = decimal_value(tax.get("rate", 0), f"tax {number} rate")
     if not 0 <= rate <= 1 or rate != rate.quantize(Decimal("0.0001")):
         raise ValueError(f"tax {number} rate must be between 0 and 1")
-    return {"tax_code": tax_code, "tax_name": tax_name, "rate": rate,
-            "taxable_amount": money(tax.get("taxable_amount", 0), f"tax {number} taxable_amount") * sign,
-            "tax_amount": money(tax.get("tax_amount"), f"tax {number} tax_amount") * sign}
+    return {
+        "tax_code": tax_code,
+        "tax_name": tax_name,
+        "rate": rate,
+        "taxable_amount": money(tax.get("taxable_amount", 0), f"tax {number} taxable_amount")
+        * sign,
+        "tax_amount": money(tax.get("tax_amount"), f"tax {number} tax_amount") * sign,
+    }
 
 
 def summarize_line_taxes(lines: list[dict]) -> list[dict]:
@@ -211,10 +233,16 @@ def summarize_line_taxes(lines: list[dict]) -> list[dict]:
     for line in lines:
         if not line["tax_code"] or not line["tax_amount"]:
             continue
-        summary = by_code.setdefault(line["tax_code"], {
-            "tax_code": line["tax_code"], "tax_name": line["tax_code"], "rate": line["tax_rate"],
-            "taxable_amount": Decimal("0"), "tax_amount": Decimal("0"),
-        })
+        summary = by_code.setdefault(
+            line["tax_code"],
+            {
+                "tax_code": line["tax_code"],
+                "tax_name": line["tax_code"],
+                "rate": line["tax_rate"],
+                "taxable_amount": Decimal("0"),
+                "tax_amount": Decimal("0"),
+            },
+        )
         summary["taxable_amount"] += line["gross_amount"]
         summary["tax_amount"] += line["tax_amount"]
         if abs(summary["taxable_amount"]) > MAX_MONEY or abs(summary["tax_amount"]) > MAX_MONEY:
@@ -232,7 +260,14 @@ def totals(detail: dict) -> dict:
         else sum((tax_line["tax_amount"] for tax_line in detail["taxes"]), Decimal("0"))
     )
     tendered = sum((t["amount"] for t in detail["tenders"]), Decimal("0"))
-    return {"gross": gross, "discounts": disc, "tax": tax, "net": gross - disc, "expected_total": gross - disc + tax, "tendered": tendered}
+    return {
+        "gross": gross,
+        "discounts": disc,
+        "tax": tax,
+        "net": gross - disc,
+        "expected_total": gross - disc + tax,
+        "tendered": tendered,
+    }
 
 
 def check(detail: dict | None, header_amount: Decimal) -> dict:
@@ -241,8 +276,13 @@ def check(detail: dict | None, header_amount: Decimal) -> dict:
         return {"status": "No detail", "total_variance": None, "tender_variance": None}
     t = totals(detail)
     return check_totals(
-        t["gross"], t["discounts"], t["tax"], t["tendered"], header_amount,
-        has_lines=bool(detail["lines"]), has_tenders=bool(detail["tenders"]),
+        t["gross"],
+        t["discounts"],
+        t["tax"],
+        t["tendered"],
+        header_amount,
+        has_lines=bool(detail["lines"]),
+        has_tenders=bool(detail["tenders"]),
     )
 
 
@@ -262,7 +302,9 @@ def check_totals(
     expected_total = gross - discounts + tax
     total_var = expected_total - header_amount if has_lines else None
     tender_var = tendered - header_amount if has_tenders else None
-    bad = (total_var is not None and abs(total_var) > CENT) or (tender_var is not None and abs(tender_var) > CENT)
+    bad = (total_var is not None and abs(total_var) > CENT) or (
+        tender_var is not None and abs(tender_var) > CENT
+    )
     return {
         "status": "Unbalanced" if bad else "Balanced",
         "total_variance": total_var,
@@ -284,17 +326,30 @@ def card_amount(tenders: list, header_amount: Decimal) -> Decimal:
 
 
 # ---- synthetic detail for the demo feed: always adds up to the amount it is given ----------------------------------
-CATALOG = [("SKU-1001", "Basmati rice 5kg", "12.40"), ("SKU-1002", "Cooking oil 1L", "3.80"), ("SKU-1003", "Tea leaves 250g", "4.50"),
-           ("SKU-1004", "Notebook A5", "1.90"), ("SKU-1005", "LED bulb 9W", "2.75"), ("SKU-1006", "Dish soap 500ml", "2.20"),
-           ("SKU-1007", "School bag", "18.00"), ("SKU-1008", "Water bottle 1L", "5.60")]
+CATALOG = [
+    ("SKU-1001", "Basmati rice 5kg", "12.40"),
+    ("SKU-1002", "Cooking oil 1L", "3.80"),
+    ("SKU-1003", "Tea leaves 250g", "4.50"),
+    ("SKU-1004", "Notebook A5", "1.90"),
+    ("SKU-1005", "LED bulb 9W", "2.75"),
+    ("SKU-1006", "Dish soap 500ml", "2.20"),
+    ("SKU-1007", "School bag", "18.00"),
+    ("SKU-1008", "Water bottle 1L", "5.60"),
+]
 PROMOS = [("PROMO-SPRING10", "Spring promotion 10% off"), ("PROMO-3FOR2", "Three for two")]
 COUPONS = [("CPN-WELCOME5", "Welcome coupon"), ("CPN-LOYAL", "Loyalty coupon")]
 VOUCHERS = [("VCH-GIFT-2041", "Gift voucher"), ("VCH-REFUND-77", "Refund voucher")]
 VAT = ("VAT13", Decimal("0.13"))
 
 
-def synthesize(total: Decimal, rng: random.Random, sign_positive: bool = True, original_reference: str | None = None,
-               return_reason: str | None = None, voucher_tender: bool = False) -> dict:
+def synthesize(
+    total: Decimal,
+    rng: random.Random,
+    sign_positive: bool = True,
+    original_reference: str | None = None,
+    return_reason: str | None = None,
+    voucher_tender: bool = False,
+) -> dict:
     """A positive-amount detail block (the shape feeds send) whose lines, tax and discounts add up to `total`.
 
     total = gross - discounts + tax, tax = total - net so it always balances; tenders pay the whole amount, or the
@@ -309,7 +364,9 @@ def synthesize(total: Decimal, rng: random.Random, sign_positive: bool = True, o
             amt = (net * Decimal(rng.choice(["0.03", "0.05", "0.08"]))).quantize(CENT)
             if amt <= 0:
                 continue
-            code, desc = rng.choice({"Promotion": PROMOS, "Coupon": COUPONS, "Voucher": VOUCHERS}[kind])
+            code, desc = rng.choice(
+                {"Promotion": PROMOS, "Coupon": COUPONS, "Voucher": VOUCHERS}[kind]
+            )
             discounts.append({"kind": kind, "code": code, "description": desc, "amount": str(amt)})
             disc_total += amt
     gross = net + disc_total
@@ -325,27 +382,44 @@ def synthesize(total: Decimal, rng: random.Random, sign_positive: bool = True, o
             if qty * unit >= remaining - Decimal("1"):
                 qty, unit = Decimal("1"), (remaining / 2).quantize(CENT)
             remaining -= qty * unit
-        lines.append({"item_code": code, "description": desc, "quantity": str(qty), "unit_price": str(unit.quantize(CENT)),
-                      "tax_code": VAT[0], "tax_rate": str(rate)})
+        lines.append(
+            {
+                "item_code": code,
+                "description": desc,
+                "quantity": str(qty),
+                "unit_price": str(unit.quantize(CENT)),
+                "tax_code": VAT[0],
+                "tax_rate": str(rate),
+            }
+        )
     # Tax per line in proportion to its share, the last line absorbing rounding so the sum equals the header tax.
     acc = Decimal("0")
     for i, ln in enumerate(lines):
-        share = (Decimal(ln["quantity"]) * Decimal(ln["unit_price"]) - Decimal("0"))
-        ln["tax_amount"] = str((tax - acc) if i == len(lines) - 1 else (tax * share / gross).quantize(CENT))
+        share = Decimal(ln["quantity"]) * Decimal(ln["unit_price"]) - Decimal("0")
+        ln["tax_amount"] = str(
+            (tax - acc) if i == len(lines) - 1 else (tax * share / gross).quantize(CENT)
+        )
         acc += Decimal(ln["tax_amount"])
-    detail = {"lines": lines, "discounts": discounts,
-              "tenders": [{"tender_type": "Card", "amount": str(total), "reference": "****4242"}]}
+    detail = {
+        "lines": lines,
+        "discounts": discounts,
+        "tenders": [{"tender_type": "Card", "amount": str(total), "reference": "****4242"}],
+    }
     if voucher_tender and total > Decimal("30"):
         part = (total * Decimal("0.2")).quantize(CENT)
-        detail["tenders"] = [{"tender_type": "Card", "amount": str(total - part), "reference": "****4242"},
-                             {"tender_type": "Voucher", "amount": str(part), "reference": rng.choice(VOUCHERS)[0]}]
+        detail["tenders"] = [
+            {"tender_type": "Card", "amount": str(total - part), "reference": "****4242"},
+            {"tender_type": "Voucher", "amount": str(part), "reference": rng.choice(VOUCHERS)[0]},
+        ]
     if original_reference:
         detail["original_reference"] = original_reference
         detail["return_reason"] = return_reason or "Customer changed mind"
     return detail
 
 
-def synthesize_return(original: dict, rng: random.Random, extra_qty: int = 0, reason: str = "Customer changed mind") -> tuple[Decimal, dict]:
+def synthesize_return(
+    original: dict, rng: random.Random, extra_qty: int = 0, reason: str = "Customer changed mind"
+) -> tuple[Decimal, dict]:
     """A return of the first line of a sale feed record. extra_qty > 0 returns more than was sold (an audit finding).
 
     Returns (total refunded, detail block). The refund is the line price plus tax, paid back to the card."""
@@ -356,8 +430,22 @@ def synthesize_return(original: dict, rng: random.Random, extra_qty: int = 0, re
     gross = (qty * unit).quantize(CENT)
     tax = (gross * rate).quantize(CENT)
     total = gross + tax
-    detail = {"lines": [{"item_code": line["item_code"], "description": line.get("description"), "quantity": str(qty), "unit_price": str(unit),
-                         "tax_code": line.get("tax_code"), "tax_rate": str(rate), "tax_amount": str(tax), "return_reason": reason}],
-              "discounts": [], "tenders": [{"tender_type": "Card", "amount": str(total), "reference": "****4242"}],
-              "original_reference": original["source_record_id"], "return_reason": reason}
+    detail = {
+        "lines": [
+            {
+                "item_code": line["item_code"],
+                "description": line.get("description"),
+                "quantity": str(qty),
+                "unit_price": str(unit),
+                "tax_code": line.get("tax_code"),
+                "tax_rate": str(rate),
+                "tax_amount": str(tax),
+                "return_reason": reason,
+            }
+        ],
+        "discounts": [],
+        "tenders": [{"tender_type": "Card", "amount": str(total), "reference": "****4242"}],
+        "original_reference": original["source_record_id"],
+        "return_reason": reason,
+    }
     return total, detail
