@@ -7,7 +7,6 @@ import uuid
 from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import urlsplit
 
 import httpx
 from database import get_db
@@ -15,8 +14,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
 from sqlalchemy import delete, func, insert, select, update
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,10 +34,24 @@ from apps.exports.delivery import (
 from apps.exports.delivery import (
     valid_signature as valid_signature,
 )
+from apps.exports.destinations import (
+    _is_duplicate_destination_name as _is_duplicate_destination_name,
+)
+from apps.exports.destinations import (
+    dest_view as dest_view,
+)
+from apps.exports.destinations import (
+    ensure_defaults as ensure_destination_defaults,
+)
+from apps.exports.destinations import (
+    router as destinations_router,
+)
+from apps.exports.destinations import (
+    webhook_origin as webhook_origin,
+)
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem, TestSinkReceipt
 from apps.exports.schemas import (
     AckIn,
-    DestIn,
     FailedExportResolution,
     InterruptedExportRecovery,
     RunIn,
@@ -61,11 +72,13 @@ from apps.exports.selection import (
 from apps.exports.selection import (
     prior_exported_days as prior_exported_days,
 )
+from apps.exports.settings import SINK_SECRET, sink_secret, test_sink_enabled
 from apps.exports.tracking import TRACK_STATES, tracking_page
 from apps.request_body import read_limited_body
 from apps.security.authentication import require_role
 
 router = APIRouter(prefix="/api/exports")
+router.include_router(destinations_router)
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))
 MAX_SINK_BODY_BYTES = 25 * 1024 * 1024
 DATASETS = {
@@ -73,36 +86,11 @@ DATASETS = {
     "adjustments": "Approved financial adjustments from validated cases (journal lines for ERP/GL)",
     "audit": "Audit trail events since the last delivery (with hashes)",
 }
-DEFAULT_DESTINATION_NAMESPACE = uuid.UUID("e3648eeb-fb20-4290-a08b-fd39404b0be4")
-
-
-def test_sink_enabled() -> bool:
-    environment = os.getenv("ENVIRONMENT", "production").strip().lower()
-    explicit_setting = os.getenv("NIMBUS_ENABLE_TEST_SINK", "true").strip().lower()
-    return environment in {"development", "test"} and explicit_setting in {"1", "true", "yes", "on"}
-
-
-def sink_secret() -> str:
-    configured = os.getenv("NIMBUS_SINK_SECRET")
-    if configured:
-        return configured
-    return "nimbus-local-test-sink-secret-32chars" if test_sink_enabled() else ""
-
-
-SINK_SECRET = sink_secret()
 
 
 async def require_test_sink_enabled() -> None:
     if not test_sink_enabled():
         raise HTTPException(status_code=404, detail="Not found")
-
-
-def _is_duplicate_destination_name(exc: IntegrityError) -> bool:
-    return violates_unique_constraint(
-        exc,
-        constraint_names={"export_destinations_name_key"},
-        sqlite_messages={"UNIQUE constraint failed: export_destinations.name"},
-    )
 
 
 def _is_export_reservation_conflict(exc: IntegrityError) -> bool:
@@ -123,36 +111,6 @@ def _is_sink_receipt_conflict(exc: IntegrityError) -> bool:
         constraint_names={"test_sink_receipts_pkey"},
         sqlite_messages={"UNIQUE constraint failed: test_sink_receipts.idempotency_key"},
     )
-
-
-def dest_view(d: ExportDestination, *, reveal_url: bool = False) -> dict:
-    cfg = dict(d.config or {})
-    if "secret" in cfg:
-        cfg["secret"] = "••••••" if cfg["secret"] else ""
-    if cfg.get("url") and not reveal_url:
-        cfg["url"] = webhook_origin(str(cfg["url"]))
-    return {
-        "id": d.id,
-        "name": d.name,
-        "kind": d.kind,
-        "config": cfg,
-        "format": d.format,
-        "enabled": d.enabled,
-    }
-
-
-def webhook_origin(url: str) -> str:
-    """Expose only the webhook origin when the caller cannot manage destination credentials."""
-    try:
-        parsed = urlsplit(url)
-        hostname = parsed.hostname
-        if parsed.scheme not in {"http", "https"} or not hostname:
-            return "Webhook configured"
-        host = f"[{hostname}]" if ":" in hostname else hostname
-        port = f":{parsed.port}" if parsed.port is not None else ""
-    except ValueError:
-        return "Webhook configured"
-    return f"{parsed.scheme}://{host}{port}"
 
 
 def batch_view(b: ExportBatch, dest_name: str | None = None) -> dict:
@@ -256,128 +214,10 @@ async def datasets(_: dict = Depends(require_role("finance", "it", "auditor"))):
 
 
 async def ensure_defaults(db):
-    if (await db.execute(select(func.count()).select_from(ExportDestination))).scalar():
-        return
-    defaults = []
-    if test_sink_enabled():
-        defaults.append(
-            {
-                "id": str(uuid.uuid5(DEFAULT_DESTINATION_NAMESPACE, "Test receiver (webhook)")),
-                "name": "Test receiver (webhook)",
-                "kind": "webhook",
-                "format": "json",
-                "config": {
-                    "url": "http://localhost:8000/api/exports/_sink",
-                    "secret": sink_secret(),
-                },
-            }
-        )
-    defaults.append(
-        {
-            "id": str(uuid.uuid5(DEFAULT_DESTINATION_NAMESPACE, "ERP/GL file drop")),
-            "name": "ERP/GL file drop",
-            "kind": "file",
-            "format": "csv",
-            "config": {},
-        }
+    """Compatibility wrapper for initializing default export destinations."""
+    await ensure_destination_defaults(
+        db, test_sink_enabled=test_sink_enabled(), sink_secret=sink_secret()
     )
-    dialect = db.get_bind().dialect.name
-    if dialect == "postgresql":
-        statement = (
-            postgresql_insert(ExportDestination)
-            .values(defaults)
-            .on_conflict_do_nothing(
-                index_elements=["name"],
-            )
-        )
-    elif dialect == "sqlite":
-        statement = (
-            sqlite_insert(ExportDestination)
-            .values(defaults)
-            .on_conflict_do_nothing(
-                index_elements=["name"],
-            )
-        )
-    else:
-        raise RuntimeError(
-            f"Default export destinations are unsupported for database dialect {dialect}"
-        )
-    await db.execute(statement)
-    await db.commit()
-
-
-@router.get("/destinations")
-async def list_destinations(
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("finance", "it", "auditor")),
-):
-    await ensure_defaults(db)
-    reveal_url = user["role"] in {"it", "admin"}
-    return [
-        dest_view(d, reveal_url=reveal_url)
-        for d in (await db.execute(select(ExportDestination).order_by(ExportDestination.name)))
-        .scalars()
-        .all()
-    ]
-
-
-@router.post("/destinations")
-async def create_destination(
-    body: DestIn, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("it"))
-):
-    if body.kind not in ("webhook", "file") or body.format not in ("json", "csv"):
-        raise HTTPException(status_code=400, detail="kind must be webhook|file and format json|csv")
-    if body.kind == "webhook" and not (body.url and re.match(r"^https?://", body.url)):
-        raise HTTPException(status_code=400, detail="A webhook needs an http(s) URL")
-    cfg = {"url": body.url, "secret": body.secret or ""} if body.kind == "webhook" else {}
-    d = ExportDestination(
-        id=str(uuid.uuid4()), name=body.name.strip(), kind=body.kind, format=body.format, config=cfg
-    )
-    db.add(d)
-    audit(
-        db,
-        "EXPORT_DESTINATION_CREATED",
-        None,
-        "ExportDestination",
-        d.id,
-        f"Destination '{d.name}' ({d.kind}) created",
-        actor=user["user"] or "demo.user",
-    )
-    try:
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        if _is_duplicate_destination_name(exc):
-            raise HTTPException(
-                status_code=409, detail="A destination with that name exists"
-            ) from exc
-        raise
-    return dest_view(d, reveal_url=True)
-
-
-@router.post("/destinations/{dest_id}/toggle")
-async def toggle_destination(
-    dest_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("it"))
-):
-    d = (
-        await db.execute(
-            select(ExportDestination).where(ExportDestination.id == dest_id).with_for_update()
-        )
-    ).scalar_one_or_none()
-    if not d:
-        raise HTTPException(status_code=404, detail="Destination not found")
-    d.enabled = not d.enabled
-    audit(
-        db,
-        "EXPORT_DESTINATION_TOGGLED",
-        None,
-        "ExportDestination",
-        d.id,
-        f"'{d.name}' {'enabled' if d.enabled else 'disabled'}",
-        actor=user["user"] or "demo.user",
-    )
-    await db.commit()
-    return dest_view(d, reveal_url=True)
 
 
 @router.post("/run")
