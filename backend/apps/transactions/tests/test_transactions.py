@@ -222,6 +222,28 @@ def test_detail_shows_source_record_cases_linked_transactions_and_adjustments():
     async def go():
         Session = await seed()
         async with Session() as db:
+            db.add(
+                Case(
+                    id="c-malformed-lineage",
+                    case_number="CASE-MALFORMED",
+                    case_type="x",
+                    business_date="2026-10-03",
+                    store_id="S1",
+                )
+            )
+            db.add(
+                AuditEvent(
+                    id=str(uuid.uuid4()),
+                    event_type="CASE_CREATED",
+                    actor="sys",
+                    object_type="Case",
+                    object_id="c-malformed-lineage",
+                    case_id="c-malformed-lineage",
+                    action_description="malformed lineage",
+                    after_state={"transaction_ids": "t3"},
+                )
+            )
+            await db.commit()
             d = await rt.transaction_detail("t3", db=db, _=USER)
             assert (
                 d["source"]["source_record_id"] == "SRC-t3"
@@ -232,6 +254,7 @@ def test_detail_shows_source_record_cases_linked_transactions_and_adjustments():
                 "CASE-C": "raised from this transaction",
                 "CASE-X": "same store and day",
             }
+            assert "CASE-MALFORMED" not in links
             assert d["cases"][0]["case_number"] == "CASE-C"  # causal first
             assert [a["id"] for a in d["adjustments"]] == ["a1"]
             t1 = await rt.transaction_detail("t1", db=db, _=USER)

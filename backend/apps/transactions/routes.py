@@ -532,23 +532,14 @@ async def transaction_detail(
     )
 
     # Cases that were raised from this transaction (the case-creation event lists the transactions behind it).
-    candidate_events = (
-        select(AuditEvent.case_id, AuditEvent.after_state)
-        .join(Case, Case.id == AuditEvent.case_id)
-        .where(
-            AuditEvent.event_type == "CASE_CREATED", case_creation_mentions_transaction(db, tx.id)
-        )
+    candidate_case_ids = select(AuditEvent.case_id).where(
+        AuditEvent.event_type == "CASE_CREATED", case_creation_mentions_transaction(db, tx.id)
     )
-    candidate_events = scope.restrict(candidate_events, _, Case.store_id)
-    candidates = (await db.execute(candidate_events)).all()
-    causal_ids = {
-        case_id
-        for case_id, after_state in candidates
-        if case_id
-        and isinstance(after_state, dict)
-        and isinstance(after_state.get("transaction_ids"), list)
-        and tx.id in after_state["transaction_ids"]
-    }
+    causal_query = scope.restrict(
+        select(Case.id).where(Case.id.in_(candidate_case_ids)), _, Case.store_id
+    )
+    causal_query = causal_query.order_by(Case.case_number, Case.id).limit(MAX_RELATED_CASES + 1)
+    causal_ids = set((await db.execute(causal_query)).scalars())
     related_case_query = (
         select(Case)
         .where(

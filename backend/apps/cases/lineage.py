@@ -1,6 +1,6 @@
 """Database predicates for querying case-to-transaction audit lineage."""
 
-from sqlalchemy import String, cast, func, literal_column, select
+from sqlalchemy import String, and_, cast, func, literal_column, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import aliased
 
@@ -20,11 +20,12 @@ def case_creation_mentions_transaction(db, transaction_id: str, audit_event=None
     transaction_ids = func.json_each(audit_event.after_state, "$.transaction_ids").table_valued(
         "key", "value"
     )
-    return (
+    return and_(
+        func.json_type(audit_event.after_state, "$.transaction_ids") == "array",
         select(1)
         .select_from(transaction_ids)
         .where(transaction_ids.c.value == transaction_id)
-        .exists()
+        .exists(),
     )
 
 
