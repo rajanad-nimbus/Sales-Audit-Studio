@@ -1,4 +1,5 @@
 """Archive-first retention guardrail."""
+
 import asyncio
 import hashlib
 import json
@@ -34,14 +35,16 @@ from sqlalchemy.pool import StaticPool
 
 def test_archive_serialization_preserves_scalar_types():
     instant = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
-    assert serialise_row({
-        "count": 4,
-        "enabled": False,
-        "amount": Decimal("12.30"),
-        "created_at": instant,
-        "payload": b"data",
-        "missing": None,
-    }) == {
+    assert serialise_row(
+        {
+            "count": 4,
+            "enabled": False,
+            "amount": Decimal("12.30"),
+            "created_at": instant,
+            "payload": b"data",
+            "missing": None,
+        }
+    ) == {
         "count": 4,
         "enabled": False,
         "amount": "12.30",
@@ -63,21 +66,57 @@ def test_retention_archives_without_purging_until_confirmed():
             os.environ["NIMBUS_ARCHIVE_DIR"] = archive
             try:
                 async with Session() as db:
-                    db.add(RetentionPolicy(id="p1", dataset="canonical_transactions", retain_days=30, archive_before_purge=True, updated_by="it"))
-                    db.add(CanonicalTransaction(id="tx1", business_date="2026-08-01", transaction_date=old, event_timestamp=old, processing_timestamp=old, settlement_date="2026-08-01", transaction_type="Sale", source_lineage="pos-map-v1", currency="USD", signed_amount=Decimal("10"), store_id="S1", channel_id="store", reconciliation_status="Open", disposition="Open", created_at=old))
+                    db.add(
+                        RetentionPolicy(
+                            id="p1",
+                            dataset="canonical_transactions",
+                            retain_days=30,
+                            archive_before_purge=True,
+                            updated_by="it",
+                        )
+                    )
+                    db.add(
+                        CanonicalTransaction(
+                            id="tx1",
+                            business_date="2026-08-01",
+                            transaction_date=old,
+                            event_timestamp=old,
+                            processing_timestamp=old,
+                            settlement_date="2026-08-01",
+                            transaction_type="Sale",
+                            source_lineage="pos-map-v1",
+                            currency="USD",
+                            signed_amount=Decimal("10"),
+                            store_id="S1",
+                            channel_id="store",
+                            reconciliation_status="Open",
+                            disposition="Open",
+                            created_at=old,
+                        )
+                    )
                     await db.commit()
-                    result = await execute_retention("canonical_transactions", RetentionRunBody(confirm_purge=False), db, {"user": "it.user"})
+                    result = await execute_retention(
+                        "canonical_transactions",
+                        RetentionRunBody(confirm_purge=False),
+                        db,
+                        {"user": "it.user"},
+                    )
                     assert result["archived_records"] == 1 and result["purged_records"] == 0
-                    assert await db.scalar(select(func.count()).select_from(CanonicalTransaction)) == 1
+                    assert (
+                        await db.scalar(select(func.count()).select_from(CanonicalTransaction)) == 1
+                    )
                     record = (await db.execute(select(RetentionRun))).scalar_one()
                     assert record.archive_location and os.path.exists(record.archive_location)
                     archived = open(record.archive_location, "rb").read()
                     assert hashlib.sha256(archived).hexdigest() == record.archive_hash
                     assert json.loads(archived.splitlines()[0])["id"] == "tx1"
             finally:
-                if old_env is None: os.environ.pop("NIMBUS_ARCHIVE_DIR", None)
-                else: os.environ["NIMBUS_ARCHIVE_DIR"] = old_env
+                if old_env is None:
+                    os.environ.pop("NIMBUS_ARCHIVE_DIR", None)
+                else:
+                    os.environ["NIMBUS_ARCHIVE_DIR"] = old_env
         await engine.dispose()
+
     asyncio.run(run())
 
 
@@ -91,21 +130,41 @@ def test_retention_processes_a_deterministic_bounded_batch(monkeypatch):
         try:
             async with Session() as db:
                 old = utcnow() - timedelta(days=45)
-                db.add(RetentionPolicy(
-                    id="policy", dataset="canonical_transactions", retain_days=30,
-                    archive_before_purge=False, updated_by="it",
-                ))
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="canonical_transactions",
+                        retain_days=30,
+                        archive_before_purge=False,
+                        updated_by="it",
+                    )
+                )
                 for identifier in ("tx-b", "tx-a"):
-                    db.add(CanonicalTransaction(
-                        id=identifier, business_date="2026-08-01", transaction_date=old,
-                        event_timestamp=old, processing_timestamp=old, settlement_date="2026-08-01",
-                        transaction_type="Sale", source_lineage="pos-map-v1", currency="USD",
-                        signed_amount=Decimal("10"), store_id="S1", channel_id="store",
-                        reconciliation_status="Open", disposition="Open", created_at=old,
-                    ))
+                    db.add(
+                        CanonicalTransaction(
+                            id=identifier,
+                            business_date="2026-08-01",
+                            transaction_date=old,
+                            event_timestamp=old,
+                            processing_timestamp=old,
+                            settlement_date="2026-08-01",
+                            transaction_type="Sale",
+                            source_lineage="pos-map-v1",
+                            currency="USD",
+                            signed_amount=Decimal("10"),
+                            store_id="S1",
+                            channel_id="store",
+                            reconciliation_status="Open",
+                            disposition="Open",
+                            created_at=old,
+                        )
+                    )
                 await db.commit()
                 result = await execute_retention(
-                    "canonical_transactions", RetentionRunBody(confirm_purge=True), db, {"user": "it.user"}
+                    "canonical_transactions",
+                    RetentionRunBody(confirm_purge=True),
+                    db,
+                    {"user": "it.user"},
                 )
                 assert result["eligible_records"] == result["purged_records"] == 1
                 assert result["more_eligible"] is True
@@ -127,30 +186,36 @@ def test_retention_archive_byte_limit_purges_only_archived_records(tmp_path, mon
         monkeypatch.setenv("NIMBUS_ARCHIVE_DIR", str(tmp_path))
         try:
             async with Session() as db:
-                db.add(RetentionPolicy(
-                    id="policy", dataset="source_records", retain_days=30,
-                    archive_before_purge=True, updated_by="it",
-                ))
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="source_records",
+                        retain_days=30,
+                        archive_before_purge=True,
+                        updated_by="it",
+                    )
+                )
                 for identifier in ("src-1", "src-2", "src-3"):
-                    db.add(SourceRecord(
-                        id=identifier,
-                        source_system="POS",
-                        source_version="1",
-                        source_record_id=identifier,
-                        delivery_id="delivery",
-                        payload=b"{}",
-                        payload_hash="0" * 64,
-                        received_at=old,
-                        source_event_time=old,
-                        status="Processed",
-                        created_at=old,
-                    ))
+                    db.add(
+                        SourceRecord(
+                            id=identifier,
+                            source_system="POS",
+                            source_version="1",
+                            source_record_id=identifier,
+                            delivery_id="delivery",
+                            payload=b"{}",
+                            payload_hash="0" * 64,
+                            received_at=old,
+                            source_event_time=old,
+                            status="Processed",
+                            created_at=old,
+                        )
+                    )
                 await db.commit()
 
                 candidate = (
                     await db.execute(
-                        select(*SourceRecord.__table__.columns)
-                        .where(SourceRecord.id == "src-1")
+                        select(*SourceRecord.__table__.columns).where(SourceRecord.id == "src-1")
                     )
                 ).first()
                 serialized_size = len(
@@ -194,21 +259,38 @@ def test_retention_removes_archive_when_purge_fails(tmp_path, monkeypatch):
         try:
             async with Session() as db:
                 old = utcnow() - timedelta(days=45)
-                db.add(RetentionPolicy(
-                    id="policy", dataset="source_records", retain_days=30,
-                    archive_before_purge=True, updated_by="it",
-                ))
-                db.add(SourceRecord(
-                    id="src-1", source_system="POS", source_version="1",
-                    source_record_id="src-1", delivery_id="delivery", payload=b"{}",
-                    payload_hash="0" * 64, received_at=old, source_event_time=old,
-                    status="Processed", created_at=old,
-                ))
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="source_records",
+                        retain_days=30,
+                        archive_before_purge=True,
+                        updated_by="it",
+                    )
+                )
+                db.add(
+                    SourceRecord(
+                        id="src-1",
+                        source_system="POS",
+                        source_version="1",
+                        source_record_id="src-1",
+                        delivery_id="delivery",
+                        payload=b"{}",
+                        payload_hash="0" * 64,
+                        received_at=old,
+                        source_event_time=old,
+                        status="Processed",
+                        created_at=old,
+                    )
+                )
                 await db.commit()
 
                 with pytest.raises(RuntimeError, match="simulated purge failure"):
                     await execute_retention(
-                        "source_records", RetentionRunBody(confirm_purge=True), db, {"user": "it.user"}
+                        "source_records",
+                        RetentionRunBody(confirm_purge=True),
+                        db,
+                        {"user": "it.user"},
                     )
 
                 await db.rollback()
@@ -228,19 +310,26 @@ def test_empty_retention_run_is_written_to_audit_log():
         Session = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with Session() as db:
-                db.add(RetentionPolicy(
-                    id="policy", dataset="source_records", retain_days=30,
-                    archive_before_purge=False, updated_by="it",
-                ))
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="source_records",
+                        retain_days=30,
+                        archive_before_purge=False,
+                        updated_by="it",
+                    )
+                )
                 await db.commit()
 
                 result = await execute_retention(
                     "source_records", RetentionRunBody(confirm_purge=False), db, {"user": "it.user"}
                 )
 
-                audit_event = (await db.execute(
-                    select(AuditEvent).where(AuditEvent.event_type == "RETENTION_RUN")
-                )).scalar_one()
+                audit_event = (
+                    await db.execute(
+                        select(AuditEvent).where(AuditEvent.event_type == "RETENTION_RUN")
+                    )
+                ).scalar_one()
                 assert result["eligible_records"] == 0
                 assert audit_event.object_type == "RetentionRun"
                 assert audit_event.object_id == result["run_id"]
@@ -272,12 +361,16 @@ def test_retention_policy_changes_are_audited():
                 )
 
                 events = (
-                    await db.execute(
-                        select(AuditEvent)
-                        .where(AuditEvent.object_type == "RetentionPolicy")
-                        .order_by(AuditEvent.created_at, AuditEvent.id)
+                    (
+                        await db.execute(
+                            select(AuditEvent)
+                            .where(AuditEvent.object_type == "RetentionPolicy")
+                            .order_by(AuditEvent.created_at, AuditEvent.id)
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
 
                 assert created["id"] == updated["id"]
                 assert [event.event_type for event in events] == [
@@ -309,25 +402,52 @@ def test_retention_refuses_to_purge_transactions_with_referenced_details(tmp_pat
         try:
             async with Session() as db:
                 old = utcnow() - timedelta(days=45)
-                db.add(RetentionPolicy(
-                    id="policy", dataset="canonical_transactions", retain_days=30,
-                    archive_before_purge=True, updated_by="it",
-                ))
-                db.add(CanonicalTransaction(
-                    id="tx1", business_date="2026-08-01", transaction_date=old,
-                    event_timestamp=old, processing_timestamp=old, settlement_date="2026-08-01",
-                    transaction_type="Sale", source_lineage="pos-map-v1", currency="USD",
-                    signed_amount=Decimal("10"), store_id="S1", channel_id="store",
-                    reconciliation_status="Open", disposition="Open", created_at=old,
-                ))
-                db.add(TransactionLine(
-                    id="line1", transaction_id="tx1", line_no=1, item_code="SKU-1",
-                    quantity=Decimal("1"), unit_price=Decimal("10"), gross_amount=Decimal("10"),
-                ))
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="canonical_transactions",
+                        retain_days=30,
+                        archive_before_purge=True,
+                        updated_by="it",
+                    )
+                )
+                db.add(
+                    CanonicalTransaction(
+                        id="tx1",
+                        business_date="2026-08-01",
+                        transaction_date=old,
+                        event_timestamp=old,
+                        processing_timestamp=old,
+                        settlement_date="2026-08-01",
+                        transaction_type="Sale",
+                        source_lineage="pos-map-v1",
+                        currency="USD",
+                        signed_amount=Decimal("10"),
+                        store_id="S1",
+                        channel_id="store",
+                        reconciliation_status="Open",
+                        disposition="Open",
+                        created_at=old,
+                    )
+                )
+                db.add(
+                    TransactionLine(
+                        id="line1",
+                        transaction_id="tx1",
+                        line_no=1,
+                        item_code="SKU-1",
+                        quantity=Decimal("1"),
+                        unit_price=Decimal("10"),
+                        gross_amount=Decimal("10"),
+                    )
+                )
                 await db.commit()
                 with pytest.raises(HTTPException) as error:
                     await execute_retention(
-                        "canonical_transactions", RetentionRunBody(confirm_purge=True), db, {"user": "it.user"}
+                        "canonical_transactions",
+                        RetentionRunBody(confirm_purge=True),
+                        db,
+                        {"user": "it.user"},
                     )
                 assert error.value.status_code == 409
                 assert await db.scalar(select(func.count()).select_from(CanonicalTransaction)) == 1
@@ -349,26 +469,55 @@ def test_retention_refuses_to_purge_referenced_source_records(tmp_path, monkeypa
         try:
             async with Session() as db:
                 old = utcnow() - timedelta(days=45)
-                db.add(RetentionPolicy(
-                    id="source-policy", dataset="source_records", retain_days=30,
-                    archive_before_purge=True, updated_by="it",
-                ))
-                db.add(SourceRecord(
-                    id="source-1", source_system="POS", source_version="1", source_record_id="pos-1",
-                    delivery_id="delivery-1", payload=b"{}", payload_hash="0" * 64,
-                    received_at=old, source_event_time=old, status="Processed",
-                ))
-                db.add(CanonicalTransaction(
-                    id="tx-source-1", business_date="2026-08-01", transaction_date=old,
-                    event_timestamp=old, processing_timestamp=old, settlement_date="2026-08-01",
-                    transaction_type="Sale", source_lineage="pos-map-v1", currency="USD",
-                    signed_amount=Decimal("10"), store_id="S1", channel_id="store",
-                    reconciliation_status="Open", disposition="Open", source_record_id="source-1",
-                ))
+                db.add(
+                    RetentionPolicy(
+                        id="source-policy",
+                        dataset="source_records",
+                        retain_days=30,
+                        archive_before_purge=True,
+                        updated_by="it",
+                    )
+                )
+                db.add(
+                    SourceRecord(
+                        id="source-1",
+                        source_system="POS",
+                        source_version="1",
+                        source_record_id="pos-1",
+                        delivery_id="delivery-1",
+                        payload=b"{}",
+                        payload_hash="0" * 64,
+                        received_at=old,
+                        source_event_time=old,
+                        status="Processed",
+                    )
+                )
+                db.add(
+                    CanonicalTransaction(
+                        id="tx-source-1",
+                        business_date="2026-08-01",
+                        transaction_date=old,
+                        event_timestamp=old,
+                        processing_timestamp=old,
+                        settlement_date="2026-08-01",
+                        transaction_type="Sale",
+                        source_lineage="pos-map-v1",
+                        currency="USD",
+                        signed_amount=Decimal("10"),
+                        store_id="S1",
+                        channel_id="store",
+                        reconciliation_status="Open",
+                        disposition="Open",
+                        source_record_id="source-1",
+                    )
+                )
                 await db.commit()
                 with pytest.raises(HTTPException) as error:
                     await execute_retention(
-                        "source_records", RetentionRunBody(confirm_purge=True), db, {"user": "it.user"}
+                        "source_records",
+                        RetentionRunBody(confirm_purge=True),
+                        db,
+                        {"user": "it.user"},
                     )
                 assert error.value.status_code == 409
                 assert await db.scalar(select(func.count()).select_from(SourceRecord)) == 1
@@ -389,14 +538,26 @@ def test_retention_never_purges_hash_chained_audit_events():
         try:
             async with Session() as db:
                 old = utcnow() - timedelta(days=45)
-                db.add(RetentionPolicy(
-                    id="audit-policy", dataset="audit_events", retain_days=30,
-                    archive_before_purge=False, updated_by="it",
-                ))
-                db.add(AuditEvent(
-                    id="audit-1", event_type="TEST", actor="test", object_type="Case",
-                    object_id="case-1", action_description="test event", created_at=old,
-                ))
+                db.add(
+                    RetentionPolicy(
+                        id="audit-policy",
+                        dataset="audit_events",
+                        retain_days=30,
+                        archive_before_purge=False,
+                        updated_by="it",
+                    )
+                )
+                db.add(
+                    AuditEvent(
+                        id="audit-1",
+                        event_type="TEST",
+                        actor="test",
+                        object_type="Case",
+                        object_id="case-1",
+                        action_description="test event",
+                        created_at=old,
+                    )
+                )
                 await db.commit()
                 preview = await preview_retention("audit_events", db, {"user": "it.user"})
                 assert preview["retention_supported"] is False
@@ -406,9 +567,14 @@ def test_retention_never_purges_hash_chained_audit_events():
                     )
                 assert error.value.status_code == 409
                 for confirm_purge in (False, True):
-                    with pytest.raises(HTTPException, match="append-only and hash-chained") as error:
+                    with pytest.raises(
+                        HTTPException, match="append-only and hash-chained"
+                    ) as error:
                         await execute_retention(
-                            "audit_events", RetentionRunBody(confirm_purge=confirm_purge), db, {"user": "it.user"}
+                            "audit_events",
+                            RetentionRunBody(confirm_purge=confirm_purge),
+                            db,
+                            {"user": "it.user"},
                         )
                     assert error.value.status_code == 409
                 assert await db.scalar(select(func.count()).select_from(AuditEvent)) == 1

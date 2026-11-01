@@ -1,4 +1,5 @@
 """Safe retailer-configured Sales Audit rules."""
+
 import uuid
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from apps.totals.models import AuditTotalDefinition
 from apps.transactions.detail import MAX_MONEY, cent_value
 
 router = APIRouter(prefix="/api/audit-rules", tags=["Audit rules"])
+
+
 class RuleBody(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     total_name: str = Field(min_length=1, max_length=150)
@@ -39,7 +42,21 @@ class RuleBody(BaseModel):
     @classmethod
     def normalize_owner(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
-def view(row: ConfiguredAuditRule): return {"id": row.id, "name": row.name, "total_name": row.total_name, "threshold": row.threshold, "threshold_currency": row.threshold_currency, "severity": row.severity, "owner": row.owner, "enabled": row.enabled, "updated_by": row.updated_by, "updated_at": row.updated_at}
+
+
+def view(row: ConfiguredAuditRule):
+    return {
+        "id": row.id,
+        "name": row.name,
+        "total_name": row.total_name,
+        "threshold": row.threshold,
+        "threshold_currency": row.threshold_currency,
+        "severity": row.severity,
+        "owner": row.owner,
+        "enabled": row.enabled,
+        "updated_by": row.updated_by,
+        "updated_at": row.updated_at,
+    }
 
 
 def _is_duplicate_rule_name(exc: IntegrityError) -> bool:
@@ -51,31 +68,76 @@ def _is_duplicate_rule_name(exc: IntegrityError) -> bool:
 
 
 @router.get("")
-async def list_rules(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))): return [view(row) for row in (await db.execute(select(ConfiguredAuditRule).order_by(ConfiguredAuditRule.name))).scalars().all()]
+async def list_rules(
+    db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))
+):
+    return [
+        view(row)
+        for row in (
+            await db.execute(select(ConfiguredAuditRule).order_by(ConfiguredAuditRule.name))
+        )
+        .scalars()
+        .all()
+    ]
+
+
 @router.post("")
-async def create_rule(body: RuleBody, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance"))):
+async def create_rule(
+    body: RuleBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance")),
+):
     await lock_configuration(db, exclusive=True)
     try:
         threshold = cent_value(body.threshold, "threshold")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if threshold > MAX_MONEY or body.severity not in {"Low", "Medium", "High", "Critical"}:
-        raise HTTPException(status_code=422, detail="Threshold must be a non-negative amount with at most two decimal places and severity valid")
+        raise HTTPException(
+            status_code=422,
+            detail="Threshold must be a non-negative amount with at most two decimal places and severity valid",
+        )
     if body.threshold_currency is not None:
-        try: validate_currency(body.threshold_currency)
-        except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+        try:
+            validate_currency(body.threshold_currency)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     else:
-        name = body.total_name.removeprefix("Configured: ") if body.total_name.startswith("Configured: ") else None
-        definition = (await db.execute(select(AuditTotalDefinition).where(AuditTotalDefinition.name == name)
-                      .order_by(AuditTotalDefinition.revision.desc()).limit(1))).scalar_one_or_none() if name else None
+        name = (
+            body.total_name.removeprefix("Configured: ")
+            if body.total_name.startswith("Configured: ")
+            else None
+        )
+        definition = (
+            (
+                await db.execute(
+                    select(AuditTotalDefinition)
+                    .where(AuditTotalDefinition.name == name)
+                    .order_by(AuditTotalDefinition.revision.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if name
+            else None
+        )
         if not definition or definition.aggregation != "Count":
-            raise HTTPException(status_code=422, detail="A currency-free threshold requires a configured Count total")
+            raise HTTPException(
+                status_code=422,
+                detail="A currency-free threshold requires a configured Count total",
+            )
     if body.enabled:
-        await invalidate_configuration(db, actor=user["user"] or "ontology.user", reason=f"Audit rule {body.name} added")
-    row = ConfiguredAuditRule(id=str(uuid.uuid4()), **body.model_dump(exclude={"threshold"}), threshold=threshold,
-                              updated_by=user["user"] or "ontology.user")
+        await invalidate_configuration(
+            db, actor=user["user"] or "ontology.user", reason=f"Audit rule {body.name} added"
+        )
+    row = ConfiguredAuditRule(
+        id=str(uuid.uuid4()),
+        **body.model_dump(exclude={"threshold"}),
+        threshold=threshold,
+        updated_by=user["user"] or "ontology.user",
+    )
     db.add(row)
-    try: await db.commit()
+    try:
+        await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         if _is_duplicate_rule_name(exc):
