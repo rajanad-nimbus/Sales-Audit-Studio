@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from apps.ingest import reconciliation
+from apps.ingest import controls, reconciliation
 from apps.ingest import service as ingest
 from apps.ingest.shopify import routes as routes_shopify
 from database import get_db
@@ -267,7 +267,7 @@ def test_multiple_refunds_are_summed_to_full_and_match():
 
 
 def test_large_refund_history_is_summed_across_bounded_pages(monkeypatch):
-    monkeypatch.setattr(reconciliation, "SETTLEMENT_QUERY_PAGE_SIZE", 17)
+    monkeypatch.setattr(controls, "SETTLEMENT_QUERY_PAGE_SIZE", 17)
 
     async def go():
         Session = await make_session()

@@ -1,6 +1,6 @@
 import asyncio
 
-from apps.ingest import reconciliation, service
+from apps.ingest import controls, reconciliation, service
 from apps.ingest.manifests import iter_manifests, manifest_query
 from models import Base, CanonicalTransaction, SourceRecord, TransactionAdjustment
 from sqlalchemy import event, select
@@ -251,7 +251,7 @@ def test_control_reconciliation_batches_store_date_currency_queries(monkeypatch)
                         for index in range(5)
                     ],
                 )
-                monkeypatch.setattr(reconciliation, "COMPOSITE_SCOPE_BATCH_SIZE", 2)
+                monkeypatch.setattr(controls, "COMPOSITE_SCOPE_BATCH_SIZE", 2)
                 queries = []
 
                 def count_transaction_queries(

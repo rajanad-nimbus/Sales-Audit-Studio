@@ -4,7 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from apps.ingest import reconciliation
+from apps.ingest import controls, reconciliation
 from models import Base, CanonicalTransaction
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -18,7 +18,7 @@ def test_daily_feed_actual_and_expected_queries_batch_composite_scopes(monkeypat
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                monkeypatch.setattr(reconciliation, "COMPOSITE_SCOPE_BATCH_SIZE", 2)
+                monkeypatch.setattr(controls, "COMPOSITE_SCOPE_BATCH_SIZE", 2)
                 timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 feed = []
                 transactions = []

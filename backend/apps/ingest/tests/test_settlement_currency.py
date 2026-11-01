@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from apps.ingest import reconciliation, service
+from apps.ingest import controls, reconciliation, service
 from models import Base, CanonicalTransaction, Case
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -335,15 +335,15 @@ def test_referenced_settlement_totals_are_accumulated_in_bounded_pages(monkeypat
                     )
                 db.add_all([*processor_rows, *bank_rows])
                 await db.flush()
-                monkeypatch.setattr(reconciliation, "SETTLEMENT_QUERY_PAGE_SIZE", 2)
+                monkeypatch.setattr(controls, "SETTLEMENT_QUERY_PAGE_SIZE", 2)
                 observed_page_sizes = []
-                original_effective_amounts = reconciliation.effective_amounts
+                original_effective_amounts = controls.effective_amounts
 
                 async def track_page_size(session, rows):
                     observed_page_sizes.append(len(rows))
                     return await original_effective_amounts(session, rows)
 
-                monkeypatch.setattr(reconciliation, "effective_amounts", track_page_size)
+                monkeypatch.setattr(controls, "effective_amounts", track_page_size)
                 findings = []
                 await reconciliation.run_settlement_controls(
                     db, bank_rows, lambda *args: findings.append(args)
