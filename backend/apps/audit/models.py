@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class AuditEvent(Base):
     """Append-only audit trail of all actions"""
+
     __tablename__ = "audit_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

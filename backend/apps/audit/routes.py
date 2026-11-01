@@ -217,9 +217,7 @@ def conditions(event_type, actor, case_id, date_from, date_to, q):
     if case_id:
         conds.append(AuditEvent.case_id == case_id)
     if date_from:
-        conds.append(
-            AuditEvent.created_at >= datetime.combine(date_from, time.min, tzinfo=UTC)
-        )
+        conds.append(AuditEvent.created_at >= datetime.combine(date_from, time.min, tzinfo=UTC))
     if date_to:
         if date_to == date.max:
             conds.append(AuditEvent.created_at <= datetime.max.replace(tzinfo=UTC))
