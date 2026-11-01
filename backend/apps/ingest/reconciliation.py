@@ -68,9 +68,9 @@ async def reconcile(
             f"Reconciliation{scope} exceeds the {MAX_RECONCILIATION_TRANSACTIONS:,}-transaction limit; "
             "resolve a smaller date scope or reduce the unmatched backlog."
         )
-    policy = (await db.execute(select(ReconciliationPolicy).where(ReconciliationPolicy.active == True)
+    policy = (await db.execute(select(ReconciliationPolicy).where(ReconciliationPolicy.active.is_(True))
                                .order_by(ReconciliationPolicy.updated_at.desc(), ReconciliationPolicy.id.desc())
-                               .limit(1))).scalar_one_or_none()  # noqa: E712
+                               .limit(1))).scalar_one_or_none()
     amount_tolerance = policy.amount_tolerance if policy else Decimal("0")
     tolerance_currency = policy.amount_tolerance_currency if policy else "USD"
     findings, matched = await match_processor_transactions(db, txns, amount_tolerance, tolerance_currency,

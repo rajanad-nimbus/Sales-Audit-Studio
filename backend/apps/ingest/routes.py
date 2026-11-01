@@ -159,9 +159,9 @@ async def feed_health(db: AsyncSession = Depends(get_db), _: dict = Depends(requ
 
 @router.get("/api/reconciliation/policy")
 async def get_reconciliation_policy(db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
-    policy = (await db.execute(select(ReconciliationPolicy).where(ReconciliationPolicy.active == True)
+    policy = (await db.execute(select(ReconciliationPolicy).where(ReconciliationPolicy.active.is_(True))
                                .order_by(ReconciliationPolicy.updated_at.desc(), ReconciliationPolicy.id.desc())
-                               .limit(1))).scalar_one_or_none()  # noqa: E712
+                               .limit(1))).scalar_one_or_none()
     return {"source": "local-fallback", "amount_tolerance": policy.amount_tolerance if policy else 0,
             "amount_tolerance_currency": policy.amount_tolerance_currency if policy else "USD",
             "settlement_day_tolerance": policy.settlement_day_tolerance if policy else 0,
@@ -177,9 +177,9 @@ async def update_reconciliation_policy(body: ReconciliationPolicyRequest, db: As
         raise HTTPException(status_code=422, detail="Tolerance values must be non-negative; settlement days may not exceed 31")
     if not body.gap_share.is_finite() or body.gap_min_count < 1 or not 0 < body.gap_share <= 1 or body.gap_share != body.gap_share.quantize(Decimal("0.0001")):
         raise HTTPException(status_code=422, detail="Gap minimum must be at least 1 and gap share between 0 and 1")
-    policy_query = (select(ReconciliationPolicy).where(ReconciliationPolicy.active == True)
+    policy_query = (select(ReconciliationPolicy).where(ReconciliationPolicy.active.is_(True))
                     .order_by(ReconciliationPolicy.updated_at.desc(), ReconciliationPolicy.id.desc())
-                    .limit(1).with_for_update())  # noqa: E712
+                    .limit(1).with_for_update())
     policy = (await db.execute(policy_query)).scalar_one_or_none()
     if not policy:
         policy = ReconciliationPolicy(id=str(uuid.uuid4()), name="Nimbus fallback reconciliation policy")
