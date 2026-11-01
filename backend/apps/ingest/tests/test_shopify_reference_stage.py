@@ -227,6 +227,11 @@ def test_reference_route_stages_in_an_isolated_session(monkeypatch):
     monkeypatch.setattr(shopify_routes, "async_session", StagingContext)
     monkeypatch.setattr(shopify_routes.shopify_adapter, "ShopifyAdapter", Adapter)
     monkeypatch.setattr(shopify_routes.source_settings, "require_allowed", require_allowed)
+    monkeypatch.setattr(
+        shopify_routes.source_settings,
+        "lock_source_settings",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=None),
+    )
     monkeypatch.setattr(shopify_routes.reference_sync, "stage", stage)
     monkeypatch.setattr(shopify_routes.reference_sync, "apply", apply)
     monkeypatch.setattr(shopify_routes, "audit", lambda *_args, **_kwargs: None)
@@ -239,6 +244,71 @@ def test_reference_route_stages_in_an_isolated_session(monkeypatch):
     assert observed["stage_session"] is staging_session
     assert observed["apply_session"] is request_session
     assert request_session.commits == 1
+
+
+def test_reference_route_rechecks_manual_permission_before_apply(monkeypatch):
+    class RequestSession:
+        rolled_back = False
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    class StageSession:
+        pass
+
+    class SessionContext:
+        async def __aenter__(self):
+            return stage_session
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class Adapter:
+        async def close(self):
+            pass
+
+    request_session = RequestSession()
+    stage_session = StageSession()
+    applied = False
+    permission_check = {}
+
+    async def require_allowed(_db, _source, *, manual=False):
+        permission_check["manual"] = manual
+
+    async def stage(*_args):
+        return {"generation": 1, "duplicates": 0}
+
+    async def apply(*_args):
+        nonlocal applied
+        applied = True
+        return {}
+
+    async def discard(*_args):
+        pass
+
+    monkeypatch.setattr(shopify_routes, "async_session", SessionContext)
+    monkeypatch.setattr(shopify_routes.shopify_adapter, "ShopifyAdapter", Adapter)
+    monkeypatch.setattr(shopify_routes.source_settings, "require_allowed", require_allowed)
+    monkeypatch.setattr(
+        shopify_routes.source_settings,
+        "lock_source_settings",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=object()),
+    )
+    monkeypatch.setattr(shopify_routes.source_settings, "effective", lambda *_args: {
+        "enabled": True, "manual_sync": False,
+    })
+    monkeypatch.setattr(shopify_routes.reference_sync, "stage", stage)
+    monkeypatch.setattr(shopify_routes.reference_sync, "apply", apply)
+    monkeypatch.setattr(shopify_routes.reference_sync, "discard", discard)
+
+    with pytest.raises(shopify_routes.HTTPException) as error:
+        run(shopify_routes.sync_reference(request_session, {"user": "test"}))
+
+    assert permission_check["manual"] is True
+    assert error.value.status_code == 409
+    assert "Manual sync was switched off" in error.value.detail
+    assert request_session.rolled_back
+    assert not applied
 
 
 def test_duplicate_skus_keep_first_staged_variant(monkeypatch):

@@ -126,7 +126,7 @@ async def sync_reference(
     user: dict = Depends(require_role("it", "finance")),
 ):
     """Sync Shopify locations (Stores) and product variants (Items) into the retail foundation data."""
-    await source_settings.require_allowed(db, "Shopify")
+    await source_settings.require_allowed(db, "Shopify", manual=True)
     store_code = os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN")
     sync_id = str(uuid.uuid4())
     adapter = shopify_adapter.ShopifyAdapter()
@@ -142,6 +142,12 @@ async def sync_reference(
         await adapter.close()
     actor = user.get("user") or "shopify-connector"
     try:
+        setting = await source_settings.lock_source_settings(db, "Shopify", shared=True)
+        state = source_settings.effective("Shopify", setting)
+        if not state["enabled"]:
+            raise HTTPException(status_code=409, detail="Shopify was switched off while the sync was fetching data")
+        if not state["manual_sync"]:
+            raise HTTPException(status_code=409, detail="Manual sync was switched off while Shopify was fetching data")
         counts = await reference_sync.apply(
             db, sync_id, staged["generation"], actor, staged["duplicates"]
         )
