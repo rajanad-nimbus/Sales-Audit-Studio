@@ -1,4 +1,5 @@
 """Stage complete Shopify reference snapshots before applying them."""
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -19,13 +20,18 @@ def upgrade():
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=False),
         sa.Column("attributes", sa.JSON(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("sync_id", "category", "code", name="uq_shopify_reference_stage_sync_code"),
+        sa.UniqueConstraint(
+            "sync_id", "category", "code", name="uq_shopify_reference_stage_sync_code"
+        ),
     )
-    op.create_index(
-        "ix_shopify_reference_stage_sync_id", "shopify_reference_stage", ["sync_id"]
-    )
+    op.create_index("ix_shopify_reference_stage_sync_id", "shopify_reference_stage", ["sync_id"])
     op.create_index(
         "ix_shopify_reference_stage_sync_id_id", "shopify_reference_stage", ["sync_id", "id"]
     )

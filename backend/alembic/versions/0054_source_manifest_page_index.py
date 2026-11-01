@@ -1,4 +1,5 @@
 """Index archived manifests for bounded reconciliation paging."""
+
 from alembic import op
 
 revision = "0054"

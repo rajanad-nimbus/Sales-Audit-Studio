@@ -1,4 +1,5 @@
 """Index the latest successful batch status lookup."""
+
 from alembic import op
 
 revision = "0055"

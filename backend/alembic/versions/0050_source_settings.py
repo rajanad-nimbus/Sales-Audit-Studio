@@ -1,4 +1,5 @@
 """Per-source switches for the daily batch and manual sync."""
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -16,7 +17,9 @@ def upgrade():
         sa.Column("in_daily_batch", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("manual_sync", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("updated_by", sa.String(255), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
 

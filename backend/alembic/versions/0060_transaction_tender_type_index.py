@@ -1,4 +1,5 @@
 """Index tender facets and transaction tender filtering."""
+
 from alembic import op
 
 revision = "0060"

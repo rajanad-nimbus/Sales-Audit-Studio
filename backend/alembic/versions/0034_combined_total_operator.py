@@ -1,4 +1,5 @@
 """Record the arithmetic operation for combined totals."""
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -9,7 +10,9 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("audit_total_definitions", sa.Column("combined_operator", sa.String(1), nullable=True))
+    op.add_column(
+        "audit_total_definitions", sa.Column("combined_operator", sa.String(1), nullable=True)
+    )
 
 
 def downgrade():

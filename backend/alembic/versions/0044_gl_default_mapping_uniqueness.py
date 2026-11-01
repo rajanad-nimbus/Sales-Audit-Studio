@@ -1,4 +1,5 @@
 """Allow only one fallback GL account mapping per transaction type."""
+
 import sqlalchemy as sa
 from alembic import context, op
 
@@ -12,10 +13,17 @@ INDEX_NAME = "uq_gl_cross_reference_default_by_type"
 
 def upgrade():
     if not context.is_offline_mode():
-        conflicts = op.get_bind().execute(sa.text(
-            "SELECT transaction_type FROM gl_cross_references WHERE tender_type IS NULL "
-            "GROUP BY transaction_type HAVING COUNT(*) > 1 ORDER BY transaction_type"
-        )).scalars().all()
+        conflicts = (
+            op.get_bind()
+            .execute(
+                sa.text(
+                    "SELECT transaction_type FROM gl_cross_references WHERE tender_type IS NULL "
+                    "GROUP BY transaction_type HAVING COUNT(*) > 1 ORDER BY transaction_type"
+                )
+            )
+            .scalars()
+            .all()
+        )
         if conflicts:
             transaction_types = ", ".join(conflicts)
             raise RuntimeError(

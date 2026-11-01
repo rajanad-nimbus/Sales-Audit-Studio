@@ -15,7 +15,9 @@ def upgrade():
             "ix_ct_pending_return_link",
             "canonical_transactions",
             ["store_id", "original_reference", "id"],
-            postgresql_where=sa.text("transaction_type = 'Return' AND original_transaction_id IS NULL"),
+            postgresql_where=sa.text(
+                "transaction_type = 'Return' AND original_transaction_id IS NULL"
+            ),
             postgresql_concurrently=True,
         )
 

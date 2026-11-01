@@ -9,7 +9,11 @@ depends_on = None
 
 
 def upgrade():
-    op.create_index("ix_source_records_system_event_time", "source_records", ["source_system", "source_event_time"])
+    op.create_index(
+        "ix_source_records_system_event_time",
+        "source_records",
+        ["source_system", "source_event_time"],
+    )
 
 
 def downgrade():

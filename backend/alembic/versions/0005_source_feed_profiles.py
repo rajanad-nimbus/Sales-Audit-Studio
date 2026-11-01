@@ -3,6 +3,7 @@
 Revision ID: 0005
 Revises: 0004
 """
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -24,7 +25,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index("ix_source_feed_profiles_source_system", "source_feed_profiles", ["source_system"])
+    op.create_index(
+        "ix_source_feed_profiles_source_system", "source_feed_profiles", ["source_system"]
+    )
 
 
 def downgrade() -> None:

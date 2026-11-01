@@ -1,4 +1,5 @@
 """Enforce one active recommendation for each case."""
+
 import sqlalchemy as sa
 from alembic import context, op
 
@@ -13,10 +14,17 @@ INDEX_NAME = "uq_recommendations_one_proposed_per_case"
 
 def upgrade():
     if not context.is_offline_mode():
-        conflicts = op.get_bind().execute(sa.text(
-            "SELECT case_id FROM recommendations WHERE status = 'Proposed' "
-            "GROUP BY case_id HAVING COUNT(*) > 1 ORDER BY case_id"
-        )).scalars().all()
+        conflicts = (
+            op.get_bind()
+            .execute(
+                sa.text(
+                    "SELECT case_id FROM recommendations WHERE status = 'Proposed' "
+                    "GROUP BY case_id HAVING COUNT(*) > 1 ORDER BY case_id"
+                )
+            )
+            .scalars()
+            .all()
+        )
         if conflicts:
             case_ids = ", ".join(conflicts)
             raise RuntimeError(

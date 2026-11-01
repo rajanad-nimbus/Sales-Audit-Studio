@@ -1,4 +1,5 @@
 """Allow at most one active daily batch per business date."""
+
 import sqlalchemy as sa
 from alembic import context, op
 
@@ -10,10 +11,17 @@ depends_on = None
 
 def upgrade():
     if not context.is_offline_mode():
-        conflicts = op.get_bind().execute(sa.text(
-            "SELECT business_date FROM batch_runs WHERE status = 'Running' "
-            "GROUP BY business_date HAVING COUNT(*) > 1 ORDER BY business_date"
-        )).scalars().all()
+        conflicts = (
+            op.get_bind()
+            .execute(
+                sa.text(
+                    "SELECT business_date FROM batch_runs WHERE status = 'Running' "
+                    "GROUP BY business_date HAVING COUNT(*) > 1 ORDER BY business_date"
+                )
+            )
+            .scalars()
+            .all()
+        )
         if conflicts:
             dates = ", ".join(conflicts)
             raise RuntimeError(

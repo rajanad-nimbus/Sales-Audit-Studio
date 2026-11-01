@@ -1,4 +1,5 @@
 """Track active batch progress for safe abandoned-run recovery."""
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -9,7 +10,9 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("batch_runs", sa.Column("heartbeat_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "batch_runs", sa.Column("heartbeat_at", sa.DateTime(timezone=True), nullable=True)
+    )
     op.create_index("ix_batch_runs_heartbeat_at", "batch_runs", ["heartbeat_at"])
 
 

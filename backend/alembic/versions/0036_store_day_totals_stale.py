@@ -1,4 +1,5 @@
 """Track source changes made after store-day totals were calculated."""
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -9,7 +10,10 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("store_days", sa.Column("totals_stale", sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column(
+        "store_days",
+        sa.Column("totals_stale", sa.Boolean(), nullable=False, server_default=sa.false()),
+    )
 
 
 def downgrade():

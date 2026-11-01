@@ -1,4 +1,5 @@
 """Preserve the definition revision used for each configured total."""
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -12,7 +13,9 @@ def upgrade():
     with op.batch_alter_table("audit_totals") as batch:
         batch.add_column(sa.Column("definition_id", sa.String(36), nullable=True))
         batch.add_column(sa.Column("definition_revision", sa.Integer(), nullable=True))
-        batch.create_foreign_key("fk_audit_totals_definition", "audit_total_definitions", ["definition_id"], ["id"])
+        batch.create_foreign_key(
+            "fk_audit_totals_definition", "audit_total_definitions", ["definition_id"], ["id"]
+        )
 
 
 def downgrade():

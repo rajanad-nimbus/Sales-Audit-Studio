@@ -17,7 +17,8 @@ def upgrade():
 
     dialect = op.get_context().dialect.name
     if dialect == "postgresql":
-        op.execute(sa.text("""
+        op.execute(
+            sa.text("""
             UPDATE reconciliation_matches AS match_row
             SET store_id = resolved.store_id
             FROM (
@@ -56,9 +57,11 @@ def upgrade():
                    AND COUNT(DISTINCT transaction_row.store_id) = 1
             ) AS resolved
             WHERE match_row.id = resolved.id
-        """))
+        """)
+        )
     elif dialect == "sqlite":
-        op.execute(sa.text("""
+        op.execute(
+            sa.text("""
             UPDATE reconciliation_matches AS match_row
             SET store_id = (
                 SELECT MIN(transaction_row.store_id)
@@ -90,9 +93,12 @@ def upgrade():
                        )
                    AND COUNT(DISTINCT transaction_row.store_id) = 1
             )
-        """))
+        """)
+        )
     else:
-        raise RuntimeError(f"Unsupported database dialect for reconciliation match scope: {dialect}")
+        raise RuntimeError(
+            f"Unsupported database dialect for reconciliation match scope: {dialect}"
+        )
 
     with op.get_context().autocommit_block():
         op.create_index(

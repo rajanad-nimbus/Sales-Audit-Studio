@@ -16,14 +16,16 @@ REQUIRED_TEXT_CHECK = (
 
 
 def upgrade():
-    op.execute(sa.text(
-        "DO $$ BEGIN "
-        "IF EXISTS (SELECT 1 FROM foundation_references "
-        "WHERE length(trim(category)) = 0 OR length(trim(code)) = 0 "
-        "OR length(trim(name)) = 0) THEN "
-        "RAISE EXCEPTION 'foundation_references has blank category, code, or name; repair those rows before upgrading'; "
-        "END IF; END $$;"
-    ))
+    op.execute(
+        sa.text(
+            "DO $$ BEGIN "
+            "IF EXISTS (SELECT 1 FROM foundation_references "
+            "WHERE length(trim(category)) = 0 OR length(trim(code)) = 0 "
+            "OR length(trim(name)) = 0) THEN "
+            "RAISE EXCEPTION 'foundation_references has blank category, code, or name; repair those rows before upgrading'; "
+            "END IF; END $$;"
+        )
+    )
     op.create_check_constraint(
         CONSTRAINT_NAME,
         "foundation_references",

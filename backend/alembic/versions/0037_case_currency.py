@@ -1,4 +1,5 @@
 """Preserve the currency of reconciliation findings."""
+
 import sqlalchemy as sa
 from alembic import op
 

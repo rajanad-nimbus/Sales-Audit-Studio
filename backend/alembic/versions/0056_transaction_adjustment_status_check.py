@@ -1,4 +1,5 @@
 """Restrict correction review states to the supported state machine."""
+
 from alembic import op
 
 revision = "0056"
