@@ -413,3 +413,35 @@ def test_older_snapshot_is_not_applied_while_newer_generation_is_staging():
             assert row.name == "Newer"
 
     run(go())
+
+
+def test_apply_rejects_missing_or_mismatched_stage_without_deactivating_references():
+    async def go():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        _engines.append(engine)
+        Session = await make_session(engine)
+        async with Session() as db:
+            db.add(FoundationReference(
+                id="keep", category="Item", code="KEEP", name="Keep", active=True,
+                attributes={"source": "Shopify"},
+            ))
+            state = (await db.execute(select(ShopifyReferenceSyncState))).scalar_one()
+            state.generation = 1
+            await db.commit()
+
+            with pytest.raises(reference_sync.ShopifyReferenceStageError, match="snapshot is missing"):
+                await reference_sync.apply(db, "missing-stage", 1, "test-actor")
+            await db.rollback()
+            assert (await db.get(FoundationReference, "keep")).active is True
+
+            staged = await reference_sync.stage(CatalogAdapter(), db, "mismatched-stage", "SHOPIFY-MAIN")
+            with pytest.raises(reference_sync.ShopifyReferenceStageError, match="does not match"):
+                await reference_sync.apply(
+                    db, "mismatched-stage", staged["generation"] + 1, "test-actor"
+                )
+            await db.rollback()
+            row = await db.get(FoundationReference, "keep")
+            await db.refresh(row)
+            assert row.active is True
+
+    run(go())

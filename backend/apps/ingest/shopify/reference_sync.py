@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, tuple_, update, delete
+from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,10 @@ SOURCE = "Shopify"
 STAGE_BATCH_SIZE = 500
 ORPHAN_RETENTION = timedelta(days=1)
 logger = logging.getLogger(__name__)
+
+
+class ShopifyReferenceStageError(RuntimeError):
+    """A staged Shopify snapshot is missing or does not match its generation."""
 
 
 @dataclass(slots=True)
@@ -237,6 +241,20 @@ async def apply(
         counts["superseded"] = True
         await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.sync_id == sync_id))
         return counts
+
+    staged_generations = (await db.execute(
+        select(ShopifyReferenceStage.generation, func.count())
+        .where(ShopifyReferenceStage.sync_id == sync_id)
+        .group_by(ShopifyReferenceStage.generation)
+    )).all()
+    if (
+        len(staged_generations) != 1
+        or staged_generations[0][0] != generation
+        or staged_generations[0][1] == 0
+    ):
+        raise ShopifyReferenceStageError(
+            "Shopify reference snapshot is missing or does not match its generation"
+        )
 
     await lock_configuration(db, exclusive=True)
     affected_stores = await _apply_staged_rows(db, sync_id, actor, counts)
