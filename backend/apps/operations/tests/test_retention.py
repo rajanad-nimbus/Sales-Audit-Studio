@@ -244,6 +244,67 @@ def test_retention_archive_byte_limit_purges_only_archived_records(tmp_path, mon
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("candidate_ids", [["missing"], ["src-1", "missing"]])
+def test_retention_rejects_incomplete_candidate_archive(tmp_path, monkeypatch, candidate_ids):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setenv("NIMBUS_ARCHIVE_DIR", str(tmp_path))
+
+        async def changed_candidates(*_args):
+            return candidate_ids, None, len(candidate_ids), False
+
+        monkeypatch.setattr("apps.operations.routes.retention_candidates", changed_candidates)
+        try:
+            async with sessions() as db:
+                old = utcnow() - timedelta(days=45)
+                db.add(
+                    RetentionPolicy(
+                        id="policy",
+                        dataset="source_records",
+                        retain_days=30,
+                        archive_before_purge=True,
+                        updated_by="it",
+                    )
+                )
+                db.add(
+                    SourceRecord(
+                        id="src-1",
+                        source_system="POS",
+                        source_version="1",
+                        source_record_id="src-1",
+                        delivery_id="delivery",
+                        payload=b"{}",
+                        payload_hash="0" * 64,
+                        received_at=old,
+                        source_event_time=old,
+                        status="Processed",
+                        created_at=old,
+                    )
+                )
+                await db.commit()
+
+                with pytest.raises(HTTPException) as error:
+                    await execute_retention(
+                        "source_records",
+                        RetentionRunBody(confirm_purge=True),
+                        db,
+                        {"user": "it.user"},
+                    )
+                assert error.value.status_code == 409
+                assert "candidates changed" in error.value.detail
+                await db.rollback()
+                assert await db.scalar(select(func.count()).select_from(SourceRecord)) == 1
+                assert await db.scalar(select(func.count()).select_from(RetentionRun)) == 0
+                assert not list(tmp_path.rglob("*.jsonl"))
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_retention_removes_archive_when_purge_fails(tmp_path, monkeypatch):
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)

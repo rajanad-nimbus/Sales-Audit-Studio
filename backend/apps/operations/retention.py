@@ -216,7 +216,12 @@ async def archive_retention_candidates(
         archived_ids, archive_hash, archived_count, has_more = await stream_retention_rows(
             db, archive_query, archive_path
         )
-        if archived_ids != record_ids[: len(archived_ids)] or archived_count != len(archived_ids):
+        if (
+            not archived_ids
+            or archived_ids != record_ids[: len(archived_ids)]
+            or archived_count != len(archived_ids)
+            or (len(archived_ids) < len(record_ids) and not has_more)
+        ):
             raise HTTPException(
                 status_code=409,
                 detail="Retention candidates changed while preparing the archive; retry the operation",
