@@ -26,6 +26,8 @@ def test_mapping_conflict_matches_default_mapping_unique_constraint():
 
 
 def test_unrelated_integrity_error_is_not_misclassified_as_duplicate_mapping():
-    error = IntegrityError("insert", {}, Exception("UNIQUE constraint failed: gl_cross_references.id"))
+    error = IntegrityError(
+        "insert", {}, Exception("UNIQUE constraint failed: gl_cross_references.id")
+    )
 
     assert not _is_duplicate_cross_reference(error)

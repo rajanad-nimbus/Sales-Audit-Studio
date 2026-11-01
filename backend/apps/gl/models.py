@@ -16,7 +16,9 @@ class GLCrossReference(Base):
     credit_account: Mapped[str] = mapped_column(String(100))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
     __table_args__ = (
         UniqueConstraint("transaction_type", "tender_type", name="uq_gl_cross_reference"),
         Index(

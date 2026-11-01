@@ -1,4 +1,5 @@
 """GL cross-reference maintenance and paginated journal previews."""
+
 import math
 import uuid
 from typing import Annotated
@@ -73,9 +74,17 @@ async def list_maps(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_role("finance", "it")),
 ):
-    rows = (await db.execute(select(GLCrossReference).order_by(
-        GLCrossReference.transaction_type, GLCrossReference.tender_type
-    ))).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(GLCrossReference).order_by(
+                    GLCrossReference.transaction_type, GLCrossReference.tender_type
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [view(row) for row in rows]
 
 
@@ -123,23 +132,32 @@ async def journal_preview(
         CanonicalTransaction.store_id == store_id,
         CanonicalTransaction.business_date == business_date,
     )
-    total = (await db.execute(
-        select(func.count()).select_from(CanonicalTransaction).where(*conditions)
-    )).scalar() or 0
+    total = (
+        await db.execute(select(func.count()).select_from(CanonicalTransaction).where(*conditions))
+    ).scalar() or 0
     pages = max(1, math.ceil(total / page_size))
     if page > pages:
         raise HTTPException(status_code=422, detail=f"page must be between 1 and {pages}")
 
-    rows = (await db.execute(
-        select(CanonicalTransaction).where(*conditions)
-        .order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(CanonicalTransaction)
+                .where(*conditions)
+                .order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
     amounts = await effective_amounts(db, rows)
-    maps = (await db.execute(select(GLCrossReference).where(
-        GLCrossReference.active.is_(True)
-    ))).scalars().all()
+    maps = (
+        (await db.execute(select(GLCrossReference).where(GLCrossReference.active.is_(True))))
+        .scalars()
+        .all()
+    )
     indexed = {}
     for item in maps:
         key = (item.transaction_type, item.tender_type)
@@ -152,24 +170,27 @@ async def journal_preview(
 
     lines, unmapped = [], []
     for transaction in rows:
-        mapping = indexed.get((transaction.transaction_type, transaction.tender_type)) or indexed.get(
-            (transaction.transaction_type, None)
-        )
+        mapping = indexed.get(
+            (transaction.transaction_type, transaction.tender_type)
+        ) or indexed.get((transaction.transaction_type, None))
         if mapping is None:
             unmapped.append(transaction.id)
             continue
         amount = amounts[transaction.id]
         debit, credit = (
             (mapping.debit_account, mapping.credit_account)
-            if amount >= 0 else (mapping.credit_account, mapping.debit_account)
+            if amount >= 0
+            else (mapping.credit_account, mapping.debit_account)
         )
-        lines.append({
-            "transaction_id": transaction.id,
-            "debit_account": debit,
-            "credit_account": credit,
-            "amount": abs(amount),
-            "currency": transaction.currency,
-        })
+        lines.append(
+            {
+                "transaction_id": transaction.id,
+                "debit_account": debit,
+                "credit_account": credit,
+                "amount": abs(amount),
+                "currency": transaction.currency,
+            }
+        )
 
     return {
         "store_id": store_id,

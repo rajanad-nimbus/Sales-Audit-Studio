@@ -38,8 +38,10 @@ def test_scale_demo_cleanup_deletes_only_reserved_synthetic_case_numbers():
                 result = await clear_scale_demo(db, {"role": "it"})
 
                 remaining = (
-                    await db.execute(select(Case.case_number).order_by(Case.case_number))
-                ).scalars().all()
+                    (await db.execute(select(Case.case_number).order_by(Case.case_number)))
+                    .scalars()
+                    .all()
+                )
                 assert result == {"deleted": 1}
                 assert remaining == ["ZS-A1B2-0000001"]
         finally:

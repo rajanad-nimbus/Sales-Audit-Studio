@@ -33,68 +33,168 @@ async def seed_demo_data(
 
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     demo_cases = (
-        ("Timing Difference", "STORE-014", "Ready for Decision", "In Review", "High",
-         "TIMING_DIFFERENCE", "Settlement", 550, 0, "Medium",
-         "Refund of $550 occurred after 23:00 cutoff; confirmed by processor settlement batch.",
-         "Timing", "Disposition Only"),
-        ("Duplicate Sales", "STORE-022", "In Progress", "In Investigation", "Normal",
-         "DUPLICATE_SALES", "Transaction Audit", 1280, 1280, "High", None, None, None),
-        ("Missing Refund", "STORE-007", "Pending", "Open", "Critical",
-         "MISSING_REFUND", "Payment Reconciliation", 3420, 3420, "Critical", None, None, None),
-        ("Connector Failure", "STORE-031", "Needs Intervention", "Open", "High",
-         "CONNECTOR_TIMEOUT", "Ingestion", 0, 0, "Medium", None, None, None),
+        (
+            "Timing Difference",
+            "STORE-014",
+            "Ready for Decision",
+            "In Review",
+            "High",
+            "TIMING_DIFFERENCE",
+            "Settlement",
+            550,
+            0,
+            "Medium",
+            "Refund of $550 occurred after 23:00 cutoff; confirmed by processor settlement batch.",
+            "Timing",
+            "Disposition Only",
+        ),
+        (
+            "Duplicate Sales",
+            "STORE-022",
+            "In Progress",
+            "In Investigation",
+            "Normal",
+            "DUPLICATE_SALES",
+            "Transaction Audit",
+            1280,
+            1280,
+            "High",
+            None,
+            None,
+            None,
+        ),
+        (
+            "Missing Refund",
+            "STORE-007",
+            "Pending",
+            "Open",
+            "Critical",
+            "MISSING_REFUND",
+            "Payment Reconciliation",
+            3420,
+            3420,
+            "Critical",
+            None,
+            None,
+            None,
+        ),
+        (
+            "Connector Failure",
+            "STORE-031",
+            "Needs Intervention",
+            "Open",
+            "High",
+            "CONNECTOR_TIMEOUT",
+            "Ingestion",
+            0,
+            0,
+            "Medium",
+            None,
+            None,
+            None,
+        ),
     )
     for index, values in enumerate(demo_cases, start=1):
-        (case_type, store, status, investigation_status, priority, exception_type, family,
-         amount, exposure, severity, conclusion, disposition, action_class) = values
+        (
+            case_type,
+            store,
+            status,
+            investigation_status,
+            priority,
+            exception_type,
+            family,
+            amount,
+            exposure,
+            severity,
+            conclusion,
+            disposition,
+            action_class,
+        ) = values
         case_id = str(uuid.uuid4())
-        db.add(Case(
-            id=case_id,
-            case_number=f"ZA-{today.replace('-', '')}-{index:04d}",
-            status=status,
-            case_type=case_type,
-            business_date=today,
-            store_id=store,
-            total_exception_amount=amount,
-            total_exposure=exposure,
-            investigation_status=investigation_status,
-            evidence_completeness=100 if conclusion else 40,
-            priority=priority,
-        ))
+        db.add(
+            Case(
+                id=case_id,
+                case_number=f"ZA-{today.replace('-', '')}-{index:04d}",
+                status=status,
+                case_type=case_type,
+                business_date=today,
+                store_id=store,
+                total_exception_amount=amount,
+                total_exposure=exposure,
+                investigation_status=investigation_status,
+                evidence_completeness=100 if conclusion else 40,
+                priority=priority,
+            )
+        )
         await db.flush()
-        db.add(DBException(
-            id=str(uuid.uuid4()), case_id=case_id, exception_type=exception_type,
-            exception_family=family, source_system="POS", detection_origin="Audit Rule",
-            detection_rule_id=f"RULE-{exception_type}", exception_amount=amount,
-            estimated_exposure=exposure, severity=severity, confidence="High",
-            close_impact="Yes" if amount else "No",
-        ))
+        db.add(
+            DBException(
+                id=str(uuid.uuid4()),
+                case_id=case_id,
+                exception_type=exception_type,
+                exception_family=family,
+                source_system="POS",
+                detection_origin="Audit Rule",
+                detection_rule_id=f"RULE-{exception_type}",
+                exception_amount=amount,
+                estimated_exposure=exposure,
+                severity=severity,
+                confidence="High",
+                close_impact="Yes" if amount else "No",
+            )
+        )
         if conclusion:
             investigation_id = f"INV-{index:04d}"
-            db.add(Finding(
-                id=str(uuid.uuid4()), case_id=case_id, investigation_id=investigation_id,
-                conclusion=conclusion, finding_type="Supported Finding", confidence="High",
-                supporting_rationale="Evidence complete and consistent across sources.",
-            ))
-            db.add(Recommendation(
-                id=str(uuid.uuid4()), case_id=case_id, investigation_id=investigation_id,
-                disposition_type=disposition, action_class=action_class,
-                expected_workflow="Apply classification -> Schedule validation -> Monitor -> Close",
-                financial_impact=0, confidence="High",
-            ))
-        db.add(AuditEvent(
-            id=str(uuid.uuid4()), event_type="CASE_CREATED", actor="system", object_type="Case",
-            object_id=case_id, case_id=case_id, action_description=f"Case created: {case_type}",
-        ))
+            db.add(
+                Finding(
+                    id=str(uuid.uuid4()),
+                    case_id=case_id,
+                    investigation_id=investigation_id,
+                    conclusion=conclusion,
+                    finding_type="Supported Finding",
+                    confidence="High",
+                    supporting_rationale="Evidence complete and consistent across sources.",
+                )
+            )
+            db.add(
+                Recommendation(
+                    id=str(uuid.uuid4()),
+                    case_id=case_id,
+                    investigation_id=investigation_id,
+                    disposition_type=disposition,
+                    action_class=action_class,
+                    expected_workflow="Apply classification -> Schedule validation -> Monitor -> Close",
+                    financial_impact=0,
+                    confidence="High",
+                )
+            )
+        db.add(
+            AuditEvent(
+                id=str(uuid.uuid4()),
+                event_type="CASE_CREATED",
+                actor="system",
+                object_type="Case",
+                object_id=case_id,
+                case_id=case_id,
+                action_description=f"Case created: {case_type}",
+            )
+        )
 
     await db.commit()
     return {"seeded": len(demo_cases)}
 
 
 SCALE_DEMO_CASE_TYPES = (
-    "Timing Difference", "Duplicate Sales", "Missing Refund", "Amount Mismatch",
-    "Orphan Payment", "Unmatched Sale", "Bank Deposit Variance", "GL Posting Variance",
-    "Incomplete Feed", "Balancing Variance",
+    "Timing Difference",
+    "Duplicate Sales",
+    "Missing Refund",
+    "Amount Mismatch",
+    "Orphan Payment",
+    "Unmatched Sale",
+    "Bank Deposit Variance",
+    "GL Posting Variance",
+    "Incomplete Feed",
+    "Balancing Variance",
 )
 
 
@@ -106,9 +206,12 @@ async def scale_demo(
     _user: dict = Depends(require_role("it")),
 ):
     """Create tagged synthetic cases for action-center volume checks."""
-    case_types_sql = "ARRAY[" + ",".join(f"'{case_type}'" for case_type in SCALE_DEMO_CASE_TYPES) + "]"
+    case_types_sql = (
+        "ARRAY[" + ",".join(f"'{case_type}'" for case_type in SCALE_DEMO_CASE_TYPES) + "]"
+    )
     tag = uuid.uuid4().hex[:4].upper()
-    await db.execute(text(f"""
+    await db.execute(
+        text(f"""
         INSERT INTO cases (id, case_number, status, case_type, business_date, store_id, total_exception_amount,
             total_exposure, investigation_status, evidence_completeness, assigned_to, priority, sla_due_at, created_at, updated_at)
         SELECT gen_random_uuid()::text, 'ZS-DEMO-{tag}-' || lpad(i::text, 7, '0'),
@@ -121,13 +224,17 @@ async def scale_demo(
             'Pending', 100, NULL, 'Normal', now() + ((random() * 90 - 20) || ' hours')::interval,
             now() - ((random() * 14 * 24) || ' hours')::interval, now()
         FROM generate_series(1, :n) AS i
-    """), {"n": cases, "stores": stores})
-    await db.execute(text(f"""
+    """),
+        {"n": cases, "stores": stores},
+    )
+    await db.execute(
+        text(f"""
         UPDATE cases SET priority = CASE WHEN total_exposure > 3000 THEN 'Critical' WHEN total_exposure > 1000 THEN 'High' ELSE 'Normal' END,
             investigation_status = CASE WHEN status = 'In Review' THEN 'Ready for Decision' WHEN status = 'Closed' THEN 'Resolved' ELSE 'Pending' END,
             evidence_completeness = CASE WHEN status IN ('Open') THEN 0 ELSE 100 END
         WHERE case_number LIKE 'ZS-DEMO-{tag}-%'
-    """))
+    """)
+    )
     await db.commit()
     total = (await db.execute(select(func.count()).select_from(Case))).scalar()
     return {"created": cases, "tag": tag, "total_cases": total}
