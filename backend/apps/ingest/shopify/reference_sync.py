@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from model_base import utcnow
 from apps.controls.foundation.models import FoundationReference
 from apps.ingest.models import ShopifyReferenceStage, ShopifyReferenceSyncState
+from apps.ingest.shopify.adapter import ShopifyAPIError
 
 SOURCE = "Shopify"
 STAGE_BATCH_SIZE = 500
@@ -45,20 +46,33 @@ class StageAccumulator:
             self.counts[name] += value
 
 
-def _clip(value: str, size: int) -> str:
-    return (value or "").strip()[:size]
+def _clip(value, size: int) -> str:
+    return str(value or "").strip()[:size]
+
+
+def _required_text(value, size: int, response: str, fallback=None) -> str:
+    normalized = _clip(value, size)
+    if normalized:
+        return normalized
+    normalized_fallback = _clip(fallback, size)
+    if normalized_fallback:
+        return normalized_fallback
+    raise ShopifyAPIError(f"Shopify returned an invalid {response} response")
 
 
 def shop_to_store(shop: dict, store_code: str) -> dict:
     """The shop itself is the store that Shopify orders are booked to (SHOPIFY_STORE_ID)."""
-    return {"category": "Store", "code": _clip(store_code, 100), "name": _clip(shop.get("name") or store_code, 255),
+    code = _required_text(store_code, 100, "shop")
+    return {"category": "Store", "code": code,
+            "name": _required_text(shop.get("name"), 255, "shop", fallback=code),
             "active": True, "attributes": {"source": SOURCE, "kind": "shop", "shopify_id": shop.get("id"),
                                            "currency": shop.get("currency"), "timezone": shop.get("iana_timezone")}}
 
 
 def location_to_store(location: dict) -> dict:
-    return {"category": "Store", "code": _clip(f"SHOPIFY-LOC-{location['id']}", 100),
-            "name": _clip(location.get("name") or f"Location {location['id']}", 255),
+    location_id = _required_text(location.get("id"), 100, "locations")
+    return {"category": "Store", "code": _clip(f"SHOPIFY-LOC-{location_id}", 100),
+            "name": _required_text(location.get("name"), 255, "locations", fallback=f"Location {location_id}"),
             "active": bool(location.get("active", True)),
             "attributes": {"source": SOURCE, "kind": "location", "shopify_id": location["id"],
                            "city": location.get("city"), "province": location.get("province"),
@@ -67,17 +81,22 @@ def location_to_store(location: dict) -> dict:
 
 def product_to_items(product: dict) -> list[dict]:
     """One Item per variant, keyed by SKU (falling back to the variant id)."""
+    product_id = _required_text(product.get("id"), 100, "products")
+    product_name = _required_text(
+        product.get("title"), 255, "products", fallback=f"Product {product_id}"
+    )
     items = []
     for variant in product.get("variants") or []:
         sku = (variant.get("sku") or "").strip()
         label = (variant.get("title") or "").strip()
-        name = product.get("title") or f"Product {product['id']}"
+        variant_id = _required_text(variant.get("id"), 100, "products")
+        name = product_name
         if label and label != "Default Title":
             name = f"{name} - {label}"
-        items.append({"category": "Item", "code": _clip(sku or f"SHOPIFY-VAR-{variant['id']}", 100),
+        items.append({"category": "Item", "code": _required_text(sku, 100, "products", fallback=f"SHOPIFY-VAR-{variant_id}"),
                       "name": _clip(name, 255), "active": product.get("status", "active") == "active",
-                      "attributes": {"source": SOURCE, "shopify_product_id": product["id"],
-                                     "shopify_variant_id": variant["id"], "price": variant.get("price"),
+                      "attributes": {"source": SOURCE, "shopify_product_id": product_id,
+                                     "shopify_variant_id": variant_id, "price": variant.get("price"),
                                      "vendor": product.get("vendor"), "product_type": product.get("product_type")}})
     return items
 
