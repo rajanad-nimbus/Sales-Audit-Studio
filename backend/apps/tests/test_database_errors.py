@@ -27,6 +27,25 @@ def test_unique_violation_matches_sqlite_message():
     )
 
 
+def test_unique_violation_matches_underlying_asyncpg_constraint():
+    driver_error = Exception("duplicate key")
+    driver_error.constraint_name = "uq_expected"
+    original = Exception("translated error")
+    original.__cause__ = driver_error
+    error = IntegrityError("insert", {}, original)
+
+    assert violates_unique_constraint(
+        error,
+        constraint_names={"uq_expected"},
+        sqlite_messages=set(),
+    )
+    assert not violates_unique_constraint(
+        error,
+        constraint_names={"uq_other"},
+        sqlite_messages=set(),
+    )
+
+
 def test_unrecognized_constraint_is_not_misclassified():
     error = IntegrityError("insert", {}, Exception("UNIQUE constraint failed: example.id"))
 
