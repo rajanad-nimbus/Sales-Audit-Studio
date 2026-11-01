@@ -26,51 +26,130 @@ def test_closed_case_follow_up_is_scoped_idempotent_and_preserves_history():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                parent = Case(id="parent", case_number="P", status="Closed", case_type="Mismatch",
-                              business_date="2026-10-01", store_id="S1", currency="USD",
-                              amount_needs_review=True, total_exception_amount=10, total_exposure=10)
+                parent = Case(
+                    id="parent",
+                    case_number="P",
+                    status="Closed",
+                    case_type="Mismatch",
+                    business_date="2026-10-01",
+                    store_id="S1",
+                    currency="USD",
+                    amount_needs_review=True,
+                    total_exception_amount=10,
+                    total_exposure=10,
+                )
                 db.add(parent)
-                db.add(CaseException(id="exception", case_id="parent", exception_type="Mismatch",
-                    exception_family="test", source_system="POS", detection_origin="test", detection_rule_id="r",
-                    exception_amount=10, estimated_exposure=10, severity="High", confidence="High", close_impact="Yes"))
-                audit(db, "CASE_CREATED", "parent", "Case", "parent", "created", after={"transaction_ids": ["tx"]})
-                audit(db, "CASE_EVIDENCE_STALE", "parent", "TransactionAdjustment", "a1", "corrected")
+                db.add(
+                    CaseException(
+                        id="exception",
+                        case_id="parent",
+                        exception_type="Mismatch",
+                        exception_family="test",
+                        source_system="POS",
+                        detection_origin="test",
+                        detection_rule_id="r",
+                        exception_amount=10,
+                        estimated_exposure=10,
+                        severity="High",
+                        confidence="High",
+                        close_impact="Yes",
+                    )
+                )
+                audit(
+                    db,
+                    "CASE_CREATED",
+                    "parent",
+                    "Case",
+                    "parent",
+                    "created",
+                    after={"transaction_ids": ["tx"]},
+                )
+                audit(
+                    db, "CASE_EVIDENCE_STALE", "parent", "TransactionAdjustment", "a1", "corrected"
+                )
                 await db.commit()
                 with pytest.raises(HTTPException) as error:
-                    await create_follow_up(db, "parent", {"user": "finance", "store_scoped": True, "stores": ["S2"]})
+                    await create_follow_up(
+                        db, "parent", {"user": "finance", "store_scoped": True, "stores": ["S2"]}
+                    )
                 assert error.value.status_code == 403
                 child = await create_follow_up(db, "parent", {"user": "finance"})
                 assert child.id != parent.id and child.amount_needs_review
                 assert parent.status == "Closed" and parent.total_exception_amount == 10
-                copied = (await db.execute(select(CaseException).where(CaseException.case_id == child.id))).scalar_one()
+                copied = (
+                    await db.execute(select(CaseException).where(CaseException.case_id == child.id))
+                ).scalar_one()
                 assert copied.id != "exception" and copied.exception_amount == 10
-                created = (await db.execute(select(AuditEvent).where(AuditEvent.case_id == child.id,
-                           AuditEvent.event_type == "CASE_CREATED"))).scalar_one()
+                created = (
+                    await db.execute(
+                        select(AuditEvent).where(
+                            AuditEvent.case_id == child.id, AuditEvent.event_type == "CASE_CREATED"
+                        )
+                    )
+                ).scalar_one()
                 assert created.after_state["transaction_ids"] == ["tx"]
                 assert (await create_follow_up(db, "parent", {"user": "finance"})).id == child.id
                 child.amount_needs_review = False
-                audit(db, "CASE_EVIDENCE_STALE", "parent", "TransactionAdjustment", "a2", "corrected again")
+                audit(
+                    db,
+                    "CASE_EVIDENCE_STALE",
+                    "parent",
+                    "TransactionAdjustment",
+                    "a2",
+                    "corrected again",
+                )
                 await db.commit()
                 assert (await create_follow_up(db, "parent", {"user": "finance"})).id == child.id
                 assert child.amount_needs_review
                 # A later correction invalidates both cases in the approval transaction.
                 # The follow-up may be reviewed and closed without reopening the parent.
-                audit(db, "CASE_EVIDENCE_STALE", "parent", "TransactionAdjustment", "a-direct", "corrected")
-                audit(db, "CASE_EVIDENCE_STALE", child.id, "TransactionAdjustment", "a-direct", "corrected",
-                      after={"case_closed": False})
+                audit(
+                    db,
+                    "CASE_EVIDENCE_STALE",
+                    "parent",
+                    "TransactionAdjustment",
+                    "a-direct",
+                    "corrected",
+                )
+                audit(
+                    db,
+                    "CASE_EVIDENCE_STALE",
+                    child.id,
+                    "TransactionAdjustment",
+                    "a-direct",
+                    "corrected",
+                    after={"case_closed": False},
+                )
                 child.status = "Closed"
                 await db.commit()
                 with pytest.raises(HTTPException, match="No new correction"):
                     await create_follow_up(db, "parent", {"user": "finance"})
-                audit(db, "CASE_EVIDENCE_STALE", "parent", "TransactionAdjustment", "a3", "corrected again")
-                audit(db, "CASE_EVIDENCE_STALE", child.id, "TransactionAdjustment", "a3", "corrected again",
-                      after={"case_closed": True})
+                audit(
+                    db,
+                    "CASE_EVIDENCE_STALE",
+                    "parent",
+                    "TransactionAdjustment",
+                    "a3",
+                    "corrected again",
+                )
+                audit(
+                    db,
+                    "CASE_EVIDENCE_STALE",
+                    child.id,
+                    "TransactionAdjustment",
+                    "a3",
+                    "corrected again",
+                    after={"case_closed": True},
+                )
                 await db.commit()
                 replacement = await create_follow_up(db, child.id, {"user": "finance"})
                 assert replacement.id != child.id
-                assert (await create_follow_up(db, "parent", {"user": "finance"})).id == replacement.id
+                assert (
+                    await create_follow_up(db, "parent", {"user": "finance"})
+                ).id == replacement.id
         finally:
             await engine.dispose()
+
     asyncio.run(run())
 
 
@@ -81,18 +160,49 @@ def test_follow_up_state_queries_large_child_history_in_database():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add(Case(id="parent", case_number="P", status="Closed", case_type="test",
-                            business_date="2026-10-01", store_id="S1"))
+                db.add(
+                    Case(
+                        id="parent",
+                        case_number="P",
+                        status="Closed",
+                        case_type="test",
+                        business_date="2026-10-01",
+                        store_id="S1",
+                    )
+                )
                 for index in range(1_100):
                     child_id = f"child-{index}"
-                    db.add(Case(id=child_id, case_number=child_id,
-                                status="Open" if index == 1_099 else "Closed", case_type="test",
-                                business_date="2026-10-01", store_id="S1"))
-                    audit(db, "CASE_FOLLOW_UP_LINKED", "parent", "Case", child_id, "linked",
-                          after={"follow_up_id": child_id, "stale_event_ids": []})
-                db.add(AuditEvent(id="legacy-follow-up-link", event_type="CASE_FOLLOW_UP_LINKED",
-                    actor="system", object_type="Case", object_id="parent", case_id="parent",
-                    action_description="Malformed legacy follow-up metadata", after_state=["legacy"]))
+                    db.add(
+                        Case(
+                            id=child_id,
+                            case_number=child_id,
+                            status="Open" if index == 1_099 else "Closed",
+                            case_type="test",
+                            business_date="2026-10-01",
+                            store_id="S1",
+                        )
+                    )
+                    audit(
+                        db,
+                        "CASE_FOLLOW_UP_LINKED",
+                        "parent",
+                        "Case",
+                        child_id,
+                        "linked",
+                        after={"follow_up_id": child_id, "stale_event_ids": []},
+                    )
+                db.add(
+                    AuditEvent(
+                        id="legacy-follow-up-link",
+                        event_type="CASE_FOLLOW_UP_LINKED",
+                        actor="system",
+                        object_type="Case",
+                        object_id="parent",
+                        case_id="parent",
+                        action_description="Malformed legacy follow-up metadata",
+                        after_state=["legacy"],
+                    )
+                )
                 await db.commit()
 
                 events = await parent_lineage_events(db, "parent")
@@ -101,6 +211,7 @@ def test_follow_up_state_queries_large_child_history_in_database():
                 assert [child.id for child in state.children] == ["child-1099"]
         finally:
             await engine.dispose()
+
     asyncio.run(run())
 
 
@@ -111,26 +222,66 @@ def test_malformed_parent_creation_metadata_does_not_break_follow_up():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add(Case(id="parent", case_number="P", status="Closed", case_type="Mismatch",
-                            business_date="2026-10-01", store_id="S1", currency="USD",
-                            amount_needs_review=True, total_exception_amount=10, total_exposure=10))
-                db.add(CaseException(id="exception", case_id="parent", exception_type="Mismatch",
-                    exception_family="test", source_system="POS", detection_origin="test", detection_rule_id="r",
-                    exception_amount=10, estimated_exposure=10, severity="High", confidence="High", close_impact="Yes"))
-                db.add(AuditEvent(id="legacy-created", event_type="CASE_CREATED", actor="system",
-                    object_type="Case", object_id="parent", case_id="parent", action_description="legacy",
-                    after_state=["unexpected"]))
-                audit(db, "CASE_EVIDENCE_STALE", "parent", "TransactionAdjustment", "a1", "corrected")
+                db.add(
+                    Case(
+                        id="parent",
+                        case_number="P",
+                        status="Closed",
+                        case_type="Mismatch",
+                        business_date="2026-10-01",
+                        store_id="S1",
+                        currency="USD",
+                        amount_needs_review=True,
+                        total_exception_amount=10,
+                        total_exposure=10,
+                    )
+                )
+                db.add(
+                    CaseException(
+                        id="exception",
+                        case_id="parent",
+                        exception_type="Mismatch",
+                        exception_family="test",
+                        source_system="POS",
+                        detection_origin="test",
+                        detection_rule_id="r",
+                        exception_amount=10,
+                        estimated_exposure=10,
+                        severity="High",
+                        confidence="High",
+                        close_impact="Yes",
+                    )
+                )
+                db.add(
+                    AuditEvent(
+                        id="legacy-created",
+                        event_type="CASE_CREATED",
+                        actor="system",
+                        object_type="Case",
+                        object_id="parent",
+                        case_id="parent",
+                        action_description="legacy",
+                        after_state=["unexpected"],
+                    )
+                )
+                audit(
+                    db, "CASE_EVIDENCE_STALE", "parent", "TransactionAdjustment", "a1", "corrected"
+                )
                 await db.commit()
 
                 child = await create_follow_up(db, "parent", {"user": "finance"})
-                created = (await db.execute(select(AuditEvent).where(
-                    AuditEvent.case_id == child.id, AuditEvent.event_type == "CASE_CREATED"
-                ))).scalar_one()
+                created = (
+                    await db.execute(
+                        select(AuditEvent).where(
+                            AuditEvent.case_id == child.id, AuditEvent.event_type == "CASE_CREATED"
+                        )
+                    )
+                ).scalar_one()
                 assert created.after_state["transaction_ids"] == []
                 assert created.after_state["parent_case_id"] == "parent"
         finally:
             await engine.dispose()
+
     asyncio.run(run())
 
 
@@ -144,21 +295,59 @@ def test_linked_cases_lock_parent_before_follow_up_even_when_ids_sort_oppositely
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 for case_id in ("z-parent", "a-child", "b-child", "m-malformed-child"):
-                    db.add(Case(id=case_id, case_number=case_id, status="Closed", case_type="test",
-                                business_date="2026-10-01", store_id="S1"))
+                    db.add(
+                        Case(
+                            id=case_id,
+                            case_number=case_id,
+                            status="Closed",
+                            case_type="test",
+                            business_date="2026-10-01",
+                            store_id="S1",
+                        )
+                    )
                 await db.flush()
-                audit(db, "CASE_CREATED", "z-parent", "Case", "z-parent", "created",
-                      after={"transaction_ids": ["tx"]})
-                audit(db, "CASE_CREATED", "a-child", "Case", "a-child", "created",
-                      after={"transaction_ids": ["tx"], "parent_case_id": "z-parent"})
-                audit(db, "CASE_CREATED", "b-child", "Case", "b-child", "created",
-                      after={"transaction_ids": ["tx"], "parent_case_id": "z-parent"})
-                audit(db, "CASE_CREATED", "m-malformed-child", "Case", "m-malformed-child", "legacy",
-                      after={"transaction_ids": ["tx"], "parent_case_id": {"legacy": "invalid"}})
+                audit(
+                    db,
+                    "CASE_CREATED",
+                    "z-parent",
+                    "Case",
+                    "z-parent",
+                    "created",
+                    after={"transaction_ids": ["tx"]},
+                )
+                audit(
+                    db,
+                    "CASE_CREATED",
+                    "a-child",
+                    "Case",
+                    "a-child",
+                    "created",
+                    after={"transaction_ids": ["tx"], "parent_case_id": "z-parent"},
+                )
+                audit(
+                    db,
+                    "CASE_CREATED",
+                    "b-child",
+                    "Case",
+                    "b-child",
+                    "created",
+                    after={"transaction_ids": ["tx"], "parent_case_id": "z-parent"},
+                )
+                audit(
+                    db,
+                    "CASE_CREATED",
+                    "m-malformed-child",
+                    "Case",
+                    "m-malformed-child",
+                    "legacy",
+                    after={"transaction_ids": ["tx"], "parent_case_id": {"legacy": "invalid"}},
+                )
                 await db.commit()
                 lock_queries = []
 
-                def capture_lock_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+                def capture_lock_query(
+                    _connection, _cursor, statement, _parameters, _context, _executemany
+                ):
                     normalized = statement.lower()
                     if normalized.startswith("select cases.") and "cases.id in" in normalized:
                         lock_queries.append(statement)
@@ -173,6 +362,7 @@ def test_linked_cases_lock_parent_before_follow_up_even_when_ids_sort_oppositely
                 assert "IN (?, ?)" in lock_queries[-1]
         finally:
             await engine.dispose()
+
     asyncio.run(run())
 
 
@@ -184,17 +374,31 @@ def test_evidence_invalidation_supersedes_recommendations_in_one_batched_update(
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 cases = [
-                    Case(id=f"case-{index}", case_number=f"C-{index}", status=status,
-                         case_type="Mismatch", business_date="2026-10-01", store_id="S1")
+                    Case(
+                        id=f"case-{index}",
+                        case_number=f"C-{index}",
+                        status=status,
+                        case_type="Mismatch",
+                        business_date="2026-10-01",
+                        store_id="S1",
+                    )
                     for index, status in enumerate(("In Review", "Open", "Closed"))
                 ]
                 db.add_all(cases)
-                db.add_all([
-                    Recommendation(id=f"recommendation-{index}", case_id=case.id,
-                                   investigation_id="investigation", disposition_type="Review",
-                                   action_class="Manual", expected_workflow="Review", confidence="High")
-                    for index, case in enumerate(cases)
-                ])
+                db.add_all(
+                    [
+                        Recommendation(
+                            id=f"recommendation-{index}",
+                            case_id=case.id,
+                            investigation_id="investigation",
+                            disposition_type="Review",
+                            action_class="Manual",
+                            expected_workflow="Review",
+                            confidence="High",
+                        )
+                        for index, case in enumerate(cases)
+                    ]
+                )
                 await db.commit()
                 statements = []
 
@@ -213,7 +417,9 @@ def test_evidence_invalidation_supersedes_recommendations_in_one_batched_update(
                     for recommendation in (await db.execute(select(Recommendation))).scalars()
                 }
                 assert statuses == {
-                    "case-0": "Superseded", "case-1": "Superseded", "case-2": "Proposed"
+                    "case-0": "Superseded",
+                    "case-1": "Superseded",
+                    "case-2": "Proposed",
                 }
                 assert len(statements) == 1
                 assert [case.status for case in cases] == ["Open", "Open", "Closed"]
@@ -230,22 +436,42 @@ def test_follow_up_copies_large_exception_history_in_bounded_pages():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                parent = Case(id="large-parent", case_number="P-LARGE", status="Closed",
-                              case_type="Mismatch", business_date="2026-10-01", store_id="S1")
+                parent = Case(
+                    id="large-parent",
+                    case_number="P-LARGE",
+                    status="Closed",
+                    case_type="Mismatch",
+                    business_date="2026-10-01",
+                    store_id="S1",
+                )
                 db.add(parent)
-                db.add_all([
-                    CaseException(id=f"exception-{index:04}", case_id=parent.id,
-                                  exception_type="Mismatch", exception_family="test",
-                                  source_system="POS", detection_origin="test", detection_rule_id="rule",
-                                  exception_amount=10, estimated_exposure=10, severity="High",
-                                  confidence="High", close_impact="Yes")
-                    for index in range(1_101)
-                ])
+                db.add_all(
+                    [
+                        CaseException(
+                            id=f"exception-{index:04}",
+                            case_id=parent.id,
+                            exception_type="Mismatch",
+                            exception_family="test",
+                            source_system="POS",
+                            detection_origin="test",
+                            detection_rule_id="rule",
+                            exception_amount=10,
+                            estimated_exposure=10,
+                            severity="High",
+                            confidence="High",
+                            close_impact="Yes",
+                        )
+                        for index in range(1_101)
+                    ]
+                )
                 await db.flush()
                 queries = []
 
                 def capture(_connection, _cursor, statement, parameters, _context, _executemany):
-                    if "from exceptions" in statement.lower() and "exceptions.case_id" in statement.lower():
+                    if (
+                        "from exceptions" in statement.lower()
+                        and "exceptions.case_id" in statement.lower()
+                    ):
                         queries.append((statement, parameters))
 
                 event.listen(engine.sync_engine, "before_cursor_execute", capture)
@@ -254,9 +480,13 @@ def test_follow_up_copies_large_exception_history_in_bounded_pages():
                 finally:
                     event.remove(engine.sync_engine, "before_cursor_execute", capture)
 
-                copied_count = (await db.execute(
-                    select(func.count()).select_from(CaseException).where(CaseException.case_id == child.id)
-                )).scalar_one()
+                copied_count = (
+                    await db.execute(
+                        select(func.count())
+                        .select_from(CaseException)
+                        .where(CaseException.case_id == child.id)
+                    )
+                ).scalar_one()
                 assert copied_count == 1_101
                 assert len(queries) == 4
                 assert all(500 in parameters for _statement, parameters in queries)
@@ -268,6 +498,7 @@ def test_follow_up_copies_large_exception_history_in_bounded_pages():
 
 def test_stale_closed_cases_do_not_block_unrelated_exports(monkeypatch):
     from apps.exports import routes
+
     monkeypatch.setattr(routes, "MAX_BATCH", 1)
 
     async def run():
@@ -276,11 +507,23 @@ def test_stale_closed_cases_do_not_block_unrelated_exports(monkeypatch):
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                dest = ExportDestination(id="dest", name="ERP", kind="file", format="json", config={})
+                dest = ExportDestination(
+                    id="dest", name="ERP", kind="file", format="json", config={}
+                )
                 db.add(dest)
                 for case_id, stale in (("stale", True), ("valid", False)):
-                    db.add(Case(id=case_id, case_number=case_id, status="Closed", case_type="test",
-                                business_date="2026-10-01", store_id="S1", currency="USD", amount_needs_review=stale))
+                    db.add(
+                        Case(
+                            id=case_id,
+                            case_number=case_id,
+                            status="Closed",
+                            case_type="test",
+                            business_date="2026-10-01",
+                            store_id="S1",
+                            currency="USD",
+                            amount_needs_review=stale,
+                        )
+                    )
                 await db.commit()
                 records, items, _, _ = await build(db, dest, "resolutions")
                 assert [item[0] for item in items] == ["valid"]
@@ -293,4 +536,5 @@ def test_stale_closed_cases_do_not_block_unrelated_exports(monkeypatch):
                 assert rows["valid"]["state"] == "waiting"
         finally:
             await engine.dispose()
+
     asyncio.run(run())

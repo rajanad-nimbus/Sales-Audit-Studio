@@ -22,30 +22,80 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
             track_facet_queries = False
 
             @event.listens_for(engine.sync_engine, "before_cursor_execute")
-            def record_facet_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+            def record_facet_query(
+                _connection, _cursor, statement, _parameters, _context, _executemany
+            ):
                 if track_facet_queries and "foundation_references" in statement.lower():
                     facets_queries.append(statement)
 
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                common = {"record_type": "Sale", "event_time": "2026-10-01T10:00:00Z", "amount": "10"}
-                await ingest(db, "POS", "delivery", [
-                    {**common, "source_record_id": "one", "store_id": "S1", "payment_reference": "common"},
-                    {**common, "source_record_id": "two", "store_id": "S2", "payment_reference": "common"},
-                ])
+                common = {
+                    "record_type": "Sale",
+                    "event_time": "2026-10-01T10:00:00Z",
+                    "amount": "10",
+                }
+                await ingest(
+                    db,
+                    "POS",
+                    "delivery",
+                    [
+                        {
+                            **common,
+                            "source_record_id": "one",
+                            "store_id": "S1",
+                            "payment_reference": "common",
+                        },
+                        {
+                            **common,
+                            "source_record_id": "two",
+                            "store_id": "S2",
+                            "payment_reference": "common",
+                        },
+                    ],
+                )
                 transactions = (await db.execute(select(CanonicalTransaction))).scalars().all()
                 first, second = sorted(transactions, key=lambda row: row.store_id)
-                db.add_all([
-                    TransactionAdjustment(id="a", transaction_id=first.id, adjustment_type="Amount", status="Proposed",
-                                          proposed_values={"amount_delta": "1"}, rationale="test", proposed_by="user"),
-                    TransactionAdjustment(id="b", transaction_id=second.id, adjustment_type="Amount", status="Proposed",
-                                          proposed_values={"amount_delta": "1"}, rationale="test", proposed_by="user"),
-                    TransactionAdjustment(id="c", adjustment_type="MissingTransaction", status="Proposed",
-                                          proposed_values={"store_id": "S2", "business_date": "2026-10-01", "amount": "1",
-                                                           "transaction_type": "Sale"}, rationale="test", proposed_by="user"),
-                ])
+                db.add_all(
+                    [
+                        TransactionAdjustment(
+                            id="a",
+                            transaction_id=first.id,
+                            adjustment_type="Amount",
+                            status="Proposed",
+                            proposed_values={"amount_delta": "1"},
+                            rationale="test",
+                            proposed_by="user",
+                        ),
+                        TransactionAdjustment(
+                            id="b",
+                            transaction_id=second.id,
+                            adjustment_type="Amount",
+                            status="Proposed",
+                            proposed_values={"amount_delta": "1"},
+                            rationale="test",
+                            proposed_by="user",
+                        ),
+                        TransactionAdjustment(
+                            id="c",
+                            adjustment_type="MissingTransaction",
+                            status="Proposed",
+                            proposed_values={
+                                "store_id": "S2",
+                                "business_date": "2026-10-01",
+                                "amount": "1",
+                                "transaction_type": "Sale",
+                            },
+                            rationale="test",
+                            proposed_by="user",
+                        ),
+                    ]
+                )
                 await db.commit()
                 user = {"user": "scoped", "store_scoped": True, "stores": ["S1"]}
-                assert [row["store_id"] for row in await routes.search_transactions("common", 12, db, user)] == ["S1"]
+                assert [
+                    row["store_id"]
+                    for row in await routes.search_transactions("common", 12, db, user)
+                ] == ["S1"]
                 assert await routes.search_transactions("__", 12, db, user) == []
                 track_facet_queries = True
                 transaction_facets = await routes.transaction_facets(db, user)
@@ -57,7 +107,9 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
                 assert listing["total"] == 1 and listing["net_amount"] == "10.00"
                 assert listing["by_status"] == {"Unmatched": 1}
                 assert (await transactions_routes.facets(db, user))["stores"] == ["S1"]
-                assert (await transactions_routes.transaction_detail(first.id, db, user))["linked_transactions"] == []
+                assert (await transactions_routes.transaction_detail(first.id, db, user))[
+                    "linked_transactions"
+                ] == []
                 adjustment_page = await routes.list_adjustments(None, None, db, user)
                 assert [row["id"] for row in adjustment_page["items"]] == ["a"]
                 for operation in (
@@ -66,11 +118,30 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
                     routes.approve_adjustment("b", db, user),
                     routes.approve_adjustment("c", db, user),
                     routes.reject_adjustment("c", db, user),
-                    routes.propose_adjustment(routes.AdjustmentBody(transaction_id=second.id, adjustment_type="Amount",
-                        proposed_values={"amount_delta": "1"}, rationale="test"), db, user),
-                    routes.propose_adjustment(routes.AdjustmentBody(adjustment_type="MissingTransaction",
-                        proposed_values={"store_id": "S2", "business_date": "2026-10-01", "amount": "1",
-                                         "transaction_type": "Sale"}, rationale="test"), db, user),
+                    routes.propose_adjustment(
+                        routes.AdjustmentBody(
+                            transaction_id=second.id,
+                            adjustment_type="Amount",
+                            proposed_values={"amount_delta": "1"},
+                            rationale="test",
+                        ),
+                        db,
+                        user,
+                    ),
+                    routes.propose_adjustment(
+                        routes.AdjustmentBody(
+                            adjustment_type="MissingTransaction",
+                            proposed_values={
+                                "store_id": "S2",
+                                "business_date": "2026-10-01",
+                                "amount": "1",
+                                "transaction_type": "Sale",
+                            },
+                            rationale="test",
+                        ),
+                        db,
+                        user,
+                    ),
                 ):
                     with pytest.raises(HTTPException) as exc:
                         await operation
@@ -81,4 +152,5 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
                 assert (await routes.list_adjustments(None, None, db, empty))["items"] == []
         finally:
             await engine.dispose()
+
     asyncio.run(run())

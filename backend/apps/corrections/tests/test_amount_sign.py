@@ -22,16 +22,32 @@ def test_amount_correction_cannot_reverse_transaction_sign(record_type, amount_d
                 await connection.run_sync(Base.metadata.create_all)
             session_factory = async_sessionmaker(engine, expire_on_commit=False)
             async with session_factory() as db:
-                await ingest(db, "POS", "delivery", [{
-                    "source_record_id": f"source-{record_type}", "record_type": record_type,
-                    "event_time": "2026-10-01T10:00:00Z", "amount": "100", "store_id": "S1",
-                }])
+                await ingest(
+                    db,
+                    "POS",
+                    "delivery",
+                    [
+                        {
+                            "source_record_id": f"source-{record_type}",
+                            "record_type": record_type,
+                            "event_time": "2026-10-01T10:00:00Z",
+                            "amount": "100",
+                            "store_id": "S1",
+                        }
+                    ],
+                )
                 transaction = (await db.execute(select_transaction())).scalar_one()
-                db.add(TransactionAdjustment(
-                    id="adjustment", transaction_id=transaction.id, adjustment_type="Amount",
-                    proposed_values={"amount_delta": amount_delta}, status="Proposed",
-                    rationale="Correct the source amount", proposed_by="analyst",
-                ))
+                db.add(
+                    TransactionAdjustment(
+                        id="adjustment",
+                        transaction_id=transaction.id,
+                        adjustment_type="Amount",
+                        proposed_values={"amount_delta": amount_delta},
+                        status="Proposed",
+                        rationale="Correct the source amount",
+                        proposed_by="analyst",
+                    )
+                )
                 await db.commit()
 
                 with pytest.raises(HTTPException, match="cannot reverse") as error:

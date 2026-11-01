@@ -24,7 +24,12 @@ def validate_adjustment_values(adjustment_type: str, values: dict) -> None:
             "Item": {"item"},
         }
         allowed = allowed_fields.get(adjustment_type)
-        if not isinstance(values, dict) or not allowed or len(values) != 1 or not set(values) <= allowed:
+        if (
+            not isinstance(values, dict)
+            or not allowed
+            or len(values) != 1
+            or not set(values) <= allowed
+        ):
             raise ValueError("provide exactly one field appropriate to the adjustment type")
         field, value = next(iter(values.items()))
         if adjustment_type in {"Amount", "Tax"}:
@@ -58,9 +63,20 @@ def validate_missing_transaction(values: dict) -> tuple[Decimal, str, str, datet
 
 def validate_missing_transaction_fields(values: dict) -> None:
     allowed = {
-        "amount", "business_date", "store_id", "transaction_type", "event_timestamp",
-        "settlement_date", "currency", "quantity", "register_id", "channel_id", "tender_type",
-        "payment_reference", "settlement_reference", "source_system",
+        "amount",
+        "business_date",
+        "store_id",
+        "transaction_type",
+        "event_timestamp",
+        "settlement_date",
+        "currency",
+        "quantity",
+        "register_id",
+        "channel_id",
+        "tender_type",
+        "payment_reference",
+        "settlement_reference",
+        "source_system",
     }
     if not isinstance(values, dict) or set(values) - allowed:
         raise ValueError("unsupported missing transaction fields")
@@ -106,8 +122,11 @@ def validate_quantity(value: object) -> None:
 
 def validate_optional_text_fields(values: dict) -> None:
     for name, max_length in (
-        ("register_id", 50), ("channel_id", 50), ("tender_type", 50),
-        ("payment_reference", 255), ("settlement_reference", 255),
+        ("register_id", 50),
+        ("channel_id", 50),
+        ("tender_type", 50),
+        ("payment_reference", 255),
+        ("settlement_reference", 255),
     ):
         value = values.get(name)
         if value is not None and (not isinstance(value, str) or len(value) > max_length):

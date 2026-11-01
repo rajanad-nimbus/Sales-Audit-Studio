@@ -46,7 +46,9 @@ async def prepare_approval(
 ) -> ApprovalContext:
     """Validate scope, lock affected rows, and check dependent workflows."""
     if adjustment.adjustment_type == "MissingTransaction":
-        amount, transaction_type, business_date, event_at, settlement_date, source = missing_transaction
+        amount, transaction_type, business_date, event_at, settlement_date, source = (
+            missing_transaction
+        )
         context = ApprovalContext(
             store_id=str(adjustment.proposed_values["store_id"]),
             business_date=business_date,
@@ -76,7 +78,11 @@ async def prepare_approval(
             context.transaction = next(
                 row for row in context.locked_transactions if row.id == adjustment.transaction_id
             )
-            validate_effective_amount(context.transaction, context.values, await effective_amounts(db, [context.transaction]))
+            validate_effective_amount(
+                context.transaction,
+                context.values,
+                await effective_amounts(db, [context.transaction]),
+            )
     return context
 
 
@@ -111,17 +117,23 @@ async def lock_related_transactions(db: AsyncSession, transaction: CanonicalTran
     """Lock the complete linked exception set in stable order for amount checks."""
     transaction_ids = await related_exception_ids(db, transaction)
     return (
-        await db.execute(
-            select(CanonicalTransaction)
-            .where(CanonicalTransaction.id.in_(transaction_ids))
-            .order_by(CanonicalTransaction.id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
+        (
+            await db.execute(
+                select(CanonicalTransaction)
+                .where(CanonicalTransaction.id.in_(transaction_ids))
+                .order_by(CanonicalTransaction.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
-def validate_effective_amount(transaction: CanonicalTransaction, values: dict, amounts: dict) -> None:
+def validate_effective_amount(
+    transaction: CanonicalTransaction, values: dict, amounts: dict
+) -> None:
     """Reject effective amounts that overflow or reverse transaction direction."""
     current = amounts[transaction.id]
     result = (
@@ -130,19 +142,24 @@ def validate_effective_amount(transaction: CanonicalTransaction, values: dict, a
         else current + Decimal(str(values["amount_delta"]))
     )
     if abs(result) > MAX_MONEY:
-        raise HTTPException(status_code=422, detail="Adjusted amount exceeds supported monetary precision")
+        raise HTTPException(
+            status_code=422, detail="Adjusted amount exceeds supported monetary precision"
+        )
     expected_sign = SIGN.get(transaction.transaction_type)
     if expected_sign is None or result * expected_sign < 0:
-        raise HTTPException(status_code=422, detail="Adjusted amount cannot reverse the transaction's financial sign")
+        raise HTTPException(
+            status_code=422,
+            detail="Adjusted amount cannot reverse the transaction's financial sign",
+        )
 
 
-async def apply_approval_effects(db: AsyncSession, adjustment, context: ApprovalContext, actor: str) -> None:
+async def apply_approval_effects(
+    db: AsyncSession, adjustment, context: ApprovalContext, actor: str
+) -> None:
     """Apply reconciliation, freshness, and missing-transaction effects in this transaction."""
     await invalidate_case_evidence(db, context.cases, adjustment.id, actor)
     if adjustment.adjustment_type == "Amount":
-        await requeue_linked_exceptions(
-            db, context.transaction, context.locked_transactions, actor
-        )
+        await requeue_linked_exceptions(db, context.transaction, context.locked_transactions, actor)
     if context.day:
         await invalidate_totals(db, context.day, actor)
     if context.missing_transaction:

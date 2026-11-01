@@ -17,15 +17,22 @@ def test_adjustment_queue_is_paged_and_reports_unfiltered_status_counts():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add_all([
-                    TransactionAdjustment(
-                        id=f"adjustment-{index}", adjustment_type="Amount",
-                        proposed_values={"amount_delta": "1", "label": "unique-effect" if index == 4 else "common"},
-                        rationale=f"review item {index}",
-                        status="Proposed" if index < 3 else "Approved", proposed_by="finance",
-                    )
-                    for index in range(5)
-                ])
+                db.add_all(
+                    [
+                        TransactionAdjustment(
+                            id=f"adjustment-{index}",
+                            adjustment_type="Amount",
+                            proposed_values={
+                                "amount_delta": "1",
+                                "label": "unique-effect" if index == 4 else "common",
+                            },
+                            rationale=f"review item {index}",
+                            status="Proposed" if index < 3 else "Approved",
+                            proposed_by="finance",
+                        )
+                        for index in range(5)
+                    ]
+                )
                 await db.commit()
 
                 first = await list_adjustments(None, None, db, {"role": "finance"}, 1, 2)
@@ -39,10 +46,14 @@ def test_adjustment_queue_is_paged_and_reports_unfiltered_status_counts():
                 assert len(second["items"]) == 1
                 assert second["status_counts"] == first["status_counts"]
 
-                matching = await list_adjustments(None, None, db, {"role": "finance"}, 1, 50, "item 4")
+                matching = await list_adjustments(
+                    None, None, db, {"role": "finance"}, 1, 50, "item 4"
+                )
                 assert matching["total"] == 1
                 assert matching["items"][0]["id"] == "adjustment-4"
-                effect_match = await list_adjustments(None, None, db, {"role": "finance"}, 1, 50, "unique-effect")
+                effect_match = await list_adjustments(
+                    None, None, db, {"role": "finance"}, 1, 50, "unique-effect"
+                )
                 assert effect_match["total"] == 1
                 assert effect_match["items"][0]["id"] == "adjustment-4"
         finally:
@@ -74,10 +85,16 @@ def test_database_rejects_unsupported_adjustment_status():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add(TransactionAdjustment(
-                    id="invalid-status", adjustment_type="Amount", proposed_values={"amount_delta": "1"},
-                    status="Pending", rationale="invalid state", proposed_by="test",
-                ))
+                db.add(
+                    TransactionAdjustment(
+                        id="invalid-status",
+                        adjustment_type="Amount",
+                        proposed_values={"amount_delta": "1"},
+                        status="Pending",
+                        rationale="invalid state",
+                        proposed_by="test",
+                    )
+                )
                 with pytest.raises(IntegrityError):
                     await db.commit()
         finally:

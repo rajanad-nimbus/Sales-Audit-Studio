@@ -1,4 +1,5 @@
 """Request size limits for correction search inputs."""
+
 import asyncio
 
 import httpx
