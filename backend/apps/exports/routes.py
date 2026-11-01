@@ -50,7 +50,13 @@ from apps.exports.destinations import (
 from apps.exports.destinations import (
     webhook_origin as webhook_origin,
 )
-from apps.exports.models import ExportBatch, ExportDestination, ExportItem, TestSinkReceipt
+from apps.exports.models import ExportBatch, ExportDestination, TestSinkReceipt
+from apps.exports.reservations import (
+    _is_export_reservation_conflict as _is_export_reservation_conflict,
+)
+from apps.exports.reservations import (
+    reserve_export_batch as reserve_export_batch,
+)
 from apps.exports.resolution_routes import (
     cancel_batch as cancel_batch,
 )
@@ -80,7 +86,6 @@ from apps.exports.selection import (
     MAX_BATCH,
     SCOPES,
     build,
-    head_hash,
     summarize,
 )
 from apps.exports.selection import (
@@ -121,18 +126,6 @@ async def deliver(
 async def require_test_sink_enabled() -> None:
     if not test_sink_enabled():
         raise HTTPException(status_code=404, detail="Not found")
-
-
-def _is_export_reservation_conflict(exc: IntegrityError) -> bool:
-    return violates_unique_constraint(
-        exc,
-        constraint_names={"export_batches_idempotency_key_key", "uq_export_item"},
-        sqlite_messages={
-            "UNIQUE constraint failed: export_batches.idempotency_key",
-            "UNIQUE constraint failed: export_items.destination_id, export_items.dataset, "
-            "export_items.object_id, export_items.object_version",
-        },
-    )
 
 
 def _is_sink_receipt_conflict(exc: IntegrityError) -> bool:
@@ -291,85 +284,6 @@ async def validate_audit_export_claim(
             status_code=409,
             detail="An audit export is pending or failed; resolve the existing batch first",
         )
-
-
-async def reserve_export_batch(
-    db: AsyncSession,
-    body: RunIn,
-    destination: ExportDestination,
-    actor: str,
-    records: list[dict],
-    items: list[tuple],
-    range_from: int | None,
-    range_to: int | None,
-) -> ExportBatch:
-    """Persist an immutable payload and reserve its records before delivery."""
-    summary = summarize(records)
-    audit_head = await head_hash(db)
-    batch_id = str(uuid.uuid4())
-    idempotency_key = hashlib.sha256(f"nimbus-export:{batch_id}".encode()).hexdigest()
-    payload = render(destination, body.dataset, records, audit_head, idempotency_key, summary)
-    batch = ExportBatch(
-        id=batch_id,
-        destination_id=destination.id,
-        dataset=body.dataset,
-        idempotency_key=idempotency_key,
-        created_by=actor,
-        range_from=range_from,
-        range_to=range_to,
-        delivery_attempt_id=str(uuid.uuid4()),
-        attempt_started_at=utcnow(),
-        payload=payload.decode(),
-        payload_hash=hashlib.sha256(payload).hexdigest(),
-        record_count=len(records),
-        audit_head_hash=audit_head,
-        status="Pending",
-        backposted_count=summary["backposted"],
-    )
-    db.add(batch)
-    try:
-        await db.flush()
-        for object_id, version, metadata in items:
-            db.add(
-                ExportItem(
-                    id=str(uuid.uuid4()),
-                    batch_id=batch.id,
-                    destination_id=destination.id,
-                    dataset=body.dataset,
-                    object_id=object_id,
-                    object_version=version,
-                    state="Pending",
-                    **metadata,
-                )
-            )
-        await db.flush()
-    except IntegrityError as exc:
-        await db.rollback()
-        if _is_export_reservation_conflict(exc):
-            raise HTTPException(
-                status_code=409,
-                detail="This export or some of its records are already reserved. Refresh and try again.",
-            ) from exc
-        raise
-    audit(
-        db,
-        "EXPORT_CREATED",
-        None,
-        "ExportBatch",
-        batch.id,
-        f"Export of {len(records)} {body.dataset} record(s) to '{destination.name}' created"
-        + (f" ({summary['backposted']} back-posted)" if summary["backposted"] else ""),
-        actor=actor,
-        after={
-            "payload_hash": batch.payload_hash,
-            "idempotency_key": idempotency_key,
-            "scope": body.scope,
-            **summary,
-        },
-    )
-    await db.commit()
-    db.expunge(batch)
-    return batch
 
 
 @router.get("/batches")
