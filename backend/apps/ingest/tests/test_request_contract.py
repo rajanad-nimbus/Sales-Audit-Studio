@@ -29,7 +29,7 @@ def test_ingest_requests_accept_database_sized_identifiers():
 
 
 def test_json_payload_size_counts_utf8_without_exceeding_limit():
-    assert contracts.json_payload_size([{"name": "café"}], 100) == len('[{"name":"café"}]'.encode("utf-8"))
+    assert contracts.json_payload_size([{"name": "café"}], 100) == len('[{"name":"café"}]'.encode())
     assert contracts.json_payload_size([{"name": "café"}], 5) > 5
 
 

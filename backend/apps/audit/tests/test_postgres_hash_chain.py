@@ -74,7 +74,10 @@ def test_concurrent_inserts_keep_sequence_and_hash_chain_ordered():
                 assert len(events) == 50
                 assert [event.seq for event in events] == list(range(1, 51))
                 assert events[0].prev_hash is None
-                assert all(current.prev_hash == previous.hash for previous, current in zip(events, events[1:]))
+                assert all(
+                    current.prev_hash == previous.hash
+                    for previous, current in zip(events, events[1:], strict=False)
+                )
                 hashes_match = await db.scalar(text(
                     "SELECT bool_and(a.hash = audit_event_hash(a.prev_hash, a)) FROM audit_events AS a"
                 ))

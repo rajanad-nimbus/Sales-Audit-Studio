@@ -5,7 +5,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import InvalidOperation
 
 from model_base import utcnow
@@ -293,7 +293,7 @@ def parse_transaction(source: str, rec: dict) -> dict:
     except ValueError as exc:
         raise ValueError("event_time is not ISO-8601") from exc
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     try:
         detail = transaction_detail.extract(rec, SIGN[rec["record_type"]])
     except (ValueError, InvalidOperation, OverflowError) as exc:

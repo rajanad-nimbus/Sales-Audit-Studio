@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -276,8 +276,8 @@ def test_refund_reconciliation_chooses_earliest_order_by_event_time_not_id():
     async def go():
         Session = await make_session()
         async with Session() as db:
-            early = datetime(2024, 1, 15, 10, tzinfo=timezone.utc)
-            late = datetime(2024, 1, 15, 11, tzinfo=timezone.utc)
+            early = datetime(2024, 1, 15, 10, tzinfo=UTC)
+            late = datetime(2024, 1, 15, 11, tzinfo=UTC)
             shared = {
                 "business_date": "2024-01-15", "transaction_date": early,
                 "processing_timestamp": late, "settlement_date": "2024-01-15",

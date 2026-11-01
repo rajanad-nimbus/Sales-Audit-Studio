@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -34,8 +34,8 @@ def test_non_object_case_evidence_does_not_break_correction_link_lookup():
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 transaction = CanonicalTransaction(
                     id="tx-malformed-evidence", business_date="2026-10-01",
-                    transaction_date=datetime.now(timezone.utc), event_timestamp=datetime.now(timezone.utc),
-                    processing_timestamp=datetime.now(timezone.utc), settlement_date="2026-10-01",
+                    transaction_date=datetime.now(UTC), event_timestamp=datetime.now(UTC),
+                    processing_timestamp=datetime.now(UTC), settlement_date="2026-10-01",
                     transaction_type="Sale", source_lineage="pos-map-v1", currency="USD",
                     signed_amount=10, store_id="S1", channel_id="store", payment_reference="REF",
                     reconciliation_status="Exception",
@@ -63,7 +63,7 @@ def test_related_correction_pair_uses_database_lineage_for_large_cases():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 common = {
                     "business_date": "2026-10-01",
                     "transaction_date": timestamp,

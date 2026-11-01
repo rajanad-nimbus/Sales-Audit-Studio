@@ -1,7 +1,7 @@
 """Case investigation, workflow execution, and validation endpoints."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from database import get_db
@@ -242,7 +242,7 @@ async def validation_candidates(
     if has_more and rows:
         timestamp = rows[-1][1].received_at
         if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
+            timestamp = timestamp.replace(tzinfo=UTC)
         next_cursor = {"received_at": timestamp, "source_record_id": rows[-1][1].id}
     return {"items": candidates, "has_more": has_more, "next_cursor": next_cursor}
 

@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from integrations.ontology.nimbus import audit
@@ -110,7 +110,7 @@ async def claim_batch(db: AsyncSession, business_date: str, trigger: str, rerun:
     if running:
         last_activity = running.heartbeat_at or running.started_at
         if last_activity.tzinfo is None:
-            last_activity = last_activity.replace(tzinfo=timezone.utc)
+            last_activity = last_activity.replace(tzinfo=UTC)
         age = now - last_activity
         if age <= timedelta(hours=RUN_STALE_AFTER_HOURS):
             raise HTTPException(
@@ -170,7 +170,7 @@ async def resolve_batch_feeds(db: AsyncSession, business_date: str) -> dict:
     feeds = {
         source: rows for source, rows in simulate_feed(business_date).items() if source in wanted
     }
-    batch_start = datetime.fromisoformat(business_date).replace(tzinfo=timezone.utc)
+    batch_start = datetime.fromisoformat(business_date).replace(tzinfo=UTC)
     if "Shopify" in wanted and os.getenv("SHOPIFY_STORE_URL"):
         feeds.update(
             await shopify_adapter.fetch_shopify_feed(

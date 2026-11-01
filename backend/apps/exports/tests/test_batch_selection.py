@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -36,7 +36,7 @@ def test_export_selection_skips_reserved_and_ineligible_cases_before_limit(monke
             async with session() as db:
                 destination = ExportDestination(id="d1", name="ERP", kind="file", format="json", config={})
                 db.add(destination)
-                date = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                date = datetime(2026, 10, 1, tzinfo=UTC)
                 for index, case_id in enumerate(("reserved", "ineligible", "eligible")):
                     db.add(Case(id=case_id, case_number=case_id, case_type="test", status="Closed",
                                 business_date="2026-10-01", store_id="S1", currency="EUR", updated_at=date + timedelta(hours=index)))
@@ -129,8 +129,8 @@ def test_closed_case_context_selects_latest_records_per_case():
                 case = Case(id="c1", case_number="C1", case_type="test", status="Closed",
                             store_id="S1", business_date="2026-10-01")
                 db.add(case)
-                for identifier, created_at in (("old", datetime(2026, 10, 1, tzinfo=timezone.utc)),
-                                               ("new", datetime(2026, 10, 2, tzinfo=timezone.utc))):
+                for identifier, created_at in (("old", datetime(2026, 10, 1, tzinfo=UTC)),
+                                               ("new", datetime(2026, 10, 2, tzinfo=UTC))):
                     db.add(Recommendation(
                         id=f"r-{identifier}", case_id=case.id, investigation_id="i", status="Approved",
                         disposition_type=identifier, action_class="test", expected_workflow="test",
@@ -155,12 +155,12 @@ def test_closed_case_context_selects_latest_records_per_case():
                     id="r-unvalidated", case_id=case.id, investigation_id="i", status="Approved",
                     disposition_type="unvalidated", action_class="test", expected_workflow="test",
                     financial_impact=Decimal("1"), confidence="High",
-                    created_at=datetime(2026, 10, 3, tzinfo=timezone.utc),
+                    created_at=datetime(2026, 10, 3, tzinfo=UTC),
                 ))
                 db.add(HumanDecision(
                     id="h-unvalidated", case_id=case.id, recommendation_id="r-unvalidated",
                     decision_type="human", decision="Approved", actor="unvalidated",
-                    authority_check="Approved", created_at=datetime(2026, 10, 3, tzinfo=timezone.utc),
+                    authority_check="Approved", created_at=datetime(2026, 10, 3, tzinfo=UTC),
                 ))
                 for seq, event_hash in ((1, "old-hash"), (2, "new-hash")):
                     db.add(AuditEvent(
@@ -195,7 +195,7 @@ def test_batch_insert_conflict_returns_conflict_without_delivering(monkeypatch):
             async with session() as db:
                 db.add(ExportDestination(id="d1", name="ERP", kind="file", format="json", config={}))
                 db.add(Case(id="c1", case_number="C1", case_type="test", status="Closed", store_id="S1",
-                            business_date="2026-10-01", updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc)))
+                            business_date="2026-10-01", updated_at=datetime(2026, 10, 1, tzinfo=UTC)))
                 await db.commit()
                 delivered = []
 
@@ -238,9 +238,9 @@ def test_scoped_export_applies_filter_before_batch_limit(monkeypatch, scope):
                 last_date = "2026-10-02" if scope == "current" else "2026-10-01"
                 db.add_all([
                     Case(id="first", case_number="FIRST", case_type="test", status="Closed", store_id="S1",
-                         business_date=first_date, updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc)),
+                         business_date=first_date, updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
                     Case(id="target", case_number="TARGET", case_type="test", status="Closed", store_id="S2",
-                         business_date=last_date, updated_at=datetime(2026, 10, 2, tzinfo=timezone.utc)),
+                         business_date=last_date, updated_at=datetime(2026, 10, 2, tzinfo=UTC)),
                 ])
                 await db.commit()
                 records, items, _, _ = await routes.build(db, destination, "resolutions", scope)
@@ -271,7 +271,7 @@ def test_previously_exported_day_is_treated_as_backpost(monkeypatch):
                 db.add(destination)
                 for case_id in ("sent", "later"):
                     db.add(Case(id=case_id, case_number=case_id, case_type="test", status="Closed", store_id="S1",
-                                business_date="2026-10-01", updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc)))
+                                business_date="2026-10-01", updated_at=datetime(2026, 10, 1, tzinfo=UTC)))
                 db.add(ExportBatch(id="batch-001", destination_id="d1", dataset="resolutions", status="Sent",
                                    idempotency_key="k1", created_by="it"))
                 db.add(ExportItem(id="e1", batch_id="batch-001", destination_id="d1", dataset="resolutions",

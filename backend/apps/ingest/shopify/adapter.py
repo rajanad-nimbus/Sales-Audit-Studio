@@ -9,10 +9,10 @@ import json
 import math
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
-from typing import AsyncGenerator
 
 import aiohttp
 
@@ -117,8 +117,8 @@ def retry_delay(retry_after: str | None, attempt: int) -> float:
             try:
                 retry_at = parsedate_to_datetime(retry_after)
                 if retry_at.tzinfo is None:
-                    retry_at = retry_at.replace(tzinfo=timezone.utc)
-                seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+                    retry_at = retry_at.replace(tzinfo=UTC)
+                seconds = (retry_at - datetime.now(UTC)).total_seconds()
                 if seconds > 0:
                     return min(seconds, MAX_RETRY_DELAY_SECONDS)
             except (TypeError, ValueError, OverflowError):
@@ -193,7 +193,7 @@ class ShopifyAdapter:
                         raise ShopifyAPIError(f"Shopify API returned HTTP {resp.status}")
 
                     return await _read_response_json(resp), dict(resp.headers)
-            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+            except (TimeoutError, aiohttp.ClientError) as e:
                 last_error = safe_failure_message(e)
                 if not last:
                     await asyncio.sleep(retry_delay(None, attempt))
@@ -217,9 +217,9 @@ class ShopifyAdapter:
         lookback = int(os.getenv("SHOPIFY_SYNC_LOOKBACK_DAYS", "3"))
         limit = limit or int(os.getenv("SHOPIFY_FETCH_LIMIT", "250"))
         if created_at_min is None:
-            created_at_min = datetime.now(timezone.utc) - timedelta(days=lookback)
+            created_at_min = datetime.now(UTC) - timedelta(days=lookback)
         if created_at_max is None:
-            created_at_max = datetime.now(timezone.utc)
+            created_at_max = datetime.now(UTC)
 
         params = {
             "limit": min(limit, 250),

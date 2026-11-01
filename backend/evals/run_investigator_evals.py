@@ -9,7 +9,7 @@ import os
 import pathlib
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from apps.agents import investigator
@@ -32,7 +32,7 @@ async def run_scenario(sc):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     Session = async_sessionmaker(engine, expire_on_commit=False)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with Session() as db:
         case = Case(id="c", case_number="EVAL", case_type="Reconciliation", business_date="2026-10-01", store_id="S1")
         exc = Exc(id="e", case_id="c", exception_type=sc["exception_type"], exception_family="x", source_system="POS",

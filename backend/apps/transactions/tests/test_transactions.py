@@ -1,7 +1,7 @@
 """Transaction browsing: filters, status spread, raw source record and case links."""
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -11,7 +11,7 @@ from models import AuditEvent, Base, CanonicalTransaction, Case, SourceRecord, T
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 USER = {"user": "x", "role": "finance"}
 
 

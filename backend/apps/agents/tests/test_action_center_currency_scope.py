@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -104,7 +104,7 @@ def test_assistant_counts_all_decisions_and_checks_currency_beyond_context_limit
                         business_date="2026-10-01", store_id="S1", status="In Review",
                         currency="USD" if index < 8 else "EUR" if index < 10 else "CAD",
                         total_exposure=Decimal(100 - index),
-                        snoozed_until=(datetime.now(timezone.utc) + timedelta(days=1)
+                        snoozed_until=(datetime.now(UTC) + timedelta(days=1)
                                        if index in (8, 10) else None),
                     )
                     for index in range(11)

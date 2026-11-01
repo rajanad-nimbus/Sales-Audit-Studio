@@ -1,7 +1,7 @@
 """Investigation agent: tool scoping, citation grounding and failure fallback (fake model client, SQLite)."""
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace as NS
 
@@ -34,7 +34,7 @@ async def seed():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     Session = async_sessionmaker(engine, expire_on_commit=False)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with Session() as db:
         case = Case(id="c1", case_number="CASE-1", case_type="Reconciliation", business_date="2026-10-01", store_id="S1")
         db.add(case)
@@ -212,7 +212,7 @@ def test_investigation_source_reads_are_capped_per_evidence_scope(monkeypatch):
     async def go():
         Session, case, _, _ = await seed()
         async with Session() as db:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for index in range(5):
                 source = "POS" if index < 2 else "Processor"
                 transaction_type = "Sale" if source == "POS" else "Refund"
@@ -269,7 +269,7 @@ def test_investigation_source_query_honors_declared_evidence_sources_and_types()
     async def go():
         Session, case, _, _ = await seed()
         async with Session() as db:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             inputs = [
                 ("shopify", "Shopify", "Order"),
                 ("processor-refund", "Processor", "Refund"),
@@ -320,7 +320,7 @@ def test_shadow_endpoint_streams_latest_run_and_decision_per_case():
         from apps.agents.routes import shadow
 
         Session, _case, _exc, _ids = await seed()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with Session() as db:
             db.add(Recommendation(
                 id="recommendation-shadow",
@@ -458,7 +458,7 @@ def test_eligible_endpoint_returns_bounded_highest_exposure_cases(monkeypatch):
         from apps.agents import routes
 
         Session, _case, _exc, _ids = await seed()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         monkeypatch.setattr(routes, "MAX_ELIGIBLE_CASES", 1)
         async with Session() as db:
             first = await db.get(Case, "c1")

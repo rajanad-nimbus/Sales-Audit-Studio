@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -34,7 +34,7 @@ from sqlalchemy.pool import StaticPool
 
 
 def test_archive_serialization_preserves_scalar_types():
-    instant = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+    instant = datetime(2026, 10, 1, 12, tzinfo=UTC)
     assert serialise_row(
         {
             "count": 4,

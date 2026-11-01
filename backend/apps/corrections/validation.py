@@ -1,6 +1,6 @@
 """Input validation for governed transaction correction proposals."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
@@ -87,7 +87,7 @@ def validate_transaction_type(value: object) -> str:
 def parse_event_timestamp(value: object, business_date: str) -> datetime:
     raw_value = value or f"{business_date}T00:00:00+00:00"
     event_at = datetime.fromisoformat(str(raw_value).replace("Z", "+00:00"))
-    return event_at.replace(tzinfo=timezone.utc) if event_at.tzinfo is None else event_at
+    return event_at.replace(tzinfo=UTC) if event_at.tzinfo is None else event_at
 
 
 def parse_settlement_date(value: object, business_date: str) -> str:

@@ -1,7 +1,7 @@
 """Case evidence, collaboration, timeline, and source lineage endpoints."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from database import get_db
@@ -300,7 +300,7 @@ async def case_reconciliation(
         last_transaction = rows[-1][0]
         event_timestamp = last_transaction.event_timestamp
         if event_timestamp.tzinfo is None:
-            event_timestamp = event_timestamp.replace(tzinfo=timezone.utc)
+            event_timestamp = event_timestamp.replace(tzinfo=UTC)
         next_cursor = {"event_timestamp": event_timestamp, "transaction_id": last_transaction.id}
     return {
         "case_id": case_id,

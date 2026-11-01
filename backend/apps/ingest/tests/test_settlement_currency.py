@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from apps.ingest import reconciliation, service
@@ -76,7 +76,7 @@ def test_daily_bank_control_includes_previously_matched_deposits():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 common = {
                     "business_date": "2026-10-01",
                     "transaction_date": timestamp,
@@ -131,7 +131,7 @@ def test_referenced_settlement_controls_batch_exact_scopes():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 banks = []
                 processors = []
                 for index in range(501):
@@ -180,7 +180,7 @@ def test_referenced_settlement_totals_are_accumulated_in_bounded_pages(monkeypat
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 processor_rows = []
                 bank_rows = []
                 for index in range(5):

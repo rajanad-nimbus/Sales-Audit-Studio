@@ -1,6 +1,6 @@
 """Bulk investigations load their exception evidence with one grouped query."""
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from apps.agents import action_center, bulk_actions
@@ -197,7 +197,7 @@ def test_bulk_advance_batches_workflows_and_selects_oldest_pending_records(monke
                         "validating-1": ["wf-v1-a", "wf-v1-z"],
                         "validating-2": ["wf-v2"],
                     }[case_id]
-                    created_at = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                    created_at = datetime(2026, 10, 1, tzinfo=UTC)
                     for workflow_index, workflow_id in enumerate(workflow_ids):
                         db.add(Workflow(
                             id=workflow_id,

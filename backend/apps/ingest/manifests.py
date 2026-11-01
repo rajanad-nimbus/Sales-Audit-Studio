@@ -1,6 +1,6 @@
 """Queries for archived POS control manifests."""
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import select
 
@@ -27,7 +27,7 @@ def manifest_query(business_date: str | None, statuses: tuple[str, ...]):
     )
     if business_date is not None:
         day = date.fromisoformat(validate_business_date(business_date))
-        start = datetime.combine(day, time.min, tzinfo=timezone.utc)
+        start = datetime.combine(day, time.min, tzinfo=UTC)
         query = query.where(SourceRecord.source_event_time >= start)
         if day != date.max:
             query = query.where(SourceRecord.source_event_time < start + timedelta(days=1))

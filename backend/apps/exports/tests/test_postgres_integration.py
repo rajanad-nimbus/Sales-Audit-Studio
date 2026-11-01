@@ -3,7 +3,7 @@
 import asyncio
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import main
@@ -45,7 +45,7 @@ async def verify_adjustment_export_and_case_audit(db):
     destination = ExportDestination(id="d1", name="ERP", kind="file", format="json", config={})
     db.add(destination)
     db.add(Case(id="c1", case_number="C1", case_type="test", status="Closed", store_id="S1",
-                business_date="2026-10-01", currency="USD", updated_at=datetime(2026, 10, 2, tzinfo=timezone.utc)))
+                business_date="2026-10-01", currency="USD", updated_at=datetime(2026, 10, 2, tzinfo=UTC)))
     await db.flush()
     db.add(Recommendation(id="r1", case_id="c1", investigation_id="i", status="Approved",
                           disposition_type="Correction", action_class="test", expected_workflow="test",

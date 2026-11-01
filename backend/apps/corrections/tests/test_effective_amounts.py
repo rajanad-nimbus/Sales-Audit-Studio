@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -37,7 +37,7 @@ def test_retotal_and_preview_apply_approved_corrections_in_order_by_source():
                 transactions = (await db.execute(select(CanonicalTransaction))).scalars().all()
                 pos = next(row for row in transactions if row.source_lineage == "pos-map-v1")
                 processor = next(row for row in transactions if row.source_lineage == "processor-map-v1")
-                when = datetime(2026, 10, 2, tzinfo=timezone.utc)
+                when = datetime(2026, 10, 2, tzinfo=UTC)
                 for identifier, transaction, values, minutes in [
                     ("a", pos, {"amount_delta": "5"}, 1), ("b", pos, {"corrected_amount": "110"}, 2),
                     ("c", pos, {"amount_delta": "2"}, 3), ("d", processor, {"amount_delta": "-3"}, 4),

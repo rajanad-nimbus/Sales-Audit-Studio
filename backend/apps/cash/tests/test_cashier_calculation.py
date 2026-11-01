@@ -1,6 +1,6 @@
 """Cash expectations respect the cashier and register dimensions of a declaration."""
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -29,7 +29,7 @@ def test_cashier_declarations_use_cashier_scoped_sales_and_blank_cashier_stays_r
                 db.add(StoreDay(
                     id="day-1", store_id="S1", business_date="2026-10-01", status="Auditing",
                 ))
-                event_time = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                event_time = datetime(2026, 10, 1, tzinfo=UTC)
                 for transaction_id, cashier_id, amount in (
                     ("tx-1", "C1", "10.00"),
                     ("tx-2", "C2", "20.00"),
@@ -186,7 +186,7 @@ def test_cash_reconciliation_rejects_mixed_store_day_currencies():
                 await connection.run_sync(Base.metadata.create_all)
             sessions = async_sessionmaker(engine, expire_on_commit=False)
             async with sessions() as db:
-                event_time = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                event_time = datetime(2026, 10, 1, tzinfo=UTC)
                 db.add(StoreDay(
                     id="day-1", store_id="S1", business_date="2026-10-01", status="Auditing",
                 ))

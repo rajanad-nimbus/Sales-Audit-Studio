@@ -3,7 +3,7 @@ Real deployments replace simulate_feed with a loader that reads the day's transa
 import argparse
 import asyncio
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from database import async_session
 
@@ -12,7 +12,7 @@ from apps.operations.batch import run_daily_batch
 
 async def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=(datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=(datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%d"))
     ap.add_argument("--rerun", action="store_true")
     args = ap.parse_args()
     async with async_session() as db:

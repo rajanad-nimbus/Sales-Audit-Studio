@@ -1,7 +1,7 @@
 """Audit trail: search, integrity verification and export. The trail itself is append-only and hash-chained in the database."""
 
 import json
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 
 from database import get_db
@@ -126,7 +126,7 @@ async def generate_json(
     db: AsyncSession, conds: list, head_seq: int, head_hash: str | None, count: int
 ):
     """Stream JSON metadata and paginated audit records without buffering the full export."""
-    exported_at = datetime.now(timezone.utc)
+    exported_at = datetime.now(UTC)
     yield json.dumps(
         {"exported_at": exported_at, "head_hash": head_hash, "count": count}, default=str
     )[:-1]
@@ -218,15 +218,15 @@ def conditions(event_type, actor, case_id, date_from, date_to, q):
         conds.append(AuditEvent.case_id == case_id)
     if date_from:
         conds.append(
-            AuditEvent.created_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+            AuditEvent.created_at >= datetime.combine(date_from, time.min, tzinfo=UTC)
         )
     if date_to:
         if date_to == date.max:
-            conds.append(AuditEvent.created_at <= datetime.max.replace(tzinfo=timezone.utc))
+            conds.append(AuditEvent.created_at <= datetime.max.replace(tzinfo=UTC))
         else:
             conds.append(
                 AuditEvent.created_at
-                < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
+                < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=UTC)
             )
     if q:
         conds.append(contains_literal(AuditEvent.action_description, q))
@@ -289,7 +289,7 @@ async def verify(
         "first_broken_seq": first_bad,
         "head_hash": head,
         "head_seq": head_seq,
-        "verified_at": datetime.now(timezone.utc),
+        "verified_at": datetime.now(UTC),
         "note": "Record the head hash with an external system (for example the ERP or a ledger) to detect wholesale replacement of the trail.",
     }
 

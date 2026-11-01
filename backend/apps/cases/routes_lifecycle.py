@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 
@@ -204,7 +204,7 @@ async def create_case(
     if case.priority not in nimbus.SLA_HOURS:
         raise HTTPException(status_code=422, detail="Invalid priority")
     case_id = str(uuid.uuid4())
-    case_number = generate_case_number(datetime.now(timezone.utc).strftime("%Y%m%d"))
+    case_number = generate_case_number(datetime.now(UTC).strftime("%Y%m%d"))
     db_case = Case(
         id=case_id,
         case_number=case_number,

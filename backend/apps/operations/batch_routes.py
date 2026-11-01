@@ -1,6 +1,6 @@
 """HTTP routes and request contracts for daily batch operations."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from database import get_db
@@ -87,7 +87,7 @@ async def run_batch(
         business_date = (
             (datetime.fromisoformat(earliest) - timedelta(days=1)).strftime("%Y-%m-%d")
             if earliest
-            else (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+            else (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%d")
         )
     run = await run_daily_batch(db, business_date, req.feeds, trigger="api", rerun=req.rerun)
     return view(run)
@@ -132,7 +132,7 @@ async def status(db: AsyncSession = Depends(get_db)):
 
     finished_at = latest_success.finished_at
     if finished_at.tzinfo is None:
-        finished_at = finished_at.replace(tzinfo=timezone.utc)
+        finished_at = finished_at.replace(tzinfo=UTC)
     hours_since_success = (utcnow() - finished_at).total_seconds() / 3600
     return {
         "freshness": "stale" if hours_since_success > STALE_AFTER_HOURS else "fresh",

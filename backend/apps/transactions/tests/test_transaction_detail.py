@@ -1,7 +1,7 @@
 """Sales transaction detail: items, VAT, discounts, coupons, vouchers, tenders and returns."""
 import asyncio
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -264,7 +264,7 @@ def test_sale_detail_bounds_large_return_history():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 original = CanonicalTransaction(
                     id="sale", business_date="2026-10-01", transaction_date=timestamp,
                     event_timestamp=timestamp, processing_timestamp=timestamp,
@@ -297,7 +297,7 @@ def test_transaction_detail_bounds_child_rows_and_uses_full_totals():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 count = rt.MAX_TRANSACTION_DETAIL_ROWS + 2
                 db.add(CanonicalTransaction(
                     id="large-sale", business_date="2026-10-01", transaction_date=timestamp,
@@ -349,7 +349,7 @@ def test_return_item_history_is_bounded_without_hiding_over_returning():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 original = CanonicalTransaction(
                     id="sale", business_date="2026-10-01", transaction_date=timestamp,
                     event_timestamp=timestamp, processing_timestamp=timestamp, settlement_date="2026-10-01",

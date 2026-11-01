@@ -1,6 +1,6 @@
 """When a daily or weekly Shopify sync is due, how far back it pulls, and what a schedule may contain."""
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-UTC = timezone.utc
+UTC = UTC
 # Sunday 1 Nov 2026, noon UTC (a Sunday: weekday() == 6)
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 

@@ -1,6 +1,6 @@
 """Large case lineage remains queryable through bounded cursor pages."""
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from apps.cases.evidence import case_reconciliation
@@ -18,7 +18,7 @@ def test_case_reconciliation_paginates_large_linked_id_sets_in_database():
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 case_id = "case-large-lineage"
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 transaction_ids = [f"transaction-{index:04}" for index in range(1200)]
                 db.add(Case(
                     id=case_id,

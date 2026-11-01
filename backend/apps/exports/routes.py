@@ -3,7 +3,7 @@ import hashlib
 import os
 import re
 import uuid
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -433,7 +433,7 @@ async def recover_interrupted_batch(batch_id: str, body: InterruptedExportRecove
         raise HTTPException(status_code=422, detail="Confirm the delivery worker stopped and provide evidence (up to 2000 characters)")
     started = batch.attempt_started_at or batch.created_at
     if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
+        started = started.replace(tzinfo=UTC)
     if started > utcnow() - timedelta(minutes=5):
         raise HTTPException(status_code=409, detail="The delivery attempt is too recent to recover")
     attempt_id = batch.delivery_attempt_id

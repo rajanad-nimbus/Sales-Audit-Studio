@@ -2,7 +2,7 @@ import asyncio
 import csv
 import io
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from database import get_db
@@ -33,9 +33,9 @@ def test_date_filters_include_last_second_and_exports_never_silently_truncate(mo
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
                 for seq, timestamp in enumerate([
-                    datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc),
-                    datetime(2026, 10, 1, 23, 59, 59, 999999, tzinfo=timezone.utc),
-                    datetime(2026, 10, 2, 0, 0, tzinfo=timezone.utc),
+                    datetime(2026, 10, 1, 0, 0, tzinfo=UTC),
+                    datetime(2026, 10, 1, 23, 59, 59, 999999, tzinfo=UTC),
+                    datetime(2026, 10, 2, 0, 0, tzinfo=UTC),
                 ], 1):
                     db.add(AuditEvent(id=str(seq), seq=seq, created_at=timestamp, event_type="TEST",
                                       actor="test", object_type="Case", object_id="c", case_id="c",
@@ -98,7 +98,7 @@ def test_audit_export_pins_its_head_and_fetches_each_page_independently(monkeypa
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 for seq in (1, 2):
                     db.add(AuditEvent(
-                        id=f"event-{seq}", seq=seq, created_at=datetime.now(timezone.utc),
+                        id=f"event-{seq}", seq=seq, created_at=datetime.now(UTC),
                         event_type="TEST", actor="test", object_type="Case", object_id="case",
                         case_id="case", action_description=f"event {seq}",
                     ))
@@ -106,7 +106,7 @@ def test_audit_export_pins_its_head_and_fetches_each_page_independently(monkeypa
                 response = await routes.export(format="json", db=db, user={"user": "finance"})
                 chunks = [await anext(response.body_iterator) for _ in range(3)]
                 db.add(AuditEvent(
-                    id="event-3", seq=3, created_at=datetime.now(timezone.utc), event_type="TEST",
+                    id="event-3", seq=3, created_at=datetime.now(UTC), event_type="TEST",
                     actor="test", object_type="Case", object_id="case", case_id="case",
                     action_description="new event after export began",
                 ))
@@ -130,10 +130,10 @@ def test_recent_audit_order_uses_chain_sequence_not_wall_clock():
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 db.add_all([
-                    AuditEvent(id="older-seq", seq=1, created_at=datetime(2026, 10, 2, tzinfo=timezone.utc),
+                    AuditEvent(id="older-seq", seq=1, created_at=datetime(2026, 10, 2, tzinfo=UTC),
                                event_type="TEST", actor="test", object_type="Test", object_id="one",
                                action_description="older in chain"),
-                    AuditEvent(id="newer-seq", seq=2, created_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+                    AuditEvent(id="newer-seq", seq=2, created_at=datetime(2026, 10, 1, tzinfo=UTC),
                                event_type="TEST", actor="test", object_type="Test", object_id="two",
                                action_description="newer in chain"),
                 ])
@@ -154,7 +154,7 @@ def test_recent_audit_keyset_pages_are_bounded_and_stable():
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 db.add_all([
-                    AuditEvent(id=f"event-{seq}", seq=seq, created_at=datetime.now(timezone.utc),
+                    AuditEvent(id=f"event-{seq}", seq=seq, created_at=datetime.now(UTC),
                                event_type="TEST", actor="test", object_type="Test", object_id=str(seq),
                                action_description=f"event {seq}")
                     for seq in range(1, 6)
@@ -167,7 +167,7 @@ def test_recent_audit_keyset_pages_are_bounded_and_stable():
                 assert newest["next_before_seq"] == 4
 
                 db.add(AuditEvent(
-                    id="event-6", seq=6, created_at=datetime.now(timezone.utc), event_type="TEST",
+                    id="event-6", seq=6, created_at=datetime.now(UTC), event_type="TEST",
                     actor="test", object_type="Test", object_id="6", action_description="new event",
                 ))
                 await db.commit()

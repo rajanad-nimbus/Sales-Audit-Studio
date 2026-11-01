@@ -1,7 +1,6 @@
 """HTTP response contracts owned by the audit feature."""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,8 +13,8 @@ class AuditEventSchema(BaseModel):
     actor: str
     object_type: str
     object_id: str
-    case_id: Optional[str]
+    case_id: str | None
     action_description: str
     created_at: datetime
-    seq: Optional[int] = None
-    hash: Optional[str] = None
+    seq: int | None = None
+    hash: str | None = None

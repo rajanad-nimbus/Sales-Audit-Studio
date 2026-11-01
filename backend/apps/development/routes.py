@@ -1,7 +1,7 @@
 """Development-only demo data endpoints."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,7 +31,7 @@ async def seed_demo_data(
     if (await db.execute(select(func.count(Case.id)))).scalar():
         raise HTTPException(status_code=409, detail="Data already present")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     demo_cases = (
         ("Timing Difference", "STORE-014", "Ready for Decision", "In Review", "High",
          "TIMING_DIFFERENCE", "Settlement", 550, 0, "Medium",

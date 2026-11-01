@@ -1,6 +1,6 @@
 """Daily feed reconciliation keeps composite-scope queries within bind limits."""
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from apps.ingest import reconciliation
@@ -18,7 +18,7 @@ def test_daily_feed_actual_and_expected_queries_batch_composite_scopes(monkeypat
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 monkeypatch.setattr(reconciliation, "COMPOSITE_SCOPE_BATCH_SIZE", 2)
-                timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
+                timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 feed = []
                 transactions = []
                 for index in range(5):

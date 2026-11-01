@@ -1,5 +1,6 @@
 """Shadow-mode report: how often the Investigation agent's verdict agrees with the human decision."""
 from collections import defaultdict
+from datetime import UTC
 
 from database import get_db
 from fastapi import APIRouter, Depends, Request
@@ -250,10 +251,10 @@ def agent_registry(cfg: dict) -> list[dict]:
 @router.get("/config")
 async def agent_config(request: Request, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))):
     """Agents as configured, with live activity from the audit trail."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from sqlalchemy import func
-    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    since = datetime.now(UTC) - timedelta(hours=24)
     rows = (await db.execute(select(AuditEvent.actor, func.count(), func.max(AuditEvent.created_at))
                              .where(AuditEvent.actor.in_(AGENT_ACTORS)).group_by(AuditEvent.actor))).all()
     recent = dict((await db.execute(select(AuditEvent.actor, func.count())

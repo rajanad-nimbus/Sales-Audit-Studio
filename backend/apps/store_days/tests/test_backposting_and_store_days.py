@@ -1,7 +1,7 @@
 """Export back-posting and IT-initiated Store Days."""
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from apps.exports import routes as exports
@@ -62,8 +62,8 @@ def test_summary_and_scope_keep_records_and_items_aligned():
 def test_build_flags_late_additions_and_late_closures_but_not_same_day_resolutions():
     async def go():
         Session = await session()
-        today = datetime.now(timezone.utc).date().isoformat()
-        old = (datetime.now(timezone.utc) - timedelta(days=3)).date().isoformat()
+        today = datetime.now(UTC).date().isoformat()
+        old = (datetime.now(UTC) - timedelta(days=3)).date().isoformat()
         async with Session() as db:
             dest = ExportDestination(id="d1", name="ERP", kind="file", format="json", config={})
             db.add(dest)

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from models import Base, Case, ExportBatch, ExportDestination, ExportItem
 from sqlalchemy import event
@@ -22,16 +22,16 @@ def test_tracking_projection_counts_states_and_returns_a_stable_page():
                 db.add_all([
                     Case(id="waiting", case_number="C-001", case_type="test", status="Closed",
                          store_id="S2", business_date="2026-10-01",
-                         updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc)),
+                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
                     Case(id="backpost", case_number="C-002", case_type="test", status="Closed",
                          store_id="S1", business_date="2026-09-30",
-                         updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc)),
+                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
                     Case(id="delivered", case_number="C-003", case_type="test", status="Closed",
                          store_id="S1", business_date="2026-10-01",
-                         updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc)),
+                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
                     Case(id="open", case_number="C-004", case_type="test", status="Open",
                          store_id="S1", business_date="2026-10-01",
-                         updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc)),
+                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
                 ])
                 db.add(ExportItem(id="item", batch_id="batch", destination_id="destination",
                                   dataset="resolutions", object_id="delivered", object_version="v1",

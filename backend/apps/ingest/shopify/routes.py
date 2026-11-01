@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from database import async_session, get_db
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -89,7 +89,7 @@ async def sync_shopify(
     if not state["manual_sync"]:
         raise HTTPException(status_code=409, detail="Manual sync was switched off while Shopify was fetching data")
 
-    delivery_id = f"SHOPIFY-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
+    delivery_id = f"SHOPIFY-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
 
     try:
         stats = await ingest.ingest(db, "Shopify", delivery_id, feed.get("Shopify", []))

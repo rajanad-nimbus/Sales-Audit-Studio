@@ -1,5 +1,5 @@
 """Shopify-specific ingestion parsing and validation."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import InvalidOperation
 
 from apps.transactions import detail as transaction_detail
@@ -62,7 +62,7 @@ def parse_shopify_order(rec: dict) -> dict:
         raise ValueError("event_time is not ISO-8601") from exc
 
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
 
     financial_status = rec.get("financial_status", "pending")
     if not isinstance(financial_status, str):
@@ -103,7 +103,7 @@ def parse_shopify_refund(rec: dict) -> dict:
         raise ValueError("event_time is not ISO-8601") from exc
 
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
 
     return {
         "amount": amount,

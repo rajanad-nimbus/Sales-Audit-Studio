@@ -2,14 +2,14 @@
 import random
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from apps.transactions import detail as transaction_detail
 
 
 def simulate_feed(day: str | None = None) -> dict[str, list[dict]]:
-    day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    day = day or datetime.now(UTC).strftime("%Y-%m-%d")
     nxt = (datetime.fromisoformat(day) + timedelta(days=1)).strftime("%Y-%m-%d")
     run = uuid.uuid4().hex[:6]
     pos, proc, normal = [], [], []

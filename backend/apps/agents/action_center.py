@@ -1,7 +1,7 @@
 """Action Center: server-side triage at scale (filters, facets, aggregates, bulk actions, export)."""
 import math
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal
 
 from database import get_db
@@ -68,11 +68,11 @@ def me_name(user: dict) -> str:
 
 
 def as_utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def apply(stmt, f: Filters, user: dict, skip: str | None = None):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     conditions = (
         *_text_filter_conditions(f, user, skip),
         *_amount_date_conditions(f),
@@ -239,7 +239,7 @@ async def list_cases(f: Filters = Depends(filters),
                      dir: Literal["asc", "desc"] = "asc",
                      page: int = Query(1, ge=1, le=10_000), page_size: int = Query(50, ge=1, le=100),
                      db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     total = (await db.execute(apply(select(func.count()).select_from(Case), f, user))).scalar() or 0
     col = SORTS[sort]
     order = col.desc().nulls_last() if dir == "desc" else col.asc().nulls_last()
@@ -263,7 +263,7 @@ async def facets(f: Filters = Depends(filters), db: AsyncSession = Depends(get_d
 
 @router.get("/summary")
 async def summary(db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     live = Case.status != "Closed"
     visible = or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now)
     counter_conditions = {
@@ -314,7 +314,7 @@ async def groups(by: str = "case_type", f: Filters = Depends(filters), db: Async
            "priority": Case.priority, "status": Case.status, "assignee": func.coalesce(Case.assigned_to, "Unassigned")}.get(by)
     if col is None:
         raise HTTPException(status_code=400, detail="Unknown grouping")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     top = (apply(select(col.label("k"), func.count().label("n")).group_by(col), f, user)
            .order_by(func.count().desc(), col).limit(100).subquery())
     stmt = apply(select(
@@ -456,7 +456,7 @@ async def export_csv(f: Filters = Depends(filters), sort: str = "sla", dir: str 
             "evidence", "assigned_to", "sla_due_at", "sla_state", "age_hours"]
 
     async def generate():
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         descending = dir.lower() == "desc"
 
         yield csv_row(cols)

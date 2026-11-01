@@ -2,7 +2,6 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -24,10 +23,10 @@ class CaseCreate(BaseModel):
 
 
 class CaseUpdate(BaseModel):
-    status: Optional[str] = None
-    assigned_to: Optional[str] = Field(default=None, max_length=255)
-    priority: Optional[str] = Field(default=None, max_length=20)
-    currency: Optional[str] = Field(default=None, max_length=3)
+    status: str | None = None
+    assigned_to: str | None = Field(default=None, max_length=255)
+    priority: str | None = Field(default=None, max_length=20)
+    currency: str | None = Field(default=None, max_length=3)
 
 
 class CaseAmountReviewItem(BaseModel):
@@ -50,16 +49,16 @@ class Case(BaseModel):
     case_type: str
     business_date: str
     store_id: str
-    currency: Optional[str] = None
+    currency: str | None = None
     amount_needs_review: bool = False
     total_exception_amount: Decimal
     total_exposure: Decimal
     investigation_status: str
     evidence_completeness: int
-    assigned_to: Optional[str]
+    assigned_to: str | None
     priority: str
-    sla_due_at: Optional[datetime] = None
-    snoozed_until: Optional[datetime] = None
+    sla_due_at: datetime | None = None
+    snoozed_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -144,7 +143,7 @@ class HumanDecisionCreate(BaseModel):
     decision: str = Field(min_length=1, max_length=50)
     actor: str = Field(min_length=1, max_length=255)
     authority_check: str = Field(default="Pending", max_length=50)
-    rationale: Optional[str] = Field(default=None, max_length=2000)
+    rationale: str | None = Field(default=None, max_length=2000)
 
 
 class HumanDecision(BaseModel):
@@ -157,7 +156,7 @@ class HumanDecision(BaseModel):
     decision: str
     actor: str
     authority_check: str
-    override_reason: Optional[str] = None
+    override_reason: str | None = None
     created_at: datetime
 
 

@@ -2,7 +2,7 @@
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from model_base import utcnow
 from sqlalchemy import delete, func, select, tuple_, update
@@ -152,7 +152,7 @@ async def stage(adapter, db: AsyncSession, sync_id: str, store_code: str) -> dic
     ).values(generation=ShopifyReferenceSyncState.generation + 1).returning(
         ShopifyReferenceSyncState.generation,
     ))).scalar_one()
-    cutoff = datetime.now(timezone.utc) - ORPHAN_RETENTION
+    cutoff = datetime.now(UTC) - ORPHAN_RETENTION
     await db.execute(delete(ShopifyReferenceStage).where(ShopifyReferenceStage.created_at < cutoff))
     await db.commit()
     accumulator = StageAccumulator(db, sync_id, generation)

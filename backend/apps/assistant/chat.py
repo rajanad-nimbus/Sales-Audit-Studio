@@ -1,6 +1,6 @@
 """Grounded assistant: answers come from live data (cases, evidence, policy, ontology, connectors, batch, audit). Read-only."""
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from integrations.ontology import ontology
@@ -76,7 +76,7 @@ async def case_context(db, c: Case) -> dict:
 
 async def build_context(db, case_id: str | None, message: str = "", user: dict | None = None) -> dict:
     user = user or {}
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     decision_visible = or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now)
     by_status = dict((await db.execute(scope.restrict(select(Case.status, func.count()).group_by(Case.status), user, Case.store_id))).all())
     amounts = (await db.execute(scope.restrict(select(Case.currency, func.sum(Case.total_exception_amount),

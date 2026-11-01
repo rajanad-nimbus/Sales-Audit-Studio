@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 
@@ -205,7 +205,7 @@ async def feed_health(
         ).all()
         newest_by_source = dict(newest_rows)
     result = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for profile in profiles:
         newest = newest_by_source.get(profile.source_system)
         window = schedule_window_hours(profile.schedule)
@@ -784,7 +784,7 @@ async def simulate_ingest(
         else None
     )
     feeds = simulate_feed(day)
-    delivery = f"SIM-{datetime.now(timezone.utc).strftime('%H%M%S')}-{uuid.uuid4().hex[:4]}"
+    delivery = f"SIM-{datetime.now(UTC).strftime('%H%M%S')}-{uuid.uuid4().hex[:4]}"
     result = {src: await ingest.ingest(db, src, delivery, recs) for src, recs in feeds.items()}
     await db.commit()
     return result

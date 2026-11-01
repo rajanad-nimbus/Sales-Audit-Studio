@@ -2,7 +2,7 @@ target-version = "py312"
 line-length = 100
 
 [lint]
-select = ["E9", "F", "B904", "I", "E701", "E702", "E712", "E731", "E741"]
+select = ["E9", "F", "B904", "B905", "I", "E701", "E702", "E712", "E731", "E741", "UP"]
 
 [lint.per-file-ignores]
-"backend/alembic/versions/*.py" = ["F401", "E701", "E702", "E731", "E741"]
+"backend/alembic/versions/*.py" = ["F401", "E701", "E702", "E731", "E741", "B905", "UP"]

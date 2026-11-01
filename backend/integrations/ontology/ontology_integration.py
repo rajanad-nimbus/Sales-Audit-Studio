@@ -7,7 +7,7 @@ continues with its built-in deterministic controls.
 import asyncio
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -113,7 +113,7 @@ class OntologyIntegration:
 
     async def refresh(self, client=None) -> frozenset[str]:
         async with self._lock:
-            self.last_checked_at = datetime.now(timezone.utc)
+            self.last_checked_at = datetime.now(UTC)
             if not self.configured:
                 self._snapshot, self.rule_codes = None, frozenset()
                 missing = [name for name in ("NIMBUS_ONTOLOGY_API_URL", "NIMBUS_ONTOLOGY_API_KEY")
@@ -131,9 +131,9 @@ class OntologyIntegration:
                 if not RULE_CODES <= codes:
                     raise ValueError("Approved release is missing required Sales Audit controls")
                 self._snapshot, self.rule_codes = snapshot, codes
-                self.last_success_at = datetime.now(timezone.utc)
+                self.last_success_at = datetime.now(UTC)
                 self.last_error = None
-            except (httpx.HTTPError, ValueError, TypeError, KeyError, asyncio.TimeoutError) as exc:
+            except (TimeoutError, httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
                 self._snapshot, self.rule_codes = None, frozenset()
                 self.last_error = f"Ontology context refresh failed: {exc.__class__.__name__}"
             return self.rule_codes

@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from integrations.ontology import nimbus
@@ -225,7 +225,7 @@ async def execute_bulk_action(
 ) -> dict:
     """Apply one action to a preselected case set, audit it, and commit atomically."""
     data = await _load_action_data(db, action, cases)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     skipped: list[dict[str, str]] = []
     succeeded = 0
     for case in cases:

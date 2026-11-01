@@ -3,7 +3,7 @@
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 
@@ -97,7 +97,7 @@ async def open_store_day_record(
         date = datetime.fromisoformat(business_date).date()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if date > datetime.now(timezone.utc).date():
+    if date > datetime.now(UTC).date():
         raise HTTPException(
             status_code=422, detail="A Store Day cannot be opened for a future date"
         )

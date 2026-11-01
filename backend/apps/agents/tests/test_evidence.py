@@ -1,4 +1,5 @@
 """Evidence retrieval uses each requirement's declared source, never a guess from its wording."""
+from datetime import UTC
 from types import SimpleNamespace as NS
 
 from apps.agents.investigation_service import evidence_for_requirement
@@ -64,7 +65,7 @@ def test_totals_and_ontology_evidence():
 def test_provided_evidence_closes_a_gap_and_supersedes_the_old_recommendation():
     import asyncio
     import uuid
-    from datetime import datetime, timezone
+    from datetime import datetime
     from decimal import Decimal
 
     from apps.agents import investigation_service as svc
@@ -87,7 +88,7 @@ def test_provided_evidence_closes_a_gap_and_supersedes_the_old_recommendation():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         Session = async_sessionmaker(engine, expire_on_commit=False)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with Session() as db:
             case = Case(id="c1", case_number="CASE-1", case_type="Reconciliation", business_date="2026-10-01", store_id="S1")
             sr = SourceRecord(id=str(uuid.uuid4()), source_system="POS", source_version="1", source_record_id="k",
