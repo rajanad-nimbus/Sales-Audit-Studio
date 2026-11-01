@@ -18,6 +18,9 @@ from apps.cases.evidence import (
 from apps.cases.evidence import (
     router as evidence_router,
 )
+from apps.cases.lineage_routes import (
+    router as lineage_router,
+)
 from apps.cases.records import (
     create_decision,
     create_exception,
@@ -61,6 +64,7 @@ from apps.cases.workflows import (
 router = APIRouter()
 router.include_router(lifecycle_router)
 router.include_router(evidence_router)
+router.include_router(lineage_router)
 router.include_router(records_router)
 router.include_router(workflows_router)
 
