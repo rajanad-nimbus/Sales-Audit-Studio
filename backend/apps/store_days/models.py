@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class StoreDay(Base):
     """The controlled audit unit: one retail location and one business date."""
+
     __tablename__ = "store_days"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     store_id: Mapped[str] = mapped_column(String(50), index=True)
@@ -31,18 +32,23 @@ class StoreDay(Base):
     reopened_by: Mapped[str | None] = mapped_column(String(255))
     reopened_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
     __table_args__ = (UniqueConstraint("store_id", "business_date", name="uq_store_day"),)
 
 
 class AuditTotal(Base):
     """Versioned declared/calculated total for a Store Day and balancing dimension."""
+
     __tablename__ = "audit_totals"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     store_day_id: Mapped[str] = mapped_column(String(36), ForeignKey("store_days.id"), index=True)
     audit_version: Mapped[int] = mapped_column(Integer, index=True)
     total_name: Mapped[str] = mapped_column(String(100))
-    definition_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("audit_total_definitions.id"))
+    definition_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("audit_total_definitions.id")
+    )
     definition_revision: Mapped[int | None] = mapped_column(Integer)
     level: Mapped[str] = mapped_column(String(24), default="Store")
     dimension_key: Mapped[str | None] = mapped_column(String(100))
