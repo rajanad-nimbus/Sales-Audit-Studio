@@ -1,4 +1,5 @@
 """Shared investigation entry point: scoped evidence retrieval, optional agent, deterministic findings."""
+
 import logging
 import os
 from dataclasses import dataclass
@@ -50,8 +51,12 @@ class InvestigationException:
     exception_amount: Decimal
 
 
-def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransaction, SourceRecord]] | CaseSourceRows,
-                             totals=(), exception_type: str | None = None) -> list[dict]:
+def evidence_for_requirement(
+    requirement: str,
+    rows: list[tuple[CanonicalTransaction, SourceRecord]] | CaseSourceRows,
+    totals=(),
+    exception_type: str | None = None,
+) -> list[dict]:
     """Return only real, scoped records that satisfy an ontology requirement, using its declared source.
 
     A requirement with no declared source (or one missing from the table) is never satisfied automatically.
@@ -60,7 +65,10 @@ def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransac
     if not spec:
         return []
     if spec.get("totals"):
-        return [{"source_record_id": t.id, "transaction_id": t.id, "source_system": "Store-day totals"} for t in totals]
+        return [
+            {"source_record_id": t.id, "transaction_id": t.id, "source_system": "Store-day totals"}
+            for t in totals
+        ]
     if spec.get("ontology"):
         if not (exception_type and ontology.get(exception_type)):
             return []
@@ -78,14 +86,18 @@ def evidence_for_requirement(requirement: str, rows: list[tuple[CanonicalTransac
             or (record.source_system, spec.get("type")) in rows.truncated_scopes
             or (record.source_system, None) in rows.truncated_scopes
         )
-        selected.append({"source_record_id": record.id, "transaction_id": txn.id,
-                         "source_system": record.source_system, "truncated": truncated})
+        selected.append(
+            {
+                "source_record_id": record.id,
+                "transaction_id": txn.id,
+                "source_system": record.source_system,
+                "truncated": truncated,
+            }
+        )
     return selected
 
 
-async def case_source_rows(
-    db: AsyncSession, case: Case, requirements: list[str]
-) -> CaseSourceRows:
+async def case_source_rows(db: AsyncSession, case: Case, requirements: list[str]) -> CaseSourceRows:
     scopes = _evidence_scopes(requirements)
     if not scopes:
         return CaseSourceRows(())
@@ -103,10 +115,12 @@ async def case_source_rows(
         for transaction, record in rows:
             records_by_transaction[transaction.id] = (transaction, record)
 
-    ordered_records = tuple(sorted(
-        records_by_transaction.values(),
-        key=lambda pair: (pair[0].event_timestamp, pair[0].id),
-    ))
+    ordered_records = tuple(
+        sorted(
+            records_by_transaction.values(),
+            key=lambda pair: (pair[0].event_timestamp, pair[0].id),
+        )
+    )
     return CaseSourceRows(ordered_records, frozenset(truncated_scopes), truncated_any)
 
 
@@ -129,42 +143,78 @@ async def _source_rows_for_scope(
     evidence_scope: tuple[str | None, str | None],
 ) -> tuple[list[tuple[CanonicalTransaction, SourceRecord]], bool]:
     source, transaction_type = evidence_scope
-    query = select(CanonicalTransaction, SourceRecord).join(
-        SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id,
-    ).where(
-        CanonicalTransaction.business_date == case.business_date,
-        CanonicalTransaction.store_id == case.store_id,
+    query = (
+        select(CanonicalTransaction, SourceRecord)
+        .join(
+            SourceRecord,
+            CanonicalTransaction.source_record_id == SourceRecord.id,
+        )
+        .where(
+            CanonicalTransaction.business_date == case.business_date,
+            CanonicalTransaction.store_id == case.store_id,
+        )
     )
     if source is not None:
         query = query.where(SourceRecord.source_system == source)
     if transaction_type is not None:
         query = query.where(CanonicalTransaction.transaction_type == transaction_type)
-    rows = (await db.execute(
-        query.order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id)
-        .limit(MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE + 1)
-    )).all()
+    rows = (
+        await db.execute(
+            query.order_by(CanonicalTransaction.event_timestamp, CanonicalTransaction.id).limit(
+                MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE + 1
+            )
+        )
+    ).all()
     return rows[:MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE], len(rows) > MAX_SOURCE_EVIDENCE_ROWS_PER_SCOPE
 
 
 async def case_store_day_totals(db: AsyncSession, case: Case) -> list[AuditTotal]:
-    day = (await db.execute(select(StoreDay).where(
-        StoreDay.store_id == case.store_id, StoreDay.business_date == case.business_date))).scalar_one_or_none()
+    day = (
+        await db.execute(
+            select(StoreDay).where(
+                StoreDay.store_id == case.store_id, StoreDay.business_date == case.business_date
+            )
+        )
+    ).scalar_one_or_none()
     if not day:
         return []
-    return list((await db.execute(select(AuditTotal).where(
-        AuditTotal.store_day_id == day.id, AuditTotal.audit_version == day.audit_version))).scalars().all())
+    return list(
+        (
+            await db.execute(
+                select(AuditTotal).where(
+                    AuditTotal.store_day_id == day.id, AuditTotal.audit_version == day.audit_version
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
 
 
 async def provided_evidence(db: AsyncSession, case: Case) -> dict[str, list[dict]]:
     """Evidence a person has supplied for this case, keyed by requirement. It stands in only where no ingested
     record satisfies the requirement, and is labelled with who provided it."""
-    rows = (await db.execute(select(EvidenceRequest).where(
-        EvidenceRequest.case_id == case.id, EvidenceRequest.status == "Fulfilled"))).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(EvidenceRequest).where(
+                    EvidenceRequest.case_id == case.id, EvidenceRequest.status == "Fulfilled"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     out: dict[str, list[dict]] = {}
     for r in rows:
         ref = f"provided:{r.id}"
         out.setdefault(r.requirement.strip().lower(), []).append(
-            {"source_record_id": ref, "transaction_id": ref, "source_system": f"Provided by {r.fulfilled_by or 'a reviewer'}"})
+            {
+                "source_record_id": ref,
+                "transaction_id": ref,
+                "source_system": f"Provided by {r.fulfilled_by or 'a reviewer'}",
+            }
+        )
     return out
 
 
@@ -173,9 +223,7 @@ class InvestigationEvidenceCache:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self._source_rows: dict[
-            tuple[str, str, tuple[str, ...]], CaseSourceRows
-        ] = {}
+        self._source_rows: dict[tuple[str, str, tuple[str, ...]], CaseSourceRows] = {}
         self._store_day_totals: dict[tuple[str, str], list[AuditTotal]] = {}
 
     def clear(self) -> None:
@@ -187,9 +235,7 @@ class InvestigationEvidenceCache:
     def _key(case: Case) -> tuple[str, str]:
         return case.store_id, case.business_date
 
-    async def source_rows(
-        self, case: Case, requirements: list[str]
-    ) -> CaseSourceRows:
+    async def source_rows(self, case: Case, requirements: list[str]) -> CaseSourceRows:
         key = (*self._key(case), tuple(sorted(set(requirements))))
         if key not in self._source_rows:
             self._source_rows[key] = await case_source_rows(self.db, case, requirements)
@@ -266,23 +312,42 @@ async def run_investigation(
     use_agent: bool = True,
     evidence_cache: InvestigationEvidenceCache | None = None,
 ) -> object:
-    case = (await db.execute(select(Case).where(Case.id == case.id).with_for_update()
-                             .execution_options(populate_existing=True))).scalar_one()
+    case = (
+        await db.execute(
+            select(Case)
+            .where(Case.id == case.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     if case.amount_needs_review:
-        raise HTTPException(status_code=409, detail="Case amounts require finance review before investigation")
+        raise HTTPException(
+            status_code=409, detail="Case amounts require finance review before investigation"
+        )
     from integrations.ontology.ontology_integration import integration
+
     await integration.refresh()
     ontology_context = integration.context()
     exception_definition = ontology.get(exceptions[0].exception_type)
     narrative = await _investigation_narrative(
-        db, case, exceptions, use_agent, ontology_context, exception_definition,
+        db,
+        case,
+        exceptions,
+        use_agent,
+        ontology_context,
+        exception_definition,
     )
     evidence_cache = evidence_cache or InvestigationEvidenceCache(db)
-    required = exception_definition["evidence"] if exception_definition else ontology.DEFAULT_EVIDENCE
+    required = (
+        exception_definition["evidence"] if exception_definition else ontology.DEFAULT_EVIDENCE
+    )
     rows = await evidence_cache.source_rows(case, required)
     totals = await evidence_cache.store_day_totals(case)
     etype = exceptions[0].exception_type if exceptions else None
-    evidence = {requirement: evidence_for_requirement(requirement, rows, totals, etype) for requirement in required}
+    evidence = {
+        requirement: evidence_for_requirement(requirement, rows, totals, etype)
+        for requirement in required
+    }
     provided = await provided_evidence(db, case)
     for requirement in required:
         if not evidence[requirement]:
@@ -290,10 +355,25 @@ async def run_investigation(
     # Serialize investigations and all other proposal writers on the case row.
     # The partial unique index is the final guard, while this lock ensures the
     # old proposal is superseded before the replacement is inserted.
-    case = (await db.execute(select(Case).where(Case.id == case.id).with_for_update()
-                             .execution_options(populate_existing=True))).scalar_one()
-    for old in (await db.execute(select(Recommendation).where(
-            Recommendation.case_id == case.id, Recommendation.status == "Proposed").with_for_update())).scalars().all():
+    case = (
+        await db.execute(
+            select(Case)
+            .where(Case.id == case.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    for old in (
+        (
+            await db.execute(
+                select(Recommendation)
+                .where(Recommendation.case_id == case.id, Recommendation.status == "Proposed")
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    ):
         old.status = "Superseded"
     return nimbus.investigate(db, case, exceptions, evidence, narrative)
 
@@ -306,17 +386,37 @@ async def auto_investigate(db: AsyncSession, business_date: str, limit: int = 20
 
     The LLM agent handles the highest-exposure cases first, up to NIMBUS_AGENT_BATCH_LIMIT per batch, so an unattended
     run has bounded time and cost. The rest get the deterministic investigation and can be run by the agent on demand."""
-    case_ids = (await db.execute(select(Case.id).where(
-        Case.business_date == business_date, Case.status == "Open", Case.investigation_status == "Pending",
-        Case.amount_needs_review.is_(False),
-    ).order_by(Case.total_exposure.desc(), Case.id).limit(limit))).scalars().all()
+    case_ids = (
+        (
+            await db.execute(
+                select(Case.id)
+                .where(
+                    Case.business_date == business_date,
+                    Case.status == "Open",
+                    Case.investigation_status == "Pending",
+                    Case.amount_needs_review.is_(False),
+                )
+                .order_by(Case.total_exposure.desc(), Case.id)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
     exceptions_by_case: dict[str, list[InvestigationException]] = {}
     if case_ids:
-        exception_rows = (await db.execute(
-            select(DBException.id, DBException.case_id, DBException.exception_type, DBException.exception_amount)
-            .where(DBException.case_id.in_(case_ids))
-            .order_by(DBException.case_id, DBException.created_at, DBException.id)
-        )).all()
+        exception_rows = (
+            await db.execute(
+                select(
+                    DBException.id,
+                    DBException.case_id,
+                    DBException.exception_type,
+                    DBException.exception_amount,
+                )
+                .where(DBException.case_id.in_(case_ids))
+                .order_by(DBException.case_id, DBException.created_at, DBException.id)
+            )
+        ).all()
         for exception_id, case_id, exception_type, amount in exception_rows:
             exceptions_by_case.setdefault(case_id, []).append(
                 InvestigationException(exception_id, exception_type, amount)

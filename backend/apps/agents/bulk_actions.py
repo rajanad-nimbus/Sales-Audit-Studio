@@ -40,14 +40,22 @@ class ActionData:
 
 def first_record_per_case(model, case_ids: list[str], *conditions):
     """Select each case's earliest matching child record in the database."""
-    ranked = select(
-        model.id.label("record_id"),
-        func.row_number().over(
-            partition_by=model.case_id,
-            order_by=(model.created_at, model.id),
-        ).label("row_number"),
-    ).where(model.case_id.in_(case_ids), *conditions).subquery()
-    return select(model).join(ranked, model.id == ranked.c.record_id).where(ranked.c.row_number == 1)
+    ranked = (
+        select(
+            model.id.label("record_id"),
+            func.row_number()
+            .over(
+                partition_by=model.case_id,
+                order_by=(model.created_at, model.id),
+            )
+            .label("row_number"),
+        )
+        .where(model.case_id.in_(case_ids), *conditions)
+        .subquery()
+    )
+    return (
+        select(model).join(ranked, model.id == ranked.c.record_id).where(ranked.c.row_number == 1)
+    )
 
 
 async def _load_action_data(db: AsyncSession, action: str, cases: list[Case]) -> ActionData:
@@ -55,40 +63,62 @@ async def _load_action_data(db: AsyncSession, action: str, cases: list[Case]) ->
     data = ActionData()
     case_ids = [case.id for case in cases]
     if action == "investigate" and case_ids:
-        rows = (await db.execute(
-            select(DBException).where(DBException.case_id.in_(case_ids))
-            .order_by(DBException.case_id, DBException.created_at, DBException.id)
-        )).scalars()
+        rows = (
+            await db.execute(
+                select(DBException)
+                .where(DBException.case_id.in_(case_ids))
+                .order_by(DBException.case_id, DBException.created_at, DBException.id)
+            )
+        ).scalars()
         for row in rows:
             data.exceptions.setdefault(row.case_id, []).append(row)
 
     if action in {"approve", "escalate"} and case_ids:
-        rows = (await db.execute(
-            select(Recommendation).where(
-                Recommendation.case_id.in_(case_ids), Recommendation.status == "Proposed",
-            ).order_by(Recommendation.case_id, Recommendation.created_at.desc(), Recommendation.id.desc())
-        )).scalars()
+        rows = (
+            await db.execute(
+                select(Recommendation)
+                .where(
+                    Recommendation.case_id.in_(case_ids),
+                    Recommendation.status == "Proposed",
+                )
+                .order_by(
+                    Recommendation.case_id,
+                    Recommendation.created_at.desc(),
+                    Recommendation.id.desc(),
+                )
+            )
+        ).scalars()
         for row in rows:
             data.recommendations.setdefault(row.case_id, row)
 
     if action == "advance":
         resolving_ids = [case.id for case in cases if case.status == "Resolving"]
         if resolving_ids:
-            rows = (await db.execute(
-                first_record_per_case(Workflow, resolving_ids, Workflow.state == "Pending")
-            )).scalars()
+            rows = (
+                await db.execute(
+                    first_record_per_case(Workflow, resolving_ids, Workflow.state == "Pending")
+                )
+            ).scalars()
             data.pending_workflows = {row.case_id: row for row in rows}
 
         validation_ids = [case.id for case in cases if case.status == "Pending Validation"]
         if validation_ids:
-            rows = (await db.execute(first_record_per_case(
-                ValidationObligation, validation_ids, ValidationObligation.status != "Complete",
-            ))).scalars()
+            rows = (
+                await db.execute(
+                    first_record_per_case(
+                        ValidationObligation,
+                        validation_ids,
+                        ValidationObligation.status != "Complete",
+                    )
+                )
+            ).scalars()
             data.incomplete_obligations = {row.case_id: row for row in rows}
 
         workflow_ids = {row.workflow_id for row in data.incomplete_obligations.values()}
         if workflow_ids:
-            rows = (await db.execute(select(Workflow).where(Workflow.id.in_(workflow_ids)))).scalars()
+            rows = (
+                await db.execute(select(Workflow).where(Workflow.id.in_(workflow_ids)))
+            ).scalars()
             data.validation_workflows = {row.id: row for row in rows}
 
     if action == "investigate":
@@ -134,7 +164,9 @@ async def _investigate_case(db, case, data: ActionData, skipped) -> bool:
     if not exceptions:
         _skip(case, "no exception records to investigate", skipped)
         return False
-    await investigation_service.run_investigation(db, case, exceptions, evidence_cache=data.evidence_cache)
+    await investigation_service.run_investigation(
+        db, case, exceptions, evidence_cache=data.evidence_cache
+    )
     return True
 
 
@@ -152,14 +184,23 @@ async def _decide_case(db, case, action, user, actor, data, skipped) -> bool:
 
     if action == "approve":
         if recommendation.financial_impact != 0 and case.currency != nimbus.THRESHOLD_CURRENCY:
-            _skip(case, "bulk financial limit is in USD; review this currency individually", skipped)
+            _skip(
+                case, "bulk financial limit is in USD; review this currency individually", skipped
+            )
             return False
         if abs(recommendation.financial_impact) > BULK_APPROVE_MAX_IMPACT:
-            _skip(case, f"financial movement above bulk limit ({BULK_APPROVE_MAX_IMPACT}); review individually", skipped)
+            _skip(
+                case,
+                f"financial movement above bulk limit ({BULK_APPROVE_MAX_IMPACT}); review individually",
+                skipped,
+            )
             return False
         if data.approved_rule_codes is None:
             data.approved_rule_codes = await ontology_integration.refresh()
-        if nimbus.evaluate_policy(db, case, recommendation, data.approved_rule_codes).outcome == "RequestEvidence":
+        if (
+            nimbus.evaluate_policy(db, case, recommendation, data.approved_rule_codes).outcome
+            == "RequestEvidence"
+        ):
             _skip(case, "policy: evidence incomplete", skipped)
             return False
         recommendation.status = "Approved"
@@ -170,12 +211,26 @@ async def _decide_case(db, case, action, user, actor, data, skipped) -> bool:
         case.status = "Escalated"
         decision = "Escalated"
 
-    db.add(HumanDecision(
-        id=str(uuid.uuid4()), case_id=case.id, recommendation_id=recommendation.id,
-        decision_type="Finance", decision=decision, actor=actor, authority_check="Bulk",
-    ))
-    nimbus.audit(db, "HUMAN_DECISION", case.id, "Recommendation", recommendation.id,
-                 f"{decision} by {actor} (bulk)", actor=actor)
+    db.add(
+        HumanDecision(
+            id=str(uuid.uuid4()),
+            case_id=case.id,
+            recommendation_id=recommendation.id,
+            decision_type="Finance",
+            decision=decision,
+            actor=actor,
+            authority_check="Bulk",
+        )
+    )
+    nimbus.audit(
+        db,
+        "HUMAN_DECISION",
+        case.id,
+        "Recommendation",
+        recommendation.id,
+        f"{decision} by {actor} (bulk)",
+        actor=actor,
+    )
     return True
 
 
@@ -196,7 +251,11 @@ def _advance_case(db, case, data: ActionData, skipped) -> bool:
         if workflow is None:
             raise HTTPException(status_code=409, detail="Validation workflow no longer exists")
         nimbus.validate(db, case, workflow, obligation, [])
-        _skip(case, "validation waiting: fresh source evidence required, validate individually", skipped)
+        _skip(
+            case,
+            "validation waiting: fresh source evidence required, validate individually",
+            skipped,
+        )
         return False
     _skip(case, f"nothing to advance ({case.status})", skipped)
     return False
@@ -229,12 +288,19 @@ async def execute_bulk_action(
     skipped: list[dict[str, str]] = []
     succeeded = 0
     for case in cases:
-        succeeded += await _apply_case_action(db, case, action, params, user, actor, data, now, skipped)
+        succeeded += await _apply_case_action(
+            db, case, action, params, user, actor, data, now, skipped
+        )
 
     nimbus.audit(
-        db, "BULK_ACTION", None, "Case", "bulk",
+        db,
+        "BULK_ACTION",
+        None,
+        "Case",
+        "bulk",
         f"{actor} ran '{action}' on {len(cases)} case(s): {succeeded} ok, {len(skipped)} skipped",
-        actor=actor, after={"action": action, "params": params},
+        actor=actor,
+        after={"action": action, "params": params},
     )
     await db.commit()
     return {

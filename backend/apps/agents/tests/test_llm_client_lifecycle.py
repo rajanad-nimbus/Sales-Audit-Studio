@@ -23,13 +23,17 @@ class FakeAnthropicClient:
         self.closed = True
 
     async def create(self, **_kwargs):
-        return SimpleNamespace(content=[SimpleNamespace(type="text", text="Grounded draft")],
-                               usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="Grounded draft")],
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+        )
 
 
 def configure_fake_provider(monkeypatch):
     FakeAnthropicClient.instances.clear()
-    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(AsyncAnthropic=FakeAnthropicClient))
+    monkeypatch.setitem(
+        sys.modules, "anthropic", SimpleNamespace(AsyncAnthropic=FakeAnthropicClient)
+    )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 

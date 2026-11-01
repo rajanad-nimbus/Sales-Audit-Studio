@@ -1,4 +1,5 @@
 """Derived role permissions (analyst, auditor, store_manager) from existing require_role declarations."""
+
 from apps.security.authentication import role_allowed
 
 
@@ -18,7 +19,9 @@ def test_auditor_is_read_only():
 def test_store_manager_limited_to_cash_and_store_days():
     assert role_allowed("store_manager", ("finance", "it"), "POST", "/api/cash")
     assert role_allowed("store_manager", ("finance", "it"), "GET", "/api/store-days/S1/2026-10-01")
-    assert not role_allowed("store_manager", ("finance", "it"), "POST", "/api/store-days/S1/2026-10-01/retotal")
+    assert not role_allowed(
+        "store_manager", ("finance", "it"), "POST", "/api/store-days/S1/2026-10-01/retotal"
+    )
     assert not role_allowed("store_manager", ("finance", "it"), "GET", "/api/cases")
     assert not role_allowed("store_manager", ("finance",), "POST", "/api/cash")
 
@@ -34,9 +37,17 @@ def test_agent_settings_validation_rejects_unsafe_changes():
     import pytest
     from apps.agents import agent_settings as s
     from fastapi import HTTPException
-    assert s.validate({"model": "claude-opus-5-5", "tools": ["get_source_record"]})["tools"] == ["get_source_record"]
-    for bad in ({"model": "gpt-x"}, {"tools": []}, {"tools": ["delete_everything"]},
-                {"investigator_enabled": "yes"}, {"autonomy_limit": 99999}):
+
+    assert s.validate({"model": "claude-opus-5-5", "tools": ["get_source_record"]})["tools"] == [
+        "get_source_record"
+    ]
+    for bad in (
+        {"model": "gpt-x"},
+        {"tools": []},
+        {"tools": ["delete_everything"]},
+        {"investigator_enabled": "yes"},
+        {"autonomy_limit": 99999},
+    ):
         with pytest.raises(HTTPException):
             s.validate(bad)
 
@@ -46,16 +57,28 @@ def test_chat_via_agent_sdk_is_read_only_and_uses_result(monkeypatch):
 
     from apps.agents import llm
     from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+
     seen = {}
 
     async def fake_query(prompt, options):
         seen["options"], seen["prompt"] = options, prompt
         yield AssistantMessage(content=[TextBlock(text="draft")], model="m")
-        yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
-                            session_id="s", result="final answer")
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            result="final answer",
+        )
 
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-    out = asyncio.run(llm.chat_via_agent_sdk("SYS", [{"role": "user", "content": "hi"}], "q?", query_fn=fake_query))
+    out = asyncio.run(
+        llm.chat_via_agent_sdk(
+            "SYS", [{"role": "user", "content": "hi"}], "q?", query_fn=fake_query
+        )
+    )
     assert out == "final answer"
     o = seen["options"]
     assert o.tools == [] and o.allowed_tools == [] and o.max_turns == 1 and o.setting_sources == []

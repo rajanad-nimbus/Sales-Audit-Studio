@@ -2,6 +2,7 @@
 
 Deliberately NOT settable here: autonomy limits, policy thresholds, roles. Those remain code/config changes.
 """
+
 import os
 
 from fastapi import HTTPException
@@ -11,15 +12,23 @@ from sqlalchemy import select
 from apps.agents.agent_tools import TOOL_SPECS
 from apps.agents.models import AgentSetting
 
-ALLOWED_MODELS = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"]
+ALLOWED_MODELS = [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-fable-5-1",
+    "claude-haiku-4-5-20251001",
+]
 TOOL_NAMES = [t["name"] for t in TOOL_SPECS]
 
 
 def defaults() -> dict:
-    return {"investigator_enabled": os.getenv("NIMBUS_AGENT_INVESTIGATOR", "1") != "0",  # LLM-driven unless explicitly turned off
-            "auto_investigate": os.getenv("NIMBUS_AUTO_INVESTIGATE", "1") == "1",
-            "model": os.getenv("NIMBUS_LLM_MODEL", ALLOWED_MODELS[0]),
-            "tools": list(TOOL_NAMES)}
+    return {
+        "investigator_enabled": os.getenv("NIMBUS_AGENT_INVESTIGATOR", "1")
+        != "0",  # LLM-driven unless explicitly turned off
+        "auto_investigate": os.getenv("NIMBUS_AUTO_INVESTIGATE", "1") == "1",
+        "model": os.getenv("NIMBUS_LLM_MODEL", ALLOWED_MODELS[0]),
+        "tools": list(TOOL_NAMES),
+    }
 
 
 async def load(db) -> dict:
@@ -55,12 +64,22 @@ async def update(db, changes: dict, user: str) -> dict:
     for k, v in clean.items():
         if current[k] == v:
             continue
-        row = (await db.execute(select(AgentSetting).where(AgentSetting.key == k))).scalar_one_or_none()
+        row = (
+            await db.execute(select(AgentSetting).where(AgentSetting.key == k))
+        ).scalar_one_or_none()
         if row:
             row.value, row.updated_by = {"v": v}, user
         else:
             db.add(AgentSetting(key=k, value={"v": v}, updated_by=user))
-        nimbus.audit(db, "AGENT_SETTING_CHANGED", None, "AgentSetting", k, f"{k} changed by {user}",
-                     actor=user, after={"setting": k, "before": current[k], "after": v})
+        nimbus.audit(
+            db,
+            "AGENT_SETTING_CHANGED",
+            None,
+            "AgentSetting",
+            k,
+            f"{k} changed by {user}",
+            actor=user,
+            after={"setting": k, "before": current[k], "after": v},
+        )
     await db.commit()
     return await load(db)

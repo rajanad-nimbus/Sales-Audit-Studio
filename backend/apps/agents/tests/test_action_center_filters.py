@@ -68,12 +68,15 @@ def test_action_center_rejects_unbounded_page_numbers():
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("params", [
-    {"sort": "unknown"},
-    {"dir": "sideways"},
-    {"store": ",".join(f"S{i}" for i in range(101))},
-    {"store": "S" * 51},
-])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"sort": "unknown"},
+        {"dir": "sideways"},
+        {"store": ",".join(f"S{i}" for i in range(101))},
+        {"store": "S" * 51},
+    ],
+)
 def test_action_center_rejects_invalid_query_options(params):
     async def run():
         app = FastAPI()
@@ -132,7 +135,9 @@ def test_action_center_rejects_unsupported_or_inconsistent_filters(params):
 def test_action_center_accepts_supported_filter_values():
     from apps.agents.action_center import filters
 
-    supported = filters(store="STORE-1", stage="open", sla="at_risk", snoozed="only", min_amount=1, max_amount=10)
+    supported = filters(
+        store="STORE-1", stage="open", sla="at_risk", snoozed="only", min_amount=1, max_amount=10
+    )
     assert supported.store == "STORE-1" and supported.stage == "open"
 
 
@@ -144,13 +149,18 @@ def test_action_center_export_refuses_to_return_a_silent_partial_file(monkeypatc
                 await connection.run_sync(Base.metadata.create_all)
             sessions = async_sessionmaker(engine, expire_on_commit=False)
             async with sessions() as db:
-                db.add_all([
-                    Case(
-                        id=f"case-{index}", case_number=f"CASE-{index}", case_type="Test",
-                        business_date="2026-10-01", store_id="S1",
-                    )
-                    for index in range(3)
-                ])
+                db.add_all(
+                    [
+                        Case(
+                            id=f"case-{index}",
+                            case_number=f"CASE-{index}",
+                            case_type="Test",
+                            business_date="2026-10-01",
+                            store_id="S1",
+                        )
+                        for index in range(3)
+                    ]
+                )
                 await db.commit()
 
             app = FastAPI()
@@ -188,10 +198,15 @@ def test_action_center_csv_export_neutralizes_spreadsheet_formulas():
                 await connection.run_sync(Base.metadata.create_all)
             sessions = async_sessionmaker(engine, expire_on_commit=False)
             async with sessions() as db:
-                db.add(Case(
-                    id="case-formula", case_number="=1+1", case_type="+SUM(A1:A2)",
-                    business_date="2026-10-01", store_id="S1",
-                ))
+                db.add(
+                    Case(
+                        id="case-formula",
+                        case_number="=1+1",
+                        case_type="+SUM(A1:A2)",
+                        business_date="2026-10-01",
+                        store_id="S1",
+                    )
+                )
                 await db.commit()
 
             app = FastAPI()

@@ -38,7 +38,11 @@ def test_successful_agent_narrative_is_audited_without_llm_fallback(monkeypatch)
             [SimpleNamespace(exception_type="UNMATCHED_SALE")],
             True,
             {"source": "test", "ontology": "v1"},
-            {"label": "Unmatched Sale", "known_causes": ["missing tender"], "evidence": ["POS journal"]},
+            {
+                "label": "Unmatched Sale",
+                "known_causes": ["missing tender"],
+                "evidence": ["POS journal"],
+            },
         )
 
     assert asyncio.run(run()) == "Rendered grounded finding"
@@ -57,7 +61,10 @@ def test_failed_agent_narrative_uses_labeled_llm_fallback(monkeypatch):
 
     async def narrate(label, amount, evidence, causes):
         assert (label, amount, evidence, causes) == (
-            "Unmatched Sale", "12", ["POS journal"], ["missing tender"],
+            "Unmatched Sale",
+            "12",
+            ["POS journal"],
+            ["missing tender"],
         )
         return "Careful narrative"
 
@@ -65,7 +72,9 @@ def test_failed_agent_narrative_uses_labeled_llm_fallback(monkeypatch):
     monkeypatch.setattr(investigation_service.agent_settings, "load", load_settings)
     monkeypatch.setattr(investigation_service.investigator, "run", run_agent)
     monkeypatch.setattr(investigation_service.llm, "narrate", narrate)
-    monkeypatch.setattr(investigation_service.nimbus, "audit", lambda *args, **kwargs: audits.append((args, kwargs)))
+    monkeypatch.setattr(
+        investigation_service.nimbus, "audit", lambda *args, **kwargs: audits.append((args, kwargs))
+    )
 
     async def run():
         return await investigation_service._investigation_narrative(
@@ -74,7 +83,11 @@ def test_failed_agent_narrative_uses_labeled_llm_fallback(monkeypatch):
             [SimpleNamespace(exception_type="UNMATCHED_SALE")],
             True,
             {"source": "test", "ontology": "v1"},
-            {"label": "Unmatched Sale", "known_causes": ["missing tender"], "evidence": ["POS journal"]},
+            {
+                "label": "Unmatched Sale",
+                "known_causes": ["missing tender"],
+                "evidence": ["POS journal"],
+            },
         )
 
     narrative = asyncio.run(run())
