@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class CashControl(Base):
     """Cash-office declaration for one store day, register/cashier and tender."""
+
     __tablename__ = "cash_controls"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     store_id: Mapped[str] = mapped_column(String(50), index=True)
@@ -25,14 +26,18 @@ class CashControl(Base):
     status: Mapped[str] = mapped_column(String(24), default="Declared")
     declared_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
     __table_args__ = (
         Index("ix_cash_controls_store_date_tender", "store_id", "business_date", "tender_type"),
     )
 
+
 class CashDeposit(Base):
     """Banked cash deposit reconciled to declared cash controls."""
+
     __tablename__ = "cash_deposits"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     store_id: Mapped[str] = mapped_column(String(50), index=True)
@@ -46,6 +51,4 @@ class CashDeposit(Base):
     recorded_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    __table_args__ = (
-        Index("ix_cash_deposits_store_date", "store_id", "business_date"),
-    )
+    __table_args__ = (Index("ix_cash_deposits_store_date", "store_id", "business_date"),)

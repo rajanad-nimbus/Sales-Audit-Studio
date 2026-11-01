@@ -85,14 +85,20 @@ async def ensure_store_day_currency(
     business_date: str,
 ) -> str:
     """Reject cash calculations when a store day contains incompatible currencies."""
-    currencies = (await db.execute(
-        select(CanonicalTransaction.currency)
-        .where(
-            CanonicalTransaction.store_id == store_id,
-            CanonicalTransaction.business_date == business_date,
+    currencies = (
+        (
+            await db.execute(
+                select(CanonicalTransaction.currency)
+                .where(
+                    CanonicalTransaction.store_id == store_id,
+                    CanonicalTransaction.business_date == business_date,
+                )
+                .distinct()
+            )
         )
-        .distinct()
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     try:
         return single_currency(currencies)
     except ValueError as exc:
@@ -105,12 +111,18 @@ async def refresh_cash_deposits(
     business_date: str,
 ) -> list[CashDeposit]:
     """Reconcile recorded deposits to the latest cash declarations for an open day."""
-    deposits = (await db.execute(
-        select(CashDeposit)
-        .where(CashDeposit.store_id == store_id, CashDeposit.business_date == business_date)
-        .order_by(CashDeposit.id)
-        .with_for_update()
-    )).scalars().all()
+    deposits = (
+        (
+            await db.execute(
+                select(CashDeposit)
+                .where(CashDeposit.store_id == store_id, CashDeposit.business_date == business_date)
+                .order_by(CashDeposit.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
     if not deposits:
         return []
 
@@ -119,7 +131,11 @@ async def refresh_cash_deposits(
     for deposit in deposits:
         variance = expected - deposit.deposited_amount
         status = "Balanced" if variance == 0 else "Over/Short"
-        if (deposit.expected_amount, deposit.variance_amount, deposit.status) == (expected, variance, status):
+        if (deposit.expected_amount, deposit.variance_amount, deposit.status) == (
+            expected,
+            variance,
+            status,
+        ):
             continue
         deposit.expected_amount = expected
         deposit.variance_amount = variance
