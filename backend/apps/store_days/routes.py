@@ -284,6 +284,7 @@ async def retotal_store_day(store_id: str, business_date: str, db: AsyncSession 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     definition_by_key = add_configured_totals(calculated, definitions, calculation.configured_totals)
 
+    await validate_rule_totals(db, calculated, definitions)
     day.status, day.audit_version = "Re-totaling", day.audit_version + 1
     for (name, level, dimension), amount in calculated.items():
         definition = definition_by_key.get((name, level, dimension))
@@ -292,7 +293,6 @@ async def retotal_store_day(store_id: str, business_date: str, db: AsyncSession 
                           definition_id=definition.id if definition else None,
                           definition_revision=definition.revision if definition else None,
                           currency=currency))
-    await evaluate_configured_rules(db, definitions, calculated, store_id, business_date, currency)
     pos_net = calculated.get(("POS Net", "Store", None), Decimal("0"))
     if has_manifest:
         db.add(AuditTotal(id=str(uuid.uuid4()), store_day_id=day.id, audit_version=day.audit_version,
@@ -308,6 +308,7 @@ async def retotal_store_day(store_id: str, business_date: str, db: AsyncSession 
     db.add(AuditTotal(id=str(uuid.uuid4()), store_day_id=day.id, audit_version=day.audit_version,
                       total_name="POS to GL Variance", level="Store", calculated_amount=pos_net,
                       declared_amount=gl_net, variance_amount=pos_net - gl_net, currency=currency))
+    await evaluate_configured_rules(db, definitions, calculated, store_id, business_date, currency)
     pending_requests = (await db.execute(select(StoreDayClosureRequest).where(
         StoreDayClosureRequest.store_day_id == day.id, StoreDayClosureRequest.status == "Pending"
     ))).scalars().all()
@@ -338,28 +339,69 @@ def add_configured_totals(calculated, definitions, configured_totals):
 
 async def evaluate_configured_rules(db, definitions, calculated, store_id, business_date, currency):
     """Validate applicable total rules and create cases for newly breached controls."""
+    totals_by_name: dict[str, dict[str, Decimal]] = {}
+    for (name, level, _dimension), amount in calculated.items():
+        level_totals = totals_by_name.setdefault(name, {})
+        level_totals[level] = level_totals.get(level, Decimal("0")) + amount
+
+    applicable_totals = set(totals_by_name)
+    if not applicable_totals:
+        return
     rules = (await db.execute(
-        select(ConfiguredAuditRule).where(ConfiguredAuditRule.enabled.is_(True))
+        select(ConfiguredAuditRule).where(
+            ConfiguredAuditRule.enabled.is_(True),
+            ConfiguredAuditRule.total_name.in_(applicable_totals),
+        ).order_by(ConfiguredAuditRule.id)
     )).scalars().all()
     definitions_by_total = {f"Configured: {definition.name}": definition for definition in definitions}
-    totals_by_name: dict[str, Decimal] = {}
-    for (name, _level, _dimension), amount in calculated.items():
-        totals_by_name[name] = totals_by_name.get(name, Decimal("0")) + amount
 
     for rule in rules:
         if not rule_applies_to_currency(rule, currency):
             continue
+        available_levels = totals_by_name.get(rule.total_name)
+        if available_levels is None:
+            continue
+        observed = available_levels.get("Store")
+        if observed is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Rule {rule.name} requires a Store-level total",
+            )
         if rule.threshold_currency is None:
             definition = definitions_by_total.get(rule.total_name)
-            if definition is None:
+            if definition is None or definition.aggregation != "Count":
                 continue
-            if definition.aggregation != "Count":
-                raise HTTPException(status_code=422,
-                                    detail=f"Currency-free rule {rule.name} requires a Count total")
-        observed = totals_by_name.get(rule.total_name, Decimal("0"))
         if abs(observed) <= rule.threshold:
             continue
         await create_rule_breach(db, rule, observed, store_id, business_date, currency)
+
+
+async def validate_rule_totals(db, calculated, definitions) -> None:
+    """Reject enabled rules whose calculated total cannot be evaluated at store level."""
+    available_levels: dict[str, set[str]] = {}
+    for name, level, _dimension in calculated:
+        available_levels.setdefault(name, set()).add(level)
+    names = set(available_levels)
+    if not names:
+        return
+    rules = (await db.execute(select(ConfiguredAuditRule).where(
+        ConfiguredAuditRule.enabled.is_(True),
+        ConfiguredAuditRule.total_name.in_(names),
+    ))).scalars()
+    definitions_by_total = {f"Configured: {item.name}": item for item in definitions}
+    for rule in rules:
+        if "Store" not in available_levels[rule.total_name]:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Rule {rule.name} requires a Store-level total",
+            )
+        if rule.threshold_currency is None:
+            definition = definitions_by_total.get(rule.total_name)
+            if definition is None or definition.aggregation != "Count":
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Currency-free rule {rule.name} requires a Count total",
+                )
 
 
 def rule_applies_to_currency(rule, currency: str) -> bool:

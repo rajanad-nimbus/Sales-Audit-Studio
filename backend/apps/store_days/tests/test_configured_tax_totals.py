@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from apps.ingest import service
 from apps.store_days import routes
+from apps.controls.rules.models import ConfiguredAuditRule
 from apps.totals.routes import preview_definition
 from models import AuditTotal, AuditTotalDefinition, Base, CanonicalTransaction, StoreDay, TransactionAdjustment
 
@@ -193,6 +194,42 @@ def test_retotal_uses_latest_effective_revision_and_respects_deactivation():
                     AuditTotal.total_name == "Configured: Revised").order_by(AuditTotal.audit_version))).scalars().all()
                 assert [(item.definition_id, item.definition_revision, item.calculated_amount) for item in revisions] == [
                     ("v2", 2, Decimal("2.00")), ("v4", 4, Decimal("30.00"))]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_configured_rules_require_a_store_level_total():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add_all([
+                    StoreDay(id="day", store_id="S1", business_date="2026-10-01"),
+                    AuditTotalDefinition(
+                        id="register-total", name="Register Sales", level="Register",
+                        source_system="POS", active=True,
+                    ),
+                    ConfiguredAuditRule(
+                        id="register-rule", name="Register limit",
+                        total_name="Configured: Register Sales", threshold=Decimal("10"),
+                    ),
+                ])
+                await service.ingest(db, "POS", "delivery", [
+                    {"source_record_id": "sale", "event_time": "2026-10-01T10:00:00Z",
+                     "record_type": "Sale", "amount": "11", "store_id": "S1", "register_id": "R1"},
+                ])
+                await db.commit()
+
+                with pytest.raises(HTTPException, match="requires a Store-level total") as exc:
+                    await routes.retotal_store_day("S1", "2026-10-01", db, {"user": "finance"})
+
+                assert exc.value.status_code == 422
+                assert (await db.get(StoreDay, "day")).audit_version == 0
+                assert not (await db.execute(select(AuditTotal))).scalars().all()
         finally:
             await engine.dispose()
 
