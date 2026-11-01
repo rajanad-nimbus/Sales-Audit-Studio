@@ -1,4 +1,5 @@
 """Large case lineage remains queryable through bounded cursor pages."""
+
 import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -20,47 +21,55 @@ def test_case_reconciliation_paginates_large_linked_id_sets_in_database():
                 case_id = "case-large-lineage"
                 timestamp = datetime(2026, 10, 1, tzinfo=UTC)
                 transaction_ids = [f"transaction-{index:04}" for index in range(1200)]
-                db.add(Case(
-                    id=case_id,
-                    case_number="CASE-LARGE-LINEAGE",
-                    case_type="Amount mismatch",
-                    business_date="2026-10-01",
-                    store_id="S1",
-                ))
-                db.add_all([
-                    CanonicalTransaction(
-                        id=transaction_id,
+                db.add(
+                    Case(
+                        id=case_id,
+                        case_number="CASE-LARGE-LINEAGE",
+                        case_type="Amount mismatch",
                         business_date="2026-10-01",
-                        transaction_date=timestamp,
-                        event_timestamp=timestamp,
-                        processing_timestamp=timestamp,
-                        settlement_date="2026-10-01",
-                        transaction_type="Capture",
-                        source_lineage="processor-map-v1",
-                        currency="USD",
-                        signed_amount=Decimal("1.00"),
                         store_id="S1",
-                        channel_id="store",
-                        reconciliation_status="Exception",
-                        disposition="Awaiting",
                     )
-                    for transaction_id in transaction_ids
-                ])
-                db.add(AuditEvent(
-                    id="event-large-lineage",
-                    event_type="CASE_CREATED",
-                    actor="reconciliation-engine",
-                    object_type="Case",
-                    object_id=case_id,
-                    case_id=case_id,
-                    action_description="Large linked reconciliation case",
-                    after_state={"transaction_ids": transaction_ids},
-                ))
+                )
+                db.add_all(
+                    [
+                        CanonicalTransaction(
+                            id=transaction_id,
+                            business_date="2026-10-01",
+                            transaction_date=timestamp,
+                            event_timestamp=timestamp,
+                            processing_timestamp=timestamp,
+                            settlement_date="2026-10-01",
+                            transaction_type="Capture",
+                            source_lineage="processor-map-v1",
+                            currency="USD",
+                            signed_amount=Decimal("1.00"),
+                            store_id="S1",
+                            channel_id="store",
+                            reconciliation_status="Exception",
+                            disposition="Awaiting",
+                        )
+                        for transaction_id in transaction_ids
+                    ]
+                )
+                db.add(
+                    AuditEvent(
+                        id="event-large-lineage",
+                        event_type="CASE_CREATED",
+                        actor="reconciliation-engine",
+                        object_type="Case",
+                        object_id=case_id,
+                        case_id=case_id,
+                        action_description="Large linked reconciliation case",
+                        after_state={"transaction_ids": transaction_ids},
+                    )
+                )
                 await db.flush()
 
                 statements = []
 
-                def capture_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+                def capture_query(
+                    _connection, _cursor, statement, _parameters, _context, _executemany
+                ):
                     if "json_each" in statement.lower():
                         statements.append(statement)
 

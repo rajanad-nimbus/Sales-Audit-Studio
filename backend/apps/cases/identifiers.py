@@ -1,4 +1,5 @@
 """Generate stable-format human-readable case identifiers."""
+
 import uuid
 
 CASE_NUMBER_SUFFIX_LENGTH = 12

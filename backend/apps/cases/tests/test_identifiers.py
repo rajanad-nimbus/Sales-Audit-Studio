@@ -1,4 +1,5 @@
 """Case identifiers retain their date prefix and use the collision-resistant suffix length."""
+
 from types import SimpleNamespace
 
 from apps.cases import identifiers

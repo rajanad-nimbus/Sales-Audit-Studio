@@ -75,30 +75,60 @@ def test_validation_requires_fresh_in_scope_evidence_and_reviewer_rationale():
                     "foreign-source", "S2", utcnow(), "foreign-transaction"
                 )
                 case = Case(
-                    id="case-1", case_number="CASE-1", case_type="Test", business_date="2026-10-01",
-                    store_id="S1", status="Pending Validation", investigation_status="In Progress",
+                    id="case-1",
+                    case_number="CASE-1",
+                    case_type="Test",
+                    business_date="2026-10-01",
+                    store_id="S1",
+                    status="Pending Validation",
+                    investigation_status="In Progress",
                 )
                 workflow = Workflow(
-                    id="workflow-1", case_id=case.id, recommendation_id="recommendation-1",
-                    workflow_type="Correction", state="Executed", definition_version="v1",
+                    id="workflow-1",
+                    case_id=case.id,
+                    recommendation_id="recommendation-1",
+                    workflow_type="Correction",
+                    state="Executed",
+                    definition_version="v1",
                     current_step="Awaiting validation",
                 )
                 obligation = ValidationObligation(
-                    id="validation-1", case_id=case.id, workflow_id=workflow.id,
-                    expected_observation="Correction visible downstream", due_window_hours=24,
-                    verification_rule="Fresh evidence matches promised result", created_at=executed_at,
+                    id="validation-1",
+                    case_id=case.id,
+                    workflow_id=workflow.id,
+                    expected_observation="Correction visible downstream",
+                    due_window_hours=24,
+                    verification_rule="Fresh evidence matches promised result",
+                    created_at=executed_at,
                 )
                 exception = DBException(
-                    id="exception-1", case_id=case.id, exception_type="TEST", exception_family="Test",
-                    source_system="POS", detection_origin="Test", detection_rule_id="TEST",
-                    exception_amount=Decimal("10"), estimated_exposure=Decimal("10"), severity="Low",
-                    confidence="High", close_impact="No",
+                    id="exception-1",
+                    case_id=case.id,
+                    exception_type="TEST",
+                    exception_family="Test",
+                    source_system="POS",
+                    detection_origin="Test",
+                    detection_rule_id="TEST",
+                    exception_amount=Decimal("10"),
+                    estimated_exposure=Decimal("10"),
+                    severity="Low",
+                    confidence="High",
+                    close_impact="No",
                 )
-                db.add_all([
-                    case, workflow, obligation, exception,
-                    old_source, old_transaction, new_source, new_transaction,
-                    foreign_source, foreign_transaction,
-                ])
+                db.add_all(
+                    [
+                        case,
+                        workflow,
+                        obligation,
+                        exception,
+                        old_source,
+                        old_transaction,
+                        new_source,
+                        new_transaction,
+                        foreign_source,
+                        foreign_transaction,
+                    ]
+                )
                 await db.commit()
 
                 page = await validation_candidates("validation-1", db, {"user": "finance"})
@@ -125,15 +155,19 @@ def test_validation_requires_fresh_in_scope_evidence_and_reviewer_rationale():
                     source_record_ids=["new-source"],
                     rationale="The new POS record confirms the approved correction was applied.",
                 )
-                result = await run_validation("validation-1", db, valid_request, {"user": "finance"})
+                result = await run_validation(
+                    "validation-1", db, valid_request, {"user": "finance"}
+                )
                 assert result["verification_result"] == "Verified"
                 assert case.status == "Closed"
                 snapshot = (await db.execute(select(EvidenceSnapshot))).scalar_one()
                 assert snapshot.evidence_data["source_record_ids"] == ["new-source"]
                 assert "approved correction" in snapshot.evidence_data["rationale"]
-                event = (await db.execute(
-                    select(AuditEvent).where(AuditEvent.event_type == "VALIDATION_VERIFIED")
-                )).scalar_one()
+                event = (
+                    await db.execute(
+                        select(AuditEvent).where(AuditEvent.event_type == "VALIDATION_VERIFIED")
+                    )
+                ).scalar_one()
                 assert event.actor == "finance"
                 assert event.after_state["source_record_ids"] == ["new-source"]
                 assert "approved correction" in event.after_state["rationale"]

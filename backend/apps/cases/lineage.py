@@ -13,15 +13,19 @@ def case_creation_mentions_transaction(db, transaction_id: str, audit_event=None
         audit_event = AuditEvent
     if db.get_bind().dialect.name == "postgresql":
         transaction_ids = cast(audit_event.after_state, JSONB).op(
-            "->", return_type=JSONB,
+            "->",
+            return_type=JSONB,
         )(literal_column("'transaction_ids'"))
         return transaction_ids.contains([transaction_id])
     transaction_ids = func.json_each(audit_event.after_state, "$.transaction_ids").table_valued(
         "key", "value"
     )
-    return select(1).select_from(transaction_ids).where(
-        transaction_ids.c.value == transaction_id
-    ).exists()
+    return (
+        select(1)
+        .select_from(transaction_ids)
+        .where(transaction_ids.c.value == transaction_id)
+        .exists()
+    )
 
 
 def case_creation_has_transactions(db, audit_event):
@@ -29,7 +33,9 @@ def case_creation_has_transactions(db, audit_event):
     if db.get_bind().dialect.name == "postgresql":
         transaction_ids = cast(audit_event.after_state, JSONB)["transaction_ids"]
         return func.coalesce(func.jsonb_array_length(transaction_ids), 0) > 0
-    return func.coalesce(func.json_array_length(audit_event.after_state, "$.transaction_ids"), 0) > 0
+    return (
+        func.coalesce(func.json_array_length(audit_event.after_state, "$.transaction_ids"), 0) > 0
+    )
 
 
 def case_transaction_ids_table(db, audit_event):
@@ -74,9 +80,10 @@ def audit_json_text_value(db, audit_event, key: str):
 def audit_json_value_is_string(db, audit_event, key: str):
     """Keep malformed numeric and object identifiers out of lineage results."""
     if db.get_bind().dialect.name == "postgresql":
-        return func.jsonb_typeof(
-            cast(audit_event.after_state, JSONB).op("->", return_type=JSONB)(key)
-        ) == "string"
+        return (
+            func.jsonb_typeof(cast(audit_event.after_state, JSONB).op("->", return_type=JSONB)(key))
+            == "string"
+        )
     return func.json_type(audit_event.after_state, f"$.{key}") == "text"
 
 

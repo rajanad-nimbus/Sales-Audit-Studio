@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class Exception(Base):
     """Detected anomaly or control failure"""
+
     __tablename__ = "exceptions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -44,6 +45,7 @@ class Exception(Base):
 
 class Case(Base):
     """Groups related exceptions and orchestrates resolution"""
+
     __tablename__ = "cases"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -53,7 +55,9 @@ class Case(Base):
     business_date: Mapped[str] = mapped_column(String(10), index=True)
     store_id: Mapped[str] = mapped_column(String(50), index=True)
     currency: Mapped[str | None] = mapped_column(String(3))
-    amount_needs_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    amount_needs_review: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     total_exception_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
     total_exposure: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
     investigation_status: Mapped[str] = mapped_column(String(50), default="Pending")
@@ -62,7 +66,9 @@ class Case(Base):
     priority: Mapped[str] = mapped_column(String(20), default="Normal")
     sla_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
@@ -76,6 +82,7 @@ class Case(Base):
 
 class EvidenceSnapshot(Base):
     """Evidence data collected during investigation"""
+
     __tablename__ = "evidence_snapshots"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -89,9 +96,9 @@ class EvidenceSnapshot(Base):
     staleness_threshold: Mapped[int] = mapped_column(Integer, default=14400)  # 4 hours in seconds
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    __table_args__ = (Index(
-        "ix_evidence_snapshots_case_retrieved_id", "case_id", "retrieved_at", "id"
-    ),)
+    __table_args__ = (
+        Index("ix_evidence_snapshots_case_retrieved_id", "case_id", "retrieved_at", "id"),
+    )
 
 
 class CaseNote(Base):
@@ -112,21 +119,30 @@ class EvidenceRequest(Base):
     requested_by: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32), default="Open")  # Open -> Fulfilled
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    response: Mapped[str | None] = mapped_column(Text, nullable=True)       # what the person supplied or confirmed
-    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)  # document, ticket or system reference
+    response: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # what the person supplied or confirmed
+    reference: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # document, ticket or system reference
     fulfilled_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     override_financial_impact: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     override_requested_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    override_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    override_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     override_approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    override_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    override_approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Finding(Base):
     """Supported conclusion backed by evidence"""
+
     __tablename__ = "findings"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -141,6 +157,7 @@ class Finding(Base):
 
 class Recommendation(Base):
     """Agent-proposed disposition with evidence basis"""
+
     __tablename__ = "recommendations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -168,6 +185,7 @@ class Recommendation(Base):
 
 class HumanDecision(Base):
     """Finance/IT authorization for a recommendation"""
+
     __tablename__ = "human_decisions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -183,6 +201,7 @@ class HumanDecision(Base):
 
 class Workflow(Base):
     """Durable workflow orchestration for case resolution"""
+
     __tablename__ = "workflows"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -201,6 +220,7 @@ class Workflow(Base):
 
 class ValidationObligation(Base):
     """Post-action validation requirement"""
+
     __tablename__ = "validation_obligations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -216,6 +236,7 @@ class ValidationObligation(Base):
 
 class PolicyEvaluation(Base):
     """Deterministic policy gate result for a recommendation"""
+
     __tablename__ = "policy_evaluations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

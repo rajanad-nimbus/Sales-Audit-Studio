@@ -162,6 +162,7 @@ class HumanDecision(BaseModel):
 
 class ValidationRunRequest(BaseModel):
     """Require a reviewer to cite fresh source records and explain why they verify the action."""
+
     source_record_ids: list[str] = Field(min_length=1, max_length=500)
     rationale: str = Field(min_length=10, max_length=2000)
 
@@ -179,7 +180,9 @@ class ValidationRunRequest(BaseModel):
     def validate_rationale(cls, value: str) -> str:
         normalized = value.strip()
         if len(normalized) < 10:
-            raise ValueError("validation rationale must contain at least 10 non-whitespace characters")
+            raise ValueError(
+                "validation rationale must contain at least 10 non-whitespace characters"
+            )
         return normalized
 
 
@@ -201,8 +204,12 @@ class EvidenceRequestCreate(BaseModel):
 
 class EvidenceProvide(BaseModel):
     requirement: str = Field(min_length=1, max_length=100)
-    note: str = Field(min_length=1, max_length=10_000)  # what was checked or supplied, in the person's own words
-    reference: str | None = Field(default=None, max_length=255)  # document, ticket or system reference
+    note: str = Field(
+        min_length=1, max_length=10_000
+    )  # what was checked or supplied, in the person's own words
+    reference: str | None = Field(
+        default=None, max_length=255
+    )  # document, ticket or system reference
 
 
 class EvidenceReject(BaseModel):
