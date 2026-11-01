@@ -234,3 +234,35 @@ def test_configured_rules_require_a_store_level_total():
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_rule_target_validation_uses_effective_definition_without_transactions():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add_all([
+                    StoreDay(id="day", store_id="S1", business_date="2026-10-01"),
+                    AuditTotalDefinition(
+                        id="register-total", name="Register Sales", level="Register",
+                        source_system="POS", active=True,
+                    ),
+                    ConfiguredAuditRule(
+                        id="register-rule", name="Register limit",
+                        total_name="Configured: Register Sales", threshold=Decimal("10"),
+                    ),
+                ])
+                await db.commit()
+
+                with pytest.raises(HTTPException, match="requires a Store-level total") as exc:
+                    await routes.retotal_store_day("S1", "2026-10-01", db, {"user": "finance"})
+
+                assert exc.value.status_code == 422
+                assert (await db.get(StoreDay, "day")).audit_version == 0
+                assert not (await db.execute(select(AuditTotal))).scalars().all()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())

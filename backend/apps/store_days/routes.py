@@ -381,6 +381,9 @@ async def validate_rule_totals(db, calculated, definitions) -> None:
     available_levels: dict[str, set[str]] = {}
     for name, level, _dimension in calculated:
         available_levels.setdefault(name, set()).add(level)
+    definitions_by_total = {f"Configured: {item.name}": item for item in definitions}
+    for total_name, definition in definitions_by_total.items():
+        available_levels.setdefault(total_name, set()).add(definition.level)
     names = set(available_levels)
     if not names:
         return
@@ -388,7 +391,6 @@ async def validate_rule_totals(db, calculated, definitions) -> None:
         ConfiguredAuditRule.enabled.is_(True),
         ConfiguredAuditRule.total_name.in_(names),
     ))).scalars()
-    definitions_by_total = {f"Configured: {item.name}": item for item in definitions}
     for rule in rules:
         if "Store" not in available_levels[rule.total_name]:
             raise HTTPException(
