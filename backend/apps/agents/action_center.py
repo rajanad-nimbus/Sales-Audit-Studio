@@ -3,6 +3,7 @@
 import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 
 from database import get_db
@@ -77,8 +78,8 @@ class Filters:
     store: str | None = None
     priority: str | None = None
     assignee: str | None = None
-    min_amount: float | None = None
-    max_amount: float | None = None
+    min_amount: Decimal | None = None
+    max_amount: Decimal | None = None
     date_from: str | None = None
     date_to: str | None = None
     sla: str | None = None
@@ -195,10 +196,22 @@ def _validate_filter_options(stage: str | None, sla: str | None, snoozed: str | 
         raise HTTPException(status_code=422, detail="snoozed must be only or all")
 
 
-def _validate_amount_filters(min_amount: float | None, max_amount: float | None) -> None:
-    if min_amount is not None and not math.isfinite(min_amount):
+def _normalize_amount_filter(value: Decimal | None, field: str) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"{field} must be a decimal amount") from exc
+    if not amount.is_finite():
+        raise HTTPException(status_code=422, detail=f"{field} must be a finite number")
+    return amount
+
+
+def _validate_amount_filters(min_amount: Decimal | None, max_amount: Decimal | None) -> None:
+    if min_amount is not None and not min_amount.is_finite():
         raise HTTPException(status_code=422, detail="min_amount must be a finite number")
-    if max_amount is not None and not math.isfinite(max_amount):
+    if max_amount is not None and not max_amount.is_finite():
         raise HTTPException(status_code=422, detail="max_amount must be a finite number")
     if min_amount is not None and max_amount is not None and min_amount > max_amount:
         raise HTTPException(status_code=422, detail="min_amount must not exceed max_amount")
@@ -212,8 +225,8 @@ def filters(
     store: str | None = None,
     priority: str | None = None,
     assignee: str | None = None,
-    min_amount: float | None = None,
-    max_amount: float | None = None,
+    min_amount: Annotated[Decimal | None, Query(max_digits=15, decimal_places=2)] = None,
+    max_amount: Annotated[Decimal | None, Query(max_digits=15, decimal_places=2)] = None,
     date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     sla: str | None = None,
@@ -237,6 +250,8 @@ def filters(
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="date_from must not be after date_to")
     _validate_filter_options(stage, sla, snoozed)
+    min_amount = _normalize_amount_filter(min_amount, "min_amount")
+    max_amount = _normalize_amount_filter(max_amount, "max_amount")
     _validate_amount_filters(min_amount, max_amount)
     return Filters(
         q=q,

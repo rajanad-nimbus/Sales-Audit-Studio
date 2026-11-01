@@ -3,6 +3,7 @@
 import asyncio
 import csv
 import io
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -139,6 +140,69 @@ def test_action_center_accepts_supported_filter_values():
         store="STORE-1", stage="open", sla="at_risk", snoozed="only", min_amount=1, max_amount=10
     )
     assert supported.store == "STORE-1" and supported.stage == "open"
+    assert supported.min_amount == Decimal("1") and supported.max_amount == Decimal("10")
+
+
+def test_action_center_amount_bounds_preserve_decimal_precision():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            async with sessions() as db:
+                db.add_all(
+                    [
+                        Case(
+                            id="case-amount-10-10",
+                            case_number="CASE-10-10",
+                            case_type="Test",
+                            business_date="2026-10-01",
+                            store_id="S1",
+                            total_exception_amount=Decimal("10.10"),
+                        ),
+                        Case(
+                            id="case-amount-10-11",
+                            case_number="CASE-10-11",
+                            case_type="Test",
+                            business_date="2026-10-01",
+                            store_id="S1",
+                            total_exception_amount=Decimal("10.11"),
+                        ),
+                    ]
+                )
+                await db.commit()
+
+            app = FastAPI()
+            app.include_router(router)
+
+            async def identity():
+                return {"user": "finance@example.test", "role": "finance"}
+
+            async def database():
+                async with sessions() as db:
+                    yield db
+
+            app.dependency_overrides[auth.current_user] = identity
+            app.dependency_overrides[get_db] = database
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.get(
+                    "/api/action-center/cases",
+                    params={"min_amount": "10.10", "max_amount": "10.10"},
+                )
+                invalid_precision = await client.get(
+                    "/api/action-center/cases", params={"min_amount": "10.101"}
+                )
+
+            assert response.status_code == 200
+            assert [item["case_number"] for item in response.json()["items"]] == ["CASE-10-10"]
+            assert invalid_precision.status_code == 422
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
 
 
 def test_action_center_export_refuses_to_return_a_silent_partial_file(monkeypatch):
