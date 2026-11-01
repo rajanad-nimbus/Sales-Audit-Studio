@@ -8,13 +8,17 @@ from apps.exports.routes import (
 
 
 def test_destination_name_conflict_matches_sqlite_constraint():
-    error = IntegrityError("insert", {}, Exception("UNIQUE constraint failed: export_destinations.name"))
+    error = IntegrityError(
+        "insert", {}, Exception("UNIQUE constraint failed: export_destinations.name")
+    )
 
     assert _is_duplicate_destination_name(error)
 
 
 def test_export_reservation_matches_idempotency_key_constraint():
-    error = IntegrityError("insert", {}, Exception("UNIQUE constraint failed: export_batches.idempotency_key"))
+    error = IntegrityError(
+        "insert", {}, Exception("UNIQUE constraint failed: export_batches.idempotency_key")
+    )
 
     assert _is_export_reservation_conflict(error)
 

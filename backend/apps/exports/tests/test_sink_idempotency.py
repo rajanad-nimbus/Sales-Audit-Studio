@@ -17,7 +17,10 @@ from apps.exports import routes
 
 def test_finance_destination_view_redacts_webhook_url_credentials():
     destination = ExportDestination(
-        id="destination", name="ERP", kind="webhook", format="json",
+        id="destination",
+        name="ERP",
+        kind="webhook",
+        format="json",
         config={
             "url": "https://username:password@erp.example.com/inbound/token?api_key=private",
             "secret": "signing-secret",
@@ -28,7 +31,8 @@ def test_finance_destination_view_redacts_webhook_url_credentials():
     it_view = routes.dest_view(destination, reveal_url=True)
 
     assert finance_view["config"] == {
-        "url": "https://erp.example.com", "secret": "••••••",
+        "url": "https://erp.example.com",
+        "secret": "••••••",
     }
     assert it_view["config"]["url"] == destination.config["url"]
     assert it_view["config"]["secret"] == "••••••"
@@ -37,7 +41,10 @@ def test_finance_destination_view_redacts_webhook_url_credentials():
 def request_for(body: bytes) -> Request:
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
-    return Request({"type": "http", "method": "POST", "path": "/api/exports/_sink", "headers": []}, receive)
+
+    return Request(
+        {"type": "http", "method": "POST", "path": "/api/exports/_sink", "headers": []}, receive
+    )
 
 
 def test_sink_persists_retry_receipts_and_rejects_key_reuse(tmp_path):
@@ -50,31 +57,80 @@ def test_sink_persists_retry_receipts_and_rejects_key_reuse(tmp_path):
             key, body = "a" * 64, b"first payload"
             envelope = routes.sign_envelope(routes.SINK_SECRET, "resolutions", key, body)
             async with sessions() as db:
-                first = await routes.sink(request_for(body), routes.sign(routes.SINK_SECRET, body), key, "resolutions", db, envelope)
+                first = await routes.sink(
+                    request_for(body),
+                    routes.sign(routes.SINK_SECRET, body),
+                    key,
+                    "resolutions",
+                    db,
+                    envelope,
+                )
             async with sessions() as db:
-                assert await routes.sink(request_for(body), routes.sign(routes.SINK_SECRET, body), key, "resolutions", db, envelope) == first
-                assert (await db.execute(select(func.count()).select_from(SinkReceipt))).scalar_one() == 1
+                assert (
+                    await routes.sink(
+                        request_for(body),
+                        routes.sign(routes.SINK_SECRET, body),
+                        key,
+                        "resolutions",
+                        db,
+                        envelope,
+                    )
+                    == first
+                )
+                assert (
+                    await db.execute(select(func.count()).select_from(SinkReceipt))
+                ).scalar_one() == 1
                 other = b"different payload"
                 with pytest.raises(HTTPException) as error:
-                    await routes.sink(request_for(other), routes.sign(routes.SINK_SECRET, other), key, "resolutions", db,
-                                      routes.sign_envelope(routes.SINK_SECRET, "resolutions", key, other))
+                    await routes.sink(
+                        request_for(other),
+                        routes.sign(routes.SINK_SECRET, other),
+                        key,
+                        "resolutions",
+                        db,
+                        routes.sign_envelope(routes.SINK_SECRET, "resolutions", key, other),
+                    )
                 assert error.value.status_code == 409
                 with pytest.raises(HTTPException) as error:
-                    await routes.sink(request_for(body), routes.sign(routes.SINK_SECRET, body), key, "adjustments", db,
-                                      routes.sign_envelope(routes.SINK_SECRET, "adjustments", key, body))
+                    await routes.sink(
+                        request_for(body),
+                        routes.sign(routes.SINK_SECRET, body),
+                        key,
+                        "adjustments",
+                        db,
+                        routes.sign_envelope(routes.SINK_SECRET, "adjustments", key, body),
+                    )
                 assert error.value.status_code == 409
                 with pytest.raises(HTTPException) as error:
                     await routes.sink(request_for(body), "bad", key, "resolutions", db, envelope)
                 assert error.value.status_code == 401
-                for changed_key, changed_dataset in (("b" * 64, "resolutions"), (key, "adjustments")):
+                for changed_key, changed_dataset in (
+                    ("b" * 64, "resolutions"),
+                    (key, "adjustments"),
+                ):
                     with pytest.raises(HTTPException) as error:
-                        await routes.sink(request_for(body), routes.sign(routes.SINK_SECRET, body), changed_key, changed_dataset, db, envelope)
+                        await routes.sink(
+                            request_for(body),
+                            routes.sign(routes.SINK_SECRET, body),
+                            changed_key,
+                            changed_dataset,
+                            db,
+                            envelope,
+                        )
                     assert error.value.status_code == 401
                 with pytest.raises(HTTPException) as error:
-                    await routes.sink(request_for(body), routes.sign(routes.SINK_SECRET, body), key, "resolutions", db, "é")
+                    await routes.sink(
+                        request_for(body),
+                        routes.sign(routes.SINK_SECRET, body),
+                        key,
+                        "resolutions",
+                        db,
+                        "é",
+                    )
                 assert error.value.status_code == 401
         finally:
             await engine.dispose()
+
     asyncio.run(run())
 
 
@@ -150,16 +206,38 @@ def test_rebuilt_cancelled_batch_has_distinct_key(monkeypatch, tmp_path):
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add(ExportDestination(id="d", name="ERP", kind="webhook", format="json", config={}))
-                db.add(Case(id="case", case_number="C1", status="Closed", case_type="test", store_id="S1", business_date="2026-10-01"))
+                db.add(
+                    ExportDestination(id="d", name="ERP", kind="webhook", format="json", config={})
+                )
+                db.add(
+                    Case(
+                        id="case",
+                        case_number="C1",
+                        status="Closed",
+                        case_type="test",
+                        store_id="S1",
+                        business_date="2026-10-01",
+                    )
+                )
                 await db.commit()
-                first = await routes.run_export(routes.RunIn(destination_id="d", dataset="resolutions"), db, {"user": "it"})
+                first = await routes.run_export(
+                    routes.RunIn(destination_id="d", dataset="resolutions"), db, {"user": "it"}
+                )
                 original = (await db.get(ExportBatch, first["id"])).idempotency_key
-                await routes.cancel_batch(first["id"], db, {"user": "it"}, routes.FailedExportResolution(
-                    outcome="not_received", evidence="Receiver confirmed no receipt"))
-                second = await routes.run_export(routes.RunIn(destination_id="d", dataset="resolutions"), db, {"user": "it"})
+                await routes.cancel_batch(
+                    first["id"],
+                    db,
+                    {"user": "it"},
+                    routes.FailedExportResolution(
+                        outcome="not_received", evidence="Receiver confirmed no receipt"
+                    ),
+                )
+                second = await routes.run_export(
+                    routes.RunIn(destination_id="d", dataset="resolutions"), db, {"user": "it"}
+                )
                 assert (await db.get(ExportBatch, second["id"])).idempotency_key != original
                 assert (await db.get(ExportBatch, first["id"])).idempotency_key == original
         finally:
             await engine.dispose()
+
     asyncio.run(run())

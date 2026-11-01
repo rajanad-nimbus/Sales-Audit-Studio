@@ -28,11 +28,31 @@ def test_active_retry_rejects_other_retry_and_cancellation(tmp_path, monkeypatch
                 await connection.run_sync(Base.metadata.create_all)
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
-                db.add(ExportDestination(id="d1", name="ERP", kind="file", format="json", config={}))
-                db.add(ExportBatch(id="b1", destination_id="d1", dataset="resolutions", status="Failed",
-                                   idempotency_key="key", created_by="it", retries=0))
-                db.add(ExportItem(id="e1", batch_id="b1", destination_id="d1", dataset="resolutions",
-                                  object_id="c1", object_version="v1", state="Pending"))
+                db.add(
+                    ExportDestination(id="d1", name="ERP", kind="file", format="json", config={})
+                )
+                db.add(
+                    ExportBatch(
+                        id="b1",
+                        destination_id="d1",
+                        dataset="resolutions",
+                        status="Failed",
+                        idempotency_key="key",
+                        created_by="it",
+                        retries=0,
+                    )
+                )
+                db.add(
+                    ExportItem(
+                        id="e1",
+                        batch_id="b1",
+                        destination_id="d1",
+                        dataset="resolutions",
+                        object_id="c1",
+                        object_version="v1",
+                        state="Pending",
+                    )
+                )
                 await db.commit()
 
             async with session() as first, session() as second:
@@ -46,8 +66,14 @@ def test_active_retry_rejects_other_retry_and_cancellation(tmp_path, monkeypatch
                         await routes.cancel_batch("b1", second, {"user": "it"})
                     assert cancel_error.value.status_code == 409
                     with pytest.raises(HTTPException) as resolution_error:
-                        await routes.reconcile_failed_batch("b1", routes.FailedExportResolution(
-                            outcome="received", evidence="Receiver confirmation"), second, {"user": "it"})
+                        await routes.reconcile_failed_batch(
+                            "b1",
+                            routes.FailedExportResolution(
+                                outcome="received", evidence="Receiver confirmation"
+                            ),
+                            second,
+                            {"user": "it"},
+                        )
                     assert resolution_error.value.status_code == 409
                 finally:
                     finish.set()
@@ -79,9 +105,22 @@ def test_disabled_destination_cannot_retry_failed_batch(tmp_path, monkeypatch):
                 await connection.run_sync(Base.metadata.create_all)
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
-                db.add(ExportDestination(id="d1", name="ERP", kind="file", format="json", config={}, enabled=False))
-                db.add(ExportBatch(id="b1", destination_id="d1", dataset="resolutions", status="Failed",
-                                   idempotency_key="key", created_by="it", retries=0))
+                db.add(
+                    ExportDestination(
+                        id="d1", name="ERP", kind="file", format="json", config={}, enabled=False
+                    )
+                )
+                db.add(
+                    ExportBatch(
+                        id="b1",
+                        destination_id="d1",
+                        dataset="resolutions",
+                        status="Failed",
+                        idempotency_key="key",
+                        created_by="it",
+                        retries=0,
+                    )
+                )
                 await db.commit()
                 executed = []
                 original_execute = db.execute
@@ -121,18 +160,50 @@ def test_failed_audit_batch_cannot_be_recreated_via_run(tmp_path, monkeypatch, m
                 await connection.run_sync(Base.metadata.create_all)
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
-                db.add(ExportDestination(id="d1", name="ERP", kind="file", format="json", config={}))
-                db.add(AuditEvent(id="a1", seq=1, event_type="TEST", actor="it", object_type="test",
-                                  object_id="object", action_description="test"))
+                db.add(
+                    ExportDestination(id="d1", name="ERP", kind="file", format="json", config={})
+                )
+                db.add(
+                    AuditEvent(
+                        id="a1",
+                        seq=1,
+                        event_type="TEST",
+                        actor="it",
+                        object_type="test",
+                        object_id="object",
+                        action_description="test",
+                    )
+                )
                 if more_events:
-                    db.add(AuditEvent(id="a2", seq=2, event_type="TEST", actor="it", object_type="test",
-                                      object_id="object", action_description="later event"))
+                    db.add(
+                        AuditEvent(
+                            id="a2",
+                            seq=2,
+                            event_type="TEST",
+                            actor="it",
+                            object_type="test",
+                            object_id="object",
+                            action_description="later event",
+                        )
+                    )
                 key = hashlib.sha256(json.dumps(["d1", "audit", [], 1, 1]).encode()).hexdigest()
-                db.add(ExportBatch(id="b1", destination_id="d1", dataset="audit", status="Failed",
-                                   idempotency_key=key, created_by="it", payload="original", payload_hash="hash"))
+                db.add(
+                    ExportBatch(
+                        id="b1",
+                        destination_id="d1",
+                        dataset="audit",
+                        status="Failed",
+                        idempotency_key=key,
+                        created_by="it",
+                        payload="original",
+                        payload_hash="hash",
+                    )
+                )
                 await db.commit()
                 with pytest.raises(HTTPException) as error:
-                    await routes.run_export(routes.RunIn(destination_id="d1", dataset="audit"), db, {"user": "it"})
+                    await routes.run_export(
+                        routes.RunIn(destination_id="d1", dataset="audit"), db, {"user": "it"}
+                    )
                 assert error.value.status_code == 409
                 assert "resolve the existing batch" in error.value.detail
                 assert (await db.get(ExportBatch, "b1")).payload == "original"

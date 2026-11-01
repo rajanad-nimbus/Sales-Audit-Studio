@@ -16,34 +16,84 @@ def test_tracking_projection_counts_states_and_returns_a_stable_page():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add(ExportDestination(id="destination", name="ERP", kind="file", format="json", config={}))
-                db.add(ExportBatch(id="batch", destination_id="destination", dataset="resolutions",
-                                   status="Sent", idempotency_key="key", created_by="it"))
-                db.add_all([
-                    Case(id="waiting", case_number="C-001", case_type="test", status="Closed",
-                         store_id="S2", business_date="2026-10-01",
-                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
-                    Case(id="backpost", case_number="C-002", case_type="test", status="Closed",
-                         store_id="S1", business_date="2026-09-30",
-                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
-                    Case(id="delivered", case_number="C-003", case_type="test", status="Closed",
-                         store_id="S1", business_date="2026-10-01",
-                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
-                    Case(id="open", case_number="C-004", case_type="test", status="Open",
-                         store_id="S1", business_date="2026-10-01",
-                         updated_at=datetime(2026, 10, 1, tzinfo=UTC)),
-                ])
-                db.add(ExportItem(id="item", batch_id="batch", destination_id="destination",
-                                  dataset="resolutions", object_id="delivered", object_version="v1",
-                                  state="Delivered", record_ref="C-003"))
+                db.add(
+                    ExportDestination(
+                        id="destination", name="ERP", kind="file", format="json", config={}
+                    )
+                )
+                db.add(
+                    ExportBatch(
+                        id="batch",
+                        destination_id="destination",
+                        dataset="resolutions",
+                        status="Sent",
+                        idempotency_key="key",
+                        created_by="it",
+                    )
+                )
+                db.add_all(
+                    [
+                        Case(
+                            id="waiting",
+                            case_number="C-001",
+                            case_type="test",
+                            status="Closed",
+                            store_id="S2",
+                            business_date="2026-10-01",
+                            updated_at=datetime(2026, 10, 1, tzinfo=UTC),
+                        ),
+                        Case(
+                            id="backpost",
+                            case_number="C-002",
+                            case_type="test",
+                            status="Closed",
+                            store_id="S1",
+                            business_date="2026-09-30",
+                            updated_at=datetime(2026, 10, 1, tzinfo=UTC),
+                        ),
+                        Case(
+                            id="delivered",
+                            case_number="C-003",
+                            case_type="test",
+                            status="Closed",
+                            store_id="S1",
+                            business_date="2026-10-01",
+                            updated_at=datetime(2026, 10, 1, tzinfo=UTC),
+                        ),
+                        Case(
+                            id="open",
+                            case_number="C-004",
+                            case_type="test",
+                            status="Open",
+                            store_id="S1",
+                            business_date="2026-10-01",
+                            updated_at=datetime(2026, 10, 1, tzinfo=UTC),
+                        ),
+                    ]
+                )
+                db.add(
+                    ExportItem(
+                        id="item",
+                        batch_id="batch",
+                        destination_id="destination",
+                        dataset="resolutions",
+                        object_id="delivered",
+                        object_version="v1",
+                        state="Delivered",
+                        record_ref="C-003",
+                    )
+                )
                 await db.commit()
 
                 summary, page, total = await tracking_page(
                     db, "destination", "resolutions", "", "", 1, 2
                 )
                 assert summary == {
-                    "delivered": 1, "in_batch": 0, "waiting": 2,
-                    "not_eligible": 1, "waiting_backposts": 1,
+                    "delivered": 1,
+                    "in_batch": 0,
+                    "waiting": 2,
+                    "not_eligible": 1,
+                    "waiting_backposts": 1,
                 }
                 assert total == 4
                 assert [item["object_id"] for item in page] == ["backpost", "waiting"]
@@ -62,21 +112,56 @@ def test_tracking_pages_tie_break_duplicate_record_references_by_object_id():
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                db.add(ExportDestination(id="destination", name="ERP", kind="file", format="json", config={}))
-                db.add(ExportBatch(id="batch", destination_id="destination", dataset="resolutions",
-                                   status="Pending", idempotency_key="key", created_by="it"))
-                db.add_all([
-                    Case(id="b-case", case_number="C-002", case_type="test", status="Closed",
-                         store_id="S1", business_date="2026-10-01"),
-                    Case(id="a-case", case_number="C-001", case_type="test", status="Closed",
-                         store_id="S1", business_date="2026-10-01"),
-                ])
-                db.add_all([
-                    ExportItem(id=f"item-{case_id}", batch_id="batch", destination_id="destination",
-                               dataset="resolutions", object_id=case_id, object_version="v1",
-                               state="Pending", record_ref="SHARED-REFERENCE")
-                    for case_id in ("b-case", "a-case")
-                ])
+                db.add(
+                    ExportDestination(
+                        id="destination", name="ERP", kind="file", format="json", config={}
+                    )
+                )
+                db.add(
+                    ExportBatch(
+                        id="batch",
+                        destination_id="destination",
+                        dataset="resolutions",
+                        status="Pending",
+                        idempotency_key="key",
+                        created_by="it",
+                    )
+                )
+                db.add_all(
+                    [
+                        Case(
+                            id="b-case",
+                            case_number="C-002",
+                            case_type="test",
+                            status="Closed",
+                            store_id="S1",
+                            business_date="2026-10-01",
+                        ),
+                        Case(
+                            id="a-case",
+                            case_number="C-001",
+                            case_type="test",
+                            status="Closed",
+                            store_id="S1",
+                            business_date="2026-10-01",
+                        ),
+                    ]
+                )
+                db.add_all(
+                    [
+                        ExportItem(
+                            id=f"item-{case_id}",
+                            batch_id="batch",
+                            destination_id="destination",
+                            dataset="resolutions",
+                            object_id=case_id,
+                            object_version="v1",
+                            state="Pending",
+                            record_ref="SHARED-REFERENCE",
+                        )
+                        for case_id in ("b-case", "a-case")
+                    ]
+                )
                 await db.commit()
 
                 statements = []

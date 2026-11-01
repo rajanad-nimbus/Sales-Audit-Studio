@@ -23,8 +23,7 @@ def sign(secret: str, body: bytes) -> str:
 def sign_envelope(secret: str, dataset: str, idempotency_key: str, body: bytes) -> str:
     """Sign canonical delivery metadata and the payload digest (protocol v1)."""
     message = (
-        f"nimbus-export-v1\n{dataset}\n{idempotency_key}\n"
-        f"{hashlib.sha256(body).hexdigest()}"
+        f"nimbus-export-v1\n{dataset}\n{idempotency_key}\n{hashlib.sha256(body).hexdigest()}"
     ).encode("ascii")
     return "sha256=" + hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
 
@@ -94,7 +93,9 @@ def write_file_delivery(
             ("", body),
         )
         for suffix, contents in artifacts:
-            with tempfile.NamedTemporaryFile(dir=folder, prefix=".nimbus-", delete=False) as temporary:
+            with tempfile.NamedTemporaryFile(
+                dir=folder, prefix=".nimbus-", delete=False
+            ) as temporary:
                 temporary_paths.append(Path(temporary.name))
                 temporary.write(contents)
             os.replace(temporary_paths[-1], folder / (name + suffix))
@@ -106,7 +107,9 @@ def write_file_delivery(
             if previous_checksum is None:
                 checksum_path.unlink(missing_ok=True)
             else:
-                with tempfile.NamedTemporaryFile(dir=folder, prefix=".nimbus-", delete=False) as backup:
+                with tempfile.NamedTemporaryFile(
+                    dir=folder, prefix=".nimbus-", delete=False
+                ) as backup:
                     backup.write(previous_checksum)
                     temporary_paths.append(Path(backup.name))
                 os.replace(temporary_paths[-1], checksum_path)
@@ -143,7 +146,11 @@ def safe_delivery_error(error: Exception) -> str:
             "Export payload does not match its recorded hash",
             "Webhook signing secret is missing or too short",
         }
-        return str(error) if str(error) in safe_messages else "Export payload or destination is invalid"
+        return (
+            str(error)
+            if str(error) in safe_messages
+            else "Export payload or destination is invalid"
+        )
     return "Delivery failed"
 
 

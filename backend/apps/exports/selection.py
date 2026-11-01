@@ -121,43 +121,56 @@ async def closed_case_context(
         else SQLITE_BIND_BATCH_SIZE
     )
     evidence_query = (
-        verified_adjustment_evidence()
-        if positive_recommendations
-        else completed_case_evidence()
+        verified_adjustment_evidence() if positive_recommendations else completed_case_evidence()
     )
     recs, decisions, validations, references = {}, {}, {}, {}
     for offset in range(0, len(ids), batch_size):
         case_ids = ids[offset : offset + batch_size]
-        ranked_evidence = evidence_query.where(
-            Recommendation.case_id.in_(case_ids)
-        ).add_columns(
-            func.row_number()
-            .over(
-                partition_by=Recommendation.case_id,
-                order_by=(
-                    Recommendation.created_at.desc(),
-                    Recommendation.id.desc(),
-                    HumanDecision.created_at.desc(),
-                    HumanDecision.id.desc(),
-                    ValidationObligation.created_at.desc(),
-                    ValidationObligation.id.desc(),
-                ),
+        ranked_evidence = (
+            evidence_query.where(Recommendation.case_id.in_(case_ids))
+            .add_columns(
+                func.row_number()
+                .over(
+                    partition_by=Recommendation.case_id,
+                    order_by=(
+                        Recommendation.created_at.desc(),
+                        Recommendation.id.desc(),
+                        HumanDecision.created_at.desc(),
+                        HumanDecision.id.desc(),
+                        ValidationObligation.created_at.desc(),
+                        ValidationObligation.id.desc(),
+                    ),
+                )
+                .label("case_rank")
             )
-            .label("case_rank")
-        ).subquery()
+            .subquery()
+        )
         recommendation = aliased(Recommendation, ranked_evidence)
         decision = aliased(HumanDecision, ranked_evidence)
         obligation = aliased(ValidationObligation, ranked_evidence)
         evidence = (
             await db.execute(
-                select(recommendation, decision, obligation).where(
-                    ranked_evidence.c.case_rank == 1
-                )
+                select(recommendation, decision, obligation).where(ranked_evidence.c.case_rank == 1)
             )
         ).all()
-        recs.update({recommendation_row.case_id: recommendation_row for recommendation_row, _, _ in evidence})
-        decisions.update({recommendation_row.case_id: decision_row for recommendation_row, decision_row, _ in evidence})
-        validations.update({recommendation_row.case_id: validation_row for recommendation_row, _, validation_row in evidence})
+        recs.update(
+            {
+                recommendation_row.case_id: recommendation_row
+                for recommendation_row, _, _ in evidence
+            }
+        )
+        decisions.update(
+            {
+                recommendation_row.case_id: decision_row
+                for recommendation_row, decision_row, _ in evidence
+            }
+        )
+        validations.update(
+            {
+                recommendation_row.case_id: validation_row
+                for recommendation_row, _, validation_row in evidence
+            }
+        )
 
         latest_event_ids = (
             select(
@@ -173,12 +186,16 @@ async def closed_case_context(
             .subquery()
         )
         latest_events = (
-            await db.execute(
-                select(AuditEvent)
-                .join(latest_event_ids, AuditEvent.id == latest_event_ids.c.id)
-                .where(latest_event_ids.c.case_rank == 1)
+            (
+                await db.execute(
+                    select(AuditEvent)
+                    .join(latest_event_ids, AuditEvent.id == latest_event_ids.c.id)
+                    .where(latest_event_ids.c.case_rank == 1)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         references.update({event.case_id: event.hash for event in latest_events})
 
     return {
@@ -209,13 +226,17 @@ async def build(
             )
         ).scalar() or 0
         rows = (
-            await db.execute(
-                select(AuditEvent)
-                .where(AuditEvent.seq > last)
-                .order_by(AuditEvent.seq)
-                .limit(MAX_BATCH)
+            (
+                await db.execute(
+                    select(AuditEvent)
+                    .where(AuditEvent.seq > last)
+                    .order_by(AuditEvent.seq)
+                    .limit(MAX_BATCH)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         records = [
             {
                 "seq": event.seq,
@@ -233,11 +254,15 @@ async def build(
         ]
         return records, [], (rows[0].seq if rows else None), (rows[-1].seq if rows else None)
 
-    reserved = select(ExportItem.id).where(
-        ExportItem.destination_id == destination.id,
-        ExportItem.dataset == dataset,
-        ExportItem.object_id == Case.id,
-    ).exists()
+    reserved = (
+        select(ExportItem.id)
+        .where(
+            ExportItem.destination_id == destination.id,
+            ExportItem.dataset == dataset,
+            ExportItem.object_id == Case.id,
+        )
+        .exists()
+    )
     query = select(Case).where(
         Case.status == "Closed",
         Case.amount_needs_review.is_(False),
@@ -274,8 +299,10 @@ async def build(
         )
 
     cases = (
-        await db.execute(query.order_by(Case.updated_at, Case.id).limit(MAX_BATCH))
-    ).scalars().all()
+        (await db.execute(query.order_by(Case.updated_at, Case.id).limit(MAX_BATCH)))
+        .scalars()
+        .all()
+    )
     context = await closed_case_context(
         db, cases, positive_recommendations=dataset == "adjustments"
     )

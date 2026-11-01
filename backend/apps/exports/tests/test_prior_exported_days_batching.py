@@ -23,7 +23,9 @@ class RecordingDatabase:
     "dialect,expected_queries",
     [("postgresql", 1), ("sqlite", 3)],
 )
-def test_prior_exported_day_lookup_batches_by_database_parameter_capacity(dialect, expected_queries):
+def test_prior_exported_day_lookup_batches_by_database_parameter_capacity(
+    dialect, expected_queries
+):
     async def run():
         db = RecordingDatabase(dialect)
         cases = [

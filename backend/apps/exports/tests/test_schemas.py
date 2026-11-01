@@ -33,10 +33,13 @@ def test_failed_export_resolution_rejects_unknown_outcomes():
     with pytest.raises(ValidationError):
         FailedExportResolution(outcome="not-recieved", evidence="operator checked receiver")
 
-    assert FailedExportResolution(
-        outcome="not_received",
-        evidence="operator checked receiver",
-    ).outcome == "not_received"
+    assert (
+        FailedExportResolution(
+            outcome="not_received",
+            evidence="operator checked receiver",
+        ).outcome
+        == "not_received"
+    )
 
 
 def test_export_request_limits_lookup_identifiers():

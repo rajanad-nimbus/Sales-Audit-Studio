@@ -14,8 +14,15 @@ WEBHOOK_SECRET = "s" * 32
 def make_delivery(name="ERP"):
     payload = '{"records": [1]}'
     destination = ExportDestination(id="d1", name=name, kind="file", format="json", config={})
-    batch = ExportBatch(id="batch-123", dataset="resolutions", destination_id="d1", idempotency_key="key",
-                        created_by="it", payload=payload, payload_hash=hashlib.sha256(payload.encode()).hexdigest())
+    batch = ExportBatch(
+        id="batch-123",
+        dataset="resolutions",
+        destination_id="d1",
+        idempotency_key="key",
+        created_by="it",
+        payload=payload,
+        payload_hash=hashlib.sha256(payload.encode()).hexdigest(),
+    )
     return destination, batch
 
 
@@ -26,7 +33,7 @@ def test_csv_exports_neutralize_spreadsheet_formulas():
     payload = render(
         destination,
         "transactions",
-        [{"reference": "=HYPERLINK(\"https://example.test\")", "amount": 10}],
+        [{"reference": '=HYPERLINK("https://example.test")', "amount": 10}],
         None,
         "key",
     )
@@ -43,7 +50,10 @@ def test_file_delivery_is_stable_across_retries(tmp_path, monkeypatch):
         assert batch.status == "Sent"
         path = Path(batch.response_ref)
         assert path.read_text() == batch.payload
-        assert path.with_name(path.name + ".sha256").read_text() == f"{batch.payload_hash}  {path.name}\n"
+        assert (
+            path.with_name(path.name + ".sha256").read_text()
+            == f"{batch.payload_hash}  {path.name}\n"
+        )
         await routes.deliver(destination, batch)
         assert Path(batch.response_ref) == path
         assert len(list(path.parent.glob("*.json"))) == 1
@@ -53,7 +63,10 @@ def test_file_delivery_is_stable_across_retries(tmp_path, monkeypatch):
 
 def test_webhook_sends_body_and_metadata_signatures(monkeypatch):
     destination, batch = make_delivery()
-    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+    destination.kind, destination.config = (
+        "webhook",
+        {"url": "https://receiver.example", "secret": WEBHOOK_SECRET},
+    )
     captured = {}
 
     class Client:
@@ -75,12 +88,17 @@ def test_webhook_sends_body_and_metadata_signatures(monkeypatch):
     assert batch.status == "Sent"
     headers, body = captured["headers"], captured["body"]
     assert headers["X-Nimbus-Signature"] == routes.sign(WEBHOOK_SECRET, body)
-    assert headers["X-Nimbus-Envelope-Signature"] == routes.sign_envelope(WEBHOOK_SECRET, batch.dataset, batch.idempotency_key, body)
+    assert headers["X-Nimbus-Envelope-Signature"] == routes.sign_envelope(
+        WEBHOOK_SECRET, batch.dataset, batch.idempotency_key, body
+    )
 
 
 def test_webhook_failure_does_not_persist_receiver_response_body(monkeypatch):
     destination, batch = make_delivery()
-    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+    destination.kind, destination.config = (
+        "webhook",
+        {"url": "https://receiver.example", "secret": WEBHOOK_SECRET},
+    )
 
     class Client:
         def __init__(self, **_kwargs):
@@ -93,7 +111,9 @@ def test_webhook_failure_does_not_persist_receiver_response_body(monkeypatch):
             pass
 
         async def post(self, *_args, **_kwargs):
-            return type("Response", (), {"status_code": 500, "text": "secret payload echoed by receiver"})()
+            return type(
+                "Response", (), {"status_code": 500, "text": "secret payload echoed by receiver"}
+            )()
 
     monkeypatch.setattr(routes.httpx, "AsyncClient", Client)
     asyncio.run(routes.deliver(destination, batch))
@@ -134,9 +154,14 @@ def test_webhook_transport_error_does_not_persist_url_credentials(monkeypatch):
 
 
 @pytest.mark.parametrize("response_body", [ValueError("invalid JSON"), ["unexpected", "JSON"]])
-def test_webhook_acknowledges_success_even_when_response_reference_is_unusable(monkeypatch, response_body):
+def test_webhook_acknowledges_success_even_when_response_reference_is_unusable(
+    monkeypatch, response_body
+):
     destination, batch = make_delivery()
-    destination.kind, destination.config = "webhook", {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+    destination.kind, destination.config = (
+        "webhook",
+        {"url": "https://receiver.example", "secret": WEBHOOK_SECRET},
+    )
 
     class Client:
         def __init__(self, **_kwargs):
