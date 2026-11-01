@@ -8,15 +8,18 @@ from apps.security import authentication as auth
 from apps.security import middleware
 
 
-@pytest.mark.parametrize("path,maximum", [
-    ("/api/cases", 500),
-    ("/api/audit", 500),
-    ("/api/transaction-adjustments/transactions/search?q=a", 25),
-    ("/api/operations/retention/runs", 200),
-    ("/api/batch/runs", 100),
-    ("/api/ingest/deliveries", 100),
-    ("/api/store-days", 500),
-])
+@pytest.mark.parametrize(
+    "path,maximum",
+    [
+        ("/api/cases", 500),
+        ("/api/audit", 500),
+        ("/api/transaction-adjustments/transactions/search?q=a", 25),
+        ("/api/operations/retention/runs", 200),
+        ("/api/batch/runs", 100),
+        ("/api/ingest/deliveries", 100),
+        ("/api/store-days", 500),
+    ],
+)
 @pytest.mark.parametrize("boundary", ["negative", "zero", "excessive"])
 def test_list_limits_reject_invalid_values(monkeypatch, path, maximum, boundary):
     async def identity():
@@ -31,7 +34,9 @@ def test_list_limits_reject_invalid_values(monkeypatch, path, maximum, boundary)
     separator = "&" if "?" in path else "?"
 
     async def request():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=main.app), base_url="http://test"
+        ) as client:
             return await client.get(f"{path}{separator}limit={limit}")
 
     assert asyncio.run(request()).status_code == 422
@@ -44,7 +49,9 @@ def test_cases_reject_negative_skip(monkeypatch):
     monkeypatch.setattr(middleware, "current_user", identity)
 
     async def request():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=main.app), base_url="http://test"
+        ) as client:
             return await client.get("/api/cases?skip=-1")
 
     assert asyncio.run(request()).status_code == 422

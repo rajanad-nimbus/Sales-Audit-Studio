@@ -24,7 +24,9 @@ async def ontology_authentication(
     try:
         request.state.user = await current_user(request, request.headers.get("authorization"))
     except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers or {})
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers or {}
+        )
 
     allowed, screens = access.api_allowed(request.state.user["role"], request.url.path)
     if not allowed:
@@ -37,5 +39,7 @@ async def ontology_authentication(
 
     store = scope.path_store(request.url.path)
     if store is not None and not scope.store_allowed(request.state.user, store):
-        return JSONResponse(status_code=403, content={"detail": f"You are not assigned to store {store}."})
+        return JSONResponse(
+            status_code=403, content={"detail": f"You are not assigned to store {store}."}
+        )
     return await call_next(request)

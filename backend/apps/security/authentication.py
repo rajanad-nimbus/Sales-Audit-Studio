@@ -1,4 +1,5 @@
 """Nimbus authorization delegated to Ontology Studio."""
+
 import os
 
 import httpx
@@ -41,7 +42,10 @@ def stores_from_identity(identity: dict, claim: str | None = None) -> list[str]:
 
 
 def _role_map() -> dict[str, str]:
-    raw = os.getenv("NIMBUS_ONTOLOGY_ROLE_MAP", "admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,auditor:auditor,store_manager:store_manager")
+    raw = os.getenv(
+        "NIMBUS_ONTOLOGY_ROLE_MAP",
+        "admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,auditor:auditor,store_manager:store_manager",
+    )
     return dict(item.split(":", 1) for item in raw.split(",") if ":" in item)
 
 
@@ -68,8 +72,11 @@ def identity_request_headers(request: Request, authorization: str | None) -> dic
         # Forward it only to the configured Ontology Studio identity endpoint.
         headers["Cookie"] = f"app_session_id={session}"
     else:
-        raise HTTPException(status_code=401, detail="Sign in through Ontology Studio or provide its bearer token",
-                            headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=401,
+            detail="Sign in through Ontology Studio or provide its bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return headers
 
 
@@ -88,20 +95,30 @@ async def fetch_verified_identity(request: Request, headers: dict[str, str]) -> 
             status_code=503, detail="Ontology authentication service is unavailable"
         ) from None
     if response.status_code in (401, 403):
-        raise HTTPException(status_code=401, detail="Invalid or expired Ontology Studio token",
-                            headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired Ontology Studio token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if response.status_code != 200:
-        raise HTTPException(status_code=503, detail="Ontology authentication service could not verify the token")
+        raise HTTPException(
+            status_code=503, detail="Ontology authentication service could not verify the token"
+        )
     return response
 
 
 def parse_identity_response(response: httpx.Response) -> dict:
     """Validate upstream status and extract its user object."""
     if response.status_code in (401, 403):
-        raise HTTPException(status_code=401, detail="Invalid or expired Ontology Studio token",
-                            headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired Ontology Studio token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if response.status_code != 200:
-        raise HTTPException(status_code=503, detail="Ontology authentication service could not verify the token")
+        raise HTTPException(
+            status_code=503, detail="Ontology authentication service could not verify the token"
+        )
     try:
         identity = response.json()["user"]
         if not isinstance(identity, dict):
@@ -134,13 +151,18 @@ def normalize_identity(identity: dict, request: Request) -> dict:
     }
 
 
-def resolve_identity_stores(identity: dict, request: Request, real_role: str, role: str) -> list[str] | None:
+def resolve_identity_stores(
+    identity: dict, request: Request, real_role: str, role: str
+) -> list[str] | None:
     """Resolve assigned stores, requiring admins to explicitly scope simulated store managers."""
     if role != "store_manager":
         return None
     if real_role == "admin":
-        return [store.strip() for store in
-                (request.headers.get("x-impersonate-stores") or "").split(",") if store.strip()]
+        return [
+            store.strip()
+            for store in (request.headers.get("x-impersonate-stores") or "").split(",")
+            if store.strip()
+        ]
     return stores_from_identity(identity)
 
 
@@ -159,7 +181,9 @@ def role_allowed(role: str, roles: tuple[str, ...], method: str, path: str) -> b
     if role == "auditor":
         return method == "GET" and ("finance" in roles or "it" in roles)
     if role == "store_manager":
-        if not shared or not any(_path_is_within(path, prefix) for prefix in STORE_MANAGER_PREFIXES):
+        if not shared or not any(
+            _path_is_within(path, prefix) for prefix in STORE_MANAGER_PREFIXES
+        ):
             return False
         return method == "GET" or any(
             _path_is_within(path, prefix) for prefix in STORE_MANAGER_CASH_PREFIXES
@@ -177,5 +201,6 @@ def require_role(*roles: str):
         if not role_allowed(user["role"], roles, request.method, request.url.path):
             raise HTTPException(status_code=403, detail=f"Requires role: {', '.join(roles)}")
         return user
-    dep.roles = roles   # read by tests that compare each endpoint with the screen access map
+
+    dep.roles = roles  # read by tests that compare each endpoint with the screen access map
     return dep

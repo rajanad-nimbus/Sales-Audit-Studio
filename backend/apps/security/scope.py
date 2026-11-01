@@ -3,12 +3,15 @@
 Assignments are maintained in Ontology Studio and arrive with the identity (see auth.stores_from_identity). Scope is
 fail-closed: a scoped user with no assigned stores can reach none. Everyone else is unrestricted here.
 """
+
 import re
 
 from fastapi import HTTPException
 from sqlalchemy import false
 
-STORE_PATH = re.compile(r"^/api/store-days/([^/]+)/[^/]+")   # /api/store-days/{store}/{date}/...  (not /stores)
+STORE_PATH = re.compile(
+    r"^/api/store-days/([^/]+)/[^/]+"
+)  # /api/store-days/{store}/{date}/...  (not /stores)
 
 
 def scoped(user: dict) -> bool:

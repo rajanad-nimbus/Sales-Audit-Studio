@@ -33,8 +33,15 @@ def test_case_change_and_audit_commit_together(operation, audit_fails):
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
                 if operation == "update":
-                    db.add(Case(id="c1", case_number="CASE-1", case_type="test",
-                                business_date="2026-10-01", store_id="S1"))
+                    db.add(
+                        Case(
+                            id="c1",
+                            case_number="CASE-1",
+                            case_type="test",
+                            business_date="2026-10-01",
+                            store_id="S1",
+                        )
+                    )
                     await db.commit()
 
                 def fail_audit(_mapper, _connection, _target):
@@ -62,7 +69,9 @@ def test_case_change_and_audit_commit_together(operation, audit_fails):
                 assert len(audits) == (0 if audit_fails else 1)
                 if audits:
                     assert audits[0].actor == USER["user"]
-                    assert audits[0].event_type == ("CASE_CREATED" if operation == "create" else "CASE_UPDATED")
+                    assert audits[0].event_type == (
+                        "CASE_CREATED" if operation == "create" else "CASE_UPDATED"
+                    )
         finally:
             await engine.dispose()
 
@@ -73,7 +82,9 @@ def test_invalid_create_priority_is_rejected_before_database_use():
     async def run():
         with pytest.raises(HTTPException) as error:
             await main.create_case(
-                CaseCreate(case_type="test", business_date="2026-10-01", store_id="S1", priority="invalid"),
+                CaseCreate(
+                    case_type="test", business_date="2026-10-01", store_id="S1", priority="invalid"
+                ),
                 None,
                 USER,
             )
@@ -91,8 +102,15 @@ def test_null_controlled_case_fields_are_rejected(update):
                 await conn.run_sync(Base.metadata.create_all)
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
-                db.add(Case(id="c1", case_number="CASE-1", case_type="test",
-                            business_date="2026-10-01", store_id="S1"))
+                db.add(
+                    Case(
+                        id="c1",
+                        case_number="CASE-1",
+                        case_type="test",
+                        business_date="2026-10-01",
+                        store_id="S1",
+                    )
+                )
                 await db.commit()
                 with pytest.raises(HTTPException) as error:
                     await main.update_case("c1", CaseUpdate(**update), db, USER)

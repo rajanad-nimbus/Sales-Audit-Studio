@@ -10,20 +10,28 @@ from apps.security import authentication as auth
 from apps.security import middleware
 
 
-@pytest.mark.parametrize("role,allowed", [
-    ("viewer", False),
-    ("store_manager", False),
-    ("it", False),
-    ("finance", True),
-    ("analyst", True),
-    ("auditor", True),
-    ("admin", True),
-])
+@pytest.mark.parametrize(
+    "role,allowed",
+    [
+        ("viewer", False),
+        ("store_manager", False),
+        ("it", False),
+        ("finance", True),
+        ("analyst", True),
+        ("auditor", True),
+        ("admin", True),
+    ],
+)
 def test_assistant_only_accessible_to_roles_allowed_case_context(monkeypatch, role, allowed):
     calls = []
 
     async def identity():
-        return {"user": "user@example.test", "role": role, "store_scoped": role == "store_manager", "stores": []}
+        return {
+            "user": "user@example.test",
+            "role": role,
+            "store_scoped": role == "store_manager",
+            "stores": [],
+        }
 
     async def middleware_identity(_request, _authorization):
         return await identity()
@@ -41,7 +49,9 @@ def test_assistant_only_accessible_to_roles_allowed_case_context(monkeypatch, ro
     monkeypatch.setattr(llm, "chat", narrator)
 
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=main.app), base_url="http://test"
+        ) as client:
             return await client.post("/api/chat", json={"message": "hello"})
 
     response = asyncio.run(run())

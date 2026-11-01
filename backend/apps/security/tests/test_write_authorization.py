@@ -11,10 +11,26 @@ from apps.security import middleware
 @pytest.mark.parametrize(
     "path,payload",
     [
-        ("/api/findings", {"case_id": "c", "investigation_id": "i", "conclusion": "x",
-                           "finding_type": "x", "confidence": "Low"}),
-        ("/api/recommendations", {"case_id": "c", "investigation_id": "i", "disposition_type": "x",
-                                  "action_class": "x", "confidence": "Low"}),
+        (
+            "/api/findings",
+            {
+                "case_id": "c",
+                "investigation_id": "i",
+                "conclusion": "x",
+                "finding_type": "x",
+                "confidence": "Low",
+            },
+        ),
+        (
+            "/api/recommendations",
+            {
+                "case_id": "c",
+                "investigation_id": "i",
+                "disposition_type": "x",
+                "action_class": "x",
+                "confidence": "Low",
+            },
+        ),
     ],
 )
 def test_auditor_cannot_create_case_findings_or_recommendations(monkeypatch, path, payload):
@@ -28,7 +44,9 @@ def test_auditor_cannot_create_case_findings_or_recommendations(monkeypatch, pat
     monkeypatch.setitem(main.app.dependency_overrides, auth.current_user, auditor)
 
     async def request():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=main.app), base_url="http://test"
+        ) as client:
             return await client.post(path, json=payload)
 
     response = asyncio.run(request())
