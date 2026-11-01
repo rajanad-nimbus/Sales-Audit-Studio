@@ -72,6 +72,7 @@ async def run_daily_batch(
     run = await run_optional_investigation(db, run, business_date)
     return run
 
+
 def validate_batch_date(business_date: str) -> None:
     """Translate an invalid business date into the batch API's validation response."""
     try:

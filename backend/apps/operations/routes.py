@@ -1,4 +1,5 @@
 """HTTP endpoints for production operations and retention controls."""
+
 import uuid
 from datetime import timedelta
 from typing import Annotated
@@ -47,8 +48,10 @@ async def list_retention(
     _: dict = Depends(require_role("it", "finance")),
 ) -> list[dict]:
     rows = (
-        await db.execute(select(RetentionPolicy).order_by(RetentionPolicy.dataset))
-    ).scalars().all()
+        (await db.execute(select(RetentionPolicy).order_by(RetentionPolicy.dataset)))
+        .scalars()
+        .all()
+    )
     return [view(row) for row in rows]
 
 
@@ -149,12 +152,14 @@ async def retention_runs(
     _: dict = Depends(require_role("it")),
 ) -> list[dict]:
     rows = (
-        await db.execute(
-            select(RetentionRun)
-            .order_by(RetentionRun.created_at.desc())
-            .limit(limit)
+        (
+            await db.execute(
+                select(RetentionRun).order_by(RetentionRun.created_at.desc()).limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": row.id,
@@ -218,9 +223,12 @@ async def execute_retention(
     archive_hash = None
     try:
         if policy.archive_before_purge:
-            archive_path, archive_hash, record_ids, archive_has_more = await archive_retention_candidates(
-                db, dataset, model, timestamp, candidate_ids
-            )
+            (
+                archive_path,
+                archive_hash,
+                record_ids,
+                archive_has_more,
+            ) = await archive_retention_candidates(db, dataset, model, timestamp, candidate_ids)
             eligible_count = len(record_ids)
             has_more = has_more or archive_has_more
         else:

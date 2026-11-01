@@ -179,10 +179,14 @@ def test_batch_failure_does_not_persist_sensitive_exception_text(monkeypatch):
 
 def test_recovered_batch_worker_cannot_checkpoint_or_report_success(monkeypatch):
     async def ingest(db, _source, _delivery, _records):
-        run_id = (await db.execute(select(BatchRun.id).where(BatchRun.status == "Running"))).scalar_one()
-        await db.execute(update(BatchRun).where(BatchRun.id == run_id).values(
-            status="Failed", error="recovered by replacement worker"
-        ))
+        run_id = (
+            await db.execute(select(BatchRun.id).where(BatchRun.status == "Running"))
+        ).scalar_one()
+        await db.execute(
+            update(BatchRun)
+            .where(BatchRun.id == run_id)
+            .values(status="Failed", error="recovered by replacement worker")
+        )
         await db.commit()
         return {"received": 1, "canonical_created": 1}
 
@@ -208,10 +212,14 @@ def test_recovered_batch_worker_cannot_checkpoint_or_report_success(monkeypatch)
 
 def test_recovered_batch_worker_cannot_commit_reconciliation(monkeypatch):
     async def reconcile(db, _business_date):
-        run_id = (await db.execute(select(BatchRun.id).where(BatchRun.status == "Running"))).scalar_one()
-        await db.execute(update(BatchRun).where(BatchRun.id == run_id).values(
-            status="Failed", error="recovered during reconciliation"
-        ))
+        run_id = (
+            await db.execute(select(BatchRun.id).where(BatchRun.status == "Running"))
+        ).scalar_one()
+        await db.execute(
+            update(BatchRun)
+            .where(BatchRun.id == run_id)
+            .values(status="Failed", error="recovered during reconciliation")
+        )
         await db.commit()
         return {"matched_pairs": 1, "cases_created": 2}
 
@@ -246,10 +254,15 @@ def test_active_heartbeat_prevents_recovery_of_long_running_batch():
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
                 now = utcnow()
-                db.add(BatchRun(
-                    id="active-run", business_date="2026-10-01", status="Running",
-                    started_at=now - timedelta(days=3), heartbeat_at=now - timedelta(minutes=1),
-                ))
+                db.add(
+                    BatchRun(
+                        id="active-run",
+                        business_date="2026-10-01",
+                        status="Running",
+                        started_at=now - timedelta(days=3),
+                        heartbeat_at=now - timedelta(minutes=1),
+                    )
+                )
                 await db.commit()
                 try:
                     await batch.run_daily_batch(db, "2026-10-01", feeds={})
@@ -274,14 +287,21 @@ def test_stale_heartbeat_is_recovered_before_retry():
             session = async_sessionmaker(engine, expire_on_commit=False)
             async with session() as db:
                 now = utcnow()
-                db.add(BatchRun(
-                    id="stale-run", business_date="2026-10-01", status="Running",
-                    started_at=now - timedelta(days=3), heartbeat_at=now - timedelta(days=2),
-                ))
+                db.add(
+                    BatchRun(
+                        id="stale-run",
+                        business_date="2026-10-01",
+                        status="Running",
+                        started_at=now - timedelta(days=3),
+                        heartbeat_at=now - timedelta(days=2),
+                    )
+                )
                 await db.commit()
                 result = await batch.run_daily_batch(db, "2026-10-01", feeds={})
                 assert result.status == "Succeeded"
-                old_run = (await db.execute(select(BatchRun).where(BatchRun.id == "stale-run"))).scalar_one()
+                old_run = (
+                    await db.execute(select(BatchRun).where(BatchRun.id == "stale-run"))
+                ).scalar_one()
                 assert old_run.status == "Failed"
                 assert "Recovered stale Running batch" in old_run.error
         finally:

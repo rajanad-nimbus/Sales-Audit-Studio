@@ -14,10 +14,14 @@ class RetentionPolicy(Base):
     retain_days: Mapped[int] = mapped_column(Integer)
     archive_before_purge: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
 
 class RetentionRun(Base):
     """Immutable record of a retention archive or purge operation."""
+
     __tablename__ = "retention_runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     dataset: Mapped[str] = mapped_column(String(50), index=True)
@@ -32,15 +36,19 @@ class RetentionRun(Base):
     performed_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+
 class BatchRun(Base):
     """One execution of the daily transaction-log batch (ingest + reconcile)"""
+
     __tablename__ = "batch_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     business_date: Mapped[str] = mapped_column(String(10), index=True)
     status: Mapped[str] = mapped_column(String(20), index=True, default="Running")
     trigger: Mapped[str] = mapped_column(String(30), default="manual")
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_counts: Mapped[dict | None] = mapped_column(JSON)
@@ -51,8 +59,11 @@ class BatchRun(Base):
 
     __table_args__ = (
         Index(
-            "uq_batch_runs_one_running_per_date", "business_date", unique=True,
-            postgresql_where=text("status = 'Running'"), sqlite_where=text("status = 'Running'"),
+            "uq_batch_runs_one_running_per_date",
+            "business_date",
+            unique=True,
+            postgresql_where=text("status = 'Running'"),
+            sqlite_where=text("status = 'Running'"),
         ),
         Index("ix_batch_runs_status_finished_at", "status", "finished_at"),
     )

@@ -81,9 +81,7 @@ async def run_batch(
 ):
     business_date = req.business_date
     if business_date is None:
-        earliest = (
-            await db.execute(select(func.min(CanonicalTransaction.business_date)))
-        ).scalar()
+        earliest = (await db.execute(select(func.min(CanonicalTransaction.business_date)))).scalar()
         business_date = (
             (datetime.fromisoformat(earliest) - timedelta(days=1)).strftime("%Y-%m-%d")
             if earliest
@@ -100,27 +98,33 @@ async def runs(
     _: dict = Depends(require_role("finance", "it")),
 ):
     rows = (
-        await db.execute(select(BatchRun).order_by(BatchRun.started_at.desc()).limit(limit))
-    ).scalars().all()
+        (await db.execute(select(BatchRun).order_by(BatchRun.started_at.desc()).limit(limit)))
+        .scalars()
+        .all()
+    )
     return [view(run) for run in rows]
 
 
 @router.get("/status")
 async def status(db: AsyncSession = Depends(get_db)):
     latest_success = (
-        await db.execute(
-            select(BatchRun)
-            .where(BatchRun.status == "Succeeded")
-            .order_by(BatchRun.finished_at.desc())
-            .limit(1)
+        (
+            await db.execute(
+                select(BatchRun)
+                .where(BatchRun.status == "Succeeded")
+                .order_by(BatchRun.finished_at.desc())
+                .limit(1)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     latest_run = (
-        await db.execute(select(BatchRun).order_by(BatchRun.started_at.desc()).limit(1))
-    ).scalars().first()
-    data_as_of = (
-        await db.execute(select(func.max(CanonicalTransaction.business_date)))
-    ).scalar()
+        (await db.execute(select(BatchRun).order_by(BatchRun.started_at.desc()).limit(1)))
+        .scalars()
+        .first()
+    )
+    data_as_of = (await db.execute(select(func.max(CanonicalTransaction.business_date)))).scalar()
     if latest_success is None:
         return {
             "freshness": "never",

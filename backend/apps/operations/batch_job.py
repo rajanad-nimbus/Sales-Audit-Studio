@@ -1,5 +1,6 @@
 """Cron entry point. Usage: python batch_job.py --date 2026-10-05 [--rerun] [--simulate]
 Real deployments replace simulate_feed with a loader that reads the day's transaction-log extract."""
+
 import argparse
 import asyncio
 import sys
@@ -17,7 +18,9 @@ async def main() -> int:
     args = ap.parse_args()
     async with async_session() as db:
         run = await run_daily_batch(db, args.date, trigger="schedule", rerun=args.rerun)
-    print(f"{run.business_date}: {run.status} loaded={run.transactions_loaded} cases={run.cases_created} {run.error or ''}")
+    print(
+        f"{run.business_date}: {run.status} loaded={run.transactions_loaded} cases={run.cases_created} {run.error or ''}"
+    )
     return 0 if run.status == "Succeeded" else 1
 
 
