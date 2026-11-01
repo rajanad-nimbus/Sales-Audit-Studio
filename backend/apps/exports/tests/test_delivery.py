@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from models import ExportBatch, ExportDestination
 
-from apps.exports import routes
+from apps.exports import delivery, routes
 from apps.exports.delivery import MAX_RESPONSE_REFERENCE_BYTES, render
 
 WEBHOOK_SECRET = "s" * 32
@@ -267,6 +267,83 @@ def test_webhook_does_not_retain_oversized_receiver_response(monkeypatch):
 
     asyncio.run(routes.deliver(destination, batch, Client()))
 
+    assert batch.status == "Acknowledged"
+    assert batch.response_ref is None
+
+
+def test_webhook_stops_reading_when_response_exceeds_limit():
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+    closed = False
+
+    class Client:
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            nonlocal closed
+
+            async def body():
+                yield b"x" * (MAX_RESPONSE_REFERENCE_BYTES + 1)
+                pytest.fail("oversized response should not be read further")
+
+            response = type("Response", (), {"status_code": 200})()
+            response.aiter_bytes = body
+            try:
+                yield response
+            finally:
+                closed = True
+
+    asyncio.run(routes.deliver(destination, batch, Client()))
+
+    assert closed
+    assert batch.status == "Acknowledged"
+    assert batch.response_ref is None
+
+
+@pytest.mark.parametrize(("status_code", "expected"), [(202, "Sent"), (500, "Failed")])
+def test_webhook_skips_unused_response_bodies(status_code, expected):
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+
+    class Client:
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            response = type("Response", (), {"status_code": status_code})()
+            response.aiter_bytes = lambda: pytest.fail("unused body should not be read")
+            yield response
+
+    asyncio.run(routes.deliver(destination, batch, Client()))
+
+    assert batch.status == expected
+
+
+def test_webhook_stops_waiting_for_slow_optional_reference(monkeypatch):
+    destination, batch = make_delivery()
+    destination.kind = "webhook"
+    destination.config = {"url": "https://receiver.example", "secret": WEBHOOK_SECRET}
+    monkeypatch.setattr(delivery, "MAX_RESPONSE_REFERENCE_SECONDS", 0.01)
+    closed = False
+
+    class Client:
+        @asynccontextmanager
+        async def stream(self, *_args, **_kwargs):
+            nonlocal closed
+
+            async def body():
+                yield b'{"reference":'
+                await asyncio.Event().wait()
+
+            response = type("Response", (), {"status_code": 200})()
+            response.aiter_bytes = body
+            try:
+                yield response
+            finally:
+                closed = True
+
+    asyncio.run(routes.deliver(destination, batch, Client()))
+
+    assert closed
     assert batch.status == "Acknowledged"
     assert batch.response_ref is None
 

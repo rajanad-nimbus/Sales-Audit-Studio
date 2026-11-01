@@ -16,6 +16,7 @@ from apps.csv_export import csv_table
 from apps.exports.models import ExportBatch, ExportDestination
 
 MAX_RESPONSE_REFERENCE_BYTES = 64 * 1024
+MAX_RESPONSE_REFERENCE_SECONDS = 5
 
 
 def sign(secret: str, body: bytes) -> str:
@@ -220,19 +221,21 @@ async def post_webhook(
     body: bytes,
     headers: dict[str, str],
 ) -> tuple[int, bytes | None]:
-    """Send a webhook while retaining only a bounded response body."""
+    """Send a webhook and bound the optional receiver reference by size and time."""
     async with client.stream("POST", url, content=body, headers=headers) as response:
         status_code = response.status_code
+        if not 200 <= status_code < 300 or status_code == 202:
+            return status_code, None
         response_body = bytearray()
-        oversized = False
-        async for chunk in response.aiter_bytes():
-            remaining = MAX_RESPONSE_REFERENCE_BYTES - len(response_body)
-            if remaining <= 0:
-                oversized = True
-                continue
-            response_body.extend(chunk[:remaining])
-            oversized |= len(chunk) > remaining
-    return status_code, None if oversized else bytes(response_body)
+        try:
+            async with asyncio.timeout(MAX_RESPONSE_REFERENCE_SECONDS):
+                async for chunk in response.aiter_bytes():
+                    if len(response_body) + len(chunk) > MAX_RESPONSE_REFERENCE_BYTES:
+                        return status_code, None
+                    response_body.extend(chunk)
+        except TimeoutError:
+            return status_code, None
+    return status_code, bytes(response_body)
 
 
 def response_reference(response_body: bytes | None) -> str | None:
