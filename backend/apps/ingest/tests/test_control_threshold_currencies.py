@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -34,7 +34,20 @@ def test_rules_apply_to_configured_currency_and_count_rules_are_dimensionless():
                 await service.ingest(db, "POS", "delivery", [{"source_record_id": "s", "record_type": "Sale",
                     "event_time": "2026-10-01T10:00:00Z", "store_id": "S1", "amount": "10", "currency": "EUR"}])
                 await db.commit()
-                await retotal_store_day("S1", "2026-10-01", db, user)
+                rule_query_count = 0
+
+                def count_rule_queries(_connection, _cursor, statement, _parameters, _context, _executemany):
+                    nonlocal rule_query_count
+                    normalized = statement.lower()
+                    if normalized.lstrip().startswith("select") and "configured_audit_rules" in normalized:
+                        rule_query_count += 1
+
+                event.listen(engine.sync_engine, "before_cursor_execute", count_rule_queries)
+                try:
+                    await retotal_store_day("S1", "2026-10-01", db, user)
+                finally:
+                    event.remove(engine.sync_engine, "before_cursor_execute", count_rule_queries)
+                assert rule_query_count == 1
                 cases = (await db.execute(select(Case))).scalars().all()
                 assert {case.case_type for case in cases} == {"Rule breach: EUR limit", "Rule breach: Count limit"}
                 count_case = next(case for case in cases if case.case_type == "Rule breach: Count limit")
