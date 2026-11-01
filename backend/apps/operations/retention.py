@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.audit.models import AuditEvent
 from apps.corrections.models import TransactionAdjustment
 from apps.ingest.models import SourceRecord
-from apps.operations.models import RetentionRun
+from apps.operations.models import RetentionPolicy, RetentionRun
 from apps.transactions.models import (
     CanonicalTransaction,
     TransactionDiscount,
@@ -36,6 +36,19 @@ DATASETS = {
 }
 MAX_RETENTION_BATCH = 5000
 MAX_RETENTION_ARCHIVE_BYTES = 64 * 1024 * 1024
+
+
+async def lock_retention_policy(
+    db: AsyncSession, dataset: str, *, shared: bool = False
+) -> RetentionPolicy | None:
+    """Lock the policy until a run or policy update completes its transaction."""
+    query = (
+        select(RetentionPolicy)
+        .where(RetentionPolicy.dataset == dataset)
+        .with_for_update(read=shared)
+        .execution_options(populate_existing=True)
+    )
+    return (await db.execute(query)).scalar_one_or_none()
 
 
 class RetentionArchiveWriter:

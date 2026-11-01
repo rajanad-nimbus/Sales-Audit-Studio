@@ -19,6 +19,7 @@ from apps.operations.retention import (
     archive_retention_candidates,
     audit_retention_run,
     ensure_retention_records_are_unreferenced,
+    lock_retention_policy,
     purge_retention_candidates,
     retention_candidates,
 )
@@ -74,9 +75,7 @@ async def set_retention(
             status_code=409,
             detail="Audit events are append-only and hash-chained; retention policies cannot be changed.",
         )
-    row = (
-        await db.execute(select(RetentionPolicy).where(RetentionPolicy.dataset == dataset))
-    ).scalar_one_or_none()
+    row = await lock_retention_policy(db, dataset)
     previous_settings = (
         {
             "retain_days": row.retain_days,
@@ -196,9 +195,7 @@ async def execute_retention(
             status_code=409,
             detail="Audit events are append-only and hash-chained; retention runs are disabled. Use the audit export to create a copy.",
         )
-    policy = (
-        await db.execute(select(RetentionPolicy).where(RetentionPolicy.dataset == dataset))
-    ).scalar_one_or_none()
+    policy = await lock_retention_policy(db, dataset, shared=True)
     if policy is None:
         raise HTTPException(status_code=409, detail="Configure retention policy before running it")
     model, timestamp = DATASETS[dataset]
