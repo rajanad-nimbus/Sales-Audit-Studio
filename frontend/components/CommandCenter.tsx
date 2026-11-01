@@ -15,6 +15,8 @@ import {
   CaseDetail,
   Connector,
   caseMoney,
+  currencyBreakdown,
+  CurrencyAmount,
 } from '@/lib/api';
 import { Alert, Button, MetricGrid, MetricTile, Tabs } from '@/components/ui';
 
@@ -57,10 +59,11 @@ export function CommandCenter() {
     amount: number | null;
     exposure: number | null;
     currency: string | null;
+    byCurrency: CurrencyAmount[];
     staleAmounts: number;
     decision: number;
     closed: number;
-  }>({ amount: 0, exposure: 0, currency: null, staleAmounts: 0, decision: 0, closed: 0 });
+  }>({ amount: 0, exposure: 0, currency: null, byCurrency: [], staleAmounts: 0, decision: 0, closed: 0 });
   const [daily, setDaily] = useState({ prepared: 0, awaitingEvidence: 0 });
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -133,6 +136,7 @@ export function CommandCenter() {
         amount: sm.data.open_amount === null ? null : Number(sm.data.open_amount),
         exposure: sm.data.open_exposure === null ? null : Number(sm.data.open_exposure),
         currency: sm.data.currency,
+        byCurrency: sm.data.amounts_by_currency ?? [],
         staleAmounts: sm.data.stale_amount_cases,
         decision: sm.data.needs_decision,
         closed: sm.data.closed,
@@ -358,7 +362,7 @@ export function CommandCenter() {
           value={
             loaded ? (
               amount === null ? (
-                'Multiple or unknown currencies'
+                currencyBreakdown(kpi.byCurrency, 'amount')
               ) : (
                 caseMoney(amount, kpi.currency)
               )
@@ -372,7 +376,7 @@ export function CommandCenter() {
           value={
             loaded ? (
               exposure === null ? (
-                'Multiple or unknown currencies'
+                currencyBreakdown(kpi.byCurrency, 'exposure')
               ) : (
                 caseMoney(exposure, kpi.currency)
               )

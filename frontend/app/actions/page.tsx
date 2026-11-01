@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ACRow, BatchStatus, caseMoney, compact } from '@/lib/api';
+import { api, ACRow, BatchStatus, caseMoney, compact, currencyBreakdown, CurrencyAmount } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useDataChanged } from '@/lib/sync';
 import { Alert, Badge, Button, Segmented } from '@/components/ui';
@@ -45,6 +45,7 @@ interface Summary {
   snoozed: number;
   open_total: number;
   open_exposure: string | null;
+  amounts_by_currency?: CurrencyAmount[];
   currency: string | null;
   stale_amount_cases: number;
   stores_affected: number;
@@ -426,7 +427,7 @@ export default function ActionCenter() {
             {tile(
               'Open exposure',
               summary.open_exposure === null
-                ? 'Multiple or unknown currencies'
+                ? currencyBreakdown(summary.amounts_by_currency ?? [], 'exposure')
                 : caseMoney(summary.open_exposure, summary.currency),
               `${compact(summary.open_total)} open · ${summary.stores_affected} stores${summary.stale_amount_cases ? ` · ${summary.stale_amount_cases} amounts awaiting review` : ''}`
             )}

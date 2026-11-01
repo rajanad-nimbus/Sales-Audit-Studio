@@ -157,6 +157,17 @@ export const money = (v: string | number, currency = 'USD') =>
 export const caseMoney = (v: string | number, currency: string | null | undefined) =>
   currency ? money(v, currency) : `${Number(v).toLocaleString('en-US')} (currency unknown)`;
 
+export interface CurrencyAmount {
+  currency: string | null;
+  amount: string;
+  exposure: string;
+}
+
+export const currencyBreakdown = (rows: CurrencyAmount[], field: 'amount' | 'exposure') =>
+  rows.length
+    ? rows.map((r) => caseMoney(r[field], r.currency)).join(' · ')
+    : 'Multiple or unknown currencies';
+
 export interface Workflow {
   id: string;
   case_id: string;
