@@ -14,8 +14,14 @@ from sqlalchemy.pool import StaticPool
 
 from models import (AuditEvent, Base, CanonicalTransaction, RetentionPolicy, RetentionRun, SourceRecord,
                     TransactionLine, utcnow)
-from apps.operations.routes import (RetentionBody, RetentionRunBody, execute_retention, preview_retention,
-                                    serialise_row, set_retention)
+from apps.operations.retention import serialise_row
+from apps.operations.routes import (
+    RetentionBody,
+    RetentionRunBody,
+    execute_retention,
+    preview_retention,
+    set_retention,
+)
 
 
 def test_archive_serialization_preserves_scalar_types():
@@ -73,7 +79,7 @@ def test_retention_processes_a_deterministic_bounded_batch(monkeypatch):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         Session = async_sessionmaker(engine, expire_on_commit=False)
-        monkeypatch.setattr("apps.operations.routes.MAX_RETENTION_BATCH", 1)
+        monkeypatch.setattr("apps.operations.retention.MAX_RETENTION_BATCH", 1)
         try:
             async with Session() as db:
                 old = utcnow() - timedelta(days=45)
@@ -143,7 +149,7 @@ def test_retention_archive_byte_limit_purges_only_archived_records(tmp_path, mon
                     (json.dumps(serialise_row(candidate._mapping), sort_keys=True) + "\n").encode()
                 )
                 monkeypatch.setattr(
-                    "apps.operations.routes.MAX_RETENTION_ARCHIVE_BYTES",
+                    "apps.operations.retention.MAX_RETENTION_ARCHIVE_BYTES",
                     serialized_size + 1,
                 )
 
