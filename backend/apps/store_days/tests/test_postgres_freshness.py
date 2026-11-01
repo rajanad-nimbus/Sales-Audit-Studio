@@ -13,7 +13,8 @@ from apps.ingest.reconciliation import lock_reconciliation
 from apps.store_days.freshness import lock_configuration, lock_store_day
 from apps.store_days.routes import close_store_day, open_store_day_record, retotal_store_day
 from apps.controls.rules.routes import RuleBody, create_rule
-from apps.totals.routes import TotalDefinitionBody, create_definition
+from apps.totals.routes import create_definition
+from apps.totals.schemas import TotalDefinitionBody
 from models import (
     AuditTotal,
     AuditTotalDefinition,

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from apps.totals.routes import TotalDefinitionBody
+from apps.totals.schemas import TotalDefinitionBody
 
 
 def test_total_name_is_trimmed_before_persistence():

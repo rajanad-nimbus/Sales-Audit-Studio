@@ -8,7 +8,8 @@ from sqlalchemy.pool import StaticPool
 
 from apps.controls.foundation.routes import ReferenceBody, update_reference
 from apps.controls.rules.routes import RuleBody, create_rule
-from apps.totals.routes import TotalDefinitionBody, create_definition, update_definition
+from apps.totals.routes import create_definition, update_definition
+from apps.totals.schemas import TotalDefinitionBody
 from models import Base, ConfiguredAuditRule, FoundationReference, StoreDay, StoreDayClosureRequest
 
 

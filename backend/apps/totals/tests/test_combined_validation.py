@@ -5,7 +5,8 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from apps.totals.routes import TotalDefinitionBody, validate_combined_references
+from apps.totals.routes import validate_combined_references
+from apps.totals.schemas import TotalDefinitionBody
 from models import AuditTotalDefinition, Base
 
 
