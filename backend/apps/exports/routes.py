@@ -5,21 +5,20 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import Annotated
 
 import httpx
 from database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.audit.models import AuditEvent
 from apps.database_errors import violates_unique_constraint
 from apps.exports.batch_state import batch_view as batch_view
 from apps.exports.batch_state import mark_delivered as mark_delivered
+from apps.exports.catalog import DATASETS as DATASETS
 from apps.exports.delivery import (
     deliver as perform_delivery,
 )
@@ -98,20 +97,18 @@ from apps.exports.selection import (
     prior_exported_days as prior_exported_days,
 )
 from apps.exports.settings import SINK_SECRET, sink_secret, test_sink_enabled
-from apps.exports.tracking import TRACK_STATES, tracking_page
+from apps.exports.tracking import tracking_page as tracking_page
+from apps.exports.tracking_routes import router as tracking_router
+from apps.exports.tracking_routes import tracking as tracking
 from apps.request_body import read_limited_body
 from apps.security.authentication import require_role
 
 router = APIRouter(prefix="/api/exports")
 router.include_router(destinations_router)
 router.include_router(resolution_router)
+router.include_router(tracking_router)
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))
 MAX_SINK_BODY_BYTES = 25 * 1024 * 1024
-DATASETS = {
-    "resolutions": "Closed, validated cases with decision, disposition and validation result",
-    "adjustments": "Approved financial adjustments from validated cases (journal lines for ERP/GL)",
-    "audit": "Audit trail events since the last delivery (with hashes)",
-}
 
 
 async def deliver(
@@ -375,64 +372,6 @@ async def retry(
     else:
         await deliver(dest, b, client)
     return await finish_delivery(db, b, dest.name, retrying=True)
-
-
-# ---- Tracking: which records were exported, which are waiting, which are not eligible and why -----------------
-@router.get("/tracking")
-async def tracking(
-    destination_id: str,
-    dataset: str,
-    state: Annotated[str, Query(max_length=20)] = "",
-    q: Annotated[str, Query(max_length=120)] = "",
-    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
-    db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("finance", "it", "auditor")),
-):
-    if dataset not in DATASETS:
-        raise HTTPException(status_code=400, detail="Unknown dataset")
-    if state and state not in TRACK_STATES:
-        raise HTTPException(status_code=400, detail=f"state must be one of {TRACK_STATES}")
-    if not (
-        await db.execute(select(ExportDestination.id).where(ExportDestination.id == destination_id))
-    ).scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Destination not found")
-    if dataset == "audit":
-        # The audit trail is exported as a sequence, so coverage is a position rather than a record list.
-        last = (
-            await db.execute(
-                select(func.max(ExportBatch.range_to)).where(
-                    ExportBatch.destination_id == destination_id,
-                    ExportBatch.dataset == "audit",
-                    ExportBatch.status.in_(["Sent", "Acknowledged"]),
-                )
-            )
-        ).scalar() or 0
-        head = (await db.execute(select(func.max(AuditEvent.seq)))).scalar() or 0
-        waiting = (
-            await db.execute(
-                select(func.count()).select_from(AuditEvent).where(AuditEvent.seq > last)
-            )
-        ).scalar() or 0
-        return {
-            "kind": "stream",
-            "summary": {"last_exported_seq": last, "head_seq": head, "waiting_events": waiting},
-            "items": [],
-            "total": 0,
-            "page": 1,
-            "pages": 1,
-        }
-    summary, items, total = await tracking_page(
-        db, destination_id, dataset, state, q, page, page_size
-    )
-    return {
-        "kind": "records",
-        "summary": summary,
-        "items": items,
-        "total": total,
-        "page": page,
-        "pages": max(1, -(-total // page_size)),
-    }
 
 
 @router.post("/batches/{batch_id}/ack")
