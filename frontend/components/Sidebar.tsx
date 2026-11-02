@@ -12,6 +12,7 @@ const icons: Record<string, React.ReactNode> = {
   home: <path d="M3 11.5 12 4l9 7.5M5 10v10h14V10" />,
   cases: <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z" />,
   transactions: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+  auditErrors: <path d="M12 4 3 20h18L12 4Zm0 6v5m0 3h.01" />,
   pipeline: <path d="M4 6h6v4H4zM14 14h6v4h-6zM10 8h2a2 2 0 0 1 2 2v4" />,
   foundation: (
     <path d="M12 4c4.4 0 8 1.1 8 2.5S16.400 9 12 9 4 7.900 4 6.500 7.600 4 12 4Zm8 2.500v5c0 1.400-3.600 2.500-8 2.500s-8-1.100-8-2.500v-5m16 5v5c0 1.400-3.600 2.500-8 2.500s-8-1.100-8-2.500v-5" />
@@ -45,6 +46,7 @@ const sections = [
       { label: 'Foundation Data', href: '/foundation', icon: 'foundation' },
       { label: 'Store Days & Totals', href: '/store-days', icon: 'totals' },
       { label: 'Transactions', href: '/transactions', icon: 'transactions' },
+      { label: 'Audit Errors', href: '/audit-errors', icon: 'auditErrors' },
       { label: 'Cash Office', href: '/cash-office', icon: 'cash' },
       { label: 'Transaction Corrections', href: '/corrections', icon: 'corrections' },
       { label: 'Data Pipeline', href: '/pipeline', icon: 'pipeline' },
@@ -126,7 +128,8 @@ export function Sidebar() {
     return () => window.removeEventListener('nimbus:toggle-nav', onToggle);
   }, []);
 
-  const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname.startsWith(href));
+  const isActive = (href: string) =>
+    href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
   const q = filter.trim().toLowerCase();
   const shown = sections
     .map((s) => ({
