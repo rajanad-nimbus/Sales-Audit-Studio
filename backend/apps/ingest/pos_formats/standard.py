@@ -44,6 +44,8 @@ class StandardLog:
     problems: list[str] = field(
         default_factory=list
     )  # integrity problems: counts that do not add up
+    layout: str | None = None  # which published layout variant the file matched
+    version: str | None = None  # the producer's version string, for example V.14.0
 
 
 def tender_type(group: str) -> str:

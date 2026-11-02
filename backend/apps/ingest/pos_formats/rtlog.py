@@ -137,6 +137,13 @@ LAYOUTS: dict[str, list[tuple[str, int]]] = {
     "FTAIL": [("descriptor", 5), ("line_id", 10), ("record_count", 10)],
 }
 
+# Published layouts differ between releases. v14 is the default; v10 is the 10.x layout from Oracle's operations
+# guide, where the item's voucher number is 16 characters wide instead of 25. The file's own item record decides.
+LAYOUT_VARIANTS: dict[str, dict[str, list[tuple[str, int]]]] = {
+    "v14": LAYOUTS,
+    "v10": {**LAYOUTS, "TITEM": [(n, 16 if n == "voucher" else w) for n, w in LAYOUTS["TITEM"]]},
+}
+
 TYPES = {
     "SALE": standard.SALE,
     "RETURN": standard.RETURN,
@@ -159,17 +166,38 @@ TYPES = {
 }
 
 
-def fields(kind: str, line: str) -> dict[str, str]:
+def fields(kind: str, line: str, layouts: dict | None = None) -> dict[str, str]:
     """Cut a fixed-width record into its named fields (a short line leaves the rest empty)."""
     out, at = {}, 0
-    for name, width in LAYOUTS[kind]:
+    for name, width in (layouts or LAYOUTS)[kind]:
         out[name] = line[at : at + width].strip()
         at += width
     return out
 
 
+def detect_layout(records: list[str]) -> str | None:
+    """The layout whose item record reads sensibly: a P/N quantity sign, numeric quantity and unit retail.
+
+    None when the file has no item records (any layout will do) or none of the layouts fits.
+    """
+    first = next((line for line in records if line.startswith("TITEM")), None)
+    if first is None:
+        return None
+    for name, layouts in LAYOUT_VARIANTS.items():
+        f = fields("TITEM", first, layouts)
+        if (
+            f["quantity_sign"] in ("P", "N")
+            and f["quantity"].isdigit()
+            and f["unit_retail"].isdigit()
+        ):
+            return name
+    return ""
+
+
 def signed(sign: str, digits: str, decimals: int = 4) -> Decimal:
     """A P/N sign column and a digit string with implied decimals."""
+    if digits and not digits.isdigit():
+        raise ValueError(f"expected digits in an amount field, found {digits!r}")
     value = Decimal(digits or "0") / Decimal(10**decimals)
     return -value if sign.upper() == "N" else value
 
@@ -245,7 +273,17 @@ def parse_rtlog(text: str, name: str = "RTLOG") -> standard.StandardLog:
     records = [line for line in text.splitlines() if line.strip()]
     if not records or not records[0].startswith("FHEAD"):
         raise ValueError(f"{name}: not an RTLOG file (no FHEAD record)")
-    head = fields("FHEAD", records[0])
+    layout = detect_layout(records)
+    if layout == "":
+        raise ValueError(
+            f"{name}: the item records fit none of the known layouts, so amounts cannot be read"
+        )
+    layouts = LAYOUT_VARIANTS[layout or "v14"]
+
+    def cut(kind: str, line: str) -> dict[str, str]:
+        return fields(kind, line, layouts)
+
+    head = cut("FHEAD", records[0])
     business_date = datetime.strptime(head["business_date"], "%Y%m%d").strftime("%Y-%m-%d")
     log = standard.StandardLog(
         source_format="rtlog",
@@ -253,6 +291,8 @@ def parse_rtlog(text: str, name: str = "RTLOG") -> standard.StandardLog:
         business_date=business_date,
         created_at=timestamp(head["created_at"]),
         origin_system=head["origin_system"] or None,
+        layout=layout or "v14",
+        version=head["reference"].split(":")[0].split()[0] if head["reference"] else None,
     )
     tx: dict | None = None
     item: dict | None = None
@@ -260,7 +300,7 @@ def parse_rtlog(text: str, name: str = "RTLOG") -> standard.StandardLog:
     for number, line in enumerate(records[1:], 2):
         kind = line[:5]
         if kind == "THEAD":
-            f = fields("THEAD", line)
+            f = cut("THEAD", line)
             tx_type = TYPES.get(f["type"])
             if tx_type is None:
                 log.problems.append(f"line {number}: unknown transaction type {f['type']!r}")
@@ -293,23 +333,23 @@ def parse_rtlog(text: str, name: str = "RTLOG") -> standard.StandardLog:
             }
             item, in_tx = None, 1
         elif kind == "FTAIL":
-            expected = int(fields("FTAIL", line)["record_count"] or 0)
+            expected = int(cut("FTAIL", line)["record_count"] or 0)
             if expected != len(records) - 2:
                 log.problems.append(f"FTAIL says {expected} records, found {len(records) - 2}")
         elif tx is None:
             log.problems.append(f"line {number}: {kind} before any THEAD")
         elif kind == "TITEM":
-            item = parse_item(fields("TITEM", line))
+            item = parse_item(cut("TITEM", line))
             tx["lines"].append(item)
             in_tx += 1
         elif kind == "IDISC" and item is not None:
-            tx["discounts"].append(parse_discount(fields("IDISC", line), len(tx["lines"])))
+            tx["discounts"].append(parse_discount(cut("IDISC", line), len(tx["lines"])))
             in_tx += 1
         elif kind == "IGTAX" and item is not None:
-            attach_tax(item, fields("IGTAX", line))
+            attach_tax(item, cut("IGTAX", line))
             in_tx += 1
         elif kind == "TTAX":
-            f = fields("TTAX", line)
+            f = cut("TTAX", line)
             tx["taxes"].append(
                 {
                     "code": f["tax_code"],
@@ -318,10 +358,10 @@ def parse_rtlog(text: str, name: str = "RTLOG") -> standard.StandardLog:
             )
             in_tx += 1
         elif kind == "TTEND":
-            tx["tenders"].append(parse_tender(fields("TTEND", line)))
+            tx["tenders"].append(parse_tender(cut("TTEND", line)))
             in_tx += 1
         elif kind == "TTAIL":
-            expected = int(fields("TTAIL", line)["record_count"] or 0)
+            expected = int(cut("TTAIL", line)["record_count"] or 0)
             if expected != in_tx - 1:
                 log.problems.append(
                     f"transaction {tx['transaction_number']}: TTAIL says {expected} records, found {in_tx - 1}"

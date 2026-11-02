@@ -56,6 +56,7 @@ from apps.ingest.models import (
     SourceRecord,
     SourceSetting,
 )
+from apps.ingest.pos_formats import profile as pos_profile
 from apps.ingest.pos_formats import rtlog, standard
 from apps.ingest.profiles import (
     _is_duplicate_profile_name,
@@ -398,6 +399,18 @@ async def ingest_pos_log(
         ],
         "problems": log.problems,
     }
+
+
+@router.post("/api/ingest/pos-log/profile")
+async def profile_pos_log(
+    req: PosLogRequest, _: dict = Depends(require_role("it", "analyst", "auditor"))
+):
+    """Describe what a POS log contains and which audit rules it supports, without ingesting anything."""
+    try:
+        validate_currency(req.currency)
+        return pos_profile.profile_rtlog(req.content, name=req.delivery_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/api/ingest/csv")
