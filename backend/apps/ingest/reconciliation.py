@@ -17,6 +17,7 @@ from apps.cases.models import (
     Exception as DBException,
 )
 from apps.corrections.effects import effective_amounts
+from apps.ingest.audit_rules import run_detail_rules
 from apps.ingest.common import (
     LINEAGE,
     RECONCILIATION_LOCK_KEY,
@@ -330,11 +331,12 @@ def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
 
 
 async def run_transaction_audit(db, txns, flag):
-    """Per-transaction audit errors from stored detail: out of balance, and a manual discount with no reason."""
+    """Per-transaction audit errors from stored detail: out of balance, a manual discount with no reason, and the line rules."""
     pos = [
         t
         for t in txns
-        if t.source_lineage == LINEAGE["POS"] and t.reconciliation_status != "Exception"
+        if t.source_lineage in (LINEAGE["POS"], LINEAGE["Shopify"])
+        and t.reconciliation_status != "Exception"
     ]
     for t in pos:
         if t.detail_status == "Unbalanced":
@@ -357,6 +359,7 @@ async def run_transaction_audit(db, txns, flag):
         for d in rows:
             if not (d.description or "").strip():
                 flag("DISC_REASON_REQ", Decimal("0"), by_id[d.transaction_id])
+    await run_detail_rules(db, [t for t in pos if t.reconciliation_status != "Exception"], flag)
 
 
 from apps.ingest.controls import (
