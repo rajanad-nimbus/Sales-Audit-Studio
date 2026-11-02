@@ -63,6 +63,28 @@ class CsvIngestRequest(BaseModel):
         return self
 
 
+class PosLogRequest(BaseModel):
+    """A POS system's own log file, in one of the supported formats, as text."""
+
+    format: Literal["rtlog"]
+    delivery_id: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1, max_length=MAX_DELIVERY_BYTES)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+
+    @field_validator("delivery_id")
+    @classmethod
+    def reject_blank_identifier(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def enforce_payload_size(self):
+        if len(self.content.encode("utf-8")) > MAX_DELIVERY_BYTES:
+            raise ValueError(f"Log payload exceeds {MAX_DELIVERY_BYTES} bytes")
+        return self
+
+
 def validate_profile_mapping(value: dict[str, str] | None) -> dict[str, str] | None:
     if value is None:
         return None

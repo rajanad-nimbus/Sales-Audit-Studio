@@ -48,6 +48,7 @@ from apps.gl.models import (
 from apps.ingest.models import (
     ReconciliationMatch,
     ReconciliationPolicy,
+    RegisterEvent,
     ShopifyReferenceStage,
     ShopifyReferenceSyncState,
     SourceFeedProfile,
@@ -107,6 +108,7 @@ __all__ = [
     "GLCrossReference",
     "ReconciliationMatch",
     "ReconciliationPolicy",
+    "RegisterEvent",
     "ShopifyReferenceStage",
     "ShopifyReferenceSyncState",
     "SourceFeedProfile",

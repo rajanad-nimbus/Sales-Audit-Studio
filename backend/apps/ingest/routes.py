@@ -12,13 +12,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.database_errors import violates_unique_constraint
-from apps.ingest import reconciliation, source_settings
+from apps.ingest import reconciliation, register_events, source_settings
 from apps.ingest import service as ingest
 from apps.ingest.common import VALID_TYPES
 from apps.ingest.contracts import (
     CsvIngestRequest,
     IngestRequest,
     ManualMatchRequest,
+    PosLogRequest,
     ReconciliationPolicyRequest,
     SourceFeedProfilePatch,
     SourceFeedProfileRequest,
@@ -55,6 +56,7 @@ from apps.ingest.models import (
     SourceRecord,
     SourceSetting,
 )
+from apps.ingest.pos_formats import rtlog, standard
 from apps.ingest.profiles import (
     _is_duplicate_profile_name,
     create_source_profile,
@@ -364,6 +366,38 @@ async def ingest_records(
     stats = await ingest.ingest(db, req.source_system, req.delivery_id, req.records)
     await db.commit()
     return stats
+
+
+@router.post("/api/ingest/pos-log")
+async def ingest_pos_log(
+    req: PosLogRequest, db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("it"))
+):
+    """Ingest a POS system's log file: sales and returns as POS transactions, the rest as register events."""
+    try:
+        validate_currency(req.currency)
+        log = rtlog.parse_rtlog(req.content, name=req.delivery_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await source_settings.require_allowed(db, "POS", manual=True)
+    mapped, left_over = standard.ingest_records(log, req.currency)
+    stats = await ingest.ingest(db, "POS", req.delivery_id, mapped)
+    events = await register_events.ingest_register_events(db, log, req.currency)
+    await db.commit()
+    return {
+        "format": req.format,
+        "delivery_id": req.delivery_id,
+        "store_id": log.store_id,
+        "business_date": log.business_date,
+        "transactions": len(log.transactions),
+        "sales_and_returns": stats,
+        "register_events": events,
+        "not_mapped": [
+            {"transaction_number": tx["transaction_number"], "type": tx["type"]}
+            for tx in left_over
+            if tx["type"] in standard.MERCHANDISE_TYPES
+        ],
+        "problems": log.problems,
+    }
 
 
 @router.post("/api/ingest/csv")

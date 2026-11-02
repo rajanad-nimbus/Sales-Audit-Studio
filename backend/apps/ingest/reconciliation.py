@@ -26,6 +26,7 @@ from apps.ingest.common import (
 from apps.ingest.limits import MAX_RECONCILIATION_TRANSACTIONS
 from apps.ingest.manifests import validate_business_date
 from apps.ingest.models import ReconciliationPolicy
+from apps.ingest.register_events import run_register_event_rules
 from apps.transactions import detail as transaction_detail
 from apps.transactions.models import (
     CanonicalTransaction,
@@ -108,6 +109,7 @@ async def reconcile(
 
     await reconcile_shopify(db, txns, flag)
     await run_transaction_audit(db, txns, flag)
+    await run_register_event_rules(db, add, business_date, store_ids)
     await run_controls(db, business_date, add, policy, store_ids=store_ids)
     await run_settlement_controls(db, txns, add, amount_tolerance, tolerance_currency)
 

@@ -266,8 +266,11 @@ def parse_rtlog(text: str, name: str = "RTLOG") -> standard.StandardLog:
                 log.problems.append(f"line {number}: unknown transaction type {f['type']!r}")
                 tx_type = f["type"].lower()
             tran_no = f["transaction_number"].lstrip("0") or "0"
+            # TOTAL and similar records carry no transaction number, and a till close writes several in the same
+            # second, so their place in the file is what tells them apart (stable when the file is delivered again).
+            suffix = f"-{f['event_time']}-L{int(f['line_id'] or 0)}" if tran_no == "0" else ""
             tx = {
-                "source_record_id": f"RTLOG-{log.store_id}-{business_date}-{f['register']}-{tran_no}",
+                "source_record_id": f"RTLOG-{log.store_id}-{business_date}-{f['register']}-{tran_no}{suffix}",
                 "store_id": log.store_id,
                 "business_date": business_date,
                 "register_id": f["register"],

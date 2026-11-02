@@ -176,3 +176,34 @@ class ShopifyReferenceSyncState(Base):
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
     generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     applied_generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class RegisterEvent(Base):
+    """Till and drawer activity with no sale behind it: voids, no-sales, paid-in/out, pulls, loans, opens, closes."""
+
+    __tablename__ = "register_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_record_id: Mapped[str] = mapped_column(String(255), unique=True)
+    source_format: Mapped[str] = mapped_column(String(30))
+    store_id: Mapped[str] = mapped_column(String(50), index=True)
+    business_date: Mapped[str] = mapped_column(String(10), index=True)
+    register_id: Mapped[str | None] = mapped_column(String(50))
+    cashier_id: Mapped[str | None] = mapped_column(String(100))
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    event_type: Mapped[str] = mapped_column(String(30), index=True)
+    sub_type: Mapped[str | None] = mapped_column(String(30))
+    transaction_number: Mapped[str] = mapped_column(String(30))
+    original_transaction_number: Mapped[str | None] = mapped_column(String(30))
+    original_register_id: Mapped[str | None] = mapped_column(String(50))
+    reason_code: Mapped[str | None] = mapped_column(String(30))
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    audited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    audit_code: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_register_events_store_date_type", "store_id", "business_date", "event_type"),
+        Index("ix_register_events_unaudited", "audited", "business_date"),
+    )
