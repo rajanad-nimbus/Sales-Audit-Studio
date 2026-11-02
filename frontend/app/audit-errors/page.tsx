@@ -127,7 +127,7 @@ function ErrorDetail({ error }: { error: ErrorType }) {
         {error.recommended_solution && (
           <>
             <dt>How to fix</dt>
-            <dd>{error.recommended_solution}</dd>
+            <dd>{error.recommended_solution.replaceAll(' -> ', ' → ')}</dd>
           </>
         )}
         {error.known_causes.length > 0 && (
@@ -220,6 +220,14 @@ export default function AuditErrorsPage() {
   useDataChanged(() => {
     load();
   });
+  // A link such as /audit-errors?code=TRAN_OUT_BAL opens that error's detail straight away.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('code');
+    if (code) {
+      setShow('all');
+      setExpanded(code);
+    }
+  }, []);
 
   const families = data ? [...new Set(data.items.map((i) => i.family))].sort() : [];
   const term = q.trim().toLowerCase();

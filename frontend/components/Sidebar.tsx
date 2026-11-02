@@ -12,6 +12,7 @@ const icons: Record<string, React.ReactNode> = {
   home: <path d="M3 11.5 12 4l9 7.5M5 10v10h14V10" />,
   cases: <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z" />,
   transactions: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+  registerEvents: <path d="M7 4h10v16H7zM10 8h4m-4 4h4m-4 4h2" />,
   auditErrors: <path d="M12 4 3 20h18L12 4Zm0 6v5m0 3h.01" />,
   pipeline: <path d="M4 6h6v4H4zM14 14h6v4h-6zM10 8h2a2 2 0 0 1 2 2v4" />,
   foundation: (
@@ -46,6 +47,7 @@ const sections = [
       { label: 'Foundation Data', href: '/foundation', icon: 'foundation' },
       { label: 'Store Days & Totals', href: '/store-days', icon: 'totals' },
       { label: 'Transactions', href: '/transactions', icon: 'transactions' },
+      { label: 'Register Events', href: '/register-events', icon: 'registerEvents' },
       { label: 'Audit Errors', href: '/audit-errors', icon: 'auditErrors' },
       { label: 'Cash Office', href: '/cash-office', icon: 'cash' },
       { label: 'Transaction Corrections', href: '/corrections', icon: 'corrections' },
