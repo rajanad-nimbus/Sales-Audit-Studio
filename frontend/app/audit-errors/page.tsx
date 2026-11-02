@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api, caseMoney, currencyBreakdown } from '@/lib/api';
 import type { CurrencyAmount } from '@/lib/api';
 import { useDataChanged } from '@/lib/sync';
@@ -16,6 +16,7 @@ import {
   MetricTile,
   PageHeader,
   Segmented,
+  Toolbar,
 } from '@/components/ui';
 import type { Column } from '@/components/ui';
 
@@ -93,7 +94,28 @@ const COLUMNS: Column<ErrorType>[] = [
   },
 ];
 
+const CASE_COLUMNS: Column<ErrorCase>[] = [
+  {
+    key: 'case',
+    header: 'Case',
+    primary: true,
+    stopRowClick: true,
+    render: (c) => <CaseLink id={c.id}>{c.case_number}</CaseLink>,
+  },
+  { key: 'store', header: 'Store', render: (c) => c.store_id },
+  { key: 'date', header: 'Business date', nowrap: true, render: (c) => c.business_date },
+  { key: 'status', header: 'Status', render: (c) => <StatusBadge s={c.status} /> },
+  { key: 'errors', header: 'Errors', numeric: true, render: (c) => c.errors },
+  {
+    key: 'amount',
+    header: 'Amount',
+    numeric: true,
+    render: (c) => caseMoney(c.amount, c.currency),
+  },
+];
+
 function ErrorDetail({ error }: { error: ErrorType }) {
+  const router = useRouter();
   const canOpen = useCanOpen();
   const [cases, setCases] = useState<ErrorCases | null>(null);
   const [failed, setFailed] = useState(false);
@@ -145,49 +167,27 @@ function ErrorDetail({ error }: { error: ErrorType }) {
       </dl>
       {error.form === 'Transaction Detail' && canOpen('/corrections') && (
         <div>
-          <Link href="/corrections">
-            <Button size="sm">Open Transaction Corrections</Button>
-          </Link>
+          <Button size="sm" onClick={() => router.push('/corrections')}>
+            Open Transaction Corrections
+          </Button>
         </div>
       )}
       {error.total_count === 0 ? (
         <p className="hint">None raised yet.</p>
       ) : failed ? (
         <Alert tone="error">Could not load the cases for this error.</Alert>
-      ) : !cases ? (
-        <p className="hint">Loading cases…</p>
       ) : (
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Case</th>
-                <th>Store</th>
-                <th>Business date</th>
-                <th>Status</th>
-                <th className="num">Errors</th>
-                <th className="num">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cases.items.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <CaseLink id={c.id}>{c.case_number}</CaseLink>
-                  </td>
-                  <td>{c.store_id}</td>
-                  <td className="nowrap">{c.business_date}</td>
-                  <td>
-                    <StatusBadge s={c.status} />
-                  </td>
-                  <td className="num">{c.errors}</td>
-                  <td className="num">{caseMoney(c.amount, c.currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {cases.truncated && <p className="hint">Showing the first {cases.items.length} cases.</p>}
-        </div>
+        <DataTable
+          columns={CASE_COLUMNS}
+          rows={cases ? cases.items : null}
+          rowKey={(c) => c.id}
+          loadingRows={2}
+          footer={
+            cases?.truncated ? (
+              <p className="hint">Showing the first {cases.items.length} cases.</p>
+            ) : undefined
+          }
+        />
       )}
     </div>
   );
@@ -268,7 +268,7 @@ export default function AuditErrorsPage() {
         <MetricTile label="Error types known" value={data ? data.items.length : '—'} />
       </MetricGrid>
 
-      <div className="toolbar">
+      <Toolbar count={rows ? `${rows.length} shown` : ''}>
         <Segmented
           options={[
             { value: 'open', label: 'With open errors' },
@@ -291,8 +291,7 @@ export default function AuditErrorsPage() {
             <option key={f}>{f}</option>
           ))}
         </select>
-        <span className="toolbar-count">{rows ? `${rows.length} shown` : ''}</span>
-      </div>
+      </Toolbar>
 
       <DataTable
         columns={COLUMNS}

@@ -5,7 +5,16 @@ import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
-import { Alert, Badge, Button, DataTable, EmptyState, PageHeader, Pager } from '@/components/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  Pager,
+  Toolbar,
+} from '@/components/ui';
 import type { Column } from '@/components/ui';
 
 interface Row {
@@ -270,7 +279,9 @@ export default function RegisterEventsPage() {
         ))}
       </div>
 
-      <div className="toolbar">
+      <Toolbar
+        count={data ? `${data.total.toLocaleString()} ${filtered ? 'matching' : 'total'}` : ''}
+      >
         <input
           className="grow"
           type="search"
@@ -320,10 +331,7 @@ export default function RegisterEventsPage() {
             Clear filters
           </Button>
         )}
-        <span className="toolbar-count">
-          {data ? `${data.total.toLocaleString()} ${filtered ? 'matching' : 'total'}` : ''}
-        </span>
-      </div>
+      </Toolbar>
 
       {!data ? (
         <SkeletonRows rows={8} label="Loading register events" />
