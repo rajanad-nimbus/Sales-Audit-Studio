@@ -205,14 +205,67 @@ def test_a_scanned_then_voided_line_nets_out_of_the_sale():
     assert [x["item_code"] for x in record["lines"]] == ["A"] and record["amount"] == "10.525"
 
 
-def test_a_return_that_also_sells_an_item_is_left_for_exchange_handling():
+def exchange_log(returned_unit, sold_unit, tender_sign, tender_amount):
+    """A return of one item that also sells another, paid or refunded by a single cash tender."""
+
     def exchange(b):
         b.head(transaction_number=4, type="RETURN", sub_type="RETURN")
-        b.item("A", sign="N", status="R")
-        b.item("B", unit="10000")
+        b.item("OLD", sign="N", status="R", unit=returned_unit)
+        b.item("NEW", unit=sold_unit)
+        if tender_amount:
+            b.tender(amount=tender_amount, sign=tender_sign)
 
-    [tx] = run(build((exchange, None))).transactions
-    assert standard.ingest_record(tx, "USD") is None
+    return run(build((exchange, None)))
+
+
+def exchange_summary(log):
+    records = standard.ingest_records(log)[0]
+    return {
+        r["record_type"]: (r["amount"], [(t["tender_type"], t["amount"]) for t in r["tenders"]])
+        for r in records
+    }
+
+
+def test_an_even_exchange_is_a_return_and_a_sale_settled_by_store_credit():
+    log = exchange_log("100000", "100000", "P", "")
+    assert exchange_summary(log) == {
+        "Return": ("10", [("StoreCredit", "10")]),
+        "Sale": ("10", [("StoreCredit", "10")]),
+    }
+
+
+def test_an_exchange_where_the_customer_pays_more_takes_the_difference_in_cash():
+    log = exchange_log("100000", "150000", "P", "50000")  # 10.00 returned, 15.00 bought, 5.00 paid
+    assert exchange_summary(log) == {
+        "Return": ("10", [("StoreCredit", "10")]),
+        "Sale": ("15", [("StoreCredit", "10"), ("Cash", "5")]),
+    }
+
+
+def test_an_exchange_where_the_customer_is_refunded_the_difference_refunds_it_in_cash():
+    log = exchange_log(
+        "150000", "100000", "N", "50000"
+    )  # 15.00 returned, 10.00 bought, 5.00 refunded
+    assert exchange_summary(log) == {
+        "Return": ("15", [("StoreCredit", "10"), ("Cash", "5")]),
+        "Sale": ("10", [("StoreCredit", "10")]),
+    }
+
+
+def test_each_half_of_an_exchange_balances_and_has_its_own_id():
+    records = standard.ingest_records(exchange_log("100000", "150000", "P", "50000"))[0]
+    assert len({r["source_record_id"] for r in records}) == 2
+    for record in records:
+        assert sum(Decimal(t["amount"]) for t in record["tenders"]) == Decimal(record["amount"])
+
+
+def test_a_transaction_with_no_usable_lines_is_left_unmapped():
+    def empty(b):
+        b.head(transaction_number=4)
+        b.tender(amount="250000")
+
+    log = run(build((empty, None)))
+    assert standard.ingest_records(log) == ([], log.transactions)
 
 
 def test_register_events_are_kept_apart_from_sales():
@@ -302,6 +355,7 @@ def test_sample_files_flow_through_ingest_and_the_audit_finds_the_one_real_varia
             await engine.dispose()
 
     result, statuses, types = asyncio.run(go())
-    assert (result["received"], result["quarantined"]) == (51, 0)
+    # 53 sales and returns, less one sale with no lines, plus the exchange as a return and a sale
+    assert (result["received"], result["quarantined"]) == (53, 0)
     assert sorted(set(statuses)) == ["Balanced", "Unbalanced"] and statuses.count("Unbalanced") == 1
     assert types.count("TRAN_OUT_BAL") == 1

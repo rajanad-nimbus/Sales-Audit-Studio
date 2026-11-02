@@ -313,5 +313,5 @@ def test_the_pos_log_endpoint_takes_real_files_and_a_second_delivery_adds_nothin
             and second["register_events"]["created"] == 0
         )
         unmapped.update({x["transaction_number"]: x["type"] for x in first["not_mapped"]})
-    # a sale with no item lines, and a return that also sells an item (an exchange)
-    assert unmapped == {"1290000035": "sale", "1290000044": "return"}
+    # only a sale with no item lines is left over: the exchange is mapped as a return and a sale
+    assert unmapped == {"1290000035": "sale"}

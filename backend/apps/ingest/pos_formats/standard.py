@@ -189,15 +189,65 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
     }
 
 
+def side(tx: dict, lines: list[dict], suffix: str, tenders: list[dict]) -> dict:
+    """One half of an exchange: the lines of one direction, with the discounts that belong to them."""
+    keep = {i + 1: n + 1 for n, i in enumerate(i for i, x in enumerate(tx["lines"]) if x in lines)}
+    return {
+        **tx,
+        "source_record_id": f"{tx['source_record_id']}-{suffix}",
+        "lines": lines,
+        "discounts": [
+            {**d, "line_no": keep[d["line_no"]]}
+            for d in tx["discounts"]
+            if d.get("line_no") in keep
+        ],
+        "taxes": [],
+        "tenders": tenders,
+    }
+
+
+def exchange_records(tx: dict, currency: str) -> list[dict]:
+    """A return that also sells an item, as a Return and a Sale.
+
+    The returned goods' value pays for the new goods as store credit; whatever is left over is what the customer
+    paid or was refunded, on the tenders actually used. Both records add up to their own amounts.
+    """
+    tx = without_voided_lines(tx)
+    sold = [x for x in tx["lines"] if Decimal(x["quantity"]) > 0]
+    returned = [x for x in tx["lines"] if Decimal(x["quantity"]) < 0]
+    if tx["type"] not in MERCHANDISE_TYPES or not sold or not returned:
+        return []
+    sale_total = net_amount(side(tx, sold, "S", []))
+    return_total = -net_amount(side(tx, returned, "R", []))
+    credit = min(sale_total, return_total)
+    net = (
+        sale_total - return_total
+    )  # > 0: the customer pays the difference; < 0: the customer is refunded it
+    paid = settle_tenders(tx["tenders"], 1 if net >= 0 else -1)
+    credit_tender = [{"tender_type": "StoreCredit", "amount": str(credit)}] if credit > 0 else []
+    sale_tenders = credit_tender + (paid if net > 0 else [])
+    return_tenders = [
+        {**t, "amount": "-" + t["amount"]} for t in credit_tender + (paid if net < 0 else [])
+    ]
+    records = [
+        ingest_record(side(tx, returned, "R", return_tenders), currency),
+        ingest_record(side(tx, sold, "S", sale_tenders), currency),
+    ]
+    return [r for r in records if r is not None]
+
+
 def ingest_records(log: StandardLog, currency: str = "USD") -> tuple[list[dict], list[dict]]:
-    """(POS ingest records, transactions that did not map: mixed sale-and-return lines, and register events)."""
+    """(POS ingest records, transactions that did not map: no usable lines, and register events).
+
+    A transaction that returns and sells in one go becomes two records (see `exchange_records`).
+    """
     mapped, left_over = [], []
     for tx in log.transactions:
-        record = ingest_record(tx, currency)
-        if record is None:
-            left_over.append(tx)
+        records = [r] if (r := ingest_record(tx, currency)) else exchange_records(tx, currency)
+        if records:
+            mapped.extend(records)
         else:
-            mapped.append(record)
+            left_over.append(tx)
     return mapped, left_over
 
 
