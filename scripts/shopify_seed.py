@@ -8,6 +8,7 @@ Needs the custom app scopes write_orders (plus read_orders, read_locations). Run
     python3 scripts/shopify_seed.py --dry        # prints what it would create
     python3 scripts/shopify_seed.py --only=split # only scenarios whose name contains "split"
     python3 scripts/shopify_seed.py --start=4    # skip the first 4 scenarios
+    python3 scripts/shopify_seed.py --resume     # create only scenarios not already in the store
 Tax lines are always sent, but Shopify only adds them to the order total when the store collects tax
 (Settings > Taxes and duties). The nimbus test store does not, so totals and payments here exclude tax;
 set SHOPIFY_SEED_TAX_CHARGED=1 once the store charges it.
@@ -382,8 +383,17 @@ def create(spec, locations, parent=None):
     print(f"    created order #{order['order_number']}")
 
 
+def existing_notes():
+    """Notes of orders already in the store, so --resume skips what a previous run created."""
+    orders = call("GET", "/orders.json?status=any&limit=250&fields=note")["orders"]
+    return {o["note"] for o in orders if o.get("note")}
+
+
 def main():
     scenarios = [s for s in S if ONLY in s["name"]][START:]
+    if "--resume" in sys.argv and not DRY:
+        done = existing_notes()
+        scenarios = [s for s in scenarios if f"ZeTSA seed: {s['name']}" not in done]
     locations = [] if DRY else [loc["id"] for loc in call("GET", "/locations.json")["locations"]]
     print("Dry run" if DRY else f"Creating {len(scenarios)} scenarios in {BASE.split('/admin')[0]}"
           f" ({len(locations)} locations)")
