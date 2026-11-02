@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create a matrix of dummy orders, returns, exchanges and voids in the Shopify dev store.
 
-Scenarios mirror what Oracle Retail Sales Audit has to cope with: sales, returns, exchanges,
+Scenarios cover what a sales audit has to cope with: sales, returns, exchanges,
 voids and cancellations across tenders, tax shapes, discounts, shipping and currencies.
 Needs the custom app scopes write_orders (plus read_orders, read_locations). Run from the repo root:
     python3 scripts/shopify_seed.py              # creates every scenario
