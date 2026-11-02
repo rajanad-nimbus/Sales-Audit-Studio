@@ -25,6 +25,7 @@ from apps.security.routes import router as security_router
 from apps.store_days.routes import router as store_day_router
 from apps.system.routes import router as system_router
 from apps.totals.routes import router as totals_router
+from apps.transactions.register_event_routes import router as register_event_router
 from apps.transactions.routes import router as transactions_router
 
 ROUTERS = (
@@ -41,6 +42,7 @@ ROUTERS = (
     cases_router,
     corrections_router,
     transactions_router,
+    register_event_router,
     gl_router,
     totals_router,
     rules_router,
