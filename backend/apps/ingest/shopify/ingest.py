@@ -42,13 +42,16 @@ def identity_payload(rec: dict) -> dict:
     return {k: rec.get(k) for k in IMMUTABLE_FIELDS}
 
 
-def tax_detail(rec: dict, sign: int) -> dict | None:
-    """The tax Shopify reported on an order or refund, as a transaction detail block (negative for a refund)."""
-    taxes = rec.get("taxes")
-    if taxes is None or taxes == []:
+DETAIL_FIELDS = ("lines", "discounts", "taxes", "tenders", "original_reference", "return_reason")
+
+
+def record_detail(rec: dict, sign: int) -> dict | None:
+    """Lines, discounts, tax and tenders Shopify reported, as a transaction detail block (negative for a refund)."""
+    block = {k: rec[k] for k in DETAIL_FIELDS if rec.get(k) not in (None, [])}
+    if not block:
         return None
     try:
-        return transaction_detail.extract({"taxes": taxes}, sign)
+        return transaction_detail.extract(block, sign)
     except (ValueError, InvalidOperation, OverflowError) as exc:
         raise ValueError(f"invalid transaction detail: {exc}") from exc
 
@@ -90,7 +93,7 @@ def parse_shopify_order(rec: dict) -> dict:
         "ts": ts,
         "financial_status": financial_status,
         "channel_id": "ecommerce",
-        "detail": tax_detail(rec, 1),
+        "detail": record_detail(rec, 1),
     }
 
 
@@ -132,7 +135,7 @@ def parse_shopify_refund(rec: dict) -> dict:
         "order_id": str(rec["order_id"]),
         "refund_id": str(rec.get("refund_id", "")),
         "channel_id": "ecommerce",
-        "detail": tax_detail(rec, -1),
+        "detail": record_detail(rec, -1),
     }
 
 

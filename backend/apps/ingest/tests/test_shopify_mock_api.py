@@ -42,11 +42,21 @@ def make_app(state):
 
     async def list_refunds(request):
         state["refund_calls"].append(request.match_info["oid"])
+        cursor = request.query.get("page_info")
+        state.setdefault("refund_cursors", []).append(cursor)
+        if cursor is not None:
+            assert cursor == "next+page"
+            if state.get("fail_second_refund_page"):
+                return web.Response(status=500)
+        headers = {}
+        if state.get("paginate_refunds") and cursor is None:
+            url = f"{request.scheme}://{request.host}/admin/api/2024-01/orders/3/refunds.json"
+            headers["Link"] = f'<{url}?page_info=next%2Bpage>; rel="next"'
         return web.json_response(
             {
                 "refunds": [
                     {
-                        "id": 900,
+                        "id": 901 if cursor else 900,
                         "order_id": 3,
                         "created_at": "2024-01-16T09:00:00Z",
                         "transactions": [
@@ -59,7 +69,8 @@ def make_app(state):
                         ],
                     }
                 ]
-            }
+            },
+            headers=headers,
         )
 
     app = web.Application()
@@ -97,6 +108,57 @@ def test_feed_paginates_retries_and_fetches_refunds_only_when_needed(monkeypatch
     assert set(state["auth"]) == {"tok"}
     refund = recs[3]
     assert refund["amount"] == "4.00" and refund["payment_reference"] == "3"
+
+
+def test_feed_includes_every_refund_page(monkeypatch):
+    state = {"order_calls": [], "refund_calls": [], "auth": [], "paginate_refunds": True}
+
+    async def go():
+        server = TestServer(make_app(state))
+        await server.start_server()
+        try:
+            monkeypatch.setenv("SHOPIFY_STORE_URL", f"http://{server.host}:{server.port}")
+            monkeypatch.setenv("SHOPIFY_ACCESS_TOKEN", "tok")
+            return await sa.fetch_shopify_feed("S1")
+        finally:
+            await server.close()
+
+    records = asyncio.run(go())["Shopify"]
+    assert [record["source_record_id"] for record in records] == [
+        "SHOP-1",
+        "SHOP-2",
+        "SHOP-3",
+        "SHREF-900",
+        "SHREF-901",
+        "SHOP-4",
+        "SHOP-5",
+    ]
+    assert state["refund_cursors"] == [None, "next+page"]
+
+
+def test_feed_rejects_partial_refunds_when_later_page_fails(monkeypatch):
+    state = {
+        "order_calls": [],
+        "refund_calls": [],
+        "auth": [],
+        "paginate_refunds": True,
+        "fail_second_refund_page": True,
+    }
+    monkeypatch.setattr(sa, "retry_delay", lambda *_args: 0)
+
+    async def go():
+        server = TestServer(make_app(state))
+        await server.start_server()
+        try:
+            monkeypatch.setenv("SHOPIFY_STORE_URL", f"http://{server.host}:{server.port}")
+            monkeypatch.setenv("SHOPIFY_ACCESS_TOKEN", "tok")
+            with pytest.raises(sa.ShopifyAPIError, match="Status 500"):
+                await sa.fetch_shopify_feed("S1")
+        finally:
+            await server.close()
+
+    asyncio.run(go())
+    assert state["refund_cursors"] == [None, "next+page", "next+page", "next+page"]
 
 
 def test_adapter_follows_lowercase_repeated_links_with_encoded_cursor():

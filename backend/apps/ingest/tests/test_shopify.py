@@ -246,12 +246,59 @@ def test_fetch_orders_rejects_malformed_collection_response(monkeypatch):
 def test_fetch_refunds_rejects_malformed_collection_response(monkeypatch):
     adapter = sa.ShopifyAdapter(require_credentials=False)
 
-    async def request(*_args, **_kwargs):
-        return {"refunds": None}
+    async def request_full(*_args, **_kwargs):
+        return {"refunds": None}, {}
 
-    monkeypatch.setattr(adapter, "_request", request)
+    monkeypatch.setattr(adapter, "_request_full", request_full)
 
     with pytest.raises(sa.ShopifyAPIError, match="invalid refunds response"):
+        asyncio.run(adapter.fetch_refunds("order-1"))
+
+
+def test_fetch_refunds_follows_all_pages(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+    requests = []
+    pages = [
+        (
+            {"refunds": [{"id": 1}]},
+            {"link": '<https://shop.test/refunds.json?page_info=a%2Bb>; rel="next"'},
+        ),
+        ({"refunds": [{"id": 2}]}, {}),
+    ]
+
+    async def request_full(method, endpoint, params=None):
+        requests.append((method, endpoint, dict(params)))
+        return pages.pop(0)
+
+    monkeypatch.setattr(adapter, "_request_full", request_full)
+
+    assert asyncio.run(adapter.fetch_refunds("order-1")) == [{"id": 1}, {"id": 2}]
+    assert all(endpoint == "/orders/order-1/refunds.json" for _, endpoint, _ in requests)
+    assert requests[0][2]["limit"] == requests[1][2]["limit"] == 250
+    assert requests[1][2]["page_info"] == "a+b"
+
+
+def test_fetch_refunds_rejects_repeated_cursor(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+
+    async def request_full(*_args, **_kwargs):
+        return {"refunds": []}, {"link": '<https://shop.test/refunds.json?page_info=x>; rel="next"'}
+
+    monkeypatch.setattr(adapter, "_request_full", request_full)
+    with pytest.raises(sa.ShopifyAPIError, match="repeated pagination cursor"):
+        asyncio.run(adapter.fetch_refunds("order-1"))
+
+
+def test_fetch_refunds_respects_delivery_limit(monkeypatch):
+    adapter = sa.ShopifyAdapter(require_credentials=False)
+    monkeypatch.setattr(sa, "MAX_DELIVERY_RECORDS", 1)
+
+    async def refunds(_order_id):
+        yield {"id": 1}
+        yield {"id": 2}
+
+    monkeypatch.setattr(adapter, "iter_refunds", refunds)
+    with pytest.raises(sa.ShopifyFeedLimitError, match="1-record"):
         asyncio.run(adapter.fetch_refunds("order-1"))
 
 
@@ -363,6 +410,44 @@ def test_shopify_feed_stops_at_delivery_record_limit(monkeypatch):
 
     with pytest.raises(sa.ShopifyFeedLimitError, match="1-record"):
         asyncio.run(sa.fetch_shopify_feed("S1"))
+    assert adapter.closed
+
+
+def test_shopify_feed_enforces_delivery_limit_while_streaming_refunds(monkeypatch):
+    class FakeAdapter:
+        closed = False
+        refunds_read = 0
+
+        async def fetch_orders(self, *_args, **_kwargs):
+            yield {
+                "id": 1,
+                "created_at": "2024-01-15T10:00:00Z",
+                "total_price": "5.00",
+                "currency": "USD",
+                "financial_status": "partially_refunded",
+            }
+
+        async def iter_refunds(self, _order_id):
+            for refund_id in (1, 2, 3):
+                self.refunds_read += 1
+                yield {
+                    "id": refund_id,
+                    "created_at": "2024-01-16T10:00:00Z",
+                    "transactions": [
+                        {"kind": "refund", "status": "success", "amount": "1.00", "currency": "USD"}
+                    ],
+                }
+
+        async def close(self):
+            self.closed = True
+
+    adapter = FakeAdapter()
+    monkeypatch.setattr(sa, "ShopifyAdapter", lambda: adapter)
+    monkeypatch.setattr(sa, "MAX_DELIVERY_RECORDS", 2)
+
+    with pytest.raises(sa.ShopifyFeedLimitError, match="2-record"):
+        asyncio.run(sa.fetch_shopify_feed("S1"))
+    assert adapter.refunds_read == 2
     assert adapter.closed
 
 

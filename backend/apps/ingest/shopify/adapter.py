@@ -20,6 +20,7 @@ import aiohttp
 from multidict import CIMultiDict
 
 from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
+from apps.ingest.shopify import detail as shopify_detail
 
 
 class ShopifyAPIError(Exception):
@@ -63,6 +64,30 @@ MAX_RETRY_DELAY_SECONDS = 30.0
 MAX_SHOPIFY_PAGES = 1_000
 MAX_SHOPIFY_RESPONSE_BYTES = MAX_DELIVERY_BYTES
 SHOPIFY_RESPONSE_CHUNK_BYTES = 64 * 1024
+
+
+class _DeliveryBuffer:
+    """Collect records within the same count and JSON size limits as ingestion."""
+
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+        self._payload_size = 2
+
+    def append(self, record: dict) -> None:
+        if len(self.records) >= MAX_DELIVERY_RECORDS:
+            raise ShopifyFeedLimitError(
+                f"Shopify feed exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit"
+            )
+        encoded_size = len(
+            json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        )
+        next_size = self._payload_size + encoded_size + bool(self.records)
+        if next_size > MAX_DELIVERY_BYTES:
+            raise ShopifyFeedLimitError(
+                f"Shopify feed exceeds the {MAX_DELIVERY_BYTES:,}-byte delivery limit"
+            )
+        self.records.append(record)
+        self._payload_size = next_size
 
 
 async def _read_response_json(response: aiohttp.ClientResponse) -> dict:
@@ -243,7 +268,8 @@ class ShopifyAdapter:
             "created_at_min": created_at_min.isoformat(),
             "created_at_max": created_at_max.isoformat(),
             "fields": "id,order_number,created_at,updated_at,financial_status,fulfillment_status,"
-            "total_price,currency,customer,note,tax_lines",
+            "total_price,currency,customer,note,tax_lines,total_tax,taxes_included,line_items,shipping_lines,"
+            "total_discounts,discount_codes,discount_applications,payment_gateway_names",
         }
         pagination = _ShopifyPagination()
 
@@ -303,20 +329,38 @@ class ShopifyAdapter:
             params = next_params
 
     async def fetch_refunds(self, order_id: str) -> list[dict]:
-        """Fetch refunds for a specific order."""
-        data = await self._request(
-            "GET",
-            f"/orders/{order_id}/refunds.json",
-            params={"fields": "id,order_id,created_at,note,refund_line_items,transactions"},
-        )
-        return self._collection_page(data, "refunds", "refunds")
+        """Collect an order's refunds within the ingestion delivery limits."""
+        refunds = _DeliveryBuffer()
+        async for refund in self.iter_refunds(order_id):
+            refunds.append(refund)
+        return refunds.records
+
+    async def iter_refunds(self, order_id: str) -> AsyncGenerator[dict, None]:
+        """Stream every refund page for an order."""
+        params = {
+            "limit": 250,
+            "fields": "id,order_id,created_at,note,refund_line_items,transactions",
+        }
+        pagination = _ShopifyPagination()
+        while True:
+            data, headers = await self._request_full(
+                "GET", f"/orders/{order_id}/refunds.json", params=params
+            )
+            for refund in self._collection_page(data, "refunds", "refunds"):
+                yield refund
+            next_params = pagination.next_params(headers, params)
+            if next_params is None:
+                break
+            params = next_params
 
     async def fetch_order_transactions(self, order_id: str) -> list[dict]:
         """Fetch payment transactions for an order (captures, authorizations)."""
         data = await self._request(
             "GET",
             f"/orders/{order_id}/transactions.json",
-            params={"fields": "id,type,kind,amount,currency,created_at,message"},
+            params={
+                "fields": "id,kind,status,gateway,amount,currency,authorization,created_at,message"
+            },
         )
         return self._collection_page(data, "transactions", "transactions")
 
@@ -372,37 +416,26 @@ async def fetch_shopify_feed(
 ) -> dict[str, list[dict]]:
     """Fetch Shopify orders and refunds. Any API failure propagates so no partial feed is ingested."""
     adapter = ShopifyAdapter()
-    records = []
-    payload_size = 2  # opening and closing brackets of the JSON record list
-
-    def append_record(record: dict) -> None:
-        nonlocal payload_size
-        if len(records) >= MAX_DELIVERY_RECORDS:
-            raise ShopifyFeedLimitError(
-                f"Shopify feed exceeds the {MAX_DELIVERY_RECORDS:,}-record delivery limit"
-            )
-        encoded_size = len(
-            json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        )
-        next_size = payload_size + encoded_size + bool(records)
-        if next_size > MAX_DELIVERY_BYTES:
-            raise ShopifyFeedLimitError(
-                f"Shopify feed exceeds the {MAX_DELIVERY_BYTES:,}-byte delivery limit"
-            )
-        records.append(record)
-        payload_size = next_size
+    records = _DeliveryBuffer()
 
     try:
         async for order in adapter.fetch_orders(created_at_min, created_at_max):
-            append_record(normalize_order(order, store_id))
+            # Split tenders need the payment transactions; one gateway is covered by the order itself.
+            transactions = (
+                await adapter.fetch_order_transactions(order["id"])
+                if len(order.get("payment_gateway_names") or []) > 1
+                and order.get("financial_status") in shopify_detail.SETTLED_STATUSES
+                else None
+            )
+            records.append(normalize_order(order, store_id, transactions))
 
             if order.get("financial_status") in ("refunded", "partially_refunded"):
-                for refund in await adapter.fetch_refunds(order["id"]):
-                    append_record(
+                async for refund in adapter.iter_refunds(order["id"]):
+                    records.append(
                         normalize_refund(refund, order["id"], order.get("currency"), store_id)
                     )
 
-        return {"Shopify": records}
+        return {"Shopify": records.records}
     finally:
         await adapter.close()
 
@@ -441,9 +474,14 @@ def refund_taxes(refund: dict) -> list[dict]:
     return [_tax("TAX", "Refunded tax", 0, total)] if total else []
 
 
-def normalize_order(order: dict, store_id: str) -> dict:
-    """Convert a Shopify order (REST or webhook payload) to ingest format."""
+def normalize_order(order: dict, store_id: str, transactions: list[dict] | None = None) -> dict:
+    """Convert a Shopify order (REST or webhook payload) to ingest format.
+
+    `transactions` are the order's payment transactions when the caller has them; without them
+    a single-gateway settled order is recorded as one tender for the full total.
+    """
     return {
+        **shopify_detail.order_detail(order, transactions),
         "source_record_id": f"SHOP-{order['id']}",
         "record_type": "Order",
         "store_id": store_id,
@@ -502,4 +540,5 @@ def normalize_refund(refund: dict, order_id, currency: str | None, store_id: str
         "order_id": str(order_id),
         "note": refund.get("note"),
         "taxes": refund_taxes(refund),
+        **shopify_detail.refund_detail(refund, order_id),
     }
