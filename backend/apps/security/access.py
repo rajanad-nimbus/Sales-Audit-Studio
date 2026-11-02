@@ -114,6 +114,14 @@ SCREENS: tuple[Screen, ...] = (
         ("/api/transactions",),
     ),
     Screen(
+        "audit-errors",
+        "/audit-errors",
+        "Audit Errors",
+        "Data & Control",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/audit-errors",),
+    ),
+    Screen(
         "cash-office",
         "/cash-office",
         "Cash Office",

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from apps.agents.action_center import router as action_router
 from apps.agents.routes import router as agent_router
 from apps.assistant.routes import router as assistant_router
+from apps.audit.error_routes import router as audit_error_router
 from apps.audit.routes import router as audit_router
 from apps.cases.routes import router as cases_router
 from apps.cash.routes import router as cash_router
@@ -31,6 +32,7 @@ ROUTERS = (
     action_router,
     batch_router,
     audit_router,
+    audit_error_router,
     development_router,
     exports_router,
     store_day_router,
