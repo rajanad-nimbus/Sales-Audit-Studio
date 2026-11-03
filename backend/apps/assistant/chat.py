@@ -4,6 +4,7 @@ import re
 from datetime import UTC, datetime
 
 from integrations.ontology import ontology
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from sqlalchemy import func, or_, select
 
 from apps.assistant.responses import rule_answer as rule_answer
@@ -112,6 +113,24 @@ async def case_context(db, c: Case) -> dict:
         if od
         else None,
     }
+
+
+def ontology_reference(message: str) -> dict | None:
+    """Release provenance plus approved glossary entries the question mentions; None when Studio is not connected."""
+    context = ontology_integration.context()
+    if not context["ontology"]:
+        return None
+    text = (message or "").lower()
+    glossary = [
+        row
+        for row in context["definitions"].get("glossary", [])
+        if any(
+            isinstance(v, str) and 3 < len(v) < 60 and v.lower() in text
+            for k, v in row.items()
+            if k in ("term", "name", "title", "acronym")
+        )
+    ][:5]
+    return {"release": context["ontology"].get("releaseId"), "glossary": glossary}
 
 
 async def build_context(
@@ -274,4 +293,6 @@ async def build_context(
         sel = await case_context(db, c) if c else None
     if sel:
         ctx["selected_case"] = sel
+    if reference := ontology_reference(message):
+        ctx["ontology_reference"] = reference
     return ctx

@@ -354,3 +354,15 @@ def test_case_collaboration_bounds_notes_and_requests():
             await engine.dispose()
 
     asyncio.run(go())
+
+
+def test_lookup_ontology_falls_back_to_builtin_types():
+    import asyncio
+
+    from apps.agents.agent_tools import EvidenceTools
+
+    tools = EvidenceTools(None, None)
+    out = asyncio.run(tools.lookup_ontology("tax"))
+    assert out["source"] == "built-in-fallback"
+    assert any(m["type"] == "TAX_MISMATCH" for m in out["matches"])
+    assert asyncio.run(tools.lookup_ontology(" "))["error"]

@@ -56,7 +56,7 @@ You explain what is in the provided context: cases, exposure, evidence, findings
 <guidelines>
 1. Answer directly first, in business terms, then give the supporting facts.
 2. Always cite case numbers and exact figures from the context. Keep exception amount and loss exposure separate.
-3. Separate supported findings from candidate causes. Candidate causes from the ontology are not proven.
+3. Separate supported findings from candidate causes. Candidate causes from the ontology are not proven. Glossary entries in ontology_reference are approved definitions: use them to explain terms, citing the release.
 4. Be specific and grounded. Never invent cases, amounts, evidence or causes.
 </guidelines>
 

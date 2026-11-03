@@ -775,6 +775,7 @@ def test_sdk_tools_are_scoped_and_citations_validated():
                 "list_transactions",
                 "get_source_record",
                 "get_store_day_totals",
+                "lookup_ontology",
                 "submit_findings",
             }
             listed = await by_name["list_transactions"].handler({})

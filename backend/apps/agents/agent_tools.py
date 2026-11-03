@@ -7,6 +7,8 @@ Each result carries the ids the agent may cite; the investigator rejects citatio
 import json
 from decimal import Decimal
 
+from integrations.ontology import ontology
+from integrations.ontology.ontology_integration import integration as ontology_integration
 from sqlalchemy import select
 
 from apps.ingest.models import SourceRecord
@@ -50,6 +52,24 @@ TOOL_SPECS = [
         "description": "Calculated vs declared audit totals and variances for the case's store day.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "lookup_ontology",
+        "description": (
+            "Search the approved enterprise ontology (business rules, glossary, metrics) for a term. "
+            "Definitions are reference data, not evidence about this case, and cannot be cited."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "term": {"type": "string"},
+                "section": {
+                    "type": "string",
+                    "description": "business-rules, glossary, metrics, entities, relationships or workflows",
+                },
+            },
+            "required": ["term"],
+        },
+    },
 ]
 
 
@@ -69,6 +89,7 @@ class EvidenceTools:
             "list_transactions": self.list_transactions,
             "get_source_record": self.get_source_record,
             "get_store_day_totals": self.get_store_day_totals,
+            "lookup_ontology": self.lookup_ontology,
         }.get(name)
         if not fn:
             return {"error": f"unknown tool {name}"}
@@ -138,6 +159,40 @@ class EvidenceTools:
             "source_system": rec.source_system,
             "payload": text[:MAX_PAYLOAD_CHARS],
             "truncated": len(text) > MAX_PAYLOAD_CHARS,
+        }
+
+    async def lookup_ontology(self, term: str, section: str | None = None):
+        """Read-only search of the cached approved release; falls back to the built-in exception types."""
+        needle = str(term or "").strip().lower()
+        if not needle:
+            return {"error": "term is required"}
+        context = ontology_integration.context()
+        if not context["ontology"]:
+            hits = [
+                {
+                    "type": k,
+                    "label": v["label"],
+                    "evidence": v["evidence"],
+                    "known_causes": v["known_causes"],
+                }
+                for k, v in ontology.EXCEPTION_TYPES.items()
+                if needle in k.lower() or needle in v["label"].lower()
+            ]
+            return {"source": "built-in-fallback", "release": None, "matches": hits[:MAX_ROWS]}
+        sections = [section] if section else list(context["definitions"])
+        hits = []
+        for name in sections:
+            for row in context["definitions"].get(name, []):
+                if needle in json.dumps(row, default=str).lower():
+                    hits.append({"section": name, "definition": row})
+        text = dumps(hits[:MAX_ROWS])
+        return {
+            "source": context["source"],
+            "release": context["ontology"].get("releaseId"),
+            "matches": json.loads(text[: MAX_PAYLOAD_CHARS * 4])
+            if len(text) <= MAX_PAYLOAD_CHARS * 4
+            else hits[:5],
+            "truncated": len(hits) > MAX_ROWS or len(text) > MAX_PAYLOAD_CHARS * 4,
         }
 
     async def get_store_day_totals(self):
