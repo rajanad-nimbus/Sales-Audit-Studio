@@ -6,22 +6,8 @@ import { StoreSelect } from '@/components/StoreSelect';
 import ControlsTable from '@/components/settings/ControlsTable';
 import { Alert, Button, Card, Tabs } from '@/components/ui';
 import { SettingsSection } from '@/components/settings/SettingsSection';
+import { TotalDefinitions, type TotalRevision } from '@/components/settings/TotalDefinitions';
 const STUDIO = process.env.NEXT_PUBLIC_ONTOLOGY_STUDIO_URL || 'http://localhost:3050';
-type Total = {
-  id: string;
-  name: string;
-  aggregation: string;
-  source_system: string | null;
-  transaction_types: string[];
-  tender_type: string | null;
-  level: string;
-  revision: number;
-  active: boolean;
-  rollups: unknown[];
-  calculation_basis: string;
-  combined_total_ids: string[];
-  combined_operator: string | null;
-};
 type Rule = {
   id: string;
   name: string;
@@ -59,7 +45,7 @@ type Tab = (typeof tabs)[number];
 export default function ControlsPage() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>('Totals & rules');
-  const [totals, setTotals] = useState<Total[]>([]),
+  const [totals, setTotals] = useState<TotalRevision[]>([]),
     [rules, setRules] = useState<Rule[]>([]),
     [maps, setMaps] = useState<GL[]>([]),
     [error, setError] = useState<string | null>(null),
@@ -168,27 +154,10 @@ export default function ControlsPage() {
               </a>
             }
           >
-            Totals and rules are defined and approved in Ontology Studio. Nimbus shows them here
+            Audit rules are defined and approved in Ontology Studio. Nimbus shows them here
             read-only and applies the approved versions.
           </Alert>
-          <Card title="Audit total definitions">
-            <p>
-              Active definitions are calculated and versioned during Store Day re-totaling. Rules
-              reference <b>Configured: [definition name]</b>.
-            </p>
-            <ControlsTable
-              headers={['Name', 'Aggregation', 'Source', 'Level', 'Filter']}
-              rows={totals.map((x) => [
-                x.name,
-                x.calculation_basis === 'Combined'
-                  ? `Combined (${x.combined_operator || '?'})`
-                  : x.aggregation,
-                x.source_system || 'Any',
-                x.level,
-                [...x.transaction_types, x.tender_type].filter(Boolean).join(', ') || 'All records',
-              ])}
-            />
-          </Card>
+          <TotalDefinitions revisions={totals} onChanged={load} />
           <Card title="Threshold rules">
             <p>
               A rule creates an investigation when the absolute target total exceeds the threshold

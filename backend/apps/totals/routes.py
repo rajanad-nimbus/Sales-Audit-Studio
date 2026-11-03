@@ -8,6 +8,7 @@ from decimal import Decimal
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from integrations.ontology.nimbus import audit
+from model_base import utcnow
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,14 +19,18 @@ from apps.security import scope
 from apps.security.authentication import require_role
 from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from apps.totals.calculation import (
+    DRAFT_STATUS,
+    NOT_LIVE_STATUSES,
+    PENDING_APPROVAL_STATUS,
     calculate_store_day,
     dependencies_for_preview,
     effective_definitions,
     store_location_traits,
 )
 from apps.totals.currency import single_currency
+from apps.totals.impact import change_impact
 from apps.totals.models import AuditTotalDefinition, SalesAuditErrorDefinition
-from apps.totals.schemas import TotalDefinitionBody
+from apps.totals.schemas import ActivationBody, ReturnBody, TotalDefinitionBody
 
 from .domain import serialize_definition, validate_definition
 
@@ -93,15 +98,87 @@ async def validate_combined_references(
         )
 
 
-def affected_date_range(
-    current: AuditTotalDefinition, replacement: TotalDefinitionBody
-) -> tuple[str | None, str | None]:
-    """Return the full range whose effective definition can change after a revision."""
-    starts = (current.start_date, replacement.start_date)
-    ends = (current.end_date, replacement.end_date)
-    start = None if None in starts else min(starts)
-    end = None if None in ends else max(ends)
-    return start, end
+def validate_draft(body: TotalDefinitionBody) -> None:
+    """Saves only produce drafts; a revision goes live through its reviewed impact."""
+    try:
+        validate_definition(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.status != DRAFT_STATUS:
+        raise HTTPException(
+            status_code=422,
+            detail="Save the revision as Worksheet, preview its impact, then activate it",
+        )
+
+
+async def load_draft(
+    db: AsyncSession,
+    definition_id: str,
+    statuses: tuple[str, ...] = NOT_LIVE_STATUSES,
+) -> AuditTotalDefinition:
+    draft = (
+        await db.execute(
+            select(AuditTotalDefinition).where(AuditTotalDefinition.id == definition_id)
+        )
+    ).scalar_one_or_none()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Total definition not found")
+    if draft.status not in statuses:
+        detail = {
+            (DRAFT_STATUS,): "Only a Worksheet revision can be submitted for approval",
+            (PENDING_APPROVAL_STATUS,): "Only a revision pending approval can be decided",
+        }.get(statuses, "Only a Worksheet or Pending Approval revision has an impact to preview")
+        raise HTTPException(status_code=409, detail=detail)
+    return draft
+
+
+async def require_latest(db: AsyncSession, draft: AuditTotalDefinition) -> None:
+    latest = (
+        await db.execute(
+            select(func.max(AuditTotalDefinition.revision)).where(
+                AuditTotalDefinition.name == draft.name
+            )
+        )
+    ).scalar()
+    if draft.revision != latest:
+        raise HTTPException(
+            status_code=409, detail="A newer revision of this total exists; use that one"
+        )
+
+
+def require_unscoped(user: dict) -> None:
+    if scope.scoped(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Activating a total affects every store; it needs a user who can see all stores",
+        )
+
+
+async def reviewed_impact(db: AsyncSession, draft: AuditTotalDefinition, user: dict, seen: str):
+    """Recalculate the impact and refuse it unless it is exactly the one reviewed."""
+    report = await change_impact(db, draft, user)
+    if report["fingerprint"] != seen:
+        raise HTTPException(
+            status_code=409,
+            detail="The impact has changed since it was reviewed; preview it again",
+        )
+    newly_broken = [
+        row for row in report["rows"] if row["proposed_error"] and not row["current_error"]
+    ]
+    if newly_broken:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Activating would break calculation for {len(newly_broken)} store day(s): "
+                f"{newly_broken[0]['proposed_error']}"
+            ),
+        )
+    return report
+
+
+def json_safe(value: object) -> object:
+    """Audit state is JSON; keep money exact by storing Decimals as strings."""
+    return json.loads(json.dumps(value, default=str))
 
 
 @router.get("")
@@ -125,10 +202,7 @@ async def create_definition(
     user: dict = Depends(require_role("finance")),
 ):
     await lock_configuration(db, exclusive=True)
-    try:
-        validate_definition(body)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    validate_draft(body)
     await validate_combined_references(body, db, name=body.name)
     latest = (
         await db.execute(
@@ -137,13 +211,7 @@ async def create_definition(
             )
         )
     ).scalar() or 0
-    await invalidate_configuration(
-        db,
-        actor=user["user"] or "ontology.user",
-        reason=f"Total definition {body.name} changed",
-        start_date=body.start_date,
-        end_date=body.end_date,
-    )
+    # A draft is not effective, so saving it invalidates no store day.
     row = AuditTotalDefinition(
         id=str(uuid.uuid4()),
         revision=int(latest) + 1,
@@ -218,10 +286,7 @@ async def update_definition(
     ).scalar_one_or_none()
     if not current:
         raise HTTPException(status_code=404, detail="Total definition not found")
-    try:
-        validate_definition(body)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    validate_draft(body)
     await validate_combined_references(body, db, name=current.name)
     latest = (
         await db.execute(
@@ -235,14 +300,6 @@ async def update_definition(
             status_code=409,
             detail="This total definition revision is stale; load the latest revision before updating",
         )
-    start_date, end_date = affected_date_range(current, body)
-    await invalidate_configuration(
-        db,
-        actor=user["user"] or "ontology.user",
-        reason=f"Total definition {current.name} changed",
-        start_date=start_date,
-        end_date=end_date,
-    )
     payload = body.model_dump(exclude={"revision", "name"})
     row = AuditTotalDefinition(
         id=str(uuid.uuid4()),
@@ -277,6 +334,146 @@ async def update_definition(
             ) from exc
         raise
     return view(row)
+
+
+@router.post("/{definition_id}/impact")
+async def impact_definition(
+    definition_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it")),
+):
+    """Preview what activating a draft would change, store day by store day."""
+    await lock_configuration(db)
+    draft = await load_draft(db, definition_id)
+    return await change_impact(db, draft, user)
+
+
+@router.post("/{definition_id}/submit")
+async def submit_definition(
+    definition_id: str,
+    body: ActivationBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance")),
+):
+    """The editor sends a draft, with the impact they reviewed, to a second approver."""
+    require_unscoped(user)
+    await lock_configuration(db, exclusive=True)
+    draft = await load_draft(db, definition_id, (DRAFT_STATUS,))
+    await require_latest(db, draft)
+    report = await reviewed_impact(db, draft, user, body.impact_fingerprint)
+    actor = user["user"] or "ontology.user"
+    draft.status = PENDING_APPROVAL_STATUS
+    draft.submitted_by, draft.submitted_at = actor, utcnow()
+    draft.submitted_impact_fingerprint = report["fingerprint"]
+    audit(
+        db,
+        "TOTAL_DEFINITION_SUBMITTED",
+        None,
+        "AuditTotalDefinition",
+        draft.id,
+        f"Submitted total definition {draft.name} revision {draft.revision} for approval",
+        actor=actor,
+        after={
+            "revision": draft.revision,
+            "impact_fingerprint": report["fingerprint"],
+            "impact_summary": json_safe(report["summary"]),
+        },
+    )
+    await db.commit()
+    return view(draft)
+
+
+@router.post("/{definition_id}/return")
+async def return_definition(
+    definition_id: str,
+    body: ReturnBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance")),
+):
+    """Send a submitted revision back to Worksheet with the reviewer's reason."""
+    await lock_configuration(db, exclusive=True)
+    draft = await load_draft(db, definition_id, (PENDING_APPROVAL_STATUS,))
+    actor = user["user"] or "ontology.user"
+    submitted_by = draft.submitted_by
+    draft.status = DRAFT_STATUS
+    draft.submitted_by = draft.submitted_at = draft.submitted_impact_fingerprint = None
+    audit(
+        db,
+        "TOTAL_DEFINITION_RETURNED",
+        None,
+        "AuditTotalDefinition",
+        draft.id,
+        f"Returned total definition {draft.name} revision {draft.revision}: {body.rationale}",
+        actor=actor,
+        after={"revision": draft.revision, "submitted_by": submitted_by, "reason": body.rationale},
+    )
+    await db.commit()
+    return view(draft)
+
+
+@router.post("/{definition_id}/activate")
+async def activate_definition(
+    definition_id: str,
+    body: ActivationBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance")),
+):
+    """A second person makes a submitted revision live, if its impact is what was submitted."""
+    require_unscoped(user)
+    await lock_configuration(db, exclusive=True)
+    draft = await load_draft(db, definition_id, (PENDING_APPROVAL_STATUS,))
+    actor = user["user"] or "ontology.user"
+    if actor in {draft.submitted_by, draft.updated_by}:
+        raise HTTPException(
+            status_code=403,
+            detail="A different user from the one who edited or submitted it must approve it",
+        )
+    await require_latest(db, draft)
+    if body.impact_fingerprint != draft.submitted_impact_fingerprint:
+        raise HTTPException(
+            status_code=409,
+            detail="This is not the impact that was submitted; preview it again",
+        )
+    try:
+        report = await reviewed_impact(db, draft, user, body.impact_fingerprint)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise HTTPException(
+                status_code=409,
+                detail="The impact has changed since it was submitted; return it for review",
+            ) from exc
+        raise
+    start, end = report["date_range"]["start"], report["date_range"]["end"]
+    await invalidate_configuration(
+        db,
+        actor=actor,
+        reason=f"Total definition {draft.name} revision {draft.revision} activated",
+        start_date=start,
+        end_date=end,
+    )
+    draft.status, draft.approved_by, draft.approved_at = "Active", actor, utcnow()
+    audit(
+        db,
+        "TOTAL_DEFINITION_ACTIVATED",
+        None,
+        "AuditTotalDefinition",
+        draft.id,
+        f"Activated total definition {draft.name} revision {draft.revision}",
+        actor=actor,
+        after={
+            "revision": draft.revision,
+            "edited_by": draft.updated_by,
+            "submitted_by": draft.submitted_by,
+            "replaced_definition_id": report["replaces_definition_id"],
+            "replaced_revision": report["replaces_revision"],
+            "impact_fingerprint": report["fingerprint"],
+            "impact_summary": json_safe(report["summary"]),
+            "impact_truncated": report["truncated"],
+            "date_range": report["date_range"],
+        },
+    )
+    await db.commit()
+    return view(draft)
 
 
 @router.get("/errors")

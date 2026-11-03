@@ -10,8 +10,13 @@ from apps.ingest.reconciliation import lock_reconciliation
 from apps.ingest.service import ingest
 from apps.store_days.freshness import lock_configuration, lock_store_day
 from apps.store_days.routes import close_store_day, open_store_day_record, retotal_store_day
-from apps.totals.routes import create_definition
-from apps.totals.schemas import TotalDefinitionBody
+from apps.totals.routes import (
+    activate_definition,
+    create_definition,
+    impact_definition,
+    submit_definition,
+)
+from apps.totals.schemas import ActivationBody, TotalDefinitionBody
 from fastapi import HTTPException
 from models import (
     AuditTotal,
@@ -26,6 +31,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 POSTGRES_URL = os.getenv("ZETSA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="ZETSA_TEST_POSTGRES_URL not configured")
+
+
+async def publish_definition(db, name: str) -> None:
+    """Save a draft, submit its previewed impact, then have a second user approve it."""
+    user = {"user": "finance"}
+    created = await create_definition(TotalDefinitionBody(name=name), db, user)
+    report = await impact_definition(created["id"], db, user)
+    body = ActivationBody(impact_fingerprint=report["fingerprint"])
+    await submit_definition(created["id"], body, db, user)
+    await activate_definition(created["id"], body, db, {"user": "approver"})
 
 
 def test_ingestion_and_retotal_serialize_in_both_orders():
@@ -97,11 +112,7 @@ def test_ingestion_and_retotal_serialize_in_both_orders():
             async with sessions() as totaling, sessions() as configuring:
                 await lock_configuration(totaling)
                 await lock_store_day(totaling, "S3", "2026-10-01")
-                task = asyncio.create_task(
-                    create_definition(
-                        TotalDefinitionBody(name="New control"), configuring, {"user": "finance"}
-                    )
-                )
+                task = asyncio.create_task(publish_definition(configuring, "New control"))
                 with pytest.raises(asyncio.TimeoutError):
                     await asyncio.wait_for(asyncio.shield(task), 0.2)
                 await retotal_store_day("S3", "2026-10-01", totaling, {"user": "finance"})
@@ -219,7 +230,7 @@ def test_store_day_close_waits_for_reconciliation_lock():
                         StoreDayClosureRequest(
                             id="closure-request",
                             store_day_id="close-race",
-                            requested_by="finance",
+                            requested_by="store.auditor",
                             evidence_basis="Reviewed reconciliation totals",
                             status="Pending",
                         ),

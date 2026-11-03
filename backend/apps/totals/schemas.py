@@ -7,6 +7,25 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from apps.totals.sources import normalize_source_system
 
 
+class ActivationBody(BaseModel):
+    """Activation must name the impact preview the approver reviewed."""
+
+    impact_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class ReturnBody(BaseModel):
+    """Why a reviewer sent a submitted revision back to Worksheet."""
+
+    rationale: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("rationale")
+    @classmethod
+    def strip_rationale(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A reason is required")
+        return value.strip()
+
+
 class TotalDefinitionBody(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     aggregation: str = Field(default="Sum", max_length=16)

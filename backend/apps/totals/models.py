@@ -23,7 +23,8 @@ class AuditTotalDefinition(Base):
     over_short_group: Mapped[str | None] = mapped_column(String(32))
     over_short_operator: Mapped[str | None] = mapped_column(String(8))
     calculation_basis: Mapped[str] = mapped_column(String(32), default="Raw", server_default="Raw")
-    status: Mapped[str] = mapped_column(String(24), default="Worksheet", server_default="Worksheet")
+    # Worksheet (draft) and Pending Approval revisions are stored and audited, never calculated.
+    status: Mapped[str] = mapped_column(String(24), default="Active", server_default="Active")
     aggregation: Mapped[str] = mapped_column(String(16), default="Sum")
     measure: Mapped[str] = mapped_column(
         String(16), default="Amount", server_default="Amount"
@@ -54,6 +55,12 @@ class AuditTotalDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+    # Set when the editor submits a draft for approval; the approver must be someone else.
+    submitted_by: Mapped[str | None] = mapped_column(String(255))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_impact_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    approved_by: Mapped[str | None] = mapped_column(String(255))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_audit_total_definitions_name_revision", "name", "revision", unique=True),

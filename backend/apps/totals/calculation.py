@@ -24,6 +24,19 @@ SOURCE_TOTALS = {
 }
 
 
+DRAFT_STATUS = "Worksheet"
+PENDING_APPROVAL_STATUS = "Pending Approval"
+# Revisions in these states are stored and audited but never used in calculation.
+NOT_LIVE_STATUSES = (DRAFT_STATUS, PENDING_APPROVAL_STATUS)
+
+
+def applies_on(definition: AuditTotalDefinition, business_date: str) -> bool:
+    """Whether a revision's effective dates include a business date."""
+    return (definition.start_date is None or definition.start_date <= business_date) and (
+        definition.end_date is None or definition.end_date >= business_date
+    )
+
+
 @dataclass(slots=True)
 class StoreDayCalculation:
     source_totals: dict[TotalKey, Decimal]
@@ -39,10 +52,18 @@ async def effective_definitions(
     store_id: str,
     *,
     validate_all_combined: bool = False,
+    draft: AuditTotalDefinition | None = None,
 ) -> list[AuditTotalDefinition]:
+    """Return the live revisions for a store day.
+
+    Worksheet and Pending Approval revisions never take effect. Passing ``draft`` answers
+    "what would be effective if this draft were live": it replaces the live revision
+    of the same name, subject to the same date, active-flag and trait rules.
+    """
     revisions = (
         select(AuditTotalDefinition.name, func.max(AuditTotalDefinition.revision).label("revision"))
         .where(
+            AuditTotalDefinition.status.not_in(NOT_LIVE_STATUSES),
             (AuditTotalDefinition.start_date.is_(None))
             | (AuditTotalDefinition.start_date <= business_date),
             (AuditTotalDefinition.end_date.is_(None))
@@ -66,6 +87,10 @@ async def effective_definitions(
         .scalars()
         .all()
     )
+    if draft is not None:
+        definitions = [row for row in definitions if row.name != draft.name]
+        if draft.active and applies_on(draft, business_date):
+            definitions.append(draft)
     if any(definition.location_traits for definition in definitions):
         traits = await store_location_traits(db, store_id)
         definitions = [

@@ -34,7 +34,7 @@ class PersistedDefinitionLike(TotalDefinitionLike, Protocol):
 VALID_AGGREGATIONS = frozenset({"Sum", "Count"})
 VALID_MEASURES = frozenset({"Amount", "Tax"})
 VALID_LEVELS = frozenset({"Store", "Register", "Cashier", "Tender"})
-VALID_STATUSES = frozenset({"Worksheet", "Active", "Inactive"})
+VALID_STATUSES = frozenset({"Worksheet", "Pending Approval", "Active", "Inactive"})
 VALID_BASES = frozenset({"Raw", "Combined"})
 VALID_OVER_SHORT_GROUPS = frozenset({"Accounted For", "Accountable For"})
 VALID_OPERATORS = frozenset({"+", "-"})

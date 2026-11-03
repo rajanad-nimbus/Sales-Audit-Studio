@@ -4,12 +4,26 @@ from decimal import Decimal
 import pytest
 from apps.controls.foundation.routes import ReferenceBody, update_reference
 from apps.controls.rules.routes import RuleBody, create_rule
-from apps.totals.routes import create_definition, update_definition
-from apps.totals.schemas import TotalDefinitionBody
+from apps.totals.routes import (
+    activate_definition,
+    create_definition,
+    impact_definition,
+    submit_definition,
+    update_definition,
+)
+from apps.totals.schemas import ActivationBody, TotalDefinitionBody
 from fastapi import HTTPException
 from models import Base, ConfiguredAuditRule, FoundationReference, StoreDay, StoreDayClosureRequest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+
+
+async def activate(db, definition_id: str) -> None:
+    """Preview a draft, submit that preview, then have a second user approve it."""
+    report = await impact_definition(definition_id, db, {"user": "finance"})
+    body = ActivationBody(impact_fingerprint=report["fingerprint"])
+    await submit_definition(definition_id, body, db, {"user": "finance"})
+    await activate_definition(definition_id, body, db, {"user": "approver"})
 
 
 def test_definition_invalidation_follows_effective_dates_and_supersedes_requests():
@@ -36,11 +50,16 @@ def test_definition_invalidation_follows_effective_dates_and_supersedes_requests
                     ]
                 )
                 await db.commit()
-                await create_definition(
+                created = await create_definition(
                     TotalDefinitionBody(name="New", start_date="2026-10-01"),
                     db,
                     {"user": "finance"},
                 )
+                db.expire_all()
+                # Saving a draft leaves the day and its closure request untouched.
+                assert not (await db.get(StoreDay, "new")).totals_stale
+                assert (await db.get(StoreDayClosureRequest, "req")).status == "Pending"
+                await activate(db, created["id"])
                 db.expire_all()
                 assert not (await db.get(StoreDay, "old")).totals_stale
                 assert (await db.get(StoreDay, "new")).totals_stale
@@ -131,6 +150,7 @@ def test_definition_revision_invalidates_days_from_old_and_new_date_ranges():
                     db,
                     {"user": "finance"},
                 )
+                await activate(db, created["id"])
                 db.add_all(
                     [
                         StoreDay(
@@ -152,7 +172,7 @@ def test_definition_revision_invalidates_days_from_old_and_new_date_ranges():
                 )
                 await db.commit()
 
-                await update_definition(
+                revised = await update_definition(
                     created["id"],
                     TotalDefinitionBody(
                         name="Seasonal", start_date="2026-11-01", end_date="2026-11-30"
@@ -160,6 +180,7 @@ def test_definition_revision_invalidates_days_from_old_and_new_date_ranges():
                     db,
                     {"user": "finance"},
                 )
+                await activate(db, revised["id"])
                 db.expire_all()
                 assert not (await db.get(StoreDay, "before")).totals_stale
                 assert (await db.get(StoreDay, "old-range")).totals_stale
