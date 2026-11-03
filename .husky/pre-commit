@@ -4,6 +4,7 @@ set -eu
 frontend/node_modules/.bin/lint-staged
 frontend/node_modules/.bin/tsc --project frontend/tsconfig.json --noEmit
 node frontend/scripts/check-design-system.mjs
+(cd frontend && node_modules/.bin/vitest run)
 backend/.venv/bin/ruff check backend
 # SDK and socket-backed Shopify tests require optional deployment dependencies or
 # localhost binding; deterministic tests still run independently to avoid state leakage.
