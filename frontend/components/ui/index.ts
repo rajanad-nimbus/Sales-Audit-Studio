@@ -11,6 +11,7 @@ export { MetricGrid, MetricTile } from './MetricTile';
 export { Drawer, Modal } from './Overlay';
 export { PageHeader } from './PageHeader';
 export { Pager } from './Pager';
+export { PageNav } from './PageNav';
 export { Segmented } from './Segmented';
 export { Skeleton, SkeletonRows } from './Skeleton';
 export { Tabs } from './Tabs';

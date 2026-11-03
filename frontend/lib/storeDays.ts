@@ -137,3 +137,34 @@ export const qualityVariant = (q: string | undefined): BadgeVariant =>
       : q === 'Superseded'
         ? 'secondary'
         : 'warning';
+
+/** What an expanded row of the Store Days list shows (GET .../brief). */
+export interface StoreDayBrief {
+  store_day: StoreDay;
+  readiness: Readiness;
+  blockers: string[];
+  variances: {
+    with_variance: number;
+    unexplained: number;
+    top_unexplained: {
+      name: string;
+      level: string;
+      dimension: string | null;
+      variance: string;
+      currency: string;
+      outcome: string | null;
+    }[];
+  };
+  cases: {
+    open: number;
+    top: {
+      id: string;
+      case_number: string;
+      case_type: string;
+      status: string;
+      exposure: string;
+      currency: string | null;
+    }[];
+  };
+  registers_with_gaps: number;
+}

@@ -16,6 +16,7 @@ import {
   Toolbar,
 } from '@/components/ui';
 import type { Column } from '@/components/ui';
+import { EventContext } from '@/components/registerEvents/EventContext';
 
 interface Row {
   id: string;
@@ -148,6 +149,8 @@ export default function RegisterEventsPage() {
   const [sort, setSort] = useState({ sort: 'business_date', dir: 'desc' });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  // The row open under the table, if any. Cleared whenever a different page of rows arrives.
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [data, setData] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -203,6 +206,7 @@ export default function RegisterEventsPage() {
       const { data } = await api.get('/api/register-events', { params });
       if (mine === seq.current) {
         setData(data);
+        setExpanded(null);
         setError(null);
       }
     } catch (e) {
@@ -353,6 +357,9 @@ export default function RegisterEventsPage() {
           columns={COLUMNS}
           rows={data.items}
           rowKey={(r) => r.id}
+          onRowClick={(r) => setExpanded((open) => (open === r.id ? null : r.id))}
+          expandedKey={expanded}
+          renderDetail={(r) => <EventContext id={r.id} typeLabel={typeLabel} />}
           sort={{ key: sort.sort, dir: sort.dir as 'asc' | 'desc' }}
           onSort={toggleSort}
           footer={

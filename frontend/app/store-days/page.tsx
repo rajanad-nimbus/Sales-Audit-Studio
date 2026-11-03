@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -17,11 +17,14 @@ import {
   MetricGrid,
   MetricTile,
   PageHeader,
+  PageNav,
+  Pager,
   Segmented,
   Tabs,
   Toolbar,
 } from '@/components/ui';
 import { StoreSelect } from '@/components/StoreSelect';
+import { StoreDayBrief } from '@/components/storeDays/StoreDayBrief';
 import { apiError, dayKey, dayPath, dayStatusVariant, readinessVariant } from '@/lib/storeDays';
 import type { Readiness, StoreDay } from '@/lib/storeDays';
 
@@ -41,11 +44,20 @@ interface Attention {
   business_date: string;
   expected_stores: number;
   late_stores: LateStore[];
+  late_total: number;
+  late_page: number;
+  late_page_size: number;
   stuck_after_days: number;
   stuck_store_days: StuckDay[];
   stuck_truncated: boolean;
 }
 type ListTab = 'days' | 'late' | 'stuck';
+interface Summary {
+  total: number;
+  by_status: Record<string, number>;
+  totals_stale: number;
+}
+const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 
 function ReadinessBadge({ r, part }: { r?: Readiness; part: 'ingest' | 'audit' | 'export' }) {
   if (!r) return <>—</>;
@@ -72,57 +84,99 @@ export default function StoreDaysPage() {
   const [openStore, setOpenStore] = useState('');
   const [openDate, setOpenDate] = useState(today);
   const [busy, setBusy] = useState(false);
+  // Every filter is sent to the server; the browser never holds more than one page.
   const [statusFilter, setStatusFilter] = useState('');
   const [q, setQ] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
   const [storeFilter, setStoreFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState(daysAgo(30));
+  const [dateTo, setDateTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [hasMore, setHasMore] = useState(false);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState<ListTab>('days');
   const [attention, setAttention] = useState<Attention | null>(null);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const yesterday = daysAgo(1);
   const [lateDate, setLateDate] = useState(yesterday);
+  const [latePage, setLatePage] = useState(1);
+  const [lateSize, setLateSize] = useState(100);
   const [stuckAfter, setStuckAfter] = useState(3);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
 
   const loadAttention = useCallback(async () => {
     try {
       const { data } = await api.get('/api/store-days/attention', {
-        params: { business_date: lateDate, stuck_after_days: stuckAfter },
+        params: {
+          business_date: lateDate,
+          stuck_after_days: stuckAfter,
+          late_page: latePage,
+          late_page_size: lateSize,
+        },
       });
       setAttention(data);
     } catch {
       setAttention(null);
     }
-  }, [lateDate, stuckAfter]);
+  }, [lateDate, stuckAfter, latePage, lateSize]);
   useEffect(() => {
     loadAttention();
   }, [loadAttention]);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    const scope = {
+      store_id: storeFilter || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+      q: debouncedQ.trim() || undefined,
+    };
     try {
-      const d = await api.get('/api/store-days');
-      setDays(d.data);
+      const [list, counts] = await Promise.all([
+        api.get('/api/store-days', {
+          params: { ...scope, status: statusFilter || undefined, limit: pageSize, page },
+        }),
+        api.get('/api/store-days/summary', { params: scope }),
+      ]);
+      setDays(list.data);
+      setHasMore(list.headers?.['x-has-more'] === 'true');
+      setSummary(counts.data);
       setError(null);
     } catch {
       setError('Unable to load Store Days. Sign in with a Finance or IT role.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [storeFilter, dateFrom, dateTo, debouncedQ, statusFilter, pageSize, page]);
   useEffect(() => {
     load();
   }, [load]);
 
-  const statuses = Array.from(new Set(days.map((d) => d.status))).sort();
-  const shownDays = days
-    .filter(
-      (d) =>
-        (!statusFilter || d.status === statusFilter) &&
-        (!storeFilter || d.store_id === storeFilter) &&
-        (!q.trim() ||
-          `${d.store_id} ${d.business_date}`.toLowerCase().includes(q.trim().toLowerCase()))
-    )
-    .sort(
-      (a, b) =>
-        b.business_date.localeCompare(a.business_date) || a.store_id.localeCompare(b.store_id)
-    );
+  /** A change to what is being listed starts again from the first page, with nothing open. */
+  const refilter = (change: () => void) => {
+    change();
+    setPage(1);
+    setExpanded(null);
+  };
+  const onPage = (next: number) => {
+    setPage(next);
+    setExpanded(null);
+  };
+
+  const statuses = summary ? Object.keys(summary.by_status).sort() : [];
+  const onThisPage = useMemo(
+    () => ({
+      ready: days.filter((d) => d.readiness?.ready_to_close).length,
+      incomplete: days.filter((d) => d.readiness && d.readiness.ingest.state !== 'Complete').length,
+      attention: days.filter((d) => d.readiness && d.readiness.audit.state !== 'Clean').length,
+    }),
+    [days]
+  );
   const openDay = async () => {
     setBusy(true);
     try {
@@ -196,36 +250,28 @@ export default function StoreDaysPage() {
         </Card>
       )}
 
-      {days.length > 0 && (
+      {summary && (
         <MetricGrid>
-          <MetricTile label="Store Days" value={days.length} />
+          <MetricTile label="Store Days" value={summary.total.toLocaleString()} />
           <MetricTile
-            label="Ready to close"
-            value={days.filter((d) => d.readiness?.ready_to_close).length}
+            label="Not closed"
+            value={(summary.total - (summary.by_status.Closed ?? 0)).toLocaleString()}
           />
-          <MetricTile
-            label="Data incomplete"
-            value={
-              days.filter((d) => d.readiness && d.readiness.ingest.state !== 'Complete').length
-            }
-          />
-          <MetricTile
-            label="Audit needs attention"
-            value={
-              days.filter((d) => d.readiness && !['Clean'].includes(d.readiness.audit.state)).length
-            }
-          />
-          <MetricTile label="Closed" value={days.filter((d) => d.status === 'Closed').length} />
+          <MetricTile label="Closed" value={(summary.by_status.Closed ?? 0).toLocaleString()} />
+          <MetricTile label="Totals out of date" value={summary.totals_stale.toLocaleString()} />
         </MetricGrid>
       )}
 
       <Card>
         <Tabs
           value={tab}
-          onChange={(id) => setTab(id as ListTab)}
+          onChange={(id) => {
+            setTab(id as ListTab);
+            setExpanded(null);
+          }}
           items={[
-            { id: 'days', label: 'Store Days', count: shownDays.length },
-            { id: 'late', label: 'Late stores', count: attention?.late_stores.length },
+            { id: 'days', label: 'Store Days', count: summary?.total },
+            { id: 'late', label: 'Late stores', count: attention?.late_total },
             { id: 'stuck', label: 'Stuck store days', count: attention?.stuck_store_days.length },
           ]}
         />
@@ -234,7 +280,7 @@ export default function StoreDaysPage() {
             <Toolbar
               count={
                 attention
-                  ? `${attention.late_stores.length} of ${attention.expected_stores} active stores`
+                  ? `${attention.late_total.toLocaleString()} of ${attention.expected_stores.toLocaleString()} active stores`
                   : undefined
               }
             >
@@ -243,7 +289,10 @@ export default function StoreDaysPage() {
                   type="date"
                   value={lateDate}
                   max={today}
-                  onChange={(e) => setLateDate(e.target.value)}
+                  onChange={(e) => {
+                    setLateDate(e.target.value);
+                    setLatePage(1);
+                  }}
                 />
               </Field>
             </Toolbar>
@@ -285,6 +334,23 @@ export default function StoreDaysPage() {
               rows={attention ? attention.late_stores : null}
               rowKey={(r: LateStore) => r.store_id}
               emptyTitle="Every active store's data is complete for this date"
+              footer={
+                attention &&
+                attention.late_total > 0 && (
+                  <Pager
+                    page={attention.late_page}
+                    pages={Math.max(1, Math.ceil(attention.late_total / attention.late_page_size))}
+                    total={attention.late_total}
+                    pageSize={attention.late_page_size}
+                    pageSizes={[50, 100, 200, 500]}
+                    onPage={setLatePage}
+                    onPageSize={(size) => {
+                      setLateSize(size);
+                      setLatePage(1);
+                    }}
+                  />
+                )
+              }
             />
           </>
         )}
@@ -335,34 +401,68 @@ export default function StoreDaysPage() {
               ]}
               rows={attention ? attention.stuck_store_days : null}
               rowKey={dayKey}
-              onRowClick={(d: StuckDay) => router.push(dayPath(d))}
+              onRowClick={(d: StuckDay) =>
+                setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))
+              }
+              expandedKey={expanded}
+              renderDetail={(d: StuckDay) => (
+                <StoreDayBrief storeId={d.store_id} businessDate={d.business_date} />
+              )}
               emptyTitle="No store day has been open that long"
             />
           </>
         )}
-        {tab === 'days' && days.length > 0 && (
-          <Toolbar>
-            <input
-              className="grow"
-              type="search"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search store or date"
-              aria-label="Search Store Days"
-            />
-            <StoreSelect value={storeFilter} onChange={setStoreFilter} emptyLabel="All stores" />
-            <Segmented
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={[
-                { value: '', label: `All ${days.length}` },
-                ...statuses.map((s) => ({
-                  value: s,
-                  label: `${s} ${days.filter((d) => d.status === s).length}`,
-                })),
-              ]}
-            />
-          </Toolbar>
+        {tab === 'days' && (
+          <>
+            <Toolbar
+              count={
+                days.length > 0
+                  ? `On this page: ${onThisPage.ready} ready to close · ${onThisPage.incomplete} data incomplete · ${onThisPage.attention} need attention`
+                  : undefined
+              }
+            >
+              <input
+                className="grow"
+                type="search"
+                value={q}
+                onChange={(e) => refilter(() => setQ(e.target.value))}
+                placeholder="Search store"
+                aria-label="Search Store Days"
+              />
+              <StoreSelect
+                value={storeFilter}
+                onChange={(v) => refilter(() => setStoreFilter(v))}
+                emptyLabel="All stores"
+              />
+              <input
+                type="date"
+                aria-label="From"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => refilter(() => setDateFrom(e.target.value))}
+              />
+              <input
+                type="date"
+                aria-label="To"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => refilter(() => setDateTo(e.target.value))}
+              />
+            </Toolbar>
+            {summary && (
+              <Segmented
+                value={statusFilter}
+                onChange={(v) => refilter(() => setStatusFilter(v))}
+                options={[
+                  { value: '', label: `All ${summary.total.toLocaleString()}` },
+                  ...statuses.map((status) => ({
+                    value: status,
+                    label: `${status} ${summary.by_status[status].toLocaleString()}`,
+                  })),
+                ]}
+              />
+            )}
+          </>
         )}
         {tab === 'days' && (
           <DataTable
@@ -411,16 +511,31 @@ export default function StoreDaysPage() {
                 render: (d) => `v${d.audit_version}`,
               },
             ]}
-            rows={loading ? null : shownDays}
+            rows={loading ? null : days}
             rowKey={dayKey}
-            onRowClick={(d) => router.push(dayPath(d))}
-            emptyTitle={days.length === 0 ? 'No Store Days yet' : 'No Store Days match this filter'}
+            onRowClick={(d) => setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))}
+            expandedKey={expanded}
+            renderDetail={(d) => (
+              <StoreDayBrief storeId={d.store_id} businessDate={d.business_date} />
+            )}
+            emptyTitle={
+              summary && summary.total === 0 && !statusFilter
+                ? 'No Store Days in this range'
+                : 'No Store Days match this filter'
+            }
             emptyHint={
-              days.length === 0
-                ? canOpen
-                  ? 'Use "Open Store Day" above to start one.'
-                  : 'An IT administrator needs to open one.'
-                : undefined
+              canOpen
+                ? 'Widen the date range, or use "Open Store Day" above to start one.'
+                : 'Widen the date range. An IT administrator opens new store days.'
+            }
+            footer={
+              <PageNav
+                page={page}
+                hasMore={hasMore}
+                onPage={onPage}
+                pageSize={pageSize}
+                onPageSize={(size) => refilter(() => setPageSize(size))}
+              />
             }
           />
         )}

@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { api, money } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
 import { Alert, Button, DataTable, EmptyState, PageHeader, Pager } from '@/components/ui';
 import type { Column } from '@/components/ui';
+import { TransactionBrief } from '@/components/transactions/TransactionBrief';
 
 interface Row {
   id: string;
@@ -133,12 +133,13 @@ const COLUMNS: Column<Row>[] = [
 ];
 
 export default function TransactionsPage() {
-  const router = useRouter();
   const [f, setF] = useState<F>(EMPTY);
   const [qd, setQd] = useState('');
   const [sort, setSort] = useState({ sort: 'business_date', dir: 'desc' });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  // The row open under the table, if any. Cleared whenever a different page of rows arrives.
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [data, setData] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,6 +203,7 @@ export default function TransactionsPage() {
       const { data } = await api.get('/api/transactions', { params });
       if (mine === seq.current) {
         setData(data);
+        setExpanded(null);
         setError(null);
       }
     } catch (e) {
@@ -399,7 +401,9 @@ export default function TransactionsPage() {
           columns={COLUMNS}
           rows={data.items}
           rowKey={(r) => r.id}
-          onRowClick={(r) => router.push(`/transactions/${r.id}`)}
+          onRowClick={(r) => setExpanded((open) => (open === r.id ? null : r.id))}
+          expandedKey={expanded}
+          renderDetail={(r) => <TransactionBrief id={r.id} />}
           sort={{ key: sort.sort, dir: sort.dir as 'asc' | 'desc' }}
           onSort={toggleSort}
           footer={

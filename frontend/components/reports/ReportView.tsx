@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { Alert, Button, DataTable, PageHeader, Toolbar } from '@/components/ui';
+import { Alert, Button, DataTable, PageHeader, PageNav, Toolbar } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
 import type { ReportPage } from '@/lib/reports';
 
@@ -139,28 +139,7 @@ export function ReportView({ report }: { report: ReportPage }) {
         rowKey={(r) => r.join('|')}
         emptyTitle="Nothing to report for this range"
         emptyHint={page > 1 ? 'There are no more rows. Go back a page.' : 'Try a wider date range.'}
-        footer={
-          data && (
-            <div className="ac-pager">
-              <span>Page {data.page}</span>
-              <span className="ac-spacer" />
-              <button
-                className="btn-secondary btn-small"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                Previous
-              </button>
-              <button
-                className="btn-secondary btn-small"
-                disabled={!data.has_more}
-                onClick={() => setPage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          )
-        }
+        footer={data && <PageNav page={data.page} hasMore={data.has_more} onPage={setPage} />}
       />
     </div>
   );
