@@ -82,7 +82,7 @@ def by_code(result):
 
 
 def test_overview_lists_the_whole_catalog_with_open_counts_per_currency():
-    [result] = run(lambda db, user: overview(db, user))
+    [result] = run(lambda db, user: overview(db, user, days=0))
     items = by_code(result)
     over = items["RETURN_OVER_SOLD"]
     assert (over["open_count"], over["total_count"]) == (2, 3)
@@ -98,7 +98,7 @@ def test_overview_lists_the_whole_catalog_with_open_counts_per_currency():
 
 
 def test_overview_orders_open_errors_first_and_falls_back_to_ontology_steps():
-    [result] = run(lambda db, user: overview(db, user))
+    [result] = run(lambda db, user: overview(db, user, days=0))
     assert [i["code"] for i in result["items"][:2]] == ["RETURN_OVER_SOLD", "TRAN_OUT_BAL"]
     out_of_balance = by_code(result)["TRAN_OUT_BAL"]
     assert "Re-audit" in out_of_balance["recommended_solution"]
@@ -107,23 +107,28 @@ def test_overview_orders_open_errors_first_and_falls_back_to_ontology_steps():
 
 def test_store_scoped_users_only_count_their_stores():
     scoped = {"role": "store_manager", "store_scoped": True, "stores": ["S2"]}
-    [result] = run(lambda db, user: overview(db, user), user=scoped)
+    [result] = run(lambda db, user: overview(db, user, days=0), user=scoped)
     over = by_code(result)["RETURN_OVER_SOLD"]
     assert (over["open_count"], over["total_count"]) == (1, 1)
     assert by_code(result)["TRAN_OUT_BAL"]["total_count"] == 0
 
 
-def test_cases_for_an_error_put_open_cases_first_and_respect_scope():
-    [everyone, scoped] = run(
+def test_cases_for_an_error_default_to_the_open_ones_and_respect_scope():
+    [everyone, closed, every_status, scoped] = run(
         lambda db, user: cases_for_error("RETURN_OVER_SOLD", 25, db, user),
+        lambda db, user: cases_for_error("RETURN_OVER_SOLD", 25, db, user, status="closed"),
+        lambda db, user: cases_for_error("RETURN_OVER_SOLD", 25, db, user, status="all"),
         lambda db, user: cases_for_error(
             "RETURN_OVER_SOLD",
             25,
             db,
             {"role": "store_manager", "store_scoped": True, "stores": ["S2"]},
+            status="all",
         ),
     )
-    assert [c["id"] for c in everyone["items"]][-1] == "c"  # the closed case last
-    assert {c["id"] for c in everyone["items"]} == {"a", "b", "c"}
+    assert {c["id"] for c in everyone["items"]} == {"a", "b"}
+    assert [c["id"] for c in closed["items"]] == ["c"]
+    assert {c["id"] for c in every_status["items"]} == {"a", "b", "c"}
     assert [c["id"] for c in scoped["items"]] == ["b"]
-    assert everyone["truncated"] is False
+    assert everyone["has_more"] is False and everyone["page"] == 1 and everyone["page_size"] == 25
+    assert {c["id"]: c["errors"] for c in every_status["items"]} == {"a": 1, "b": 1, "c": 1}

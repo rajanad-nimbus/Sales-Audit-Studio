@@ -1,20 +1,20 @@
 """Audit error overview: every Sales Audit error type, how many are open, and how to fix them."""
 
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from integrations.ontology import ontology
-from sqlalchemy import case as sql_case
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.audit.patterns import error_patterns
 from apps.cases.models import Case
 from apps.cases.models import Exception as ExceptionRow
+from apps.search import contains_literal
 from apps.security import scope
 from apps.security.authentication import require_role
 from apps.totals.models import SalesAuditErrorDefinition
@@ -58,40 +58,73 @@ def ontology_text(code: str) -> dict:
     }
 
 
+OPEN = Case.status != "Closed"
+DEFAULT_WINDOW_DAYS = 90
+
+
 @router.get("")
 async def overview(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role(*ROLES)),
+    days: Annotated[int, Query(ge=0, le=3650)] = DEFAULT_WINDOW_DAYS,
 ):
-    """One row per error type: the full catalog, with the open and total counts raised so far."""
-    is_open = sql_case((Case.status != "Closed", 1), else_=0)
-    counts = (
-        select(
-            ExceptionRow.exception_type,
-            Case.currency,
-            is_open.label("open"),
-            func.count(ExceptionRow.id),
-            func.coalesce(func.sum(ExceptionRow.exception_amount), 0),
-            func.coalesce(func.sum(ExceptionRow.estimated_exposure), 0),
-            func.max(ExceptionRow.created_at),
+    """One row per error type: the full catalog, with how many are open and how many were raised lately.
+
+    Open counts and amounts cover every open case, however old, since those are the work waiting.
+    "Raised" covers cases whose business date falls in the last ``days`` days (0 means all time), so
+    the page does not recount every exception ever raised each time it loads.
+    """
+    since = None if days == 0 else (datetime.now(UTC).date() - timedelta(days=days)).isoformat()
+    open_rows = (
+        await db.execute(
+            scope.restrict(
+                select(
+                    ExceptionRow.exception_type,
+                    Case.currency,
+                    func.count(ExceptionRow.id),
+                    func.coalesce(func.sum(ExceptionRow.exception_amount), 0),
+                    func.coalesce(func.sum(ExceptionRow.estimated_exposure), 0),
+                    func.max(ExceptionRow.created_at),
+                )
+                .join(Case, Case.id == ExceptionRow.case_id)
+                .where(OPEN)
+                .group_by(ExceptionRow.exception_type, Case.currency),
+                user,
+                Case.store_id,
+            )
         )
-        .join(Case, Case.id == ExceptionRow.case_id)
-        .group_by(ExceptionRow.exception_type, Case.currency, is_open)
-    )
-    rows = (await db.execute(scope.restrict(counts, user, Case.store_id))).all()
+    ).all()
+    raised_rows = (
+        await db.execute(
+            scope.restrict(
+                select(
+                    ExceptionRow.exception_type,
+                    func.count(ExceptionRow.id),
+                    func.max(ExceptionRow.created_at),
+                )
+                .join(Case, Case.id == ExceptionRow.case_id)
+                .where(*([Case.business_date >= since] if since else []))
+                .group_by(ExceptionRow.exception_type),
+                user,
+                Case.store_id,
+            )
+        )
+    ).all()
 
     stats: dict[str, dict] = defaultdict(
         lambda: {"open": 0, "total": 0, "latest": None, "by_currency": defaultdict(lambda: [0, 0])}
     )
-    for code, currency, open_flag, count, amount, exposure, latest in rows:
+    for code, currency, count, amount, exposure, latest in open_rows:
+        stat = stats[code]
+        stat["open"] += count
+        stat["latest"] = max(filter(None, [stat["latest"], latest]), default=None)
+        by_currency = stat["by_currency"][currency]
+        by_currency[0] += Decimal(str(amount))
+        by_currency[1] += Decimal(str(exposure))
+    for code, count, latest in raised_rows:
         stat = stats[code]
         stat["total"] += count
         stat["latest"] = max(filter(None, [stat["latest"], latest]), default=None)
-        if open_flag:
-            stat["open"] += count
-            by_currency = stat["by_currency"][currency]
-            by_currency[0] += Decimal(str(amount))
-            by_currency[1] += Decimal(str(exposure))
 
     catalog = {
         d.code: d
@@ -133,6 +166,7 @@ async def overview(
         "items": items,
         "open_total": sum(i["open_count"] for i in items),
         "open_types": sum(1 for i in items if i["open_count"]),
+        "window_days": days,
     }
 
 
@@ -170,17 +204,59 @@ async def cases_for_error(
     limit: Annotated[int, Query(ge=1, le=MAX_CASES)] = 25,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role(*ROLES)),
+    status: Annotated[Literal["open", "closed", "all"], Query()] = "open",
+    store: Annotated[str | None, Query(max_length=50)] = None,
+    date_from: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    date_to: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
 ):
-    """The cases holding this error type, open ones first, newest first."""
-    query = (
-        select(Case, func.count(ExceptionRow.id))
-        .join(ExceptionRow, ExceptionRow.case_id == Case.id)
-        .where(ExceptionRow.exception_type == code)
-        .group_by(Case.id)
-        .order_by(sql_case((Case.status != "Closed", 0), else_=1), Case.created_at.desc(), Case.id)
-        .limit(limit + 1)
+    """One page of the cases holding this error type, newest business date first.
+
+    Filters (status, store, dates) run in the database. There is no total, because counting every
+    case that ever held a common error is a scan: ``has_more`` says whether another page follows.
+    """
+    holds_code = (
+        select(ExceptionRow.id)
+        .where(ExceptionRow.case_id == Case.id, ExceptionRow.exception_type == code)
+        .exists()
     )
-    rows = (await db.execute(scope.restrict(query, user, Case.store_id))).all()
+    filters = [holds_code]
+    if status == "open":
+        filters.append(OPEN)
+    elif status == "closed":
+        filters.append(Case.status == "Closed")
+    if store and store.strip():
+        filters.append(contains_literal(Case.store_id, store))
+    if date_from:
+        filters.append(Case.business_date >= date_from)
+    if date_to:
+        filters.append(Case.business_date <= date_to)
+    found = (
+        (
+            await db.execute(
+                scope.restrict(select(Case).where(*filters), user, Case.store_id)
+                .order_by(Case.business_date.desc(), Case.created_at.desc(), Case.id)
+                .offset((page - 1) * limit)
+                .limit(limit + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cases = found[:limit]
+    # How many of this error each case holds, for just the cases on this page.
+    errors = dict(
+        (
+            await db.execute(
+                select(ExceptionRow.case_id, func.count())
+                .where(
+                    ExceptionRow.case_id.in_([c.id for c in cases]),
+                    ExceptionRow.exception_type == code,
+                )
+                .group_by(ExceptionRow.case_id)
+            )
+        ).all()
+    )
     return {
         "items": [
             {
@@ -192,9 +268,11 @@ async def cases_for_error(
                 "amount": str(c.total_exception_amount),
                 "currency": c.currency,
                 "priority": c.priority,
-                "errors": errors,
+                "errors": errors.get(c.id, 0),
             }
-            for c, errors in rows[:limit]
+            for c in cases
         ],
-        "truncated": len(rows) > limit,
+        "page": page,
+        "page_size": limit,
+        "has_more": len(found) > limit,
     }
