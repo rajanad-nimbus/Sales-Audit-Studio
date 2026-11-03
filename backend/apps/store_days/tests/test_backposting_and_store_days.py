@@ -237,10 +237,14 @@ def test_store_day_cannot_close_without_current_totals():
                 db,
                 user,
             )
-            result = await sd.close_store_day("S1", "2026-10-01", db, user)
+            with pytest.raises(HTTPException) as own_request:
+                await sd.close_store_day("S1", "2026-10-01", db, user)
+            assert own_request.value.status_code == 403
+            approver = {"user": "second.finance", "role": "finance"}
+            result = await sd.close_store_day("S1", "2026-10-01", db, approver)
             assert result["status"] == "Closed"
             with pytest.raises(HTTPException) as error:
-                await sd.close_store_day("S1", "2026-10-01", db, user)
+                await sd.close_store_day("S1", "2026-10-01", db, approver)
             assert error.value.status_code == 409
 
     run(go())

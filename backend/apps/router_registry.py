@@ -22,7 +22,10 @@ from apps.operations.batch_routes import router as batch_router
 from apps.operations.routes import router as operations_router
 from apps.security.middleware import ontology_authentication
 from apps.security.routes import router as security_router
+from apps.store_days.closures import closure_router
+from apps.store_days.periods import router as period_router
 from apps.store_days.routes import router as store_day_router
+from apps.store_days.variance_routes import explanation_router, tolerance_router
 from apps.system.routes import router as system_router
 from apps.totals.routes import router as totals_router
 from apps.transactions.register_event_routes import router as register_event_router
@@ -37,6 +40,10 @@ ROUTERS = (
     development_router,
     exports_router,
     store_day_router,
+    closure_router,
+    explanation_router,
+    period_router,
+    tolerance_router,
     foundation_router,
     cash_router,
     cases_router,

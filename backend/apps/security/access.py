@@ -194,6 +194,14 @@ SCREENS: tuple[Screen, ...] = (
         ("/api/total-definitions", "/api/audit-rules", "/api/gl"),
     ),
     Screen(
+        "settings-close",
+        "/settings/close",
+        "Tolerances & period close",
+        "Configuration",
+        ("finance", "it", "auditor"),
+        ("/api/variance-tolerances", "/api/periods"),
+    ),
+    Screen(
         "settings-retention",
         "/settings/retention",
         "Data retention",

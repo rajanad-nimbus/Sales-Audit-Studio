@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 
@@ -20,18 +20,26 @@ from apps.ingest import reconciliation
 from apps.ingest.manifests import iter_manifests, validate_business_date
 from apps.security import scope
 from apps.security.authentication import require_role
+from apps.store_days import variances
 from apps.store_days.closures import (
     ClosureRequestBody,
     ClosureReviewBody,
     ReopenRequest,
     close_store_day,
-    closure_router,
     reject_store_day_closure,
     reopen_store_day,
     request_store_day_closure,
 )
 from apps.store_days.freshness import lock_configuration, lock_store_day_identity
 from apps.store_days.models import AuditTotal, StoreDay, StoreDayClosureRequest
+from apps.store_days.periods import latest_close, reopen_guards
+from apps.store_days.readiness import (
+    COMPLETE,
+    data_quality,
+    holding_back,
+    ingest_states,
+    readiness,
+)
 from apps.store_days.rule_evaluation import (
     add_configured_totals,
     evaluate_configured_rules,
@@ -166,7 +174,109 @@ async def list_store_days(
     if store_id:
         query = query.where(StoreDay.store_id == store_id)
     rows = (await db.execute(query)).scalars().all()
-    return [store_day_view(row) for row in rows]
+    views = await readiness(db, list(rows))
+    return [{**store_day_view(row), "readiness": views[row.id]} for row in rows]
+
+
+@router.get("/attention")
+async def store_days_needing_attention(
+    business_date: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    stuck_after_days: Annotated[int, Query(ge=1, le=90)] = 3,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it")),
+):
+    """Late stores for one business date, and open store days that have stopped moving."""
+    today = datetime.now(UTC).date()
+    try:
+        expected_date = validate_business_date(
+            business_date or (today - timedelta(days=1)).isoformat()
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    stores = (
+        (
+            await db.execute(
+                scope.restrict(
+                    select(FoundationReference.code).where(
+                        FoundationReference.category == "Store",
+                        FoundationReference.active.is_(True),
+                    ),
+                    user,
+                    FoundationReference.code,
+                ).order_by(FoundationReference.code)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    keys = [(store, expected_date) for store in stores]
+    ingest = await ingest_states(db, keys)
+    opened = set(
+        (
+            await db.execute(
+                select(StoreDay.store_id).where(
+                    StoreDay.business_date == expected_date, StoreDay.store_id.in_(stores)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    late = [
+        {
+            "store_id": store,
+            "business_date": expected_date,
+            "store_day_open": store in opened,
+            **ingest[(store, expected_date)],
+        }
+        for store, _date in keys
+        if ingest[(store, expected_date)]["state"] != COMPLETE
+    ]
+
+    cutoff = (today - timedelta(days=stuck_after_days)).isoformat()
+    candidates = (
+        (
+            await db.execute(
+                scope.restrict(
+                    select(StoreDay).where(
+                        StoreDay.status != "Closed", StoreDay.business_date <= cutoff
+                    ),
+                    user,
+                    StoreDay.store_id,
+                )
+                .order_by(StoreDay.business_date, StoreDay.store_id)
+                .limit(limit + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    truncated = len(candidates) > limit
+    candidates = list(candidates[:limit])
+    views = await readiness(db, candidates)
+    stuck = []
+    for day in candidates:
+        view = views[day.id]
+        reasons = holding_back(view) or [
+            "Ready to close; request closure" if view["ready_to_close"] else f"Status {day.status}"
+        ]
+        stuck.append(
+            {
+                **store_day_view(day),
+                "days_open": (today - datetime.fromisoformat(day.business_date).date()).days,
+                "readiness": view,
+                "holding_back": reasons,
+            }
+        )
+    return {
+        "business_date": expected_date,
+        "expected_stores": len(stores),
+        "late_stores": late,
+        "stuck_after_days": stuck_after_days,
+        "stuck_store_days": stuck,
+        "stuck_truncated": truncated,
+    }
 
 
 @router.get("/stores")
@@ -265,7 +375,40 @@ async def get_store_day(
         .scalars()
         .all()
     )
-    blockers.extend(comparison_blockers(day, current_totals))
+    current_evaluations = await variances.evaluate(db, day, list(current_totals))
+    blockers.extend(
+        comparison_blockers(day, current_totals, set(variances.unresolved(current_evaluations)))
+    )
+    evaluations = (
+        current_evaluations
+        if selected_version == day.audit_version
+        else await variances.evaluate(db, day, list(totals))
+    )
+    day_readiness = (await readiness(db, [day], {(store_id, business_date): open_case_count}))[
+        day.id
+    ]
+    quality = data_quality(day, day_readiness["ingest"]["state"], selected_version)
+    unexplained = sum(
+        1 for total in current_totals if not current_evaluations[total.id]["resolved"]
+    )
+    reopen_events = (
+        (
+            await db.execute(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.object_type == "StoreDay",
+                    AuditEvent.object_id == day.id,
+                    AuditEvent.event_type == "STORE_DAY_REOPENED",
+                )
+                .order_by(AuditEvent.seq.desc())
+                .limit(MAX_STORE_DAY_HISTORY_ITEMS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    reopen_blocked_by = await reopen_guards(db, day) if day.status == "Closed" else []
+    period = await latest_close(db)
     requests = (
         (
             await db.execute(
@@ -334,7 +477,28 @@ async def get_store_day(
         "evidence_overrides_truncated": overrides_truncated,
         "close_blockers": blockers,
         "evidence_overrides": evidence_overrides,
-        "totals": [total_view(total) for total in totals],
+        "totals": [
+            {**total_view(total), **evaluations[total.id], "data_quality": quality["state"]}
+            for total in totals
+        ],
+        "data_quality": quality,
+        "readiness": day_readiness,
+        "unexplained_variances": unexplained,
+        "reopen_blocked_by": reopen_blocked_by,
+        "period_closed_through": period.period_end if period else None,
+        "reopens": [
+            {
+                "id": event.id,
+                "reopened_by": event.actor,
+                "reopened_at": event.created_at,
+                "reason": (event.after_state or {}).get("reason")
+                or event.action_description.removeprefix("Store day reopened: "),
+                "closed_by": (event.after_state or {}).get("closed_by"),
+                "closed_at": (event.after_state or {}).get("closed_at"),
+                "audit_version": (event.after_state or {}).get("audit_version"),
+            }
+            for event in reopen_events
+        ],
         "cases": [
             {
                 "id": case.id,
@@ -516,6 +680,3 @@ async def retotal_store_day(
         "transactions": calculation.transaction_count,
         "totals_created": len(calculated) + 2 + int(has_manifest),
     }
-
-
-router.include_router(closure_router)

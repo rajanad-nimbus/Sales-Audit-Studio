@@ -62,8 +62,11 @@ from apps.operations.models import (
 )
 from apps.store_days.models import (
     AuditTotal,
+    PeriodClose,
     StoreDay,
     StoreDayClosureRequest,
+    VarianceExplanation,
+    VarianceTolerance,
 )
 from apps.system.models import (
     Connector,
@@ -121,6 +124,9 @@ __all__ = [
     "AuditTotal",
     "StoreDay",
     "StoreDayClosureRequest",
+    "PeriodClose",
+    "VarianceExplanation",
+    "VarianceTolerance",
     "AuditTotalDefinition",
     "SalesAuditErrorDefinition",
     "CanonicalTransaction",

@@ -14,7 +14,9 @@ from apps.cases.models import Case
 from apps.ingest import reconciliation
 from apps.security import scope
 from apps.security.authentication import require_role
+from apps.store_days import variances
 from apps.store_days.models import AuditTotal, StoreDayClosureRequest
+from apps.store_days.periods import reopen_guards
 from apps.store_days.service import (
     OPTIONAL_COMPARISON_TOTALS,
     REQUIRED_COMPARISON_TOTALS,
@@ -158,7 +160,8 @@ async def close_store_day(
         .scalars()
         .all()
     )
-    blockers = comparison_blockers(day, totals)
+    evaluations = await variances.evaluate(db, day, list(totals))
+    blockers = comparison_blockers(day, totals, set(variances.unresolved(evaluations)))
     if "totals are stale; re-total the store day" in blockers:
         raise HTTPException(
             status_code=422, detail="Cannot close: totals are stale; re-total the store day"
@@ -184,7 +187,11 @@ async def close_store_day(
         )
     if "unresolved reconciliation variance" in blockers:
         raise HTTPException(
-            status_code=422, detail="Cannot close: reconciliation totals still have a variance"
+            status_code=422,
+            detail=(
+                "Cannot close: a reconciliation variance is outside tolerance and has no "
+                "explanation; give a reason, or link the case or correction behind it"
+            ),
         )
     request = (
         (
@@ -205,6 +212,11 @@ async def close_store_day(
             status_code=422, detail="A pending closure request with evidence is required"
         )
     actor = user["user"] or "ontology.user"
+    if actor == request.requested_by:
+        raise HTTPException(
+            status_code=403,
+            detail="A different user from the one who requested closure must approve it",
+        )
     request.status, request.reviewed_by, request.reviewed_at = "Approved", actor, utcnow()
     day.status, day.closed_at, day.closed_by = "Closed", utcnow(), actor
     audit(
@@ -235,6 +247,10 @@ async def reopen_store_day(
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status != "Closed":
         raise HTTPException(status_code=409, detail="Only a closed store day can be reopened")
+    guards = await reopen_guards(db, day)
+    if guards:
+        raise HTTPException(status_code=409, detail=f"Cannot reopen: {'; '.join(guards)}")
+    closed_at, closed_by = day.closed_at, day.closed_by
     day.status, day.closed_at, day.reopened_reason, day.reopened_by = (
         "Reopened",
         None,
@@ -249,6 +265,13 @@ async def reopen_store_day(
         day.id,
         f"Store day reopened: {body.rationale.strip()}",
         actor=user["user"] or "ontology.user",
+        # The reopen history is read back from these events.
+        after={
+            "reason": body.rationale.strip(),
+            "audit_version": day.audit_version,
+            "closed_at": closed_at.isoformat() if closed_at else None,
+            "closed_by": closed_by,
+        },
     )
     await db.commit()
     await db.refresh(day)

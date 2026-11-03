@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { StoreScopeNote } from '@/components/StoreScope';
-import { CaseLink } from '@/components/MeProvider';
+import { CaseLink, useMe } from '@/components/MeProvider';
 import {
   Alert,
   Badge,
@@ -20,12 +20,21 @@ import {
   Tabs,
   Toolbar,
 } from '@/components/ui';
-import { apiError, dayApi, dayStatusVariant } from '@/lib/storeDays';
+import {
+  apiError,
+  dayApi,
+  dayStatusVariant,
+  outcomeVariant,
+  qualityVariant,
+  readinessVariant,
+} from '@/lib/storeDays';
 import type {
   Closure,
   DayCase,
   EvidenceOverride,
   HistoryItem,
+  Readiness,
+  Reopen,
   StoreDay,
   Total,
 } from '@/lib/storeDays';
@@ -36,6 +45,8 @@ const HISTORY_PAGE = 15;
 const totalKey = (t: Total) => `${t.name}|${t.level}|${t.dimension ?? ''}`;
 const hasVariance = (t: Total) => t.variance_amount !== null && Number(t.variance_amount) !== 0;
 const signed = (n: number, currency: string) => `${n > 0 ? '+' : ''}${money(n, currency)}`;
+const needsExplaining = (t: Total) =>
+  (t.outcome === 'Needs reason' || t.outcome === 'Needs case') && !t.resolved;
 
 export default function StoreDayDetailPage({
   params,
@@ -45,6 +56,7 @@ export default function StoreDayDetailPage({
   const { storeId: rawStore, date } = use(params);
   const storeId = decodeURIComponent(rawStore);
   const toast = useToast();
+  const { me } = useMe();
   const [day, setDay] = useState<StoreDay | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +78,14 @@ export default function StoreDayDetailPage({
   const [historyType, setHistoryType] = useState('');
   const [historyQ, setHistoryQ] = useState('');
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE);
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [quality, setQuality] = useState<{ state: string; detail: string } | null>(null);
+  const [reopens, setReopens] = useState<Reopen[]>([]);
+  const [reopenBlockedBy, setReopenBlockedBy] = useState<string[]>([]);
+  const [explaining, setExplaining] = useState<Total | null>(null);
+  const [explainReason, setExplainReason] = useState('');
+  const [explainCase, setExplainCase] = useState('');
+  const [explainCorrection, setExplainCorrection] = useState('');
 
   const load = useCallback(
     async (v?: number) => {
@@ -81,6 +101,10 @@ export default function StoreDayDetailPage({
         setClosures(data.closure_requests);
         setHistory(data.history);
         setOverrides(data.evidence_overrides ?? []);
+        setReadiness(data.readiness ?? null);
+        setQuality(data.data_quality ?? null);
+        setReopens(data.reopens ?? []);
+        setReopenBlockedBy(data.reopen_blocked_by ?? []);
         setError(null);
         // Compare against the revision just before this one, so changes between versions are visible.
         const earlier = Math.max(
@@ -108,14 +132,15 @@ export default function StoreDayDetailPage({
     load();
   }, [load]);
 
-  const act = async (path: string, body?: object, done?: () => void) => {
+  const act = async (path: string, body?: object, done?: () => void, message?: string) => {
     setBusy(true);
     try {
       const { data } = await api.post(path, body);
       toast(
-        data.transactions !== undefined
-          ? `Re-totaled ${data.transactions} transaction(s); ${data.totals_created} totals created.`
-          : `Store Day is now ${data.status}.`,
+        message ??
+          (data.transactions !== undefined
+            ? `Re-totaled ${data.transactions} transaction(s); ${data.totals_created} totals created.`
+            : `Store Day is now ${data.status}.`),
         'success'
       );
       done?.();
@@ -127,7 +152,18 @@ export default function StoreDayDetailPage({
     }
   };
 
+  const startExplaining = (t: Total) => {
+    setExplaining(t);
+    setExplainReason('');
+    setExplainCase('');
+    setExplainCorrection('');
+  };
+  const unexplained = totals.filter(needsExplaining).length;
   const pending = closures.some((c) => c.status === 'Pending');
+  // Closure needs a second person: the requester cannot approve their own request.
+  const ownRequest = closures.some(
+    (c) => c.status === 'Pending' && !!me?.user && c.requested_by === me.user
+  );
   const closed = day?.status === 'Closed';
   const viewingOld = !!day && version !== null && version !== day.audit_version;
   const base = day ? dayApi(day) : '';
@@ -231,6 +267,34 @@ export default function StoreDayDetailPage({
             ))}
           </ol>
 
+          {readiness && (
+            <dl className="kv" aria-label="Store Day readiness">
+              {(
+                [
+                  ['Data', readiness.ingest.state, readiness.ingest.detail],
+                  ['Audit', readiness.audit.state, readiness.audit.detail],
+                  [
+                    'Export',
+                    readiness.export.state,
+                    readiness.export.records
+                      ? `${readiness.export.records} record(s), ${readiness.export.acknowledged} acknowledged`
+                      : 'Nothing exported for this day',
+                  ],
+                ] as const
+              ).map(([label, state, note]) => (
+                <div key={label} style={{ display: 'contents' }}>
+                  <dt>{label}</dt>
+                  <dd>
+                    <Badge variant={readinessVariant(state)} size="sm">
+                      {state}
+                    </Badge>{' '}
+                    <span className="hint">{note}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+
           {day.totals_stale && (
             <Alert tone="warning">
               New data arrived after these totals were calculated.{' '}
@@ -277,8 +341,14 @@ export default function StoreDayDetailPage({
             ) : pending ? (
               <Button
                 variant="primary"
-                disabled={busy || blockers.length > 0}
-                title={blockers.length ? 'Resolve the blockers first' : ''}
+                disabled={busy || blockers.length > 0 || ownRequest}
+                title={
+                  ownRequest
+                    ? 'You requested this closure; another user must approve it'
+                    : blockers.length
+                      ? 'Resolve the blockers first'
+                      : ''
+                }
                 onClick={() => act(`${base}/close`)}
               >
                 Approve &amp; close
@@ -291,9 +361,11 @@ export default function StoreDayDetailPage({
             <span className="hint">
               {closed
                 ? 'This day is closed and locked.'
-                : pending
-                  ? 'A closure request is waiting for approval.'
-                  : 'Re-total after new data arrives, then request closure.'}
+                : ownRequest
+                  ? 'You requested closure; another user must approve it.'
+                  : pending
+                    ? 'A closure request is waiting for approval.'
+                    : 'Re-total after new data arrives, then request closure.'}
             </span>
           </div>
 
@@ -335,8 +407,14 @@ export default function StoreDayDetailPage({
                     version is {day.audit_version}.
                   </Alert>
                 )}
+                {quality && quality.state !== 'Final' && quality.state !== 'Superseded' && (
+                  <Alert tone={quality.state === 'Partial' ? 'error' : 'warning'}>
+                    <b>These totals are {quality.state.toLowerCase()}.</b> {quality.detail}.
+                  </Alert>
+                )}
                 <MetricGrid>
                   <MetricTile label="Totals" value={totals.length} />
+                  <MetricTile label="Need an explanation" value={unexplained} />
                   <MetricTile
                     label="Out of balance"
                     value={totals.length === 0 ? '-' : outOfBalance.length}
@@ -428,6 +506,56 @@ export default function StoreDayDetailPage({
                           </Badge>
                         ),
                     },
+                    {
+                      key: 'outcome',
+                      header: 'Tolerance',
+                      render: (t) =>
+                        !t.outcome || t.outcome === 'Balanced' ? (
+                          '—'
+                        ) : (
+                          <>
+                            <span
+                              title={
+                                t.tolerance
+                                  ? `Within ${money(t.tolerance.within_amount, t.currency)}; case above ${money(t.tolerance.case_amount, t.currency)}${t.tolerance.rule_id ? '' : ' (no rule set)'}`
+                                  : undefined
+                              }
+                            >
+                              <Badge variant={outcomeVariant(t.outcome, t.resolved)} size="sm">
+                                {t.resolved && t.explanation ? 'Explained' : t.outcome}
+                              </Badge>
+                            </span>
+                            {t.explanation && (
+                              <small className="act-sub" style={{ display: 'block' }}>
+                                {t.explanation.reason}
+                                {t.explanation.case_id &&
+                                  ` · case ${cases.find((c) => c.id === t.explanation?.case_id)?.case_number ?? t.explanation.case_id}`}
+                                {t.explanation.correction_id &&
+                                  ` · correction ${t.explanation.correction_id.slice(0, 8)}`}
+                                {' · '}
+                                {t.explanation.explained_by}
+                              </small>
+                            )}
+                            {needsExplaining(t) && !viewingOld && !closed && (
+                              <Button size="sm" onClick={() => startExplaining(t)}>
+                                Explain…
+                              </Button>
+                            )}
+                          </>
+                        ),
+                    },
+                    {
+                      key: 'quality',
+                      header: 'Data',
+                      render: (t) =>
+                        t.data_quality ? (
+                          <Badge variant={qualityVariant(t.data_quality)} size="sm">
+                            {t.data_quality}
+                          </Badge>
+                        ) : (
+                          '—'
+                        ),
+                    },
                   ]}
                   rows={shownTotals}
                   rowKey={(t) => t.id}
@@ -441,6 +569,79 @@ export default function StoreDayDetailPage({
                     totals.length === 0 ? 'Re-total the store day to calculate them.' : undefined
                   }
                 />
+                {explaining && (
+                  <div className="sd-section">
+                    <h3>
+                      Explain the {money(explaining.variance_amount ?? 0, explaining.currency)}{' '}
+                      variance on {explaining.name}
+                    </h3>
+                    <p className="hint">
+                      {explaining.outcome === 'Needs case'
+                        ? 'This variance is above the case threshold. Give the reason and link the case or correction that resolves it.'
+                        : 'This variance is outside tolerance. Give the reason it is acceptable.'}{' '}
+                      The explanation stays with the variance while its amount is unchanged.
+                    </p>
+                    <div className="form-row">
+                      <div className="grow">
+                        <Field label="Reason">
+                          <input
+                            value={explainReason}
+                            onChange={(e) => setExplainReason(e.target.value)}
+                            placeholder="For example: deposit posted the next day"
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Case">
+                        <select
+                          value={explainCase}
+                          onChange={(e) => setExplainCase(e.target.value)}
+                        >
+                          <option value="">None</option>
+                          {cases.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.case_number} · {c.case_type}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Correction ID">
+                        <input
+                          value={explainCorrection}
+                          onChange={(e) => setExplainCorrection(e.target.value)}
+                          placeholder="Optional"
+                        />
+                      </Field>
+                    </div>
+                    <div className="cluster">
+                      <Button
+                        variant="primary"
+                        disabled={
+                          busy ||
+                          !explainReason.trim() ||
+                          (explaining.outcome === 'Needs case' &&
+                            !explainCase &&
+                            !explainCorrection.trim())
+                        }
+                        onClick={() =>
+                          act(
+                            `${base}/variance-explanations`,
+                            {
+                              total_id: explaining.id,
+                              reason: explainReason,
+                              case_id: explainCase || null,
+                              correction_id: explainCorrection.trim() || null,
+                            },
+                            () => setExplaining(null),
+                            'Variance explained.'
+                          )
+                        }
+                      >
+                        Save explanation
+                      </Button>
+                      <Button onClick={() => setExplaining(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -451,8 +652,13 @@ export default function StoreDayDetailPage({
                     <h3>Reopen this Store Day</h3>
                     <p className="hint">
                       Reopening unlocks the day so it can be re-totaled. A reason is required and is
-                      written to the history.
+                      written to the reopen history.
                     </p>
+                    {reopenBlockedBy.length > 0 && (
+                      <Alert tone="warning">
+                        <b>This Store Day cannot be reopened.</b> {reopenBlockedBy.join(' · ')}.
+                      </Alert>
+                    )}
                     <div className="form-row">
                       <div className="grow">
                         <Field label="Reopen rationale">
@@ -464,7 +670,7 @@ export default function StoreDayDetailPage({
                         </Field>
                       </div>
                       <Button
-                        disabled={busy || !rationale.trim()}
+                        disabled={busy || !rationale.trim() || reopenBlockedBy.length > 0}
                         onClick={() => act(`${base}/reopen`, { rationale }, () => setRationale(''))}
                       >
                         Reopen
@@ -505,6 +711,43 @@ export default function StoreDayDetailPage({
                     )}
                   </div>
                 )}
+
+                <div className="sd-section">
+                  <h3>Reopen history ({reopens.length})</h3>
+                  {reopens.length === 0 ? (
+                    <p className="cc-empty">This Store Day has never been reopened.</p>
+                  ) : (
+                    <DataTable
+                      columns={[
+                        {
+                          key: 'when',
+                          header: 'Reopened',
+                          nowrap: true,
+                          primary: true,
+                          render: (r: Reopen) => new Date(r.reopened_at).toLocaleString(),
+                        },
+                        { key: 'by', header: 'By', render: (r: Reopen) => r.reopened_by },
+                        { key: 'why', header: 'Reason', render: (r: Reopen) => r.reason },
+                        {
+                          key: 'closed',
+                          header: 'Had been closed by',
+                          render: (r: Reopen) =>
+                            r.closed_by
+                              ? `${r.closed_by}${r.closed_at ? ` · ${new Date(r.closed_at).toLocaleDateString()}` : ''}`
+                              : '—',
+                        },
+                        {
+                          key: 'ver',
+                          header: 'Totals version',
+                          numeric: true,
+                          render: (r: Reopen) => (r.audit_version ? `v${r.audit_version}` : '—'),
+                        },
+                      ]}
+                      rows={reopens}
+                      rowKey={(r: Reopen) => r.id}
+                    />
+                  )}
+                </div>
 
                 <div className="sd-section">
                   <h3>Closure requests ({closures.length})</h3>

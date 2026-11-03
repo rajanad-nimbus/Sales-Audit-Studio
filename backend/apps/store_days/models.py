@@ -6,8 +6,10 @@ from decimal import Decimal
 from model_base import Base, utcnow
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -70,3 +72,73 @@ class StoreDayClosureRequest(Base):
     review_reason: Mapped[str | None] = mapped_column(Text)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class VarianceTolerance(Base):
+    """How much variance a total may carry before it needs a reason, and before it needs a case.
+
+    A rule applies to one total name, or every total when total_name is null, and to the
+    stores with one location trait (the store group), or every store when the trait is null.
+    """
+
+    __tablename__ = "variance_tolerances"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    total_name: Mapped[str | None] = mapped_column(String(100))
+    location_trait: Mapped[str | None] = mapped_column(String(100))
+    # |variance| <= within_amount is within tolerance.
+    within_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
+    # |variance| > case_amount needs a case or correction; in between needs a reason.
+    case_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    updated_by: Mapped[str | None] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "within_amount >= 0 AND case_amount >= within_amount",
+            name="ck_variance_tolerances_amounts",
+        ),
+        Index("ix_variance_tolerances_scope", "total_name", "location_trait"),
+    )
+
+
+class VarianceExplanation(Base):
+    """Why a store day's total carries a variance: a reason, and the case or correction behind it.
+
+    It explains a variance by total, dimension and amount, so it still applies after a
+    re-total that leaves that variance unchanged, and stops applying when the amount moves.
+    """
+
+    __tablename__ = "variance_explanations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    store_day_id: Mapped[str] = mapped_column(String(36), ForeignKey("store_days.id"), index=True)
+    audit_total_id: Mapped[str] = mapped_column(String(36), ForeignKey("audit_totals.id"))
+    audit_version: Mapped[int] = mapped_column(Integer)
+    total_name: Mapped[str] = mapped_column(String(100))
+    level: Mapped[str] = mapped_column(String(24))
+    dimension_key: Mapped[str | None] = mapped_column(String(100))
+    variance_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
+    outcome: Mapped[str] = mapped_column(String(24))
+    reason: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("cases.id"))
+    correction_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("transaction_adjustments.id")
+    )
+    explained_by: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PeriodClose(Base):
+    """Finance has closed the books through period_end; store days on or before it stay closed."""
+
+    __tablename__ = "period_closes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    period_end: Mapped[str] = mapped_column(String(10), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="Closed", index=True)
+    reason: Mapped[str | None] = mapped_column(Text)
+    closed_by: Mapped[str] = mapped_column(String(255))
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reopened_by: Mapped[str | None] = mapped_column(String(255))
+    reopened_reason: Mapped[str | None] = mapped_column(Text)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -11,8 +11,14 @@ REQUIRED_COMPARISON_TOTALS = frozenset({"Processor to Bank Variance", "POS to GL
 OPTIONAL_COMPARISON_TOTALS = frozenset({"POS Control Declared"})
 
 
-def comparison_blockers(day: StoreDay, totals: list[AuditTotal]) -> list[str]:
-    """Return the conditions that prevent a store day from closing."""
+def comparison_blockers(
+    day: StoreDay, totals: list[AuditTotal], unresolved_ids: set[str] | None = None
+) -> list[str]:
+    """Return the conditions that prevent a store day from closing.
+
+    ``unresolved_ids`` names the totals whose variance is neither within tolerance nor
+    explained; without it, any non-zero comparison variance blocks.
+    """
     comparisons = [
         total
         for total in totals
@@ -30,7 +36,10 @@ def comparison_blockers(day: StoreDay, totals: list[AuditTotal]) -> list[str]:
     ):
         blockers.append("current reconciliation totals are missing")
     if any(
-        total.variance_amount is not None and total.variance_amount != 0 for total in comparisons
+        total.variance_amount is not None
+        and total.variance_amount != 0
+        and (unresolved_ids is None or total.id in unresolved_ids)
+        for total in comparisons
     ):
         blockers.append("unresolved reconciliation variance")
     return blockers
