@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from database import get_db
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from integrations.ontology.nimbus import audit
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select, union
@@ -19,6 +19,7 @@ from apps.controls.foundation.models import FoundationReference
 from apps.ingest import reconciliation
 from apps.ingest.manifests import iter_manifests, validate_business_date
 from apps.ingest.sequence import find_gaps
+from apps.search import contains_literal
 from apps.security import scope
 from apps.security.authentication import require_role
 from apps.store_days import variances
@@ -46,6 +47,8 @@ from apps.store_days.rule_evaluation import (
     prepare_rule_evaluation,
 )
 from apps.store_days.service import (
+    OPTIONAL_COMPARISON_TOTALS,
+    REQUIRED_COMPARISON_TOTALS,
     comparison_blockers,
     get_day,
     store_day_view,
@@ -161,23 +164,100 @@ async def open_store_day(
     return store_day_view(day)
 
 
+def day_filters(store_id, status, date_from, date_to, q, stale=None) -> list:
+    """Filters shared by the list and its summary, so the counts always match the rows."""
+    filters = []
+    for value in (date_from, date_to):
+        if value:
+            try:
+                validate_business_date(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if store_id:
+        filters.append(StoreDay.store_id == store_id)
+    if status:
+        filters.append(StoreDay.status == status)
+    if date_from:
+        filters.append(StoreDay.business_date >= date_from)
+    if date_to:
+        filters.append(StoreDay.business_date <= date_to)
+    if q and q.strip():
+        filters.append(contains_literal(StoreDay.store_id, q))
+    if stale is not None:
+        filters.append(StoreDay.totals_stale.is_(stale))
+    return filters
+
+
 @router.get("")
 async def list_store_days(
     store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
+    status: Annotated[str | None, Query(max_length=32)] = None,
+    date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    q: Annotated[str | None, Query(max_length=50)] = None,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    response: Response = None,
 ):
+    """One page of store days, newest first. The filters run in the database, not the browser.
+
+    There is no total: counting every store day is a scan. ``X-Has-More`` says whether another page
+    follows, and ``/summary`` gives exact counts by status for the same filters.
+    """
     query = (
         scope.restrict(select(StoreDay), user, StoreDay.store_id)
+        .where(*day_filters(store_id, status, date_from, date_to, q))
         .order_by(StoreDay.business_date.desc(), StoreDay.store_id)
-        .limit(min(limit, 500))
+        .offset((page - 1) * limit)
+        .limit(limit + 1)
     )
-    if store_id:
-        query = query.where(StoreDay.store_id == store_id)
-    rows = (await db.execute(query)).scalars().all()
-    views = await readiness(db, list(rows))
+    found = list((await db.execute(query)).scalars().all())
+    rows = found[:limit]
+    if response is not None:
+        response.headers["X-Has-More"] = "true" if len(found) > limit else "false"
+    views = await readiness(db, rows)
     return [{**store_day_view(row), "readiness": views[row.id]} for row in rows]
+
+
+@router.get("/summary")
+async def store_day_summary(
+    store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    q: Annotated[str | None, Query(max_length=50)] = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it")),
+):
+    """Exact counts for the same filters as the list: by lifecycle status, and totals out of date."""
+    base = day_filters(store_id, None, date_from, date_to, q)
+    by_status = (
+        await db.execute(
+            scope.restrict(
+                select(StoreDay.status, func.count()).where(*base).group_by(StoreDay.status),
+                user,
+                StoreDay.store_id,
+            )
+        )
+    ).all()
+    stale = (
+        await db.execute(
+            scope.restrict(
+                select(func.count())
+                .select_from(StoreDay)
+                .where(*base, StoreDay.totals_stale.is_(True)),
+                user,
+                StoreDay.store_id,
+            )
+        )
+    ).scalar_one()
+    counts = {status: count for status, count in by_status}
+    return {
+        "total": sum(counts.values()),
+        "by_status": counts,
+        "totals_stale": stale,
+    }
 
 
 @router.get("/attention")
@@ -187,8 +267,10 @@ async def store_days_needing_attention(
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
+    late_page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    late_page_size: Annotated[int, Query(ge=10, le=500)] = 100,
 ):
-    """Late stores for one business date, and open store days that have stopped moving."""
+    """Late stores for one business date (a page of them), and open days that have stopped moving."""
     today = datetime.now(UTC).date()
     try:
         expected_date = validate_business_date(
@@ -236,7 +318,10 @@ async def store_days_needing_attention(
     return {
         "business_date": expected_date,
         "expected_stores": expected_stores,
-        "late_stores": late,
+        "late_stores": late[(late_page - 1) * late_page_size : late_page * late_page_size],
+        "late_total": len(late),
+        "late_page": late_page,
+        "late_page_size": late_page_size,
         "stuck_after_days": stuck_after_days,
         "stuck_store_days": stuck,
         "stuck_truncated": truncated,
@@ -256,6 +341,128 @@ async def store_selector(
         select(StoreDay.store_id.label("store_id")).where(StoreDay.store_id.is_not(None)),
     ).subquery()
     return (await db.execute(select(stores.c.store_id).order_by(stores.c.store_id))).scalars().all()
+
+
+BRIEF_ITEMS = 5
+
+
+@router.get("/{store_id}/{business_date}/brief")
+async def store_day_brief(
+    store_id: str,
+    business_date: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it")),
+):
+    """What an open row of the list needs to show: what holds the day back, without loading it all.
+
+    Small and bounded however busy the day was: a few variances, a few cases, and counts.
+    """
+    scope.require_store(user, store_id)
+    day = await get_day(db, store_id, business_date)
+    current = (
+        AuditTotal.store_day_id == day.id,
+        AuditTotal.audit_version == day.audit_version,
+    )
+    varying = (
+        (
+            await db.execute(
+                select(AuditTotal)
+                .where(
+                    *current,
+                    AuditTotal.variance_amount.is_not(None),
+                    AuditTotal.variance_amount != 0,
+                )
+                .order_by(func.abs(AuditTotal.variance_amount).desc(), AuditTotal.id)
+                .limit(50)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    evaluations = await variances.evaluate(db, day, list(varying))
+    unresolved = [t for t in varying if not evaluations[t.id]["resolved"]]
+    comparison = (
+        (
+            await db.execute(
+                select(AuditTotal).where(
+                    *current,
+                    AuditTotal.level == "Store",
+                    AuditTotal.total_name.in_(
+                        REQUIRED_COMPARISON_TOTALS | OPTIONAL_COMPARISON_TOTALS
+                    ),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    comparison_evaluations = await variances.evaluate(db, day, list(comparison))
+    open_cases = (
+        await db.execute(
+            select(func.count())
+            .select_from(Case)
+            .where(
+                Case.store_id == store_id,
+                Case.business_date == business_date,
+                Case.status != "Closed",
+            )
+        )
+    ).scalar_one()
+    top_cases = (
+        (
+            await db.execute(
+                select(Case)
+                .where(
+                    Case.store_id == store_id,
+                    Case.business_date == business_date,
+                    Case.status != "Closed",
+                )
+                .order_by(Case.total_exposure.desc(), Case.case_number)
+                .limit(BRIEF_ITEMS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    blockers = ([f"{open_cases} open case(s)"] if open_cases else []) + comparison_blockers(
+        day, list(comparison), set(variances.unresolved(comparison_evaluations))
+    )
+    gaps = await find_gaps(db, business_date, store_id=store_id)
+    return {
+        "store_day": store_day_view(day),
+        "readiness": (await readiness(db, [day], {(store_id, business_date): open_cases}))[day.id],
+        "blockers": blockers,
+        "variances": {
+            "with_variance": len(varying),
+            "unexplained": len(unresolved),
+            "top_unexplained": [
+                {
+                    "name": t.total_name,
+                    "level": t.level,
+                    "dimension": t.dimension_key,
+                    "variance": t.variance_amount,
+                    "currency": t.currency,
+                    "outcome": evaluations[t.id]["outcome"],
+                }
+                for t in unresolved[:BRIEF_ITEMS]
+            ],
+        },
+        "cases": {
+            "open": open_cases,
+            "top": [
+                {
+                    "id": c.id,
+                    "case_number": c.case_number,
+                    "case_type": c.case_type,
+                    "status": c.status,
+                    "exposure": c.total_exposure,
+                    "currency": c.currency,
+                }
+                for c in top_cases
+            ],
+        },
+        "registers_with_gaps": len(gaps.get((store_id, business_date), {})),
+    }
 
 
 @router.get("/{store_id}/{business_date}/sequence-gaps")

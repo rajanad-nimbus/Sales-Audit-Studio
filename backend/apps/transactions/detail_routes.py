@@ -66,6 +66,123 @@ def decode_payload(raw: bytes | None) -> dict:
     }
 
 
+BRIEF_ROWS = 5
+
+
+@router.get("/{transaction_id}/brief")
+async def transaction_brief(
+    transaction_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """What an opened row of the transaction list shows: how it was paid, a few lines, the tax.
+
+    The full detail page also loads the source record and related cases; a list row needs only this,
+    and only a few of each kind, so it stays small for a transaction with hundreds of lines.
+    """
+    tx = (
+        await db.execute(
+            select(CanonicalTransaction).where(CanonicalTransaction.id == transaction_id)
+        )
+    ).scalar_one_or_none()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    scope.require_store(user, tx.store_id)
+
+    line_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(TransactionLine)
+            .where(TransactionLine.transaction_id == tx.id)
+        )
+    ).scalar_one()
+    lines = (
+        (
+            await db.execute(
+                select(TransactionLine)
+                .where(TransactionLine.transaction_id == tx.id)
+                .order_by(TransactionLine.line_no)
+                .limit(BRIEF_ROWS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    tenders = (
+        (
+            await db.execute(
+                select(TransactionTender)
+                .where(TransactionTender.transaction_id == tx.id)
+                .order_by(TransactionTender.id)
+                .limit(BRIEF_ROWS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    taxes = (
+        (
+            await db.execute(
+                select(TransactionTax)
+                .where(TransactionTax.transaction_id == tx.id)
+                .order_by(TransactionTax.tax_code)
+                .limit(BRIEF_ROWS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    discount_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(TransactionDiscount)
+            .where(TransactionDiscount.transaction_id == tx.id)
+        )
+    ).scalar_one()
+    corrections = (
+        await db.execute(
+            select(func.count())
+            .select_from(TransactionAdjustment)
+            .where(TransactionAdjustment.transaction_id == tx.id)
+        )
+    ).scalar_one()
+    return {
+        "id": tx.id,
+        "currency": tx.currency,
+        "detail_status": tx.detail_status,
+        "original_reference": tx.original_reference,
+        "return_reason": tx.return_reason,
+        "transaction_number": tx.transaction_number,
+        "line_count": line_count,
+        "lines": [
+            {
+                "line_no": line.line_no,
+                "item_code": line.item_code,
+                "description": line.description,
+                "quantity": line.quantity,
+                "unit_price": line.unit_price,
+                "gross_amount": line.gross_amount,
+            }
+            for line in lines
+        ],
+        "tenders": [
+            {"tender_type": t.tender_type, "amount": t.amount, "reference": t.reference}
+            for t in tenders
+        ],
+        "taxes": [
+            {
+                "tax_code": t.tax_code,
+                "tax_name": t.tax_name,
+                "rate": t.rate,
+                "tax_amount": t.tax_amount,
+            }
+            for t in taxes
+        ],
+        "discount_count": discount_count,
+        "corrections": corrections,
+    }
+
+
 @router.get("/{transaction_id}/changes")
 async def transaction_changes(
     transaction_id: str,

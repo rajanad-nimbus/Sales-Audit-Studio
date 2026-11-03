@@ -169,3 +169,81 @@ async def facets(
         )
     ).one()
     return {"stores": sorted(stores), "types": sorted(types), "date_min": lo, "date_max": hi}
+
+
+CONTEXT_EACH_SIDE = 7
+
+
+@router.get("/{event_id}/context")
+async def register_event_context(
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role(*ROLES)),
+):
+    """The events either side of one event on the same register and day, in the order they happened.
+
+    A void, no-sale or cash pull means more with what came before and after it. This reads only a
+    few rows around the event, so it is cheap to ask for when a row is opened, however busy the day.
+    """
+    event = await db.get(RegisterEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Register event not found")
+    scope.require_store(user, event.store_id)
+    same_till = (
+        RegisterEvent.store_id == event.store_id,
+        RegisterEvent.business_date == event.business_date,
+        RegisterEvent.register_id.is_(None)
+        if event.register_id is None
+        else RegisterEvent.register_id == event.register_id,
+    )
+    ordering = (RegisterEvent.event_time, RegisterEvent.id)
+    before = (
+        (
+            await db.execute(
+                select(RegisterEvent)
+                .where(
+                    *same_till,
+                    (RegisterEvent.event_time < event.event_time)
+                    | (
+                        (RegisterEvent.event_time == event.event_time)
+                        & (RegisterEvent.id < event.id)
+                    ),
+                )
+                .order_by(RegisterEvent.event_time.desc(), RegisterEvent.id.desc())
+                .limit(CONTEXT_EACH_SIDE + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    after = (
+        (
+            await db.execute(
+                select(RegisterEvent)
+                .where(
+                    *same_till,
+                    (RegisterEvent.event_time > event.event_time)
+                    | (
+                        (RegisterEvent.event_time == event.event_time)
+                        & (RegisterEvent.id > event.id)
+                    ),
+                )
+                .order_by(*ordering)
+                .limit(CONTEXT_EACH_SIDE + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "event_id": event.id,
+        "store_id": event.store_id,
+        "register_id": event.register_id,
+        "business_date": event.business_date,
+        "earlier_not_shown": len(before) > CONTEXT_EACH_SIDE,
+        "later_not_shown": len(after) > CONTEXT_EACH_SIDE,
+        "events": [
+            view(row)
+            for row in [*reversed(before[:CONTEXT_EACH_SIDE]), event, *after[:CONTEXT_EACH_SIDE]]
+        ],
+    }
