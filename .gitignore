@@ -70,3 +70,6 @@ node_modules
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# POS RTLOG sample files
+TLOG/
