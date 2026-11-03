@@ -69,7 +69,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Total-Count", "X-Has-More"],
+    expose_headers=["X-Total-Count", "X-Has-More", "X-Report-Truncated"],
 )
 
 # Keep legacy handler imports available while implementations live with their features.

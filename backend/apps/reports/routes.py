@@ -1,8 +1,14 @@
-"""Standard sales-audit reports, each shown as a table and downloadable as CSV."""
+"""Standard sales-audit reports, each paged on the server and downloadable as CSV.
+
+Each report is read a page at a time (the database does the offset and limit), so a report over a
+large volume of store days never loads more than one page into memory. There is deliberately no
+total row count, since counting a whole range is itself a scan: a page says whether another follows.
+A CSV download reads the same pages in turn, up to CSV_MAX_ROWS, and says when it stopped there.
+"""
 
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from decimal import Decimal
+from dataclasses import dataclass
 from typing import Annotated
 
 from database import get_db
@@ -27,9 +33,12 @@ from apps.transactions.models import CanonicalTransaction, TransactionTax
 
 router = APIRouter(prefix="/api/reports", tags=["Reports"])
 ROLES = ("analyst", "finance", "it", "auditor")
-MAX_ROWS = 5000
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
+CSV_CHUNK = 2000
+CSV_MAX_ROWS = 100_000
 
-Report = dict  # {"title", "columns": [...], "rows": [[...]], "truncated": bool}
+Report = dict  # {"columns": [...], "rows": [[...]], "has_more": bool}
 
 
 def date_filters(column, start: str | None, end: str | None) -> list:
@@ -45,7 +54,12 @@ def date_filters(column, start: str | None, end: str | None) -> list:
     return filters
 
 
-async def variance_report(db: AsyncSession, user: dict, start, end) -> Report:
+def page_of(found: list, limit: int) -> tuple[list, bool]:
+    """The rows to show from a query that asked for one more than the page holds."""
+    return found[:limit], len(found) > limit
+
+
+async def variance_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
     """Every total with a variance on a store day's current version, and how it stands."""
     query = (
         select(StoreDay, AuditTotal)
@@ -59,18 +73,23 @@ async def variance_report(db: AsyncSession, user: dict, start, end) -> Report:
             AuditTotal.variance_amount != 0,
             *date_filters(StoreDay.business_date, start, end),
         )
-        .order_by(StoreDay.business_date.desc(), StoreDay.store_id, AuditTotal.total_name)
-        .limit(MAX_ROWS + 1)
+        .order_by(
+            StoreDay.business_date.desc(), StoreDay.store_id, AuditTotal.total_name, AuditTotal.id
+        )
+        .offset(offset)
+        .limit(limit + 1)
     )
-    found = (await db.execute(scope.restrict(query, user, StoreDay.store_id))).all()
+    found, more = page_of(
+        (await db.execute(scope.restrict(query, user, StoreDay.store_id))).all(), limit
+    )
     days: dict[str, StoreDay] = {}
     totals: dict[str, list[AuditTotal]] = defaultdict(list)
-    for day, total in found[:MAX_ROWS]:
+    for day, total in found:
         days[day.id] = day
         totals[day.id].append(total)
     outcomes = await variances.evaluate_days(db, list(days.values()), totals)
     rows = []
-    for day, total in found[:MAX_ROWS]:
+    for day, total in found:
         evaluation = outcomes[day.id][total.id]
         explanation = evaluation["explanation"]
         rows.append(
@@ -90,7 +109,6 @@ async def variance_report(db: AsyncSession, user: dict, start, end) -> Report:
             ]
         )
     return {
-        "title": "Total variances",
         "columns": [
             "Store",
             "Business date",
@@ -106,11 +124,11 @@ async def variance_report(db: AsyncSession, user: dict, start, end) -> Report:
             "Explanation",
         ],
         "rows": rows,
-        "truncated": len(found) > MAX_ROWS,
+        "has_more": more,
     }
 
 
-async def error_report(db: AsyncSession, user: dict, start, end) -> Report:
+async def error_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
     """Audit errors by store and error code, with how many are still open."""
     is_open = sql_case((Case.status != "Closed", 1), else_=0)
     query = (
@@ -125,10 +143,18 @@ async def error_report(db: AsyncSession, user: dict, start, end) -> Report:
         .join(Case, Case.id == ExceptionRow.case_id)
         .where(*date_filters(Case.business_date, start, end))
         .group_by(Case.store_id, ExceptionRow.exception_type, Case.currency)
-        .order_by(Case.store_id, func.count(ExceptionRow.id).desc(), ExceptionRow.exception_type)
-        .limit(MAX_ROWS + 1)
+        .order_by(
+            Case.store_id,
+            func.count(ExceptionRow.id).desc(),
+            ExceptionRow.exception_type,
+            Case.currency,
+        )
+        .offset(offset)
+        .limit(limit + 1)
     )
-    found = (await db.execute(scope.restrict(query, user, Case.store_id))).all()
+    found, more = page_of(
+        (await db.execute(scope.restrict(query, user, Case.store_id))).all(), limit
+    )
     rows = [
         [
             store,
@@ -139,26 +165,26 @@ async def error_report(db: AsyncSession, user: dict, start, end) -> Report:
             open_count or 0,
             amount,
         ]
-        for store, code, currency, count, open_count, amount in found[:MAX_ROWS]
+        for store, code, currency, count, open_count, amount in found
     ]
     return {
-        "title": "Audit errors by store",
         "columns": ["Store", "Code", "Error", "Currency", "Errors", "Open", "Amount"],
         "rows": rows,
-        "truncated": len(found) > MAX_ROWS,
+        "has_more": more,
     }
 
 
-async def status_report(db: AsyncSession, user: dict, start, end) -> Report:
+async def status_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
     """Where every store day stands: data, audit and export."""
     query = (
         select(StoreDay)
         .where(*date_filters(StoreDay.business_date, start, end))
         .order_by(StoreDay.business_date.desc(), StoreDay.store_id)
-        .limit(MAX_ROWS + 1)
+        .offset(offset)
+        .limit(limit + 1)
     )
     found = list((await db.execute(scope.restrict(query, user, StoreDay.store_id))).scalars())
-    days = found[:MAX_ROWS]
+    days, more = page_of(found, limit)
     views = await readiness(db, days)
     rows = [
         [
@@ -176,7 +202,6 @@ async def status_report(db: AsyncSession, user: dict, start, end) -> Report:
         for day in days
     ]
     return {
-        "title": "Store day status",
         "columns": [
             "Store",
             "Business date",
@@ -190,13 +215,21 @@ async def status_report(db: AsyncSession, user: dict, start, end) -> Report:
             "Closed by",
         ],
         "rows": rows,
-        "truncated": len(found) > MAX_ROWS,
+        "has_more": more,
     }
 
 
-async def tax_report(db: AsyncSession, user: dict, start, end) -> Report:
-    """Tax collected by store, day and tax code, with approved tax corrections listed separately."""
-    recorded = (
+async def tax_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
+    """Tax collected by store, day and tax code."""
+    group = (
+        CanonicalTransaction.business_date,
+        CanonicalTransaction.store_id,
+        TransactionTax.tax_code,
+        TransactionTax.tax_name,
+        TransactionTax.rate,
+        CanonicalTransaction.currency,
+    )
+    query = (
         select(
             CanonicalTransaction.store_id,
             CanonicalTransaction.business_date,
@@ -210,56 +243,22 @@ async def tax_report(db: AsyncSession, user: dict, start, end) -> Report:
         )
         .join(CanonicalTransaction, CanonicalTransaction.id == TransactionTax.transaction_id)
         .where(*date_filters(CanonicalTransaction.business_date, start, end))
-        .group_by(
+        .group_by(*group)
+        .order_by(
+            CanonicalTransaction.business_date.desc(),
             CanonicalTransaction.store_id,
-            CanonicalTransaction.business_date,
             TransactionTax.tax_code,
             TransactionTax.tax_name,
             TransactionTax.rate,
             CanonicalTransaction.currency,
         )
-        .order_by(
-            CanonicalTransaction.business_date.desc(),
-            CanonicalTransaction.store_id,
-            TransactionTax.tax_code,
-        )
-        .limit(MAX_ROWS + 1)
+        .offset(offset)
+        .limit(limit + 1)
     )
-    found = (await db.execute(scope.restrict(recorded, user, CanonicalTransaction.store_id))).all()
-    rows = [
-        [store, day, code, name, rate, currency, count, taxable, tax]
-        for store, day, code, name, rate, currency, count, taxable, tax in found[:MAX_ROWS]
-    ]
-
-    adjustments = (
-        select(
-            CanonicalTransaction.store_id,
-            CanonicalTransaction.business_date,
-            CanonicalTransaction.currency,
-            TransactionAdjustment.proposed_values,
-        )
-        .join(CanonicalTransaction, CanonicalTransaction.id == TransactionAdjustment.transaction_id)
-        .where(
-            TransactionAdjustment.adjustment_type == "Tax",
-            TransactionAdjustment.status == "Approved",
-            *date_filters(CanonicalTransaction.business_date, start, end),
-        )
-        .limit(MAX_ROWS)
+    found, more = page_of(
+        (await db.execute(scope.restrict(query, user, CanonicalTransaction.store_id))).all(), limit
     )
-    deltas: dict[tuple[str, str, str], list] = defaultdict(lambda: [0, Decimal("0")])
-    for store, day, currency, values in (
-        await db.execute(scope.restrict(adjustments, user, CanonicalTransaction.store_id))
-    ).all():
-        try:
-            delta = cent_value((values or {}).get("tax_delta"), "tax_delta")
-        except ValueError:
-            continue
-        deltas[(store, day, currency)][0] += 1
-        deltas[(store, day, currency)][1] += delta
-    for (store, day, currency), (count, delta) in sorted(deltas.items(), reverse=True):
-        rows.append([store, day, "ADJ", "Approved tax corrections", "", currency, count, "", delta])
     return {
-        "title": "Tax by store and tax code",
         "columns": [
             "Store",
             "Business date",
@@ -271,22 +270,123 @@ async def tax_report(db: AsyncSession, user: dict, start, end) -> Report:
             "Taxable amount",
             "Tax amount",
         ],
-        "rows": rows,
-        "truncated": len(found) > MAX_ROWS,
+        "rows": [list(row) for row in found],
+        "has_more": more,
     }
 
 
-REPORTS: dict[str, Callable[..., Awaitable[Report]]] = {
-    "variances": variance_report,
-    "errors": error_report,
-    "store-days": status_report,
-    "tax": tax_report,
+async def tax_correction_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
+    """Approved corrections to a transaction's tax, one row each."""
+    query = (
+        select(
+            CanonicalTransaction.store_id,
+            CanonicalTransaction.business_date,
+            CanonicalTransaction.id,
+            CanonicalTransaction.currency,
+            TransactionAdjustment.proposed_values,
+            TransactionAdjustment.proposed_by,
+            TransactionAdjustment.reviewed_by,
+            TransactionAdjustment.reviewed_at,
+            TransactionAdjustment.rationale,
+        )
+        .join(CanonicalTransaction, CanonicalTransaction.id == TransactionAdjustment.transaction_id)
+        .where(
+            TransactionAdjustment.adjustment_type == "Tax",
+            TransactionAdjustment.status == "Approved",
+            *date_filters(CanonicalTransaction.business_date, start, end),
+        )
+        .order_by(
+            CanonicalTransaction.business_date.desc(),
+            CanonicalTransaction.store_id,
+            TransactionAdjustment.created_at,
+            TransactionAdjustment.id,
+        )
+        .offset(offset)
+        .limit(limit + 1)
+    )
+    found, more = page_of(
+        (await db.execute(scope.restrict(query, user, CanonicalTransaction.store_id))).all(), limit
+    )
+    rows = []
+    for (
+        store,
+        day,
+        transaction_id,
+        currency,
+        values,
+        proposed_by,
+        reviewed_by,
+        reviewed_at,
+        why,
+    ) in found:
+        try:
+            delta = cent_value((values or {}).get("tax_delta"), "tax_delta")
+        except ValueError:
+            delta = "Invalid"
+        rows.append(
+            [
+                store,
+                day,
+                transaction_id,
+                currency,
+                delta,
+                proposed_by,
+                reviewed_by or "",
+                reviewed_at,
+                why,
+            ]
+        )
+    return {
+        "columns": [
+            "Store",
+            "Business date",
+            "Transaction",
+            "Currency",
+            "Tax change",
+            "Proposed by",
+            "Approved by",
+            "Approved at",
+            "Reason",
+        ],
+        "rows": rows,
+        "has_more": more,
+    }
+
+
+@dataclass(frozen=True)
+class ReportSpec:
+    title: str
+    description: str
+    build: Callable[..., Awaitable[Report]]
+
+
+REPORTS: dict[str, ReportSpec] = {
+    "variances": ReportSpec(
+        "Total variances",
+        "Totals that do not balance, and whether each is explained.",
+        variance_report,
+    ),
+    "errors": ReportSpec(
+        "Errors by store",
+        "Audit errors by store and error code, with how many are open.",
+        error_report,
+    ),
+    "store-days": ReportSpec(
+        "Store day status", "Data, audit and export readiness for each store day.", status_report
+    ),
+    "tax": ReportSpec("Tax / VAT", "Tax collected by store, day and tax code.", tax_report),
+    "tax-corrections": ReportSpec(
+        "Tax corrections", "Approved corrections to a transaction's tax.", tax_correction_report
+    ),
 }
 
 
 @router.get("")
 async def list_reports(_: dict = Depends(require_role(*ROLES))):
-    return [{"name": name, "title": fn.__doc__.split("\n")[0]} for name, fn in REPORTS.items()]
+    return [
+        {"name": name, "title": spec.title, "description": spec.description}
+        for name, spec in REPORTS.items()
+    ]
 
 
 @router.get("/{name}")
@@ -294,19 +394,39 @@ async def run_report(
     name: str,
     start: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     end: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    page_size: Annotated[int, Query(ge=10, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     format: Annotated[str, Query(pattern="^(json|csv)$")] = "json",
+    response: Response = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role(*ROLES)),
 ):
-    builder = REPORTS.get(name)
-    if builder is None:
+    spec = REPORTS.get(name)
+    if spec is None:
         raise HTTPException(status_code=404, detail="Unknown report")
-    report = await builder(db, user, start, end)
     if format == "csv":
-        suffix = f"_{start or 'start'}_{end or 'now'}"
-        return Response(
-            csv_table(report["columns"], report["rows"]),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={name}{suffix}.csv"},
-        )
-    return report
+        return await download(spec, name, db, user, start, end)
+    report = await spec.build(db, user, start, end, (page - 1) * page_size, page_size)
+    response.headers["X-Has-More"] = "true" if report["has_more"] else "false"
+    return {"title": spec.title, "page": page, "page_size": page_size, **report}
+
+
+async def download(spec: ReportSpec, name: str, db, user, start, end) -> Response:
+    """Read the report page by page into one CSV, stopping at CSV_MAX_ROWS."""
+    columns: list = []
+    rows: list = []
+    offset, more = 0, True
+    while more and len(rows) < CSV_MAX_ROWS:
+        chunk = await spec.build(db, user, start, end, offset, CSV_CHUNK)
+        columns = chunk["columns"]
+        rows.extend(chunk["rows"])
+        more, offset = chunk["has_more"], offset + CSV_CHUNK
+    truncated = more and len(rows) >= CSV_MAX_ROWS
+    return Response(
+        csv_table(columns, rows[:CSV_MAX_ROWS]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={name}_{start or 'start'}_{end or 'now'}.csv",
+            "X-Report-Truncated": "true" if truncated else "false",
+        },
+    )

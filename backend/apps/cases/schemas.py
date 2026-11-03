@@ -141,7 +141,8 @@ class HumanDecisionCreate(BaseModel):
     recommendation_id: str = Field(min_length=1, max_length=36)
     decision_type: str = Field(min_length=1, max_length=50)
     decision: str = Field(min_length=1, max_length=50)
-    actor: str = Field(min_length=1, max_length=255)
+    # Ignored if sent: the decision is always recorded under the signed-in user.
+    actor: str | None = Field(default=None, max_length=255)
     authority_check: str = Field(default="Pending", max_length=50)
     rationale: str | None = Field(default=None, max_length=2000)
 

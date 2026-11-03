@@ -35,10 +35,9 @@ from apps.store_days.freshness import lock_configuration, lock_store_day_identit
 from apps.store_days.models import AuditTotal, StoreDay, StoreDayClosureRequest
 from apps.store_days.periods import latest_close, reopen_guards
 from apps.store_days.readiness import (
-    COMPLETE,
     data_quality,
     holding_back,
-    ingest_states,
+    late_stores,
     readiness,
 )
 from apps.store_days.rule_evaluation import (
@@ -197,45 +196,7 @@ async def store_days_needing_attention(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    stores = (
-        (
-            await db.execute(
-                scope.restrict(
-                    select(FoundationReference.code).where(
-                        FoundationReference.category == "Store",
-                        FoundationReference.active.is_(True),
-                    ),
-                    user,
-                    FoundationReference.code,
-                ).order_by(FoundationReference.code)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    keys = [(store, expected_date) for store in stores]
-    ingest = await ingest_states(db, keys)
-    opened = set(
-        (
-            await db.execute(
-                select(StoreDay.store_id).where(
-                    StoreDay.business_date == expected_date, StoreDay.store_id.in_(stores)
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    late = [
-        {
-            "store_id": store,
-            "business_date": expected_date,
-            "store_day_open": store in opened,
-            **ingest[(store, expected_date)],
-        }
-        for store, _date in keys
-        if ingest[(store, expected_date)]["state"] != COMPLETE
-    ]
+    expected_stores, late = await late_stores(db, user, expected_date)
 
     cutoff = (today - timedelta(days=stuck_after_days)).isoformat()
     candidates = (
@@ -274,7 +235,7 @@ async def store_days_needing_attention(
         )
     return {
         "business_date": expected_date,
-        "expected_stores": len(stores),
+        "expected_stores": expected_stores,
         "late_stores": late,
         "stuck_after_days": stuck_after_days,
         "stuck_store_days": stuck,

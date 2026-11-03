@@ -214,3 +214,47 @@ def test_middleware_lets_the_right_roles_through_and_keeps_auth_rules(monkeypatc
     assert _call(monkeypatch, None, "/api/health")[0] == 200  # health stays public
     assert _call(monkeypatch, None, "/api/ingest/shopify/webhook", "POST")[0] == 200
     assert _call(monkeypatch, None, "/api/ingest/shopify/webhook/extra", "POST")[0] == 401
+
+
+def test_screens_are_grouped_for_the_menu_in_the_agreed_order():
+    groups: dict[str, list[str]] = {}
+    for screen in access.SCREENS:
+        groups.setdefault(screen.group, []).append(screen.label)
+
+    assert list(groups) == [
+        "Workspace",
+        "Store Day Audit",
+        "Investigate & Correct",
+        "Reports",
+        "Integrations",
+        "Diagnostics",
+        "Configuration",
+    ]
+    # Imports (once called Data Pipeline) and Exports sit together.
+    assert groups["Integrations"] == ["Imports", "Exports"]
+    assert "Data Pipeline" not in {s.label for s in access.SCREENS}
+    assert groups["Store Day Audit"][-1] == "Foundation Data"
+    assert groups["Diagnostics"] == [
+        "System health",
+        "Data feeds",
+        "Audit integrity",
+        "Audit activity",
+        "Agent Activity",
+    ]
+    assert "Agent Activity" not in groups["Workspace"]
+
+
+def test_diagnostics_are_for_it_finance_and_auditors_only():
+    for role in ("it", "finance", "auditor", "admin"):
+        keys = {s["key"] for s in access.screens_for(role) if s["allowed"]}
+        assert {"diagnostics-health", "diagnostics-integrity"} <= keys, role
+    for role in ("analyst", "store_manager", "viewer"):
+        keys = {s["key"] for s in access.screens_for(role) if s["allowed"]}
+        assert not any(key.startswith("diagnostics-") for key in keys), role
+        assert not access.api_allowed(role, "/api/diagnostics/health")[0], role
+
+
+def test_the_imports_screen_keeps_its_api_access_after_the_rename():
+    assert access.api_allowed("it", "/api/ingest/profiles")[0]
+    assert {s.path for s in access.SCREENS} >= {"/imports", "/exports"}
+    assert "/pipeline" not in {s.path for s in access.SCREENS}

@@ -15,9 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.models import Case
 from apps.cases.models import Exception as ExceptionRow
+from apps.controls.foundation.models import FoundationReference
 from apps.exports.models import ExportBatch, ExportItem
 from apps.ingest.common import LINEAGE
 from apps.ingest.models import SourceRecord
+from apps.security import scope
 from apps.store_days.models import AuditTotal, StoreDay
 from apps.store_days.variances import evaluate_days, unresolved
 from apps.transactions.models import CanonicalTransaction
@@ -287,3 +289,50 @@ def data_quality(day: StoreDay, ingest_state: str, version: int) -> dict:
     if ingest_state == INCOMPLETE:
         return {"state": "Partial", "detail": "Built from fewer transactions than expected"}
     return {"state": "Provisional", "detail": f"Data completeness unconfirmed ({ingest_state})"}
+
+
+async def late_stores(db: AsyncSession, user: dict, business_date: str) -> tuple[int, list[dict]]:
+    """Active stores whose data for a business date is not complete.
+
+    Returns how many stores were expected, and one entry for each that is late.
+    """
+    stores = (
+        (
+            await db.execute(
+                scope.restrict(
+                    select(FoundationReference.code).where(
+                        FoundationReference.category == "Store",
+                        FoundationReference.active.is_(True),
+                    ),
+                    user,
+                    FoundationReference.code,
+                ).order_by(FoundationReference.code)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    keys = [(store, business_date) for store in stores]
+    ingest = await ingest_states(db, keys)
+    opened = set(
+        (
+            await db.execute(
+                select(StoreDay.store_id).where(
+                    StoreDay.business_date == business_date, StoreDay.store_id.in_(stores)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    late = [
+        {
+            "store_id": store,
+            "business_date": business_date,
+            "store_day_open": store in opened,
+            **ingest[(store, business_date)],
+        }
+        for store in stores
+        if ingest[(store, business_date)]["state"] != COMPLETE
+    ]
+    return len(stores), late

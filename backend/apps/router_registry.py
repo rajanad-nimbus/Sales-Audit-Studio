@@ -9,11 +9,13 @@ from apps.audit.error_routes import router as audit_error_router
 from apps.audit.routes import router as audit_router
 from apps.cases.routes import router as cases_router
 from apps.cash.routes import router as cash_router
+from apps.command_center.routes import router as command_center_router
 from apps.controls.foundation.routes import router as foundation_router
 from apps.controls.foundation.tenders import router as tender_router
 from apps.controls.rules.routes import router as rules_router
 from apps.corrections.routes import router as corrections_router
 from apps.development.routes import router as development_router
+from apps.diagnostics.routes import router as diagnostics_router
 from apps.exports.routes import router as exports_router
 from apps.gl.routes import router as gl_router
 from apps.ingest.routes import router as ingest_router
@@ -41,6 +43,7 @@ ROUTERS = (
     audit_router,
     audit_error_router,
     development_router,
+    diagnostics_router,
     exports_router,
     store_day_router,
     closure_router,
@@ -53,6 +56,7 @@ ROUTERS = (
     voucher_router,
     reports_router,
     cases_router,
+    command_center_router,
     corrections_router,
     transactions_router,
     register_event_router,

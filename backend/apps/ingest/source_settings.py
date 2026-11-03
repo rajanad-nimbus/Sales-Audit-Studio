@@ -93,10 +93,10 @@ async def require_allowed(db: AsyncSession, source: str, *, manual: bool = False
     if not state["enabled"]:
         raise HTTPException(
             status_code=409,
-            detail=f"{source} is switched off. Turn it on in Data Pipeline, Sources.",
+            detail=f"{source} is switched off. Turn it on in Imports, Sources.",
         )
     if manual and not state["manual_sync"]:
         raise HTTPException(
             status_code=409,
-            detail=f"Manual sync is switched off for {source}. Turn it on in Data Pipeline, Sources.",
+            detail=f"Manual sync is switched off for {source}. Turn it on in Imports, Sources.",
         )

@@ -1,7 +1,7 @@
 """Scheduled Shopify sync.
 
 The nightly batch still relies on an external cron. This is the in-app schedule for Shopify: IT picks daily or weekly
-and a time of day in Data Pipeline, Sources, and a loop started with the application pulls recent orders and refunds
+and a time of day in Imports, Sources, and a loop started with the application pulls recent orders and refunds
 when a run is due. Ingest de-duplicates by record identity, so overlapping windows are safe. A database lock keeps two
 copies of the application from running the same sync.
 """

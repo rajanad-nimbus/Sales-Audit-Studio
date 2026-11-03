@@ -9,12 +9,15 @@ import pytest
 HOOK = Path(__file__).resolve().parents[4] / ".husky" / "pre-commit"
 
 
-@pytest.mark.parametrize("failing_step", ["lint-staged", "tsc", "design-system", "ruff", "pytest"])
+@pytest.mark.parametrize(
+    "failing_step", ["lint-staged", "tsc", "design-system", "vitest", "ruff", "pytest"]
+)
 def test_pre_commit_propagates_failures(tmp_path, failing_step):
     tools = {
         "frontend/node_modules/.bin/lint-staged": "lint-staged",
         "frontend/node_modules/.bin/tsc": "tsc",
         "bin/node": "design-system",
+        "frontend/node_modules/.bin/vitest": "vitest",
         "backend/.venv/bin/ruff": "ruff",
         "backend/.venv/bin/python": "pytest",
     }
