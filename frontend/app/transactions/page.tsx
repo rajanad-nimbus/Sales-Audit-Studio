@@ -379,7 +379,7 @@ export default function TransactionsPage() {
           <p>
             {filtered
               ? 'Try clearing a filter.'
-              : 'Transactions appear after a feed is ingested and normalized. Run the batch on the Data Pipeline page.'}
+              : 'Transactions appear after a feed is ingested and normalized. Run the batch on the Imports page.'}
           </p>
           {filtered && (
             <Button

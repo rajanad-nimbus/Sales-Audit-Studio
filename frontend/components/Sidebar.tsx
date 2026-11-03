@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useLive } from '@/lib/sync';
+import { navSections } from '@/lib/nav';
 import { Logo } from '@/components/Logo';
 import { useMe } from './UserMenu';
 
@@ -15,6 +16,8 @@ const icons: Record<string, React.ReactNode> = {
   registerEvents: <path d="M7 4h10v16H7zM10 8h4m-4 4h4m-4 4h2" />,
   reports: <path d="M6 3h9l3 3v15H6zM9 11h6m-6 4h6M9 7h3" />,
   auditErrors: <path d="M12 4 3 20h18L12 4Zm0 6v5m0 3h.01" />,
+  diagnostics: <path d="M3 12h4l2-6 4 12 2-6h6" />,
+  imports: <path d="M12 3v12m0 0-4-4m4 4 4-4M5 17v3h14v-3" />,
   pipeline: <path d="M4 6h6v4H4zM14 14h6v4h-6zM10 8h2a2 2 0 0 1 2 2v4" />,
   foundation: (
     <path d="M12 4c4.4 0 8 1.1 8 2.5S16.400 9 12 9 4 7.900 4 6.500 7.600 4 12 4Zm8 2.500v5c0 1.400-3.600 2.500-8 2.500s-8-1.100-8-2.500v-5m16 5v5c0 1.400-3.600 2.500-8 2.500s-8-1.100-8-2.500v-5" />
@@ -31,38 +34,6 @@ const icons: Record<string, React.ReactNode> = {
   ),
   audit: <path d="M8 4h8l3 3v13H5V4h3Zm0 6h8M8 14h8M8 18h5" />,
 };
-
-const sections = [
-  {
-    title: 'Workspace',
-    items: [
-      { label: 'Command Center', href: '/', icon: 'home' },
-      { label: 'Action Center', href: '/actions', icon: 'actions', badge: true },
-      { label: 'Cases', href: '/cases', icon: 'cases' },
-      { label: 'Agent Activity', href: '/activity', icon: 'activity' },
-    ],
-  },
-  {
-    title: 'Data & Control',
-    items: [
-      { label: 'Foundation Data', href: '/foundation', icon: 'foundation' },
-      { label: 'Store Days & Totals', href: '/store-days', icon: 'totals' },
-      { label: 'Transactions', href: '/transactions', icon: 'transactions' },
-      { label: 'Register Events', href: '/register-events', icon: 'registerEvents' },
-      { label: 'Audit Errors', href: '/audit-errors', icon: 'auditErrors' },
-      { label: 'Reports', href: '/reports', icon: 'reports' },
-      { label: 'Cash Office', href: '/cash-office', icon: 'cash' },
-      { label: 'Transaction Corrections', href: '/corrections', icon: 'corrections' },
-      { label: 'Data Pipeline', href: '/pipeline', icon: 'pipeline' },
-      { label: 'Exports', href: '/exports', icon: 'exports' },
-      { label: 'Audit Trail', href: '/audit', icon: 'audit' },
-    ],
-  },
-  {
-    title: 'Configuration',
-    items: [{ label: 'Configuration', href: '/settings', icon: 'settings' }],
-  },
-];
 
 const Icon = ({ name }: { name: string }) => (
   <span className="nav-tile">
@@ -87,8 +58,7 @@ export function Sidebar() {
   const [pending, setPending] = useState(0);
   const { me } = useMe();
   // The server decides which screens this role may open (GET /api/me). Until it answers, show none.
-  const allowed = new Set((me?.screens ?? []).filter((s) => s.allowed).map((s) => s.path));
-  const canSee = (href: string) => allowed.has(href);
+  const sections = useMemo(() => navSections(me?.screens ?? []), [me]);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [filter, setFilter] = useState('');
@@ -138,7 +108,7 @@ export function Sidebar() {
   const shown = sections
     .map((s) => ({
       ...s,
-      items: s.items.filter((i) => canSee(i.href) && (!q || i.label.toLowerCase().includes(q))),
+      items: s.items.filter((i) => !q || i.label.toLowerCase().includes(q)),
     }))
     .filter((s) => s.items.length);
 

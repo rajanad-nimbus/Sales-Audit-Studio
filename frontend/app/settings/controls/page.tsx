@@ -127,7 +127,7 @@ export default function ControlsPage() {
   return (
     <SettingsSection
       title="Totals, rules & GL mapping"
-      description="Governed controls used when Store Days are recalculated. Stores, products and other reference data are under Data & Control → Foundation Data."
+      description="Governed controls used when Store Days are recalculated. Stores, products and other reference data are under Store Day Audit → Foundation Data."
     >
       <Tabs
         value={tab}

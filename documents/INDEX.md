@@ -12,7 +12,7 @@
 
 ## Operations and implementation
 
-- [Data pipeline and configuration](DATA_PIPELINE_AND_CONFIGURATION.md)
+- [Imports and configuration](DATA_PIPELINE_AND_CONFIGURATION.md)
 - [Shopify integration](backend/SHOPIFY_INTEGRATION.md)
 - [Store scope](backend/STORE_SCOPE.md)
 - [Theme](THEME.md)

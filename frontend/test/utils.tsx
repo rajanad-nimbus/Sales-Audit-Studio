@@ -19,6 +19,14 @@ const mocked = api as unknown as Record<
   ReturnType<typeof vi.fn>
 >;
 
+/** A response body that also carries headers, for the few screens that read them. */
+export class WithHeaders {
+  constructor(
+    readonly data: unknown,
+    readonly headers: Record<string, string>
+  ) {}
+}
+
 /** The recorded calls to one endpoint, e.g. calls('post', '/api/vouchers'). */
 export const calls = (method: 'get' | 'post' | 'put' | 'delete', path: string) =>
   mocked[method].mock.calls.filter(([url]) => url === path);
@@ -40,6 +48,7 @@ export function mockApi(routes: Routes) {
           : { data: rest[0], ...((rest[1] as object) ?? {}) };
       const body = typeof handler === 'function' ? await handler(config) : handler;
       if (body instanceof Error) throw body;
+      if (body instanceof WithHeaders) return { data: body.data, headers: body.headers };
       return { data: body };
     });
   }

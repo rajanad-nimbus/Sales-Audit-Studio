@@ -303,12 +303,12 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                 {shopifyStatus.quarantined_records > 0 && (
                   <Alert tone="warning">
                     {shopifyStatus.quarantined_records} Shopify record(s) failed validation and were
-                    set aside. Review them in the Data Pipeline.
+                    set aside. Review them in Imports.
                   </Alert>
                 )}
                 <p className="hint">
                   This is the connection. To switch Shopify on or off, add it to the nightly batch,
-                  or sync it now, go to <Link href="/pipeline#sources">Data Pipeline, Sources</Link>
+                  or sync it now, go to <Link href="/imports#sources">Imports, Sources</Link>
                   .
                 </p>
               </>
@@ -325,7 +325,7 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
           <Card title="Source feeds">
             <p className="hint">
               Each feed says where sales data comes from and how often it should arrive. Deliveries
-              and errors show in the Data Pipeline.
+              and errors show in Imports.
             </p>
             <DataTable
               columns={[

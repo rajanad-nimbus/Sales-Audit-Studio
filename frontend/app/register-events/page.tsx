@@ -340,7 +340,7 @@ export default function RegisterEventsPage() {
           <p>
             {filtered
               ? 'Try clearing a filter.'
-              : 'Register events appear after a POS log is ingested through the Data Pipeline.'}
+              : 'Register events appear after a POS log is ingested through Imports.'}
           </p>
           {filtered && (
             <Button size="sm" onClick={clear}>

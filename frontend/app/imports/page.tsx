@@ -95,7 +95,7 @@ const ago = (h: number | null | undefined) =>
         ? `${Math.round(h)}h ago`
         : `${Math.round(h / 24)}d ago`;
 
-export default function PipelinePage() {
+export default function ImportsPage() {
   const toast = useToast();
   const { me } = useMe();
   const canManage = !!me && (me.role === 'it' || me.role === 'admin');
@@ -132,7 +132,7 @@ export default function PipelinePage() {
       setError(null);
     } catch {
       setError(
-        'Could not load pipeline status. Check that the backend is running and your role is Finance or IT.'
+        'Could not load import status. Check that the backend is running and your role is Finance or IT.'
       );
     } finally {
       setLoaded(true);
@@ -199,7 +199,7 @@ export default function PipelinePage() {
 
   // One line that answers "is my data OK?"
   let health: { tone: 'success' | 'warning' | 'error'; title: string; body: string };
-  if (!bstatus) health = { tone: 'warning', title: 'Checking pipeline…', body: '' };
+  if (!bstatus) health = { tone: 'warning', title: 'Checking imports…', body: '' };
   else if (bstatus.freshness === 'never')
     health = {
       tone: 'warning',
@@ -236,7 +236,7 @@ export default function PipelinePage() {
   return (
     <div className="page-container">
       <PageHeader
-        title="Data Pipeline"
+        title="Imports"
         subtitle="Ingest, archive, normalize, reconcile, then cases. Transactions arrive once a day."
         actions={
           <>
@@ -263,7 +263,7 @@ export default function PipelinePage() {
       )}
 
       {!loaded ? (
-        <SkeletonRows rows={3} label="Loading pipeline" />
+        <SkeletonRows rows={3} label="Loading imports" />
       ) : (
         <>
           <div className={`pl-health ${health.tone}`} role="status">
@@ -283,7 +283,7 @@ export default function PipelinePage() {
             </span>
           </div>
 
-          <ol className="cc-pipeline pl-flow" aria-label="Pipeline stages">
+          <ol className="cc-pipeline pl-flow" aria-label="Import stages">
             {flow.map((f, i) => {
               const body = (
                 <>
@@ -307,7 +307,7 @@ export default function PipelinePage() {
             })}
           </ol>
 
-          <div className="case-tabs" role="tablist" aria-label="Pipeline sections">
+          <div className="case-tabs" role="tablist" aria-label="Import sections">
             {tabs.map(([k, label, count, hot]) => (
               <button
                 key={k}

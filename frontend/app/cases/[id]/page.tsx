@@ -253,8 +253,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           recommendation_id: recId,
           decision_type: 'Finance',
           decision,
-          actor: 'finance.user',
-          authority_check: 'Pending',
           rationale,
         }),
       decision === 'Approved' ? 'Recommendation approved.' : 'Escalated for review.'

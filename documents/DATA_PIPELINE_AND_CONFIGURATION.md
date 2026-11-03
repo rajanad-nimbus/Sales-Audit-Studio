@@ -1,15 +1,15 @@
-# Data Pipeline and Configuration
+# Imports and Configuration
 
 How data gets into Nimbus and becomes cases, and where each part of that behaviour is configured.
 
-- **Data Pipeline** (`/pipeline`) is the operational view: is my data current, and what happened to it?
+- **Imports** (`/imports`, formerly called Data Pipeline; `/pipeline` still redirects) is the operational view: is my data current, and what happened to it?
 - **Configuration** (`/settings/*`) is where you change how Nimbus behaves.
 
-Sources: `backend/apps/`, `backend/nimbus.py`, `backend/access.py`, `backend/main.py`, `frontend/app/pipeline/page.tsx`, `frontend/app/settings/`.
+Sources: `backend/apps/`, `backend/nimbus.py`, `backend/access.py`, `backend/main.py`, `frontend/app/imports/page.tsx`, `frontend/app/settings/`.
 
 ## Contents
 
-1. [Data Pipeline](#part-1-data-pipeline)
+1. [Imports](#part-1-imports)
 2. [Configuration](#part-2-configuration)
 3. [Environment variables](#environment-variables)
 4. [API quick reference](#api-quick-reference)
@@ -19,7 +19,7 @@ Sources: `backend/apps/`, `backend/nimbus.py`, `backend/access.py`, `backend/mai
 
 ---
 
-## Part 1: Data Pipeline
+## Part 1: Imports
 
 ### End-to-end flow
 
@@ -503,7 +503,7 @@ Do not commit real credentials. Keep them in `.env`.
 
 | I want to…                                           | Do this                                                                                                            |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Check whether my data is current                     | Open Data Pipeline and read the health banner                                                                      |
+| Check whether my data is current                     | Open Imports and read the health banner                                                                      |
 | Load a day's data                                    | Run nightly batch (IT), or schedule `PYTHONPATH=backend python -m apps.operations.batch_job --date YYYY-MM-DD`     |
 | Re-run a day that already succeeded                  | `POST /api/batch/run` with `rerun=true`, or `apps.operations.batch_job --rerun`                                    |
 | Find out why a record didn't load                    | Pipeline → Quarantine tab                                                                                          |

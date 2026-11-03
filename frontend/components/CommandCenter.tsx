@@ -19,6 +19,8 @@ import {
   CurrencyAmount,
 } from '@/lib/api';
 import { Alert, Button, MetricGrid, MetricTile, Tabs } from '@/components/ui';
+import { OperatingPlan } from '@/components/command/OperatingPlan';
+import type { Plan } from '@/components/command/OperatingPlan';
 
 type Persona = 'finance' | 'it';
 
@@ -66,10 +68,11 @@ export function CommandCenter() {
   }>({ amount: 0, exposure: 0, currency: null, byCurrency: [], staleAmounts: 0, decision: 0, closed: 0 });
   const [daily, setDaily] = useState({ prepared: 0, awaitingEvidence: 0 });
   const [connectors, setConnectors] = useState<Connector[]>([]);
+  // null while the first answer is awaited, undefined if the plan could not be loaded.
+  const [plan, setPlan] = useState<Plan | null | undefined>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [stageFilter, setStageFilter] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -156,8 +159,25 @@ export function CommandCenter() {
     }
   }, [stageFilter]);
 
+  // The plan does more work than the counters above, so it refreshes on its own, slower, cadence.
+  const loadPlan = useCallback(async () => {
+    try {
+      setPlan((await api.get<Plan>('/api/command-center/plan')).data);
+    } catch {
+      setPlan((previous) => previous ?? undefined);
+    }
+  }, []);
+  useEffect(() => {
+    loadPlan();
+    const t = setInterval(() => {
+      if (!document.hidden) loadPlan();
+    }, 60000);
+    return () => clearInterval(t);
+  }, [loadPlan]);
+
   useDataChanged(() => {
     refresh();
+    loadPlan();
   });
   useEffect(() => {
     refresh();
@@ -183,28 +203,6 @@ export function CommandCenter() {
       .then((r) => setDetail(r.data))
       .catch(() => setDetail(null));
   }, [selected, tick]);
-
-  const act = async (fn: () => Promise<unknown>) => {
-    try {
-      setNotice(null);
-      await fn();
-    } catch (e: any) {
-      setNotice(e?.response?.data?.detail ?? 'Action failed');
-    }
-    refresh();
-  };
-
-  const decide = (c: Case, recId: string, decision: string) =>
-    act(() =>
-      api.post('/api/decisions', {
-        case_id: c.id,
-        recommendation_id: recId,
-        decision_type: persona === 'finance' ? 'Finance' : 'IT',
-        decision,
-        actor: persona === 'finance' ? 'finance.user' : 'it.operator',
-        authority_check: 'Passed',
-      })
-    );
 
   const ask = () => {
     if (!detail) {
@@ -305,56 +303,14 @@ export function CommandCenter() {
           {error}
         </Alert>
       )}
-      {notice && (
-        <Alert tone="warning" onDismiss={() => setNotice(null)}>
-          {notice}
-        </Alert>
-      )}
 
-      <section className="cc-card" style={{ marginBottom: '1rem' }}>
-        <div className="cc-head">
-          <div>
-            <h2>Today’s operating plan</h2>
-            <p className="page-sub">
-              Start with data readiness, then balance Store Days, then review only the cases Nimbus
-              has prepared for you.
-            </p>
-          </div>
-        </div>
-        <div className="cc-pipeline" aria-label="Daily operating flow">
-          <Link className="cc-stage has" href="/pipeline">
-            <b>1</b>
-            <small>Confirm data arrived</small>
-            <small className="pl-sub">POS and simulated feeds</small>
-          </Link>
-          <Link className="cc-stage has" href="/store-days">
-            <b>2</b>
-            <small>Balance Store Days</small>
-            <small className="pl-sub">Re-total and resolve blockers</small>
-          </Link>
-          <button className="cc-stage has" onClick={() => setStageFilter('decision')}>
-            <b>{daily.prepared}</b>
-            <small>Agent prepared</small>
-            <small className="pl-sub">Ready for your review</small>
-          </button>
-          <Link className="cc-stage has" href="/actions">
-            <b>{kpi.decision}</b>
-            <small>Your decisions</small>
-            <small className="pl-sub">Approve, reject, or escalate</small>
-          </Link>
-        </div>
-        {daily.awaitingEvidence > 0 && (
-          <p className="hint" style={{ marginTop: '.7rem' }}>
-            Nimbus is waiting for evidence on {daily.awaitingEvidence} case
-            {daily.awaitingEvidence === 1 ? '' : 's'}; open{' '}
-            <Link href="/actions">Action Center</Link> to assign or request it.
-          </p>
-        )}
-        <p className="hint" style={{ marginTop: '.45rem' }}>
-          Nimbus can ingest, reconcile, collect linked evidence, and propose a disposition. People
-          retain control of corrections, approvals, closures, and financial decisions.
-        </p>
-      </section>
+      <OperatingPlan
+        plan={plan}
+        prepared={daily.prepared}
+        decisions={kpi.decision}
+        awaitingEvidence={daily.awaitingEvidence}
+        onShowPrepared={() => setStageFilter('decision')}
+      />
 
       <MetricGrid>
         <MetricTile
@@ -438,7 +394,7 @@ export function CommandCenter() {
                 </div>
               </div>
             ))}
-            <p className="cc-muted">Live connector adapters are not configured. Use Data Pipeline to review delivered feeds.</p>
+            <p className="cc-muted">Live connector adapters are not configured. Use Imports to review delivered feeds.</p>
           </div>
         )}
         {(() => {
@@ -464,7 +420,7 @@ export function CommandCenter() {
                         ? 'Try another stage or clear the filter.'
                         : 'Cases appear after the nightly batch runs.'}
                     </p>
-                    {!stageFilter && <Link href="/pipeline">Open Data Pipeline</Link>}
+                    {!stageFilter && <Link href="/imports">Open Imports</Link>}
                   </div>
                 ) : (
                   <SkeletonRows rows={5} label="Loading cases" />

@@ -395,13 +395,13 @@ export default function ActionCenter() {
         {batch && batch.freshness !== 'fresh' && (
           <Alert tone="warning">
             {batch.freshness === 'never'
-              ? 'The daily transaction batch has not run yet. Run it from Data Pipeline.'
+              ? 'The daily transaction batch has not run yet. Run it from Imports.'
               : `The last successful batch finished ${Math.round(batch.hours_since_success ?? 0)}h ago. Cases may be out of date.`}
           </Alert>
         )}
         {batch?.last_failed && (
           <Alert tone="error">
-            The most recent batch run failed. Check Data Pipeline for details.
+            The most recent batch run failed. Check Imports for details.
           </Alert>
         )}
         {error && <Alert tone="error">{error}</Alert>}
