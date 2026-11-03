@@ -15,6 +15,7 @@ import {
   MetricGrid,
   MetricTile,
   PageHeader,
+  PageNav,
   Segmented,
   Tabs,
   Toolbar,
@@ -41,6 +42,7 @@ interface Overview {
   items: ErrorType[];
   open_total: number;
   open_types: number;
+  window_days: number;
 }
 interface ErrorCase {
   id: string;
@@ -55,10 +57,23 @@ interface ErrorCase {
 }
 interface ErrorCases {
   items: ErrorCase[];
-  truncated: boolean;
+  page: number;
+  page_size: number;
+  has_more: boolean;
 }
 
-const COLUMNS: Column<ErrorType>[] = [
+/** How far back "Raised" counts. Open errors are always counted whatever their age. */
+const WINDOWS = [
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '365', label: '1 year' },
+  { value: '0', label: 'All time' },
+];
+const windowLabel = (days: number) =>
+  WINDOWS.find((w) => w.value === String(days))?.label ?? `${days} days`;
+const CASES_PER_PAGE = 25;
+
+const columnsFor = (days: number): Column<ErrorType>[] => [
   {
     key: 'error',
     header: 'Error',
@@ -81,7 +96,12 @@ const COLUMNS: Column<ErrorType>[] = [
       </Badge>
     ),
   },
-  { key: 'total', header: 'Raised', numeric: true, render: (r) => r.total_count.toLocaleString() },
+  {
+    key: 'total',
+    header: `Raised, ${windowLabel(days)}`,
+    numeric: true,
+    render: (r) => r.total_count.toLocaleString(),
+  },
   {
     key: 'amount',
     header: 'Open amount',
@@ -121,21 +141,40 @@ function ErrorDetail({ error }: { error: ErrorType }) {
   const canOpen = useCanOpen();
   const [cases, setCases] = useState<ErrorCases | null>(null);
   const [failed, setFailed] = useState(false);
+  // An error with open cases opens on them; one with none (or only closed ones) shows every case.
+  const [status, setStatus] = useState<'open' | 'closed' | 'all'>(
+    error.open_count > 0 ? 'open' : 'all'
+  );
+  const [store, setStore] = useState('');
+  const [debouncedStore, setDebouncedStore] = useState('');
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedStore(store), 300);
+    return () => clearTimeout(t);
+  }, [store]);
 
   useEffect(() => {
     let live = true;
     setCases(null);
     setFailed(false);
-    if (!error.total_count) return;
     api
-      .get(`/api/audit-errors/${encodeURIComponent(error.code)}/cases`, { params: { limit: 25 } })
+      .get(`/api/audit-errors/${encodeURIComponent(error.code)}/cases`, {
+        params: {
+          limit: CASES_PER_PAGE,
+          status,
+          store: debouncedStore.trim() || undefined,
+          page,
+        },
+      })
       .then((r) => live && setCases(r.data))
       .catch(() => live && setFailed(true));
     return () => {
       live = false;
     };
-  }, [error.code, error.total_count]);
+  }, [error.code, error.open_count, error.total_count, status, debouncedStore, page]);
 
+  const narrowed = status !== 'all' || debouncedStore.trim() !== '';
   const fixIn = [error.form, error.tab].filter(Boolean).join(' › ');
   return (
     <div className="case-stack">
@@ -174,9 +213,32 @@ function ErrorDetail({ error }: { error: ErrorType }) {
           </Button>
         </div>
       )}
-      {error.total_count === 0 ? (
-        <p className="hint">None raised yet.</p>
-      ) : failed ? (
+      <Toolbar>
+        <Segmented
+          value={status}
+          onChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+          options={[
+            { value: 'open', label: 'Open' },
+            { value: 'closed', label: 'Closed' },
+            { value: 'all', label: 'All' },
+          ]}
+        />
+        <input
+          className="grow"
+          type="search"
+          value={store}
+          onChange={(e) => {
+            setStore(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Filter by store"
+          aria-label="Filter cases by store"
+        />
+      </Toolbar>
+      {failed ? (
         <Alert tone="error">Could not load the cases for this error.</Alert>
       ) : (
         <DataTable
@@ -184,9 +246,11 @@ function ErrorDetail({ error }: { error: ErrorType }) {
           rows={cases ? cases.items : null}
           rowKey={(c) => c.id}
           loadingRows={2}
+          emptyTitle={narrowed ? 'No cases match these filters' : 'None raised yet'}
+          emptyHint={narrowed ? 'Try another status, or clear the store filter.' : undefined}
           footer={
-            cases?.truncated ? (
-              <p className="hint">Showing the first {cases.items.length} cases.</p>
+            cases && (cases.has_more || page > 1) ? (
+              <PageNav page={page} hasMore={cases.has_more} onPage={setPage} />
             ) : undefined
           }
         />
@@ -199,6 +263,7 @@ export default function AuditErrorsPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [show, setShow] = useState<'open' | 'all'>('open');
+  const [days, setDays] = useState('90');
   const [family, setFamily] = useState('');
   const [q, setQ] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -206,7 +271,7 @@ export default function AuditErrorsPage() {
 
   const load = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/audit-errors');
+      const { data } = await api.get('/api/audit-errors', { params: { days } });
       setData(data);
       setError(null);
     } catch (e) {
@@ -216,7 +281,7 @@ export default function AuditErrorsPage() {
           : 'Could not load audit errors.'
       );
     }
-  }, []);
+  }, [days]);
   useEffect(() => {
     load();
   }, [load]);
@@ -299,6 +364,13 @@ export default function AuditErrorsPage() {
               placeholder="Search error name or code"
               aria-label="Search audit errors"
             />
+            <select aria-label="Raised in" value={days} onChange={(e) => setDays(e.target.value)}>
+              {WINDOWS.map((w) => (
+                <option key={w.value} value={w.value}>
+                  Raised in {w.label.toLowerCase()}
+                </option>
+              ))}
+            </select>
             <select aria-label="Family" value={family} onChange={(e) => setFamily(e.target.value)}>
               <option value="">All families</option>
               {families.map((f) => (
@@ -308,7 +380,7 @@ export default function AuditErrorsPage() {
           </Toolbar>
 
           <DataTable
-            columns={COLUMNS}
+            columns={columnsFor(Number(days))}
             rows={rows}
             rowKey={(r) => r.code}
             onRowClick={(r) => setExpanded((k) => (k === r.code ? null : r.code))}
