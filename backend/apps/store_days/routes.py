@@ -18,6 +18,7 @@ from apps.cases.models import Case, EvidenceRequest
 from apps.controls.foundation.models import FoundationReference
 from apps.ingest import reconciliation
 from apps.ingest.manifests import iter_manifests, validate_business_date
+from apps.ingest.sequence import find_gaps
 from apps.security import scope
 from apps.security.authentication import require_role
 from apps.store_days import variances
@@ -53,6 +54,8 @@ from apps.store_days.service import (
 )
 from apps.totals.calculation import calculate_store_day, effective_definitions
 from apps.totals.currency import single_currency
+from apps.totals.over_short import TOTAL_NAME as OVER_SHORT_TOTAL
+from apps.totals.over_short import calculate as calculate_over_short
 from apps.transactions.models import CanonicalTransaction
 
 router = APIRouter(prefix="/api/store-days", tags=["Store days"])
@@ -292,6 +295,29 @@ async def store_selector(
         select(StoreDay.store_id.label("store_id")).where(StoreDay.store_id.is_not(None)),
     ).subquery()
     return (await db.execute(select(stores.c.store_id).order_by(stores.c.store_id))).scalars().all()
+
+
+@router.get("/{store_id}/{business_date}/sequence-gaps")
+async def store_day_sequence_gaps(
+    store_id: str,
+    business_date: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """Transaction numbers missing from each register's sequence for one store day."""
+    scope.require_store(user, store_id)
+    await get_day(db, store_id, business_date)
+    gaps = (await find_gaps(db, business_date, store_id=store_id)).get(
+        (store_id, business_date), {}
+    )
+    return {
+        "store_id": store_id,
+        "business_date": business_date,
+        "registers": [
+            {"register_id": register, "missing": numbers, "count": len(numbers)}
+            for register, numbers in sorted(gaps.items())
+        ],
+    }
 
 
 @router.get("/{store_id}/{business_date}")
@@ -606,6 +632,21 @@ async def retotal_store_day(
                 currency=currency,
             )
         )
+    over_short = calculate_over_short(definitions, calculation.configured_totals)
+    if over_short is not None:
+        db.add(
+            AuditTotal(
+                id=str(uuid.uuid4()),
+                store_day_id=day.id,
+                audit_version=day.audit_version,
+                total_name=OVER_SHORT_TOTAL,
+                level="Store",
+                calculated_amount=over_short.accountable,
+                declared_amount=over_short.accounted,
+                variance_amount=over_short.variance,
+                currency=currency,
+            )
+        )
     processor_net = calculated.get(("Processor Net", "Store", None), Decimal("0"))
     bank_net = calculated.get(("Bank Net", "Store", None), Decimal("0"))
     gl_net = calculated.get(("ERP Net", "Store", None), Decimal("0"))
@@ -678,5 +719,5 @@ async def retotal_store_day(
     return {
         "store_day": store_day_view(day),
         "transactions": calculation.transaction_count,
-        "totals_created": len(calculated) + 2 + int(has_manifest),
+        "totals_created": len(calculated) + 2 + int(has_manifest) + int(over_short is not None),
     }

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.audit.models import AuditEvent
 from apps.cases.lineage import case_creation_mentions_transaction
 from apps.cases.models import Case
+from apps.corrections.history import build_history
 from apps.corrections.models import TransactionAdjustment
 from apps.ingest.models import SourceRecord
 from apps.security import scope
@@ -63,6 +64,55 @@ def decode_payload(raw: bytes | None) -> dict:
         "text": text[:MAX_PAYLOAD_CHARS],
         "truncated": truncated or len(text) > MAX_PAYLOAD_CHARS,
     }
+
+
+@router.get("/{transaction_id}/changes")
+async def transaction_changes(
+    transaction_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """Every correction to this transaction with the value before and after, oldest first."""
+    tx = (
+        await db.execute(
+            select(CanonicalTransaction).where(CanonicalTransaction.id == transaction_id)
+        )
+    ).scalar_one_or_none()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    scope.require_store(user, tx.store_id)
+    recorded_tax = (
+        await db.execute(
+            select(func.coalesce(func.sum(TransactionTax.tax_amount), 0)).where(
+                TransactionTax.transaction_id == tx.id
+            )
+        )
+    ).scalar_one()
+    adjustments = (
+        (
+            await db.execute(
+                select(TransactionAdjustment)
+                .where(TransactionAdjustment.transaction_id == tx.id)
+                .order_by(TransactionAdjustment.created_at, TransactionAdjustment.id)
+                .limit(MAX_TRANSACTION_ADJUSTMENTS + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    history = build_history(
+        {
+            "amount": tx.signed_amount,
+            "tax": Decimal(recorded_tax),
+            "tender": tx.tender_type,
+            "reference": tx.payment_reference,
+            "item": None,
+        },
+        adjustments[:MAX_TRANSACTION_ADJUSTMENTS],
+    )
+    history["truncated"] = len(adjustments) > MAX_TRANSACTION_ADJUSTMENTS
+    history["currency"] = tx.currency
+    return history
 
 
 @router.get("/{transaction_id}")

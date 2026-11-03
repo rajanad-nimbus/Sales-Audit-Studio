@@ -1,4 +1,4 @@
-"""Sales Audit rules over stored line detail: unknown item, return over sold, tax mismatch."""
+"""Sales Audit rules over stored detail: unknown item or tender, return over sold, tax mismatch."""
 
 from collections import defaultdict
 from decimal import Decimal
@@ -6,7 +6,12 @@ from decimal import Decimal
 from sqlalchemy import select, tuple_
 
 from apps.controls.foundation.models import FoundationReference
-from apps.transactions.models import CanonicalTransaction, TransactionDiscount, TransactionLine
+from apps.transactions.models import (
+    CanonicalTransaction,
+    TransactionDiscount,
+    TransactionLine,
+    TransactionTender,
+)
 
 CHUNK = 400
 NON_MERCHANDISE = {"SHIPPING"}
@@ -32,11 +37,52 @@ async def load_lines(db, transaction_ids) -> dict[str, list]:
 
 async def run_detail_rules(db, transactions, flag):
     """Raise item, return-quantity and tax findings for the transactions that carry line detail."""
+    await flag_tender_rules(db, transactions, flag)
     lines = await load_lines(db, [t.id for t in transactions])
     audited = [t for t in transactions if lines.get(t.id)]
     await flag_unknown_items(db, audited, lines, flag)
     await flag_tax_mismatches(db, audited, lines, flag)
     await flag_returns_over_sold(db, audited, lines, flag)
+
+
+async def flag_tender_rules(db, transactions, flag):
+    """Tender rules, once any tender types are defined: unknown tender, missing reference, over limit."""
+    rules = {
+        row.code: row.attributes if isinstance(row.attributes, dict) else {}
+        for row in (
+            await db.execute(
+                select(FoundationReference).where(
+                    FoundationReference.category == "Tender", FoundationReference.active.is_(True)
+                )
+            )
+        ).scalars()
+    }
+    if not rules:
+        return
+    by_id = {t.id: t for t in transactions}
+    for batch in chunks(by_id):
+        rows = await db.execute(
+            select(
+                TransactionTender.transaction_id,
+                TransactionTender.tender_type,
+                TransactionTender.reference,
+                TransactionTender.amount,
+            ).where(TransactionTender.transaction_id.in_(batch))
+        )
+        found: dict[str, set[str]] = defaultdict(set)
+        for transaction_id, tender, reference, amount in rows:
+            rule = rules.get(tender)
+            if rule is None:
+                found["TENDER_NOT_FOUND"].add(transaction_id)
+                continue
+            if rule.get("requires_reference") and not (reference or "").strip():
+                found["TENDER_REF_REQ"].add(transaction_id)
+            limit = rule.get("max_amount")
+            if limit and abs(amount) > Decimal(str(limit)):
+                found["TENDER_OVER_LIMIT"].add(transaction_id)
+        for code, ids in found.items():
+            for transaction_id in sorted(ids):
+                flag(code, abs(by_id[transaction_id].signed_amount), by_id[transaction_id])
 
 
 async def flag_unknown_items(db, transactions, lines, flag):

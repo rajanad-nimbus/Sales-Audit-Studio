@@ -173,6 +173,7 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
         "amount": str(abs(total)),
         "store_id": tx["store_id"],
         "register_id": tx["register_id"] or None,
+        "transaction_number": tx.get("transaction_number") or None,
         "cashier_id": tx["cashier_id"] or None,
         "currency": currency,
         "payment_reference": tx["source_record_id"],

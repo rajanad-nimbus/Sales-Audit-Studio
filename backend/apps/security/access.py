@@ -122,6 +122,14 @@ SCREENS: tuple[Screen, ...] = (
         ("/api/register-events",),
     ),
     Screen(
+        "reports",
+        "/reports",
+        "Reports",
+        "Data & Control",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/reports",),
+    ),
+    Screen(
         "audit-errors",
         "/audit-errors",
         "Audit Errors",
@@ -135,7 +143,7 @@ SCREENS: tuple[Screen, ...] = (
         "Cash Office",
         "Data & Control",
         ("analyst", "finance", "store_manager", "auditor"),
-        ("/api/cash-controls", "/api/cash"),
+        ("/api/cash-controls", "/api/cash", "/api/vouchers"),
     ),
     Screen(
         "corrections",
@@ -200,6 +208,14 @@ SCREENS: tuple[Screen, ...] = (
         "Configuration",
         ("finance", "it", "auditor"),
         ("/api/variance-tolerances", "/api/periods"),
+    ),
+    Screen(
+        "settings-tenders",
+        "/settings/tenders",
+        "Tender types",
+        "Configuration",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/tender-types",),
     ),
     Screen(
         "settings-retention",

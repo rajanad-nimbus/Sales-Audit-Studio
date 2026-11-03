@@ -49,6 +49,7 @@ from apps.exports.destinations import (
 from apps.exports.destinations import (
     webhook_origin as webhook_origin,
 )
+from apps.exports.formats import extension, media_type
 from apps.exports.models import ExportBatch, ExportDestination, TestSinkReceipt
 from apps.exports.reservations import (
     _is_export_reservation_conflict as _is_export_reservation_conflict,
@@ -318,8 +319,10 @@ async def payload(
     ).scalar_one()
     return Response(
         b.payload,
-        media_type="text/csv" if d.format == "csv" else "application/json",
-        headers={"Content-Disposition": f"attachment; filename={b.dataset}-{b.id[:8]}.{d.format}"},
+        media_type=media_type(d.format),
+        headers={
+            "Content-Disposition": f"attachment; filename={b.dataset}-{b.id[:8]}.{extension(d.format)}"
+        },
     )
 
 

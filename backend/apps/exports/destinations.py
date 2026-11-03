@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.database_errors import violates_unique_constraint
+from apps.exports.formats import FORMATS
 from apps.exports.models import ExportDestination
 from apps.exports.schemas import DestIn
 from apps.exports.settings import sink_secret, test_sink_enabled
@@ -125,8 +126,11 @@ async def list_destinations(
 async def create_destination(
     body: DestIn, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("it"))
 ):
-    if body.kind not in ("webhook", "file") or body.format not in ("json", "csv"):
-        raise HTTPException(status_code=400, detail="kind must be webhook|file and format json|csv")
+    if body.kind not in ("webhook", "file") or body.format not in FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"kind must be webhook|file and format {'|'.join(FORMATS)}",
+        )
     if body.kind == "webhook" and body.url is None:
         raise HTTPException(status_code=400, detail="A webhook needs an http(s) URL")
     config = {"url": str(body.url), "secret": body.secret or ""} if body.kind == "webhook" else {}

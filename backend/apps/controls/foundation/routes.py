@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.controls.foundation.models import FoundationReference
+from apps.controls.foundation.tenders import normalize_attributes
 from apps.database_errors import violates_unique_constraint
 from apps.security.authentication import require_role
 from apps.store_days.freshness import (
@@ -49,6 +50,13 @@ class ReferenceBody(BaseModel):
         if not normalized:
             raise ValueError("Value cannot be blank")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_tender_attributes(self):
+        """Tender attributes are checked the same way here as on the Tender types screen."""
+        if self.category == "Tender":
+            self.attributes = normalize_attributes(self.attributes)
+        return self
 
     @model_validator(mode="after")
     def normalize_store_location_traits(self):

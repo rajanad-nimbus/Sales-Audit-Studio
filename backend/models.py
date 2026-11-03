@@ -82,6 +82,9 @@ from apps.transactions.models import (
     TransactionTax,
     TransactionTender,
 )
+from apps.vouchers.models import (
+    Voucher,
+)
 from model_base import Base, utcnow
 
 __all__ = [
@@ -125,6 +128,7 @@ __all__ = [
     "StoreDay",
     "StoreDayClosureRequest",
     "PeriodClose",
+    "Voucher",
     "VarianceExplanation",
     "VarianceTolerance",
     "AuditTotalDefinition",

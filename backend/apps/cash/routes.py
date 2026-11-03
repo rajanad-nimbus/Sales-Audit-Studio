@@ -7,7 +7,7 @@ from typing import Annotated
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from integrations.ontology.nimbus import audit
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -99,6 +99,90 @@ async def list_controls(
     )
     _set_page_headers(response, total, skip, len(rows))
     return [view(row) for row in rows]
+
+
+OVER_SHORT_GROUPS = {
+    "store": (CashControl.store_id,),
+    "date": (CashControl.business_date,),
+    "register": (CashControl.store_id, CashControl.register_id),
+    "cashier": (CashControl.store_id, CashControl.cashier_id),
+}
+
+
+@router.get("/over-short")
+async def over_short_report(
+    group_by: Annotated[str, Query(pattern="^(store|date|register|cashier)$")] = "store",
+    start: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    end: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst", "finance", "it", "auditor", "store_manager")),
+):
+    """Over and short cash by store, register, cashier or day.
+
+    A declaration is short when expected cash exceeds what was accounted for, and over when it
+    falls below. Short and over are summed separately: an over in one till does not hide a short
+    in another. Only Cash declarations are included.
+    """
+    filters = [CashControl.variance_amount.is_not(None), CashControl.tender_type == "Cash"]
+    for value in (start, end):
+        if value:
+            _validate_date_filter(value)
+    if start:
+        filters.append(CashControl.business_date >= start)
+    if end:
+        filters.append(CashControl.business_date <= end)
+    if store_id:
+        filters.append(CashControl.store_id == store_id)
+    keys = OVER_SHORT_GROUPS[group_by]
+    short = func.coalesce(
+        func.sum(case((CashControl.variance_amount > 0, CashControl.variance_amount), else_=0)), 0
+    )
+    over = func.coalesce(
+        func.sum(case((CashControl.variance_amount < 0, -CashControl.variance_amount), else_=0)), 0
+    )
+    query = (
+        scope.restrict(
+            select(
+                *keys,
+                func.count().label("declarations"),
+                func.sum(case((CashControl.variance_amount != 0, 1), else_=0)).label(
+                    "out_of_balance"
+                ),
+                short.label("short"),
+                over.label("over"),
+                func.sum(CashControl.variance_amount).label("net_short"),
+            )
+            .where(*filters)
+            .group_by(*keys),
+            user,
+            CashControl.store_id,
+        )
+        .order_by(func.sum(func.abs(CashControl.variance_amount)).desc(), *keys)
+        .limit(MAX_PAGE_SIZE + 1)
+    )
+    rows = (await db.execute(query)).all()
+    labels = [key.key for key in keys]
+    return {
+        "group_by": group_by,
+        "truncated": len(rows) > MAX_PAGE_SIZE,
+        "rows": [
+            {
+                **dict(zip(labels, row[: len(labels)], strict=True)),
+                "declarations": row.declarations,
+                "out_of_balance": row.out_of_balance,
+                "short": row.short,
+                "over": row.over,
+                "net_short": row.net_short,
+            }
+            for row in rows[:MAX_PAGE_SIZE]
+        ],
+        "totals": {
+            "declarations": sum(row.declarations for row in rows[:MAX_PAGE_SIZE]),
+            "short": sum((row.short for row in rows[:MAX_PAGE_SIZE]), 0),
+            "over": sum((row.over for row in rows[:MAX_PAGE_SIZE]), 0),
+        },
+    }
 
 
 @router.post("")

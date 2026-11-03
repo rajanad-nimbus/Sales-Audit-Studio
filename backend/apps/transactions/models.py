@@ -43,6 +43,8 @@ class CanonicalTransaction(Base):
         String(36), ForeignKey("canonical_transactions.id")
     )
     return_reason: Mapped[str | None] = mapped_column(String(255))
+    # The register's own transaction number, used to find numbers missing from its sequence.
+    transaction_number: Mapped[str | None] = mapped_column(String(30))
     detail_status: Mapped[str] = mapped_column(
         String(20), default="No detail", server_default="No detail"
     )  # No detail | Balanced | Unbalanced

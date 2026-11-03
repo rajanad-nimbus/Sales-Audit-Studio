@@ -14,6 +14,7 @@ import httpx
 from model_base import utcnow
 
 from apps.csv_export import csv_table
+from apps.exports.formats import extension, media_type, render_flat, render_xml
 from apps.exports.models import ExportBatch, ExportDestination
 
 MAX_RESPONSE_REFERENCE_BYTES = 64 * 1024
@@ -50,6 +51,9 @@ def render(
     summary: dict | None = None,
 ) -> bytes:
     """Serialize a stable payload for a reserved export batch."""
+    if destination.format in ("flat", "xml"):
+        render_file = render_flat if destination.format == "flat" else render_xml
+        return render_file(dataset, idempotency_key, utcnow().isoformat(), records)
     if destination.format == "csv":
         if records:
             fieldnames = list(records[0].keys())
@@ -87,7 +91,7 @@ def write_file_delivery(
     if not folder.is_relative_to(root) or folder == root:
         raise ValueError("Destination directory is outside the export root")
     folder.mkdir(parents=True, exist_ok=True)
-    name = f"{batch.dataset}-{batch.id}.{destination.format}"
+    name = f"{batch.dataset}-{batch.id}.{extension(destination.format)}"
     checksum_path = folder / (name + ".sha256")
     previous_checksum = checksum_path.read_bytes() if checksum_path.exists() else None
     checksum_published = False
@@ -191,7 +195,7 @@ async def deliver_webhook(
     if not isinstance(secret, str) or len(secret.strip()) < 32:
         raise ValueError("Webhook signing secret is missing or too short")
     headers = {
-        "Content-Type": "text/csv" if destination.format == "csv" else "application/json",
+        "Content-Type": media_type(destination.format),
         "X-Nimbus-Idempotency-Key": batch.idempotency_key,
         "X-Nimbus-Dataset": batch.dataset,
         "X-Nimbus-Signature": sign(secret, body),

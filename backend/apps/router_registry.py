@@ -10,6 +10,7 @@ from apps.audit.routes import router as audit_router
 from apps.cases.routes import router as cases_router
 from apps.cash.routes import router as cash_router
 from apps.controls.foundation.routes import router as foundation_router
+from apps.controls.foundation.tenders import router as tender_router
 from apps.controls.rules.routes import router as rules_router
 from apps.corrections.routes import router as corrections_router
 from apps.development.routes import router as development_router
@@ -20,6 +21,7 @@ from apps.ingest.shopify.routes import router as shopify_router
 from apps.ontology.routes import router as ontology_router
 from apps.operations.batch_routes import router as batch_router
 from apps.operations.routes import router as operations_router
+from apps.reports.routes import router as reports_router
 from apps.security.middleware import ontology_authentication
 from apps.security.routes import router as security_router
 from apps.store_days.closures import closure_router
@@ -30,6 +32,7 @@ from apps.system.routes import router as system_router
 from apps.totals.routes import router as totals_router
 from apps.transactions.register_event_routes import router as register_event_router
 from apps.transactions.routes import router as transactions_router
+from apps.vouchers.routes import router as voucher_router
 
 ROUTERS = (
     ingest_router,
@@ -45,7 +48,10 @@ ROUTERS = (
     period_router,
     tolerance_router,
     foundation_router,
+    tender_router,
     cash_router,
+    voucher_router,
+    reports_router,
     cases_router,
     corrections_router,
     transactions_router,
