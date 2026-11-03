@@ -6,6 +6,8 @@ import { useMe } from '@/components/MeProvider';
 import { Alert, Button, DataTable } from '@/components/ui';
 import { StoreSelect } from '@/components/StoreSelect';
 import { LookupSelect } from '@/components/LookupSelect';
+import { OverShortReport } from '@/components/OverShortReport';
+import { VoucherLedger } from '@/components/VoucherLedger';
 type Cash = {
   id: string;
   store_id: string;
@@ -230,6 +232,8 @@ export default function CashOfficePage() {
           </Button>
         )}
       </div>
+      <OverShortReport />
+      <VoucherLedger />
       <div className="cc-card">
         <h3>Banked deposits</h3>
         <Data

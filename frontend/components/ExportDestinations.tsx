@@ -109,6 +109,8 @@ export function ExportDestinations() {
               >
                 <option value="json">JSON</option>
                 <option value="csv">CSV</option>
+                <option value="flat">Flat file (pipe-delimited)</option>
+                <option value="xml">XML</option>
               </select>
             </Field>
             {form.kind === 'webhook' && (

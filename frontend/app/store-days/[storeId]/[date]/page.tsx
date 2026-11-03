@@ -82,6 +82,7 @@ export default function StoreDayDetailPage({
   const [quality, setQuality] = useState<{ state: string; detail: string } | null>(null);
   const [reopens, setReopens] = useState<Reopen[]>([]);
   const [reopenBlockedBy, setReopenBlockedBy] = useState<string[]>([]);
+  const [gaps, setGaps] = useState<{ register_id: string; missing: number[]; count: number }[]>([]);
   const [explaining, setExplaining] = useState<Total | null>(null);
   const [explainReason, setExplainReason] = useState('');
   const [explainCase, setExplainCase] = useState('');
@@ -106,6 +107,11 @@ export default function StoreDayDetailPage({
         setReopens(data.reopens ?? []);
         setReopenBlockedBy(data.reopen_blocked_by ?? []);
         setError(null);
+        // Missing transaction numbers are a nicety on top of the day itself.
+        api
+          .get(`${dayApi(ref)}/sequence-gaps`)
+          .then((r) => setGaps(r.data.registers))
+          .catch(() => setGaps([]));
         // Compare against the revision just before this one, so changes between versions are visible.
         const earlier = Math.max(
           0,
@@ -301,6 +307,22 @@ export default function StoreDayDetailPage({
               {closed
                 ? 'Reopen the store day, then re-total it.'
                 : 'Re-total the store day before closure.'}
+            </Alert>
+          )}
+          {gaps.length > 0 && (
+            <Alert tone="warning">
+              <div className="stack stack-sm">
+                <b>
+                  Transaction numbers are missing from {gaps.length} register
+                  {gaps.length > 1 ? 's' : ''}
+                </b>
+                {gaps.map((g) => (
+                  <span key={g.register_id}>
+                    {g.register_id}: {g.missing.slice(0, 12).join(', ')}
+                    {g.count > 12 ? ` and ${g.count - 12} more` : ''}
+                  </span>
+                ))}
+              </div>
             </Alert>
           )}
           {blockers.length > 0 && (

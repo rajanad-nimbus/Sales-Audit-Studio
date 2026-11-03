@@ -10,6 +10,7 @@ const HINTS: Record<string, string> = {
   'settings-integrations': 'Shopify, source feeds, matching tolerance, go-live checks',
   'settings-controls': 'Totals, audit rules and GL mapping',
   'settings-close': 'Variance tolerances and closing the books',
+  'settings-tenders': 'Accepted payment types, references and limits',
   'settings-retention': 'How long each dataset is kept',
   'settings-agents': 'The AI investigator and what each agent may do',
   'settings-destinations': 'Where exports are delivered',

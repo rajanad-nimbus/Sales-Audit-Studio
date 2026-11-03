@@ -150,12 +150,49 @@ interface Detail extends Linked {
 const tone = (s: string) =>
   s === 'Matched' ? 'badge-success' : s === 'Exception' ? 'badge-error' : 'badge-warning';
 const when = (iso: string) => new Date(iso).toLocaleString();
+interface FieldChange {
+  id: string;
+  field: string;
+  before: string | null;
+  after: string | null;
+  change: string | null;
+  status: string;
+  applied: boolean;
+  rationale: string;
+  proposed_by: string;
+  proposed_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  invalid?: boolean;
+}
+interface ChangeHistory {
+  currency: string;
+  truncated: boolean;
+  changes: FieldChange[];
+}
+const MONEY_FIELDS = ['Amount', 'Tax'];
+const shown = (c: FieldChange, value: string | null, currency: string) =>
+  value === null || value === undefined
+    ? '—'
+    : MONEY_FIELDS.includes(c.field)
+      ? money(value, currency)
+      : typeof value === 'string'
+        ? value
+        : JSON.stringify(value);
 
 export default function TransactionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const [d, setD] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<ChangeHistory | null>(null);
+  useEffect(() => {
+    setHistory(null);
+    api
+      .get<ChangeHistory>(`/api/transactions/${id}/changes`)
+      .then((r) => setHistory(r.data))
+      .catch(() => setHistory(null));
+  }, [id]);
   useEffect(() => {
     setD(null);
     api
@@ -258,8 +295,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         </h2>
         {truncatedSections.length > 0 && (
           <p className="hint">
-            Showing up to 500 rows per detail section. {truncatedSections.join(', ')} are
-            truncated; financial totals and balance checks use all stored rows.
+            Showing up to 500 rows per detail section. {truncatedSections.join(', ')} are truncated;
+            financial totals and balance checks use all stored rows.
           </p>
         )}
         {det.status === 'No detail' ? (
@@ -548,17 +585,21 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             />
           )}
           {d.returns.items_truncated && (
-            <p className="hint">Showing the first 100 item codes. Over-return checks include all items.</p>
+            <p className="hint">
+              Showing the first 100 item codes. Over-return checks include all items.
+            </p>
           )}
         </Card>
       )}
       {d.returns && !d.returns.is_return && d.returns.returns && d.returns.returns.length > 0 && (
         <Card className="case-section">
           <h2>Returns against this sale</h2>
-          {(d.returns.returns_truncated || d.returns.returns.some((item) => item.items_truncated)) && (
+          {(d.returns.returns_truncated ||
+            d.returns.returns.some((item) => item.items_truncated)) && (
             <p className="hint">
               {d.returns.returns_truncated && 'Showing up to 200 returns. '}
-              {d.returns.returns.some((item) => item.items_truncated) && 'Some returns show only the first 100 item lines.'}
+              {d.returns.returns.some((item) => item.items_truncated) &&
+                'Some returns show only the first 100 item lines.'}
             </p>
           )}
           <DataTable
@@ -609,7 +650,10 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           <Card className="case-section">
             <h2>Related cases</h2>
             {d.cases_truncated && (
-              <p className="hint">Showing up to 200 matches, with cases raised from this transaction first. Additional matches are not shown.</p>
+              <p className="hint">
+                Showing up to 200 matches, with cases raised from this transaction first. Additional
+                matches are not shown.
+              </p>
             )}
             {d.cases.length === 0 ? (
               <p className="cc-empty">No case has been raised for this store and day.</p>
@@ -666,10 +710,80 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               />
             )}
           </Card>
+          {history && history.changes.length > 0 && (
+            <Card className="case-section">
+              <h2>Change history</h2>
+              <p className="hint">
+                The source record is never edited. Each correction is shown with the value before
+                and after it; only approved corrections change the value in use.
+              </p>
+              {history.truncated && <p className="hint">Showing the first 200 corrections.</p>}
+              <DataTable
+                rows={history.changes}
+                rowKey={(c) => c.id}
+                columns={[
+                  { key: 'f', header: 'Field', primary: true, render: (c) => c.field },
+                  {
+                    key: 'b',
+                    header: 'Before',
+                    render: (c) => shown(c, c.before, history.currency),
+                  },
+                  {
+                    key: 'a',
+                    header: 'After',
+                    render: (c) =>
+                      c.invalid ? (
+                        <Badge variant="error" size="sm">
+                          Invalid value
+                        </Badge>
+                      ) : (
+                        shown(c, c.after, history.currency)
+                      ),
+                  },
+                  {
+                    key: 's',
+                    header: 'Status',
+                    render: (c) => (
+                      <Badge
+                        size="sm"
+                        variant={
+                          c.status === 'Approved'
+                            ? 'success'
+                            : c.status === 'Rejected'
+                              ? 'error'
+                              : 'warning'
+                        }
+                      >
+                        {c.status}
+                        {c.applied ? '' : ' · not applied'}
+                      </Badge>
+                    ),
+                  },
+                  {
+                    key: 'w',
+                    header: 'Who and why',
+                    render: (c) => (
+                      <>
+                        {c.rationale}
+                        <small className="act-sub" style={{ display: 'block' }}>
+                          Proposed by {c.proposed_by} · {when(c.proposed_at)}
+                          {c.reviewed_by && c.reviewed_at
+                            ? ` · ${c.status.toLowerCase()} by ${c.reviewed_by} · ${when(c.reviewed_at)}`
+                            : ''}
+                        </small>
+                      </>
+                    ),
+                  },
+                ]}
+              />
+            </Card>
+          )}
           {d.adjustments.length > 0 && (
             <Card className="case-section">
               <h2>Adjustments</h2>
-              {d.adjustments_truncated && <p className="hint">Showing the latest 200 adjustments.</p>}
+              {d.adjustments_truncated && (
+                <p className="hint">Showing the latest 200 adjustments.</p>
+              )}
               {d.adjustments.map((a) => (
                 <div key={a.id} className="indicator">
                   <div style={{ flex: 1 }}>
