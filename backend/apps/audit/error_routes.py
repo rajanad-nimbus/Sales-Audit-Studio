@@ -1,16 +1,18 @@
 """Audit error overview: every Sales Audit error type, how many are open, and how to fix them."""
 
 from collections import defaultdict
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated
 
 from database import get_db
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from integrations.ontology import ontology
 from sqlalchemy import case as sql_case
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.audit.patterns import error_patterns
 from apps.cases.models import Case
 from apps.cases.models import Exception as ExceptionRow
 from apps.security import scope
@@ -132,6 +134,34 @@ async def overview(
         "open_total": sum(i["open_count"] for i in items),
         "open_types": sum(1 for i in items if i["open_count"]),
     }
+
+
+@router.get("/patterns")
+async def patterns(
+    days: Annotated[int, Query(ge=7, le=180)] = 30,
+    min_days: Annotated[int, Query(ge=2, le=60)] = 3,
+    until: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role(*ROLES)),
+):
+    """Error codes that keep coming back at one store or one register."""
+    try:
+        end = date.fromisoformat(until) if until else datetime.now(UTC).date()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="until must be a valid date") from exc
+    catalog = {
+        d.code: d.short_description
+        for d in (
+            await db.execute(
+                select(SalesAuditErrorDefinition).where(SalesAuditErrorDefinition.active.is_(True))
+            )
+        ).scalars()
+    }
+
+    def label(code: str) -> dict:
+        return {"label": ontology_text(code)["label"] or catalog.get(code) or code}
+
+    return await error_patterns(db, user, end, days, min_days, label)
 
 
 @router.get("/{code}/cases")

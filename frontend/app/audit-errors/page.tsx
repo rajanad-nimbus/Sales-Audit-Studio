@@ -16,8 +16,10 @@ import {
   MetricTile,
   PageHeader,
   Segmented,
+  Tabs,
   Toolbar,
 } from '@/components/ui';
+import { ErrorPatterns } from '@/components/ErrorPatterns';
 import type { Column } from '@/components/ui';
 
 interface ErrorType {
@@ -200,6 +202,7 @@ export default function AuditErrorsPage() {
   const [family, setFamily] = useState('');
   const [q, setQ] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [tab, setTab] = useState<'types' | 'patterns'>('types');
 
   const load = useCallback(async () => {
     try {
@@ -259,54 +262,67 @@ export default function AuditErrorsPage() {
         </Alert>
       )}
 
-      <MetricGrid>
-        <MetricTile label="Open errors" value={data ? data.open_total.toLocaleString() : '—'} />
-        <MetricTile
-          label="Error types affected"
-          value={data ? data.open_types.toLocaleString() : '—'}
-        />
-        <MetricTile label="Error types known" value={data ? data.items.length : '—'} />
-      </MetricGrid>
-
-      <Toolbar count={rows ? `${rows.length} shown` : ''}>
-        <Segmented
-          options={[
-            { value: 'open', label: 'With open errors' },
-            { value: 'all', label: 'All error types' },
-          ]}
-          value={show}
-          onChange={setShow}
-        />
-        <input
-          className="grow"
-          type="search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search error name or code"
-          aria-label="Search audit errors"
-        />
-        <select aria-label="Family" value={family} onChange={(e) => setFamily(e.target.value)}>
-          <option value="">All families</option>
-          {families.map((f) => (
-            <option key={f}>{f}</option>
-          ))}
-        </select>
-      </Toolbar>
-
-      <DataTable
-        columns={COLUMNS}
-        rows={rows}
-        rowKey={(r) => r.code}
-        onRowClick={(r) => setExpanded((k) => (k === r.code ? null : r.code))}
-        expandedKey={expanded}
-        renderDetail={(r) => <ErrorDetail error={r} />}
-        emptyTitle={show === 'open' ? 'No open audit errors' : 'No error types match'}
-        emptyHint={
-          show === 'open'
-            ? 'Nothing needs fixing. Switch to All error types to see what the audit checks for.'
-            : 'Try clearing the search or family.'
-        }
+      <Tabs
+        value={tab}
+        onChange={(id) => setTab(id as 'types' | 'patterns')}
+        items={[
+          { id: 'types', label: 'Error types' },
+          { id: 'patterns', label: 'Repeating errors' },
+        ]}
       />
+      {tab === 'patterns' && <ErrorPatterns />}
+      {tab === 'types' && (
+        <>
+          <MetricGrid>
+            <MetricTile label="Open errors" value={data ? data.open_total.toLocaleString() : '—'} />
+            <MetricTile
+              label="Error types affected"
+              value={data ? data.open_types.toLocaleString() : '—'}
+            />
+            <MetricTile label="Error types known" value={data ? data.items.length : '—'} />
+          </MetricGrid>
+
+          <Toolbar count={rows ? `${rows.length} shown` : ''}>
+            <Segmented
+              options={[
+                { value: 'open', label: 'With open errors' },
+                { value: 'all', label: 'All error types' },
+              ]}
+              value={show}
+              onChange={setShow}
+            />
+            <input
+              className="grow"
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search error name or code"
+              aria-label="Search audit errors"
+            />
+            <select aria-label="Family" value={family} onChange={(e) => setFamily(e.target.value)}>
+              <option value="">All families</option>
+              {families.map((f) => (
+                <option key={f}>{f}</option>
+              ))}
+            </select>
+          </Toolbar>
+
+          <DataTable
+            columns={COLUMNS}
+            rows={rows}
+            rowKey={(r) => r.code}
+            onRowClick={(r) => setExpanded((k) => (k === r.code ? null : r.code))}
+            expandedKey={expanded}
+            renderDetail={(r) => <ErrorDetail error={r} />}
+            emptyTitle={show === 'open' ? 'No open audit errors' : 'No error types match'}
+            emptyHint={
+              show === 'open'
+                ? 'Nothing needs fixing. Switch to All error types to see what the audit checks for.'
+                : 'Try clearing the search or family.'
+            }
+          />
+        </>
+      )}
     </div>
   );
 }
