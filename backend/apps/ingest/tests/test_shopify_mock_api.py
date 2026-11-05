@@ -28,7 +28,7 @@ def make_app(state):
         if state.get("fail_first") and len(state["order_calls"]) == 1:
             return web.Response(status=429, headers={"Retry-After": "0"})
         if "page_info" in request.query:  # Shopify rejects filters alongside page_info
-            assert "created_at_min" not in request.query
+            assert "processed_at_min" not in request.query
             start = int(request.query["page_info"])
         else:
             start = 0

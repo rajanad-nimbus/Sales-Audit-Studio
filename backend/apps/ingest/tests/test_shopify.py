@@ -345,6 +345,32 @@ def test_normalize_order_handles_null_customer():
     assert si.parse(rec)["amount"] == Decimal("20.00")
 
 
+def test_backdated_order_and_refund_are_dated_by_processed_at():
+    order = sa.normalize_order(
+        {
+            "id": 2,
+            "created_at": "2026-11-05T08:11:35-05:00",
+            "processed_at": "2026-11-04T10:17:00-05:00",
+            "total_price": "20.00",
+            "currency": "USD",
+        },
+        "S1",
+    )
+    refund = sa.normalize_refund(
+        {
+            "id": 3,
+            "created_at": "2026-11-05T08:13:54-05:00",
+            "processed_at": "2026-11-04T12:50:00-05:00",
+            "transactions": [{"kind": "refund", "amount": "5"}],
+        },
+        2,
+        "USD",
+        "S1",
+    )
+    assert order["event_time"] == "2026-11-04T10:17:00-05:00"
+    assert refund["event_time"] == "2026-11-04T12:50:00-05:00"
+
+
 def test_normalize_refund_links_to_order():
     rec = sa.normalize_refund(
         {

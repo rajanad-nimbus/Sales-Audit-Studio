@@ -14,12 +14,15 @@ from apps.ingest.common import (
 )
 from apps.ingest.controls import accumulate_reconciliation_amounts
 from apps.ingest.models import SourceRecord
+from apps.ingest.shopify.duplicates import flag_duplicate_orders
 from apps.transactions.models import CanonicalTransaction
 
 
 async def reconcile_shopify(db, txns, flag):
     """Match Shopify refunds to their order (by store, currency, order id) and compare totals per order."""
     shopify = [t for t in txns if t.source_lineage == LINEAGE["Shopify"]]
+    # Flag duplicates first: a flagged order is no longer Unmatched, so it is not closed as paid.
+    await flag_duplicate_orders(db, shopify, flag)
     current_amounts = await effective_amounts(db, shopify)
     refunds = [t for t in shopify if t.transaction_type == "Refund"]
     await close_paid_orders(db, [t for t in shopify if t.transaction_type == "Order"])

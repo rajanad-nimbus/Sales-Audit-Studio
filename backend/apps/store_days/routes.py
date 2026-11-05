@@ -84,7 +84,8 @@ async def open_store_day_record(
 ) -> StoreDay:
     """Create the controlled audit unit for one store and business date. Does not commit.
 
-    There is no scheduler yet, so an IT administrator opens each day. Re-total then calculates against it.
+    There is no scheduler yet, so a Sales Auditor or IT administrator opens each day. Re-total then calculates
+    against it.
     """
     await lock_configuration(db)
     store_id = store_id.strip()
@@ -154,7 +155,7 @@ async def open_store_day_record(
 async def open_store_day(
     body: OpenStoreDayBody,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("it")),
+    user: dict = Depends(require_role("it", "analyst")),
 ):
     day = await open_store_day_record(
         db, body.store_id, body.business_date, user["user"] or "ontology.user"

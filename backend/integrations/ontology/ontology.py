@@ -413,6 +413,73 @@ EXCEPTION_TYPES = {
             "Route to merchant with refund breakdown -> Investigate -> Adjust",
         ],
     },
+    "SHOPIFY_EOD_TOTAL_MISMATCH": {
+        "label": "Shopify Store Day Total Mismatch",
+        "family": "Completeness",
+        "exposure": "amount",
+        "evidence": ["Shopify day total", "Shopify orders for the day", "Shopify order"],
+        "known_causes": [
+            "Order edited in Shopify after it was imported",
+            "Order deleted in Shopify after it was imported",
+            "Same order stored twice",
+            "Correction applied to a Shopify transaction",
+        ],
+        "disposition": [
+            "Escalation",
+            "Manual Review",
+            "amount",
+            "Compare the store day with Shopify's day total -> Re-sync or correct -> Re-audit -> Close",
+        ],
+    },
+    "SHOPIFY_INCOMPLETE_FEED": {
+        "label": "Shopify Incomplete Feed",
+        "family": "Completeness",
+        "exposure": "zero",
+        "evidence": ["Shopify day total", "Shopify orders for the day", "Delivery manifest"],
+        "known_causes": [
+            "Order quarantined at import",
+            "Order created while the Shopify source was switched off",
+            "Sync missed a page of orders",
+        ],
+        "disposition": [
+            "Recovery",
+            "Source Reprocess",
+            "zero",
+            "Release quarantined records or re-sync the day -> Re-run reconciliation -> Close",
+        ],
+    },
+    "SHOPIFY_DUPLICATE_ORDER": {
+        "label": "Duplicate Shopify Order",
+        "family": "Transaction Audit",
+        "exposure": "amount",
+        "evidence": ["Shopify order", "Order details"],
+        "known_causes": [
+            "Order loaded by both a file upload and the connector",
+            "Order re-imported under a different record id",
+        ],
+        "disposition": [
+            "Correction",
+            "Governed Adjustment",
+            "amount",
+            "Reverse the duplicate -> Validate the store day total -> Close",
+        ],
+    },
+    "SHOPIFY_POSSIBLE_DUPLICATE_ORDER": {
+        "label": "Possible Duplicate Shopify Order",
+        "family": "Transaction Audit",
+        "exposure": "amount",
+        "evidence": ["Shopify order", "Line items", "Customer order history"],
+        "known_causes": [
+            "Customer submitted checkout twice",
+            "Payment retry created a second order",
+        ],
+        "disposition": [
+            "Escalation",
+            "Manual Review",
+            "amount",
+            "Confirm with the customer -> Cancel or refund the extra order -> Close",
+        ],
+    },
 }
 
 
@@ -476,6 +543,9 @@ EVIDENCE_SOURCES: dict[str, dict | None] = {
     "Refund record": {"source": "Shopify"},
     "Manual reconciliation decision": None,
     "Line item breakdown": {"source": "Shopify"},
+    "Shopify day total": None,
+    "Shopify orders for the day": {"source": "Shopify", "type": "Order"},
+    "Customer order history": {"source": "Shopify", "type": "Order"},
 }
 
 

@@ -133,7 +133,11 @@ Each delivery returns: `received`, `archived`, `duplicates_skipped`, `quarantine
 
 **b) Shopify.** Refunds are matched to their order by store, currency and order id, and the order may belong to an earlier date. Refunded more than the order gives `SHOPIFY_OVERAGE_REFUND`, less gives `SHOPIFY_PARTIAL_REFUND`, and no order found gives `SHOPIFY_UNMATCHED_REFUND`. A refund equal to the order matches. Paid orders with no refund are closed.
 
+Before refunds are matched, Shopify orders are checked for duplicates. The same Shopify order (store, currency, order id) stored under a second record id gives `SHOPIFY_DUPLICATE_ORDER` on the later copy. A different order from the same customer, for the same amount and the same items, placed within 10 minutes of an earlier one gives `SHOPIFY_POSSIBLE_DUPLICATE_ORDER`. Guest orders, and orders Shopify already voided or fully refunded, are not checked for this.
+
 **c) Completeness and balancing controls.** Each POS control manifest is compared with the POS transactions actually ingested for that store and day. Fewer transactions than declared gives `INCOMPLETE_FEED`. A different count or total gives `BALANCING_VARIANCE`.
+
+Shopify day totals do the same for Shopify. A day total is Shopify's own order count and order total for one store, business date and currency, optionally with a refund count and total. Each Shopify sync with day totals on (manual sync, scheduled sync, nightly batch) declares one for every shop-local day its window fully covers: the count from Shopify's order count endpoint, the total from the raw orders. A Shopify finance export can be posted as `record_type: "DayTotal"` records too. Fewer orders or refunds stored than Shopify reports gives `SHOPIFY_INCOMPLETE_FEED`. Any other count difference, or an amount difference beyond the policy's amount tolerance, gives `SHOPIFY_EOD_TOTAL_MISMATCH`. Only the latest day total for a store day is checked; earlier ones become `Superseded`.
 
 **d) Settlement controls.**
 
@@ -166,6 +170,10 @@ Matched records are set to `Matched / Closed`. Records in a break are set to `Ex
 | `SHOPIFY_UNMATCHED_REFUND` | Refund with no order                                      |
 | `SHOPIFY_OVERAGE_REFUND`   | Refunds exceed the order                                  |
 | `SHOPIFY_PARTIAL_REFUND`   | Refunds are less than the order                           |
+| `SHOPIFY_DUPLICATE_ORDER`  | Same Shopify order stored twice                           |
+| `SHOPIFY_POSSIBLE_DUPLICATE_ORDER` | Same customer, basket and amount within 10 minutes |
+| `SHOPIFY_INCOMPLETE_FEED`  | Fewer Shopify orders or refunds than Shopify reported     |
+| `SHOPIFY_EOD_TOTAL_MISMATCH` | Store day count or total differs from Shopify's day total |
 | `INCOMPLETE_FEED`          | Fewer POS transactions than the control manifest declared |
 | `BALANCING_VARIANCE`       | POS count or total differs from the manifest              |
 | `MISSING_DEPOSIT`          | Expected settlement has no bank deposit                   |

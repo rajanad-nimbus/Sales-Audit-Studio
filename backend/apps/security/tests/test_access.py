@@ -116,6 +116,14 @@ def test_the_route_walk_actually_sees_the_api():
     assert declared[("GET", "/api/ingest/stats")] == ("analyst", "it", "auditor")
 
 
+def test_sales_auditors_and_it_open_store_days_and_read_only_roles_do_not():
+    roles = _endpoint_roles()[("POST", "/api/store-days")]
+    for role in ("admin", "it", "analyst"):
+        assert role_allowed(role, roles, "POST", "/api/store-days"), role
+    for role in ("finance", "auditor", "store_manager", "viewer"):
+        assert not role_allowed(role, roles, "POST", "/api/store-days"), role
+
+
 def test_a_screen_never_shows_to_a_role_whose_own_data_calls_would_be_refused():
     """If a role may open a screen, the GET endpoints behind it that carry their own role check must let that role in.
     Otherwise the screen would open and then fail to load."""

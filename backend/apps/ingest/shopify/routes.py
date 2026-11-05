@@ -74,6 +74,7 @@ async def sync_shopify(
             store_id,
             created_at_min=req.created_at_min,
             created_at_max=req.created_at_max,
+            day_totals=True,
         )
     except shopify_adapter.ShopifyFeedLimitError as e:
         raise HTTPException(status_code=413, detail=shopify_adapter.safe_failure_message(e)) from e

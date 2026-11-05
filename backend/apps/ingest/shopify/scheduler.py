@@ -186,7 +186,7 @@ async def run_if_due(session_factory=async_session, now: datetime | None = None)
     async with session_factory() as db:
         try:
             feed = await shopify_adapter.fetch_shopify_feed(
-                store_id, created_at_min=window[0], created_at_max=window[1]
+                store_id, created_at_min=window[0], created_at_max=window[1], day_totals=True
             )
             await _lock_enabled_source(db)
             delivery = f"SHOPIFY-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"  # same shape as a manual sync; fits the audit column

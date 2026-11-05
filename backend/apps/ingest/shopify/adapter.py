@@ -20,6 +20,7 @@ import aiohttp
 from multidict import CIMultiDict
 
 from apps.ingest.limits import MAX_DELIVERY_BYTES, MAX_DELIVERY_RECORDS
+from apps.ingest.shopify import day_totals as shopify_day_totals
 from apps.ingest.shopify import detail as shopify_detail
 
 
@@ -49,7 +50,7 @@ def safe_failure_message(error: Exception) -> str:
             r"Shopify returned a repeated pagination cursor",
             r"Shopify returned an invalid pagination link",
             r"Shopify returned an invalid JSON response",
-            r"Shopify returned an invalid (shop|locations|products|orders|refunds|transactions) response",
+            r"Shopify returned an invalid (shop|locations|products|orders|refunds|transactions|count) response",
             r"Status \d+ after \d+ attempts",
             r"Shopify API returned HTTP \d+",
             r"Request failed after \d+ attempts: Shopify request (timed out|failed)",
@@ -254,20 +255,20 @@ class ShopifyAdapter:
         limit: int = None,
         status: str = "any",
     ) -> AsyncGenerator[dict, None]:
-        """Fetch orders, following Shopify's Link-header cursor pagination."""
-        lookback = int(os.getenv("SHOPIFY_SYNC_LOOKBACK_DAYS", "3"))
+        """Fetch orders processed in the window, following Shopify's Link-header cursor pagination.
+
+        The window filters on processed_at, the date orders are stored under, so a backdated order
+        is fetched with its own day rather than the day it reached Shopify.
+        """
         limit = limit or int(os.getenv("SHOPIFY_FETCH_LIMIT", "250"))
-        if created_at_min is None:
-            created_at_min = datetime.now(UTC) - timedelta(days=lookback)
-        if created_at_max is None:
-            created_at_max = datetime.now(UTC)
+        created_at_min, created_at_max = sync_window(created_at_min, created_at_max)
 
         params = {
             "limit": min(limit, 250),
             "status": status,
-            "created_at_min": created_at_min.isoformat(),
-            "created_at_max": created_at_max.isoformat(),
-            "fields": "id,order_number,created_at,updated_at,financial_status,fulfillment_status,"
+            "processed_at_min": created_at_min.isoformat(),
+            "processed_at_max": created_at_max.isoformat(),
+            "fields": "id,order_number,created_at,processed_at,updated_at,financial_status,fulfillment_status,"
             "total_price,currency,customer,note,tax_lines,total_tax,taxes_included,line_items,shipping_lines,"
             "total_discounts,discount_codes,discount_applications,payment_gateway_names",
         }
@@ -283,6 +284,24 @@ class ShopifyAdapter:
                 break
             # With page_info, Shopify rejects every filter except limit/fields.
             params = next_params
+
+    async def fetch_order_count(
+        self, created_at_min: datetime, created_at_max: datetime, status: str = "any"
+    ) -> int:
+        """How many orders Shopify holds for a processing window (both ends inclusive)."""
+        data = await self._request(
+            "GET",
+            "/orders/count.json",
+            params={
+                "status": status,
+                "processed_at_min": created_at_min.isoformat(),
+                "processed_at_max": created_at_max.isoformat(),
+            },
+        )
+        count = data.get("count")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ShopifyAPIError("Shopify returned an invalid count response")
+        return count
 
     async def fetch_shop(self) -> dict:
         """Fetch the shop record (its name labels the store the orders belong to)."""
@@ -339,7 +358,7 @@ class ShopifyAdapter:
         """Stream every refund page for an order."""
         params = {
             "limit": 250,
-            "fields": "id,order_id,created_at,note,refund_line_items,transactions",
+            "fields": "id,order_id,created_at,processed_at,note,refund_line_items,transactions",
         }
         pagination = _ShopifyPagination()
         while True:
@@ -409,17 +428,57 @@ def _next_page_info(link_header: str) -> str | None:
     return next_cursor
 
 
+def sync_window(
+    created_at_min: datetime | None, created_at_max: datetime | None
+) -> tuple[datetime, datetime]:
+    """The creation window a sync pulls, defaulting to the configured lookback ending now."""
+    if created_at_min is None:
+        lookback = int(os.getenv("SHOPIFY_SYNC_LOOKBACK_DAYS", "3"))
+        created_at_min = datetime.now(UTC) - timedelta(days=lookback)
+    if created_at_max is None:
+        created_at_max = datetime.now(UTC)
+    return created_at_min, created_at_max
+
+
+async def fetch_day_totals(
+    adapter: ShopifyAdapter,
+    store_id: str,
+    window: tuple[datetime, datetime],
+    tally: shopify_day_totals.OrderTally,
+) -> list[dict]:
+    """Shopify's order count and total for every shop-local day the window fully covers."""
+    shop = await adapter.fetch_shop()
+    zone = shopify_day_totals.shop_zone(shop)
+    counts = {}
+    for day, day_start in shopify_day_totals.covered_days(*window, zone):
+        # Shopify's processed_at_max is inclusive and its timestamps are whole seconds.
+        day_end = day_start + timedelta(days=1) - timedelta(seconds=1)
+        counts[day] = await adapter.fetch_order_count(day_start, day_end)
+    return shopify_day_totals.day_total_records(
+        store_id, shop.get("currency") or "USD", counts, tally
+    )
+
+
 async def fetch_shopify_feed(
     store_id: str,
     created_at_min: datetime = None,
     created_at_max: datetime = None,
+    *,
+    day_totals: bool = False,
 ) -> dict[str, list[dict]]:
-    """Fetch Shopify orders and refunds. Any API failure propagates so no partial feed is ingested."""
+    """Fetch Shopify orders and refunds. Any API failure propagates so no partial feed is ingested.
+
+    With day_totals, the feed also carries Shopify's own count and total for each day the window
+    fully covers, which reconciliation checks each store day against.
+    """
     adapter = ShopifyAdapter()
     records = _DeliveryBuffer()
+    window = sync_window(created_at_min, created_at_max)
+    tally = shopify_day_totals.OrderTally()
 
     try:
-        async for order in adapter.fetch_orders(created_at_min, created_at_max):
+        async for order in adapter.fetch_orders(*window):
+            tally.add(order)
             # Split tenders need the payment transactions; one gateway is covered by the order itself.
             transactions = (
                 await adapter.fetch_order_transactions(order["id"])
@@ -435,6 +494,9 @@ async def fetch_shopify_feed(
                         normalize_refund(refund, order["id"], order.get("currency"), store_id)
                     )
 
+        if day_totals:
+            for record in await fetch_day_totals(adapter, store_id, window, tally):
+                records.append(record)
         return {"Shopify": records.records}
     finally:
         await adapter.close()
@@ -485,7 +547,7 @@ def normalize_order(order: dict, store_id: str, transactions: list[dict] | None 
         "source_record_id": f"SHOP-{order['id']}",
         "record_type": "Order",
         "store_id": store_id,
-        "event_time": order["created_at"],
+        "event_time": shopify_day_totals.business_time(order),
         "amount": str(order.get("total_price", "0")),
         "currency": order.get("currency", "USD"),
         "payment_reference": str(order["id"]),
@@ -532,7 +594,7 @@ def normalize_refund(refund: dict, order_id, currency: str | None, store_id: str
         "source_record_id": f"SHREF-{refund['id']}",
         "record_type": "Refund",
         "store_id": store_id,
-        "event_time": refund["created_at"],
+        "event_time": shopify_day_totals.business_time(refund),
         "amount": str(refund_amount(refund)),
         "currency": currency or txn_currency or "USD",
         "payment_reference": str(order_id),

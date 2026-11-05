@@ -144,7 +144,7 @@ Response:
 | Shopify Field          | Canonical Field       | Notes                         |
 | ---------------------- | --------------------- | ----------------------------- |
 | order.id               | payment_reference     | Key for reconciliation        |
-| order.created_at       | event_timestamp       | Order creation time           |
+| order.processed_at     | event_timestamp       | When processed; else created_at |
 | order.total_price      | signed_amount         | Positive amount               |
 | order.currency         | currency              | 3-letter code                 |
 | order.financial_status | (used for validation) | pending, paid, refunded, etc. |
@@ -159,7 +159,7 @@ Response:
 | refund.id                                                             | settlement_reference | Unique refund ID      |
 | order.id                                                              | payment_reference    | Links refund to order |
 | sum of successful refund transactions (fallback: line-item subtotals) | signed_amount        | Negative amount       |
-| refund.created_at                                                     | event_timestamp      | Refund creation time  |
+| refund.processed_at (else created_at)                                 | event_timestamp      | When processed        |
 | order.currency                                                        | currency             | From parent order     |
 | "Shopify"                                                             | source_system        | Source identifier     |
 | "ecommerce"                                                           | channel_id           | Sales channel         |
@@ -175,6 +175,37 @@ Orders are matched to refunds using:
 - `currency` (must match)
 
 Orders with `financial_status = paid` and no refund on file are closed as Matched. Pending, authorized or voided orders stay open. A refund that arrives later still matches the order and is checked against its total.
+
+### Store Day Against Shopify's Day Total
+
+A day total is Shopify's own end-of-day figure for one store, business date and currency: the order count and order total, and optionally the refund count and refund total. Reconciliation compares it with the Shopify transactions stored for that store day, after approved corrections, the way a POS control manifest is compared with POS transactions.
+
+- **Built by the connector.** The manual sync, the scheduled sync and the nightly batch each declare a day total for every shop-local day their window covers from midnight to midnight. A partly covered day gets none. The count comes from `GET /orders/count.json` (independent of the paged order list) and the total from the raw orders before ingestion parses them. Connector day totals carry no refund figures: the connector only sees refunds of orders inside its window.
+- **Posted from a report.** Send `record_type: "DayTotal"` records through `POST /api/ingest` with `source_system: "Shopify"`, for example from a Shopify finance export, to include refunds:
+
+```json
+{
+  "source_record_id": "EOD-S1-2024-01-15",
+  "record_type": "DayTotal",
+  "store_id": "SHOPIFY-MAIN",
+  "business_date": "2024-01-15",
+  "currency": "USD",
+  "order_count": 42,
+  "order_total": "3180.50",
+  "refund_count": 3,
+  "refund_total": "210.00"
+}
+```
+
+- **Revisions.** A connector day total's id carries a digest of its figures, so a changed figure is a new record. Only the latest unchecked day total for a store day is checked; earlier ones become `Superseded`. A checked one becomes `Processed`.
+- **Tolerance.** The active reconciliation policy's amount tolerance applies in its currency.
+
+### Duplicate Orders
+
+Checked before refunds are matched, against every stored Shopify order. Only orders in the current run are flagged, so the later copy is the one that waits for review.
+
+- **Same order twice**: the same store, currency and Shopify order id under a second record id, usually a file upload alongside the connector. The copy stored first is kept.
+- **Possible double submission**: a different order id from the same customer, for the same amount and the same items (SKU and quantity), placed within 10 minutes of an earlier one. Guest orders and orders already voided or fully refunded are not checked.
 
 ### Exception Types
 
@@ -201,6 +232,34 @@ Orders with `financial_status = paid` and no refund on file are closed as Matche
 - **Severity**: High
 - **Disposition**: Manual Review
 - **Example**: Refund includes discounts or restocking fees not in original order
+
+#### SHOPIFY_EOD_TOTAL_MISMATCH
+
+- **Trigger**: Store day order (or refund) count differs from Shopify's day total without being short, or an amount differs beyond tolerance
+- **Exposure**: Difference amount
+- **Disposition**: Manual Review
+- **Example**: Order edited in Shopify after import (the resend is quarantined as a conflicting resubmission), order deleted in Shopify, same order stored twice
+
+#### SHOPIFY_INCOMPLETE_FEED
+
+- **Trigger**: Fewer orders or refunds stored than Shopify's day total reports
+- **Exposure**: Zero (a recovery task)
+- **Disposition**: Source Reprocess
+- **Example**: An order quarantined at import, or created while the Shopify source was switched off
+
+#### SHOPIFY_DUPLICATE_ORDER
+
+- **Trigger**: The same Shopify order stored twice under different record ids
+- **Exposure**: Order amount
+- **Disposition**: Governed Adjustment
+- **Example**: An uploaded export and the connector both loaded order 1001
+
+#### SHOPIFY_POSSIBLE_DUPLICATE_ORDER
+
+- **Trigger**: Same customer, amount and items as an order placed within the previous 10 minutes
+- **Exposure**: Order amount
+- **Disposition**: Manual Review
+- **Example**: Customer pressed Pay twice
 
 ## Validation Rules
 
@@ -232,6 +291,7 @@ Records are quarantined (not processed) if:
 | invalid financial_status         | Status not in approved list     | Update validation rules            |
 | invalid record_type              | Type is not "Order" or "Refund" | Check data mapping                 |
 | missing required field: order_id | Refund without order reference  | Contact Shopify support            |
+| invalid day total values         | Day total count or amount bad   | Check the posted day total         |
 
 Quarantined records are visible in audit logs and can be reviewed/reprocessed.
 
@@ -257,7 +317,7 @@ The adapter includes automatic retry logic:
 
 To reduce API calls:
 
-- Filter by `created_at` range (use `created_at_min`, `created_at_max`)
+- Filter by processing time: the sync window (`created_at_min`, `created_at_max`) is sent to Shopify as `processed_at_min`/`processed_at_max`, so a backdated order is fetched and stored on the day it was processed, which is how Shopify's own reports date it
 - Increase lookback window only if needed
 - Consider webhook integration for real-time updates instead of polling
 

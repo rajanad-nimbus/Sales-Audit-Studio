@@ -75,7 +75,8 @@ export default function StoreDaysPage() {
   const router = useRouter();
   const toast = useToast();
   const { me } = useMe();
-  const canOpen = !!me && (me.role === 'it' || me.role === 'admin');
+  // Mirrors POST /api/store-days: Sales Auditor, IT and Admin.
+  const canOpen = !!me && ['analyst', 'it', 'admin'].includes(me.role);
   const [days, setDays] = useState<StoreDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

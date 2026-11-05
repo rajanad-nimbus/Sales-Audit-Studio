@@ -3,10 +3,11 @@
 from datetime import UTC, datetime
 from decimal import InvalidOperation
 
+from apps.ingest.manifests import validate_business_date
 from apps.transactions import detail as transaction_detail
 from apps.transactions.detail import MAX_MONEY
 
-SHOPIFY_VALID_RECORD_TYPES = {"Order", "Refund"}
+SHOPIFY_VALID_RECORD_TYPES = {"Order", "Refund", "DayTotal"}
 
 SHOPIFY_FINANCIAL_STATUSES = {
     "authorized",
@@ -38,7 +39,12 @@ IMMUTABLE_FIELDS = (
 
 
 def identity_payload(rec: dict) -> dict:
-    """The subset of a record used for duplicate/conflict detection."""
+    """The subset of a record used for duplicate/conflict detection.
+
+    A day total has no mutable fields: all of it is the figure being declared, so all of it counts.
+    """
+    if rec.get("record_type") == "DayTotal":
+        return rec
     return {k: rec.get(k) for k in IMMUTABLE_FIELDS}
 
 
@@ -139,6 +145,57 @@ def parse_shopify_refund(rec: dict) -> dict:
     }
 
 
+def _count(rec: dict, field: str) -> int:
+    value = rec[field]
+    if isinstance(value, bool) or not (
+        isinstance(value, int) or (isinstance(value, str) and value.isdecimal())
+    ):
+        raise ValueError(f"{field} must be a non-negative integer")
+    count = int(value)
+    if not 0 <= count <= 2**63 - 1:
+        raise ValueError(f"{field} must be a non-negative 64-bit integer")
+    return count
+
+
+def _total(rec: dict, field: str):
+    total = transaction_detail.cent_value(rec[field], field)
+    if total < 0:
+        raise ValueError(f"{field} must be non-negative")
+    if total > MAX_MONEY:
+        raise ValueError(f"{field} exceeds supported precision")
+    return total
+
+
+def parse_shopify_day_total(rec: dict) -> dict:
+    """Validate what Shopify reports for one store's business day: orders, and optionally refunds.
+
+    Refund figures are optional because the connector cannot see every refund issued on a day (a refund
+    of an older order arrives only by webhook); a Shopify finance export can supply them.
+    """
+    required = ["source_record_id", "store_id", "business_date", "order_count", "order_total"]
+    missing = [k for k in required if rec.get(k) in (None, "")]
+    if missing:
+        raise ValueError(f"missing fields: {', '.join(missing)}")
+    has_refunds = [rec.get(k) not in (None, "") for k in ("refund_count", "refund_total")]
+    if any(has_refunds) and not all(has_refunds):
+        raise ValueError("refund_count and refund_total must be supplied together")
+    business_date = validate_business_date(rec["business_date"])
+    try:
+        values = {
+            "order_count": _count(rec, "order_count"),
+            "order_total": _total(rec, "order_total"),
+            "refund_count": _count(rec, "refund_count") if all(has_refunds) else None,
+            "refund_total": _total(rec, "refund_total") if all(has_refunds) else None,
+        }
+    except (TypeError, InvalidOperation, OverflowError):
+        raise ValueError("invalid day total values") from None
+    return {
+        "manifest": True,
+        **values,
+        "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00"),
+    }
+
+
 def parse(rec: dict) -> dict:
     """Route to appropriate parser based on record_type."""
     record_type = rec.get("record_type")
@@ -147,5 +204,7 @@ def parse(rec: dict) -> dict:
         return parse_shopify_order(rec)
     elif record_type == "Refund":
         return parse_shopify_refund(rec)
+    elif record_type == "DayTotal":
+        return parse_shopify_day_total(rec)
     else:
         raise ValueError(f"unknown record_type: {record_type}")

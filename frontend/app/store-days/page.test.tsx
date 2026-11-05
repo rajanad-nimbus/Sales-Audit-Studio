@@ -215,10 +215,16 @@ describe('Store Days page: showing a large list', () => {
     expect(screen.getByText(/Widen the date range/)).toBeInTheDocument();
   });
 
-  it('lets only IT open a store day', async () => {
+  it('hides Open Store Day from roles that cannot open one', async () => {
     await renderAs(<StoreDaysPage />, ME('finance'), routes());
     await screen.findByText('S2', { selector: 'a' });
     expect(screen.queryByRole('button', { name: 'Open Store Day' })).not.toBeInTheDocument();
+  });
+
+  it('lets a Sales Auditor open a store day', async () => {
+    await renderAs(<StoreDaysPage />, ME('analyst'), routes());
+    await screen.findByText('S2', { selector: 'a' });
+    expect(screen.getByRole('button', { name: 'Open Store Day' })).toBeInTheDocument();
   });
 });
 

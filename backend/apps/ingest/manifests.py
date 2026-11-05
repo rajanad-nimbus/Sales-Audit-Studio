@@ -20,10 +20,12 @@ def validate_business_date(value: str) -> str:
     return value
 
 
-def manifest_query(business_date: str | None, statuses: tuple[str, ...]):
+def manifest_query(
+    business_date: str | None, statuses: tuple[str, ...], source_system: str = "POSControl"
+):
     """Select manifests by their recorded UTC business-date timestamp when a date is supplied."""
     query = select(SourceRecord).where(
-        SourceRecord.source_system == "POSControl", SourceRecord.status.in_(statuses)
+        SourceRecord.source_system == source_system, SourceRecord.status.in_(statuses)
     )
     if business_date is not None:
         day = date.fromisoformat(validate_business_date(business_date))
@@ -34,14 +36,16 @@ def manifest_query(business_date: str | None, statuses: tuple[str, ...]):
     return query
 
 
-async def iter_manifests(db, business_date: str | None, statuses: tuple[str, ...]):
+async def iter_manifests(
+    db, business_date: str | None, statuses: tuple[str, ...], source_system: str = "POSControl"
+):
     """Yield matching manifests in bounded primary-key pages."""
     last_id = ""
     while True:
         page = (
             (
                 await db.execute(
-                    manifest_query(business_date, statuses)
+                    manifest_query(business_date, statuses, source_system)
                     .where(SourceRecord.id > last_id)
                     .order_by(SourceRecord.id)
                     .limit(MANIFEST_PAGE_SIZE)

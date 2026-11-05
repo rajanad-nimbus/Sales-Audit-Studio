@@ -9,7 +9,7 @@ VALID_TYPES = {
     "Processor": {"Capture", "Refund"},
     "Bank": {"Deposit"},
     "ERP": {"Posting"},
-    "Shopify": {"Order", "Refund"},
+    "Shopify": {"Order", "Refund", "DayTotal"},
     "POSControl": set(),
 }
 LINEAGE = {

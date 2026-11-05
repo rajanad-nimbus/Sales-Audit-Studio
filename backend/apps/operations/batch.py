@@ -178,6 +178,7 @@ async def resolve_batch_feeds(db: AsyncSession, business_date: str) -> dict:
                 store_id=os.getenv("SHOPIFY_STORE_ID", "SHOPIFY-MAIN"),
                 created_at_min=batch_start,
                 created_at_max=batch_start + timedelta(days=1),
+                day_totals=True,
             )
         )
     return feeds
