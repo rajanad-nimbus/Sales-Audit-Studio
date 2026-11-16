@@ -203,8 +203,8 @@ async def open_store_day_record(
 ) -> StoreDay:
     """Create the controlled audit unit for one store and business date. Does not commit.
 
-    There is no scheduler yet, so a Sales Auditor or IT administrator opens each day. Re-total then calculates
-    against it.
+    The store-day agent opens days as data arrives; this is the manual path for a day it has not
+    reached. Re-total then calculates against it.
     """
     await lock_configuration(db)
     store_id = store_id.strip()
@@ -487,6 +487,31 @@ async def store_day_summary(
     }
 
 
+async def close_summary(db: AsyncSession, user: dict, business_date: str, expected: int) -> dict:
+    """How one business date's store days stand: closed by the agent, by a person, or still open."""
+    from apps.store_days.automation import AGENT
+
+    automatic = case((StoreDay.closed_by == AGENT, 1), else_=0)
+    rows = await db.execute(
+        scope.restrict(
+            select(StoreDay.status == "Closed", func.sum(automatic), func.count())
+            .where(StoreDay.business_date == business_date)
+            .group_by(StoreDay.status == "Closed"),
+            user,
+            StoreDay.store_id,
+        )
+    )
+    summary = {"closed_automatically": 0, "closed_by_person": 0, "open": 0}
+    for closed, by_agent, count in rows:
+        if closed:
+            summary["closed_automatically"] += by_agent or 0
+            summary["closed_by_person"] += count - (by_agent or 0)
+        else:
+            summary["open"] += count
+    summary["not_opened"] = max(0, expected - sum(summary.values()))
+    return summary
+
+
 @router.get("/attention")
 async def store_days_needing_attention(
     business_date: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
@@ -679,6 +704,7 @@ async def store_days_needing_attention(
     return {
         "business_date": expected_date,
         "expected_stores": expected_stores,
+        "close_summary": await close_summary(db, user, expected_date, expected_stores),
         "late_stores": late[(late_page - 1) * late_page_size : late_page * late_page_size],
         "late_total": len(late),
         "late_page": late_page,
@@ -1215,6 +1241,13 @@ async def retotal_store_day(
 ):
     """Create an immutable new totals version from archived canonical records."""
     scope.require_store(user, store_id)
+    result = await retotal_day(db, store_id, business_date, user["user"] or "ontology.user")
+    await db.commit()
+    return result
+
+
+async def retotal_day(db: AsyncSession, store_id: str, business_date: str, actor: str) -> dict:
+    """Create an immutable new totals version from archived canonical records. Does not commit."""
     await lock_configuration(db)
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
@@ -1383,7 +1416,7 @@ async def retotal_store_day(
             "StoreDay",
             day.id,
             f"Closure request {request.id} superseded by totals version {day.audit_version}",
-            actor=user["user"] or "ontology.user",
+            actor=actor,
         )
     day.status, day.totals_stale = "Auditing", False
     audit(
@@ -1393,9 +1426,9 @@ async def retotal_store_day(
         "StoreDay",
         day.id,
         f"Store day {store_id}/{business_date} re-totaled (version {day.audit_version})",
-        actor=user["user"] or "ontology.user",
+        actor=actor,
     )
-    await db.commit()
+    await db.flush()
     await db.refresh(day)
     return {
         "store_day": store_day_view(day),

@@ -54,6 +54,69 @@ class AuditSignoffBody(BaseModel):
         return value
 
 
+async def close_blocker(db: AsyncSession, day: StoreDay) -> str | None:
+    """The first condition, other than auditor sign-off, that stops a store day closing."""
+    totals = (
+        (
+            await db.execute(
+                select(AuditTotal).where(
+                    AuditTotal.store_day_id == day.id,
+                    AuditTotal.audit_version == day.audit_version,
+                    AuditTotal.total_name.in_(
+                        REQUIRED_COMPARISON_TOTALS | OPTIONAL_COMPARISON_TOTALS
+                    ),
+                    AuditTotal.level == "Store",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    evaluations = await variances.evaluate(db, day, list(totals))
+    blockers = comparison_blockers(day, totals, set(variances.unresolved(evaluations)))
+    if "totals are stale; re-total the store day" in blockers:
+        return "Cannot close: totals are stale; re-total the store day"
+    if "current reconciliation totals are missing" in blockers:
+        return "Cannot close: current reconciliation totals are missing"
+    open_case_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Case)
+            .where(
+                Case.store_id == day.store_id,
+                Case.business_date == day.business_date,
+                Case.status.not_in(("Closed",)),
+            )
+        )
+    ).scalar_one()
+    if open_case_count:
+        return f"Cannot close: {open_case_count} case(s) remain open"
+    if "unresolved reconciliation variance" in blockers:
+        return (
+            "Cannot close: a reconciliation variance is outside tolerance and has no "
+            "explanation; give a reason, or link the case or correction behind it"
+        )
+    return None
+
+
+async def earlier_open_day(db: AsyncSession, day: StoreDay) -> tuple[str, str] | None:
+    """The oldest earlier store day of this store still open, when days must close in date order."""
+    if not await store_days_worked_in_order(db):
+        return None
+    return (
+        await db.execute(
+            select(StoreDay.business_date, StoreDay.status)
+            .where(
+                StoreDay.store_id == day.store_id,
+                StoreDay.business_date < day.business_date,
+                StoreDay.status != "Closed",
+            )
+            .order_by(StoreDay.business_date)
+            .limit(1)
+        )
+    ).first()
+
+
 @closure_router.post("/{store_id}/{business_date}/audit-signoff")
 async def sign_off_store_day_audit(
     store_id: str,
@@ -114,28 +177,16 @@ async def request_store_day_closure(
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Store day is already closed")
-    if await store_days_worked_in_order(db):
-        earlier_open_day = (
-            await db.execute(
-                select(StoreDay.business_date, StoreDay.status)
-                .where(
-                    StoreDay.store_id == store_id,
-                    StoreDay.business_date < business_date,
-                    StoreDay.status != "Closed",
-                )
-                .order_by(StoreDay.business_date)
-                .limit(1)
-            )
-        ).first()
-        if earlier_open_day:
-            earlier_date, earlier_status = earlier_open_day
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Cannot close {business_date}: earlier store day {earlier_date} "
-                    f"is still {earlier_status}. Close store days in date order."
-                ),
-            )
+    earlier = await earlier_open_day(db, day)
+    if earlier:
+        earlier_date, earlier_status = earlier
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot close {business_date}: earlier store day {earlier_date} "
+                f"is still {earlier_status}. Close store days in date order."
+            ),
+        )
     current_readiness = (await readiness(db, [day]))[day.id]
     if not current_readiness["audit"]["signed_off"]:
         raise HTTPException(
@@ -232,55 +283,9 @@ async def close_store_day(
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Store day is already closed")
-    totals = (
-        (
-            await db.execute(
-                select(AuditTotal).where(
-                    AuditTotal.store_day_id == day.id,
-                    AuditTotal.audit_version == day.audit_version,
-                    AuditTotal.total_name.in_(
-                        REQUIRED_COMPARISON_TOTALS | OPTIONAL_COMPARISON_TOTALS
-                    ),
-                    AuditTotal.level == "Store",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    evaluations = await variances.evaluate(db, day, list(totals))
-    blockers = comparison_blockers(day, totals, set(variances.unresolved(evaluations)))
-    if "totals are stale; re-total the store day" in blockers:
-        raise HTTPException(
-            status_code=422, detail="Cannot close: totals are stale; re-total the store day"
-        )
-    if "current reconciliation totals are missing" in blockers:
-        raise HTTPException(
-            status_code=422, detail="Cannot close: current reconciliation totals are missing"
-        )
-    open_case_count = (
-        await db.execute(
-            select(func.count())
-            .select_from(Case)
-            .where(
-                Case.store_id == store_id,
-                Case.business_date == business_date,
-                Case.status.not_in(("Closed",)),
-            )
-        )
-    ).scalar_one()
-    if open_case_count:
-        raise HTTPException(
-            status_code=422, detail=f"Cannot close: {open_case_count} case(s) remain open"
-        )
-    if "unresolved reconciliation variance" in blockers:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Cannot close: a reconciliation variance is outside tolerance and has no "
-                "explanation; give a reason, or link the case or correction behind it"
-            ),
-        )
+    blocker = await close_blocker(db, day)
+    if blocker:
+        raise HTTPException(status_code=422, detail=blocker)
     # Sign-off is only meaningful once totals are current and nothing else blocks closure.
     current_readiness = (await readiness(db, [day]))[day.id]
     if not current_readiness["audit"]["signed_off"]:

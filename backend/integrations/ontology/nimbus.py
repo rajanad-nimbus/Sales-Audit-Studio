@@ -30,7 +30,17 @@ def sla_due(priority: str):
     return utcnow() + timedelta(hours=SLA_HOURS.get(priority, 72))
 
 
-def audit(db, event_type, case_id, object_type, object_id, description, actor="system", after=None):
+def audit(
+    db,
+    event_type,
+    case_id,
+    object_type,
+    object_id,
+    description,
+    actor="system",
+    after=None,
+    before=None,
+):
     from integrations.ontology.ontology_integration import integration
 
     after = {"ontology_context": integration.provenance(), **(after or {})}
@@ -43,6 +53,7 @@ def audit(db, event_type, case_id, object_type, object_id, description, actor="s
             object_id=object_id,
             case_id=case_id,
             action_description=description,
+            before_state=before,
             after_state=after,
         )
     )

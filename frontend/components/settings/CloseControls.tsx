@@ -44,10 +44,99 @@ export function CloseControls() {
   const canConfigureOrder = !!me && (me.role === 'it' || me.role === 'admin');
   return (
     <div className="stack">
+      <AutomaticClose canConfigure={canConfigureOrder} />
       <StoreDayOrder canConfigure={canConfigureOrder} />
       <Tolerances canEdit={canEdit} />
       <Periods canEdit={canEdit} />
     </div>
+  );
+}
+
+function AutomaticClose({ canConfigure }: { canConfigure: boolean }) {
+  const toast = useToast();
+  const [policy, setPolicy] = useState<StoreDayOrderPolicy | null>(null);
+  const [enabled, setEnabled] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.get<StoreDayOrderPolicy>(
+        '/api/system-options/automatic-store-day-close'
+      );
+      setPolicy(data);
+      setEnabled(data.enabled);
+    } catch (e) {
+      setError(apiError(e, 'Could not load the automatic close setting.'));
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { data } = await api.put<StoreDayOrderPolicy>(
+        '/api/system-options/automatic-store-day-close',
+        { enabled }
+      );
+      setPolicy(data);
+      toast(
+        enabled
+          ? 'Clean store days will now close automatically.'
+          : 'Automatic close is off. Store days wait for sign-off and approval.',
+        'success'
+      );
+    } catch (e) {
+      setError(apiError(e, 'Could not save the automatic close setting.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Automatic store-day close">
+      <p>
+        Store days open and total on their own as data arrives. When this is on, a store day whose
+        data matches its source control total, with no open errors, unexplained variances or
+        transaction number gaps, is also signed off and closed without anyone touching it. Days that
+        fail a check stay open for review. When off, every day waits for auditor sign-off and
+        Finance approval.
+      </p>
+      {error && (
+        <Alert tone="error" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      <div className="form-row">
+        <Field label="Close clean store days automatically">
+          <select
+            value={String(enabled)}
+            disabled={!canConfigure || !policy}
+            onChange={(event) => setEnabled(event.target.value === 'true')}
+          >
+            <option value="true">On</option>
+            <option value="false">Off</option>
+          </select>
+        </Field>
+        {canConfigure && (
+          <Button
+            variant="primary"
+            disabled={busy || !policy || enabled === policy.enabled}
+            onClick={() => void save()}
+          >
+            {busy ? 'Saving…' : 'Save setting'}
+          </Button>
+        )}
+        <span className="hint">
+          {policy?.updated_by
+            ? `Last changed by ${policy.updated_by}${policy.updated_at ? ` · ${formatDateTime(policy.updated_at)}` : ''}`
+            : 'Default: on'}
+        </span>
+      </div>
+    </Card>
   );
 }
 

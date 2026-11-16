@@ -11,6 +11,7 @@ STORE_DAY_ORDER_KEY = "store_days_worked_in_order"
 BACKDATED_TRANSACTION_DAYS_KEY = "max_backdated_transaction_days"
 DUPLICATE_MISSING_CHECKS_KEY = "duplicate_missing_transaction_checks"
 AUTO_AUDIT_AFTER_IMPORT_KEY = "automatic_audit_after_import"
+AUTO_STORE_DAY_CLOSE_KEY = "automatic_store_day_close"
 CARD_SECURITY_LEVEL_KEY = "credit_card_security_level"
 CARD_SECURITY_LEVELS = ("Restricted Access", "Block")
 CARD_NUMBER_MASK_KEY = "credit_card_number_mask"
@@ -59,6 +60,14 @@ async def automatic_audit_after_import_enabled(db: AsyncSession) -> bool:
         select(SystemOption.value).where(SystemOption.key == AUTO_AUDIT_AFTER_IMPORT_KEY)
     )
     return value == "true"
+
+
+async def automatic_store_day_close_enabled(db: AsyncSession) -> bool:
+    """Whether the store-day agent signs off and closes clean store days. On unless turned off."""
+    value = await db.scalar(
+        select(SystemOption.value).where(SystemOption.key == AUTO_STORE_DAY_CLOSE_KEY)
+    )
+    return value != "false"
 
 
 async def credit_card_security_level(db: AsyncSession) -> str:

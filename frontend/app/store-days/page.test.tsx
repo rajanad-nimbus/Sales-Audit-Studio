@@ -56,6 +56,7 @@ const ATTENTION = {
     { ...DAYS[1], days_open: 6, holding_back: ['Data: Incomplete', 'Audit: 2 open case(s)'] },
   ],
   stuck_truncated: false,
+  close_summary: { closed_automatically: 2940, closed_by_person: 10, open: 40, not_opened: 10 },
 };
 const BRIEF = {
   store_day: DAYS[1],
@@ -376,13 +377,22 @@ describe('Store Days page: late and stuck stores at scale', () => {
     );
   });
 
+  it('summarises how the business date closed', async () => {
+    await renderAs(<StoreDaysPage />, ME('finance'), routes());
+    expect(
+      await screen.findByText(
+        /2,940 of 3,000 active stores closed automatically · 10 closed by a person · 40 open · 10 with no Store Day/
+      )
+    ).toBeInTheDocument();
+  });
+
   it('opens a stuck store day in place and reloads for another age', async () => {
     await renderAs(
       <StoreDaysPage />,
       ME('finance'),
       routes({ 'GET /api/store-days/S2/2026-10-02/brief': BRIEF })
     );
-    await userEvent.click(await screen.findByRole('tab', { name: /Stuck store days/ }));
+    await userEvent.click(await screen.findByRole('tab', { name: /Needs review/ }));
     expect(await screen.findByText('Data: Incomplete · Audit: 2 open case(s)')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('Data: Incomplete · Audit: 2 open case(s)'));

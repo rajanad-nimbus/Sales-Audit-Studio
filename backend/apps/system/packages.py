@@ -19,6 +19,7 @@ from apps.store_days.freshness import lock_configuration
 from apps.system.models import SystemOption
 from apps.system.options import (
     AUTO_AUDIT_AFTER_IMPORT_KEY,
+    AUTO_STORE_DAY_CLOSE_KEY,
     BACKDATED_TRANSACTION_DAYS_KEY,
     CARD_NUMBER_MASK_KEY,
     CARD_SECURITY_LEVEL_KEY,
@@ -27,6 +28,7 @@ from apps.system.options import (
     EXPORT_UNIT_KEY,
     STORE_DAY_ORDER_KEY,
     automatic_audit_after_import_enabled,
+    automatic_store_day_close_enabled,
     credit_card_number_mask,
     credit_card_security_level,
     duplicate_missing_transaction_checks_enabled,
@@ -47,6 +49,7 @@ class SystemOptionsConfig(BaseModel):
     max_backdated_transaction_days: int | None = Field(default=None, ge=0, le=3650)
     duplicate_missing_transaction_checks: bool = True
     automatic_audit_after_import: bool = False
+    automatic_store_day_close: bool = True
     card_security_level: Literal["Restricted Access", "Block"] = "Restricted Access"
     card_number_mask: str = Field(default=DEFAULT_CARD_NUMBER_MASK, min_length=1, max_length=1)
 
@@ -96,6 +99,7 @@ def _config_values(config: SystemOptionsConfig) -> dict[str, str]:
         ),
         DUPLICATE_MISSING_CHECKS_KEY: str(config.duplicate_missing_transaction_checks).lower(),
         AUTO_AUDIT_AFTER_IMPORT_KEY: str(config.automatic_audit_after_import).lower(),
+        AUTO_STORE_DAY_CLOSE_KEY: str(config.automatic_store_day_close).lower(),
         CARD_SECURITY_LEVEL_KEY: config.card_security_level,
         CARD_NUMBER_MASK_KEY: config.card_number_mask,
     }
@@ -110,6 +114,7 @@ async def _current_config(db: AsyncSession, *, lock: bool = False) -> dict:
         max_backdated_transaction_days=await max_backdated_transaction_days(db),
         duplicate_missing_transaction_checks=await duplicate_missing_transaction_checks_enabled(db),
         automatic_audit_after_import=await automatic_audit_after_import_enabled(db),
+        automatic_store_day_close=await automatic_store_day_close_enabled(db),
         card_security_level=await credit_card_security_level(db),
         card_number_mask=await credit_card_number_mask(db),
     ).model_dump(mode="json")
@@ -123,6 +128,7 @@ def _preview(package: SystemOptionsPackage, current: dict) -> dict:
         ("max_backdated_transaction_days", "Maximum backdated age in days"),
         ("duplicate_missing_transaction_checks", "Duplicate and missing checks"),
         ("automatic_audit_after_import", "Audit after standalone import"),
+        ("automatic_store_day_close", "Automatic store-day close"),
         ("card_security_level", "Payment card ingestion policy"),
         ("card_number_mask", "Card number mask character"),
     )

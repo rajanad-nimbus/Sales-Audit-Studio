@@ -53,6 +53,12 @@ interface Attention {
   stuck_store_days: StuckDay[];
   stuck_truncated: boolean;
 }
+  close_summary?: {
+    closed_automatically: number;
+    closed_by_person: number;
+    open: number;
+    not_opened: number;
+  };
 type ListTab = 'days' | 'late' | 'stuck';
 interface SavedStoreDaysView {
   name: string;
@@ -124,7 +130,7 @@ export default function StoreDaysPage() {
   const [lateDate, setLateDate] = useState(yesterday);
   const [latePage, setLatePage] = useState(1);
   const [lateSize, setLateSize] = useState(100);
-  const [stuckAfter, setStuckAfter] = useState(3);
+  const [stuckAfter, setStuckAfter] = useState(1);
   const [savedViews, setSavedViews] = useState<SavedStoreDaysView[]>([]);
   const [savedViewsError, setSavedViewsError] = useState(false);
   const savedViewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
@@ -224,7 +230,7 @@ export default function StoreDaysPage() {
     if (tab === 'late' || lateDate !== yesterday) params.set('late_date', lateDate);
     if (latePage > 1) params.set('late_page', String(latePage));
     if (lateSize !== 100) params.set('late_size', String(lateSize));
-    if (stuckAfter !== 3) params.set('stuck_after', String(stuckAfter));
+    if (stuckAfter !== 1) params.set('stuck_after', String(stuckAfter));
     const queryString = params.toString();
     history.replaceState(
       null,
@@ -391,7 +397,7 @@ export default function StoreDaysPage() {
       [50, 100, 200, 500].includes(Number(params.late_size)) ? Number(params.late_size) : 100
     );
     setStuckAfter(
-      [1, 3, 7, 14].includes(Number(params.stuck_after)) ? Number(params.stuck_after) : 3
+      [1, 3, 7, 14].includes(Number(params.stuck_after)) ? Number(params.stuck_after) : 1
     );
     setExpanded(null);
   };
@@ -554,12 +560,22 @@ export default function StoreDaysPage() {
           value={tab}
           onChange={(id) => {
             setTab(id as ListTab);
+      {attention?.close_summary && (
+        <p className="hint">
+          {attention.business_date}: {formatNumber(attention.close_summary.closed_automatically)} of{' '}
+          {formatNumber(attention.expected_stores)} active stores closed automatically ·{' '}
+          {formatNumber(attention.close_summary.closed_by_person)} closed by a person ·{' '}
+          {formatNumber(attention.close_summary.open)} open ·{' '}
+          {formatNumber(attention.close_summary.not_opened)} with no Store Day
+        </p>
+      )}
+
             setExpanded(null);
           }}
           items={[
             { id: 'days', label: 'Store Days', count: summary?.total },
             { id: 'late', label: 'Late stores', count: attention?.late_total },
-            { id: 'stuck', label: 'Stuck store days', count: attention?.stuck_store_days.length },
+            { id: 'stuck', label: 'Needs review', count: attention?.stuck_store_days.length },
           ]}
         />
         {savedViewsError && (
@@ -694,7 +710,7 @@ export default function StoreDaysPage() {
                 onChange={(v) => setStuckAfter(Number(v))}
                 options={[1, 3, 7, 14].map((n) => ({
                   value: String(n),
-                  label: `Open over ${n} day${n === 1 ? '' : 's'}`,
+                  label: n === 1 ? 'All open' : `Open over ${n} days`,
                 }))}
               />
               <Button
@@ -702,7 +718,7 @@ export default function StoreDaysPage() {
                 disabled={attentionExporting || !attention?.stuck_store_days.length}
                 onClick={() => exportAttention('stuck')}
               >
-                {attentionExporting ? 'Preparing…' : 'Download all stuck days'}
+                {attentionExporting ? 'Preparing…' : 'Download all days needing review'}
               </Button>
             </Toolbar>
             {attentionExportError && <Alert tone="error">{attentionExportError}</Alert>}
@@ -711,6 +727,10 @@ export default function StoreDaysPage() {
                 {
                   key: 'store',
                   header: 'Store',
+            <p className="hint">
+              Store days from before today that were not closed automatically, oldest first, with
+              what is holding each one back. A day closes on the next run once that is resolved.
+            </p>
                   primary: true,
                   stopRowClick: true,
                   render: (d: StuckDay) => <Link href={dayPath(d)}>{d.store_id}</Link>,

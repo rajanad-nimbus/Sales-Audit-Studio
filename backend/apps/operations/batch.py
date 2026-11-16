@@ -87,15 +87,25 @@ async def run_daily_batch(
             run.store_day_open_error = f"Store Day opening failed ({type(exc).__name__})"
             await db.commit()
 
+    run_id = run.id
+    try:
+        from apps.store_days.automation import run_store_day_agent
+
+        settled = await run_store_day_agent(db, business_date)
+        logger.info("Store-day agent after batch %s: %s", run_id, settled)
+    except Exception:
+        logger.exception("Store-day agent could not run after batch %s", run_id)
+        await db.rollback()
+
     try:
         from apps.exports.routes import auto_export_valid_transactions
 
         await auto_export_valid_transactions(db, request)
     except Exception:
-        logger.exception("Automatic transaction export could not start after batch %s", run.id)
+        logger.exception("Automatic transaction export could not start after batch %s", run_id)
         await db.rollback()
 
-    run = await load_batch(db, run.id)
+    run = await load_batch(db, run_id)
     run = await run_optional_investigation(db, run, business_date)
     return run
 

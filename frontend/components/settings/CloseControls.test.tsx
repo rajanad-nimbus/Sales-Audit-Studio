@@ -179,3 +179,40 @@ describe('CloseControls: period close', () => {
     expect(await screen.findByText(/2 still open/)).toBeInTheDocument();
   });
 });
+
+describe('CloseControls: automatic close', () => {
+  const POLICY = { enabled: true, updated_by: null, updated_at: null };
+
+  it('lets IT turn automatic store-day close off', async () => {
+    await renderAs(
+      <CloseControls />,
+      ME('it'),
+      routes({
+        'GET /api/system-options/automatic-store-day-close': POLICY,
+        'PUT /api/system-options/automatic-store-day-close': { ...POLICY, enabled: false },
+      })
+    );
+    const choice = await screen.findByLabelText('Close clean store days automatically');
+    await waitFor(() => expect(choice).toBeEnabled());
+
+    await userEvent.selectOptions(choice, 'false');
+    await userEvent.click(screen.getByRole('button', { name: 'Save setting' }));
+
+    await waitFor(() =>
+      expect(calls('put', '/api/system-options/automatic-store-day-close')).toHaveLength(1)
+    );
+    expect(calls('put', '/api/system-options/automatic-store-day-close')[0][1]).toEqual({
+      enabled: false,
+    });
+  });
+
+  it('shows the setting read-only to Finance', async () => {
+    await renderAs(
+      <CloseControls />,
+      ME('finance'),
+      routes({ 'GET /api/system-options/automatic-store-day-close': POLICY })
+    );
+    expect(await screen.findByLabelText('Close clean store days automatically')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save setting' })).not.toBeInTheDocument();
+  });
+});

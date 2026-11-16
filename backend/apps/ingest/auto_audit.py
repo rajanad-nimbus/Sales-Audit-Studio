@@ -43,6 +43,9 @@ async def reconcile_after_import(
         try:
             result = await reconciliation.reconcile(db, business_date, store_ids=store_ids)
             await db.commit()
+            from apps.store_days.automation import run_store_day_agent
+
+            store_days = await run_store_day_agent(db, business_date, store_ids=store_ids)
             from apps.exports.routes import auto_export_valid_transactions
 
             automatic_exports = await auto_export_valid_transactions(
@@ -54,6 +57,7 @@ async def reconcile_after_import(
                     "business_date": business_date,
                     "stores": len(store_ids),
                     **result,
+                    "store_days": store_days,
                     "automatic_exports": automatic_exports,
                 }
             )

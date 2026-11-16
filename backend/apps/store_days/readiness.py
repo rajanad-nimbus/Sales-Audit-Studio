@@ -29,7 +29,7 @@ from apps.transactions.models import CanonicalTransaction
 
 Key = tuple[str, str]  # (store_id, business_date)
 CHUNK = 250
-GAP_ERRORS = ("INCOMPLETE_FEED", "MISSING_TRAN_BIG_GAP")
+GAP_ERRORS = ("INCOMPLETE_FEED", "MISSING_TRAN_BIG_GAP", "SHOPIFY_INCOMPLETE_FEED")
 SALES_LINEAGE = (LINEAGE["POS"], LINEAGE["Shopify"])
 
 # Ingest
@@ -56,7 +56,7 @@ def chunks(keys: list[Key]):
 
 
 async def manifests_by_key(db: AsyncSession, keys: list[Key]) -> dict[Key, set[str]]:
-    """Statuses of the POS control manifests on file for each store day."""
+    """Statuses of the control totals on file for each store day: POS manifests and Shopify day totals."""
     if not keys:
         return {}
     wanted = set(keys)
@@ -72,11 +72,26 @@ async def manifests_by_key(db: AsyncSession, keys: list[Key]) -> dict[Key, set[s
             SourceRecord.source_event_time < end,
         )
     )
-    for payload, status in rows:
+    # Shopify reports a day total instead of a manifest; it is stamped at the day's first instant.
+    midnights = [datetime.combine(date.fromisoformat(day), time.min, tzinfo=UTC) for day in dates]
+    day_totals = []
+    for offset in range(0, len(midnights), CHUNK):
+        day_totals.extend(
+            await db.execute(
+                select(SourceRecord.payload, SourceRecord.status).where(
+                    SourceRecord.source_system == "Shopify",
+                    SourceRecord.status.in_(("Archived", "Processed")),
+                    SourceRecord.source_event_time.in_(midnights[offset : offset + CHUNK]),
+                )
+            )
+        )
+    for payload, status in [*rows, *day_totals]:
         try:
             content = json.loads(payload)
             key = (content["store_id"], str(content["business_date"])[:10])
         except (ValueError, KeyError, TypeError):
+            continue
+        if content.get("record_type", "DayTotal") != "DayTotal":
             continue
         if key in wanted:
             found[key].add(status)

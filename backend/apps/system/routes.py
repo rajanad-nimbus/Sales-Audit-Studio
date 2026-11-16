@@ -21,6 +21,7 @@ from apps.system.models import Connector, SystemOption
 from apps.system.packages import router as system_options_package_router
 from apps.system.options import (
     AUTO_AUDIT_AFTER_IMPORT_KEY,
+    AUTO_STORE_DAY_CLOSE_KEY,
     BACKDATED_TRANSACTION_DAYS_KEY,
     CARD_NUMBER_MASK_KEY,
     CARD_SECURITY_LEVEL_KEY,
@@ -30,6 +31,7 @@ from apps.system.options import (
     EXPORT_UNIT_KEY,
     STORE_DAY_ORDER_KEY,
     automatic_audit_after_import_enabled,
+    automatic_store_day_close_enabled,
     credit_card_number_mask,
     credit_card_security_level,
     duplicate_missing_transaction_checks_enabled,
@@ -59,6 +61,10 @@ class DuplicateMissingChecksIn(BaseModel):
 
 
 class AutomaticAuditAfterImportIn(BaseModel):
+    enabled: bool
+
+
+class AutomaticStoreDayCloseIn(BaseModel):
     enabled: bool
 
 
@@ -261,6 +267,49 @@ async def update_audit_after_import(
         "SystemOption",
         str(uuid.uuid5(uuid.NAMESPACE_URL, AUTO_AUDIT_AFTER_IMPORT_KEY)),
         f"Automatic audit after import changed from {before} to {body.enabled}",
+        actor=actor,
+        before={"enabled": before},
+        after={"enabled": body.enabled},
+    )
+    await db.commit()
+    return {"enabled": body.enabled, "updated_by": actor, "updated_at": now}
+
+
+@router.get("/api/system-options/automatic-store-day-close")
+async def get_automatic_store_day_close(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    option = await db.get(SystemOption, AUTO_STORE_DAY_CLOSE_KEY)
+    return {
+        "enabled": await automatic_store_day_close_enabled(db),
+        "updated_by": option.updated_by if option else None,
+        "updated_at": option.updated_at if option else None,
+    }
+
+
+@router.put("/api/system-options/automatic-store-day-close")
+async def update_automatic_store_day_close(
+    body: AutomaticStoreDayCloseIn,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("it")),
+):
+    await lock_configuration(db, exclusive=True)
+    actor = user["user"] or "ontology.user"
+    now = utcnow()
+    before = await automatic_store_day_close_enabled(db)
+    option = await db.get(SystemOption, AUTO_STORE_DAY_CLOSE_KEY)
+    if option is None:
+        option = SystemOption(key=AUTO_STORE_DAY_CLOSE_KEY)
+        db.add(option)
+    option.value, option.updated_by, option.updated_at = str(body.enabled).lower(), actor, now
+    audit(
+        db,
+        "AUTOMATIC_STORE_DAY_CLOSE_CHANGED",
+        None,
+        "SystemOption",
+        str(uuid.uuid5(uuid.NAMESPACE_URL, AUTO_STORE_DAY_CLOSE_KEY)),
+        f"Automatic store-day close changed from {before} to {body.enabled}",
         actor=actor,
         before={"enabled": before},
         after={"enabled": body.enabled},

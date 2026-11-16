@@ -13,6 +13,7 @@ interface Options {
   max_backdated_transaction_days: number | null;
   duplicate_missing_transaction_checks: boolean;
   automatic_audit_after_import: boolean;
+  automatic_store_day_close: boolean;
   card_security_level: 'Restricted Access' | 'Block';
   card_number_mask: string;
 }
