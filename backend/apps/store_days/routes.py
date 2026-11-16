@@ -1331,7 +1331,7 @@ async def retotal_store_day(
     processor_net = calculated.get(("Processor Net", "Store", None), Decimal("0"))
     bank_net = calculated.get(("Bank Net", "Store", None), Decimal("0"))
     gl_net = calculated.get(("ERP Net", "Store", None), Decimal("0"))
-    # These comparison totals are retained with every version and are close-blocking when non-zero.
+    # Retain both comparisons for audit. Bank settlement may arrive after store-day close.
     db.add(
         AuditTotal(
             id=str(uuid.uuid4()),

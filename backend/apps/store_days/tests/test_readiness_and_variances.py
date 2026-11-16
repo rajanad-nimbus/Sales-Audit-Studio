@@ -14,6 +14,7 @@ from apps.store_days.periods import PeriodCloseBody, close_period
 from apps.store_days.routes import get_store_day, list_store_days, store_days_needing_attention
 from apps.store_days.variance_routes import ExplanationBody, ToleranceBody, create_tolerance
 from apps.store_days.variance_routes import explain_variance as explain
+from apps.store_days.service import comparison_blockers
 from apps.transactions.models import CanonicalTransaction
 from fastapi import HTTPException
 from integrations.ontology.nimbus import audit
@@ -84,6 +85,29 @@ def test_the_most_specific_tolerance_wins_and_sets_the_outcome():
     assert variances.outcome(Decimal("100.01"), outlet) == variances.NEEDS_CASE
     # With no rule every cent needs a case, as before tolerances existed.
     assert variances.outcome(Decimal("0.01"), variances.NO_TOLERANCE) == variances.NEEDS_CASE
+
+
+def test_late_bank_settlement_variance_does_not_block_store_day_close():
+    day = StoreDay(
+        id="day", store_id="S1", business_date=DATE, status="Auditing",
+        audit_version=1, totals_stale=False,
+    )
+    totals = [
+        AuditTotal(
+            id="bank", store_day_id="day", audit_version=1,
+            total_name="Processor to Bank Variance", level="Store",
+            calculated_amount=Decimal("100"), declared_amount=Decimal("0"),
+            variance_amount=Decimal("100"), currency="USD",
+        ),
+        AuditTotal(
+            id="gl", store_day_id="day", audit_version=1,
+            total_name="POS to GL Variance", level="Store",
+            calculated_amount=Decimal("100"), declared_amount=Decimal("100"),
+            variance_amount=Decimal("0"), currency="USD",
+        ),
+    ]
+
+    assert comparison_blockers(day, totals, unresolved_ids={"bank"}) == []
 
 
 async def totaled_day(db, *, variance="3", status="Auditing", version=1) -> StoreDay:

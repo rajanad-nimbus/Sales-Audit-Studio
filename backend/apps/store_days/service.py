@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.ingest.manifests import validate_business_date
 from apps.store_days.models import AuditTotal, StoreDay
 
-REQUIRED_COMPARISON_TOTALS = frozenset({"Processor to Bank Variance", "POS to GL Variance"})
-OPTIONAL_COMPARISON_TOTALS = frozenset({"POS Control Declared"})
+REQUIRED_COMPARISON_TOTALS = frozenset({"POS to GL Variance"})
+OPTIONAL_COMPARISON_TOTALS = frozenset({"POS Control Declared", "Processor to Bank Variance"})
 
 
 def comparison_blockers(
@@ -23,7 +23,7 @@ def comparison_blockers(
         total
         for total in totals
         if total.level == "Store"
-        and total.total_name in REQUIRED_COMPARISON_TOTALS | OPTIONAL_COMPARISON_TOTALS
+        and total.total_name in REQUIRED_COMPARISON_TOTALS | {"POS Control Declared"}
     ]
     present = {total.total_name for total in comparisons}
     blockers = []
