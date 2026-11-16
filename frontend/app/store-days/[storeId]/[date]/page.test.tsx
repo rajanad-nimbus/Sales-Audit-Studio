@@ -88,12 +88,13 @@ describe('Store day detail: completeness and readiness', () => {
     await open(detail(), ME('finance'), {
       [`GET ${DAY}/sequence-gaps`]: {
         registers: [{ register_id: 'R1', missing: [4, 9], count: 2, dismissed: [] }],
+        pagination: { page: 1, page_size: 100, total: 1, pages: 1 },
       },
     });
     expect(await screen.findByText(/2 transaction numbers are missing/)).toBeInTheDocument();
     expect(screen.getByText(/R1: 4, 9/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Review gaps' }));
-    expect(screen.getByRole('heading', { name: 'Register R1' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Register R1/ })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '4' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '9' })).toBeInTheDocument();
   });
@@ -368,5 +369,27 @@ describe('Store day detail: organized status and totals', () => {
     expect(within(list).getByText(/1 variance needs an explanation/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-total' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '1 open of 1' })).toBeInTheDocument();
+  });
+
+  it('tells Finance after a re-total when Over/Short has no Accounted For total to balance against', async () => {
+    await open(
+      detail({ store_day: { ...detail().store_day, totals_stale: true } }),
+      ME('finance', 'me'),
+      {
+        [`POST ${DAY}/retotal`]: {
+          store_day: detail().store_day,
+          transactions: 5,
+          totals_created: 9,
+          warnings: ['Over/Short has no Accounted For total configured, so it cannot balance.'],
+        },
+      }
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Re-total' }));
+
+    expect(
+      await screen.findByText('Re-totaled 5 transaction(s); 9 totals created.')
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/Over\/Short has no Accounted For total/)).toBeInTheDocument();
+    expect(calls('post', `${DAY}/retotal`)).toHaveLength(1);
   });
 });

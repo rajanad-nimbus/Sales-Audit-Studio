@@ -523,6 +523,11 @@ export function VoucherLedger() {
             Redeeming at {redeemStore}. Matching POS transactions are found from this voucher’s
             tender reference or item voucher code.
           </p>
+          {error && (
+            <Alert tone="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
           {redemptionCandidatesError && <Alert tone="error">{redemptionCandidatesError}</Alert>}
           {redemptionCandidates === null && !redemptionCandidatesError && (
             <p>Searching transactions…</p>

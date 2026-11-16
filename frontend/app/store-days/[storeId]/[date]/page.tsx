@@ -311,6 +311,7 @@ export default function StoreDayDetailPage({
             : `Store Day is now ${data.status}.`),
         'success'
       );
+      for (const warning of (data.warnings as string[] | undefined) ?? []) toast(warning, 'info');
       done?.();
       await load();
     } catch (e) {

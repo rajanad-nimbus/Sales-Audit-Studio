@@ -33,7 +33,11 @@ describe('each report is its own page that loads only its own data', () => {
         .filter(([n]) => n !== name)
         .flatMap(([n]) => calls('get', `/api/reports/${n}`));
       expect(others).toHaveLength(0);
-      expect((api.get as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(1);
+      // Besides its own report, a page only loads the store list for its store filter.
+      const requested = (api.get as unknown as { mock: { calls: [string][] } }).mock.calls.map(
+        ([path]) => path
+      );
+      expect(requested.sort()).toEqual([`/api/reports/${name}`, '/api/stores'].sort());
     }
   );
 

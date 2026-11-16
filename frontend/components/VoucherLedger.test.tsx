@@ -117,7 +117,10 @@ describe('VoucherLedger', () => {
     await renderAs(
       <VoucherLedger />,
       ME('store_manager'),
-      routes({ 'POST /api/vouchers/V1/redeem': {} })
+      routes({
+        'GET /api/vouchers/redeem-candidates': { items: [], truncated: false },
+        'POST /api/vouchers/V1/redeem': {},
+      })
     );
     await screen.findByText('V1');
     const redeem = screen.getByRole('button', { name: 'Redeem' });
@@ -125,6 +128,8 @@ describe('VoucherLedger', () => {
 
     await userEvent.selectOptions(screen.getByLabelText('Redeem at…'), 'S2');
     await userEvent.click(redeem);
+    // Redeeming opens a dialog that looks for the matching POS transaction to link.
+    await userEvent.click(await screen.findByRole('button', { name: 'Redeem without link' }));
     await waitFor(() => expect(calls('post', '/api/vouchers/V1/redeem')).toHaveLength(1));
     expect(calls('post', '/api/vouchers/V1/redeem')[0][1]).toEqual({ store_id: 'S2' });
   });
@@ -133,11 +138,15 @@ describe('VoucherLedger', () => {
     await renderAs(
       <VoucherLedger />,
       ME('finance'),
-      routes({ 'POST /api/vouchers/V1/redeem': apiFailure('Already redeemed at S2', 409) })
+      routes({
+        'GET /api/vouchers/redeem-candidates': { items: [], truncated: false },
+        'POST /api/vouchers/V1/redeem': apiFailure('Already redeemed at S2', 409),
+      })
     );
     await screen.findByText('V1');
     await userEvent.selectOptions(screen.getByLabelText('Redeem at…'), 'S1');
     await userEvent.click(screen.getByRole('button', { name: 'Redeem' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Redeem without link' }));
     expect(await screen.findByText('Already redeemed at S2')).toBeInTheDocument();
   });
 

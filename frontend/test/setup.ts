@@ -19,6 +19,8 @@ vi.mock('next/navigation', () => ({
 }));
 
 beforeEach(() => {
+  // Screens keep filters and pages in the address bar; start every test from a clean URL.
+  window.history.replaceState(null, '', '/');
   vi.stubGlobal(
     'URL',
     Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
