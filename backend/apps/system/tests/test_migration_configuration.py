@@ -156,14 +156,14 @@ def _assert_migration_columns(columns_by_table: dict) -> None:
                 default_mismatches.append(
                     (table.name, column.name, actual_default, expected_default)
                 )
-    assert not default_mismatches, default_mismatches
+    assert not default_mismatches, "\n".join(map(str, default_mismatches))
 
 
 def _assert_migration_indexes(sql: str) -> None:
     migration_indexes = {
         (table, name, _column_names(columns), bool(unique), _normalize_predicate(predicate))
         for unique, name, table, columns, predicate in re.findall(
-            r"CREATE (UNIQUE )?INDEX (?:CONCURRENTLY )?(\w+) ON (\w+) \(([^)]+)\)(?: WHERE (.*?))?;",
+            r"CREATE (UNIQUE )?INDEX (?:CONCURRENTLY )?(\w+) ON (\w+) \(((?:[^()]|\([^()]*\))+)\)(?: WHERE (.*?))?;",
             sql,
             re.I,
         )
@@ -172,7 +172,14 @@ def _assert_migration_indexes(sql: str) -> None:
         (
             table.name,
             index.name,
-            tuple(column.name for column in index.columns),
+            tuple(
+                str(
+                    expression.compile(
+                        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+                    )
+                ).replace(f"{table.name}.", "")
+                for expression in index.expressions
+            ),
             index.unique,
             _normalize_predicate(
                 str(
@@ -187,7 +194,10 @@ def _assert_migration_indexes(sql: str) -> None:
         for table in Base.metadata.tables.values()
         for index in table.indexes
     }
-    assert migration_indexes == model_indexes
+    assert migration_indexes == model_indexes, (
+        "only in migrations: " + str(sorted(migration_indexes - model_indexes, key=str)),
+        "only in models: " + str(sorted(model_indexes - migration_indexes, key=str)),
+    )
 
 
 def _assert_migration_constraints(
@@ -221,7 +231,8 @@ def _assert_migration_constraints(
     migration_unique.update(
         (table, _column_names(columns))
         for unique, _name, table, columns in re.findall(
-            r"CREATE (UNIQUE )?INDEX (?:CONCURRENTLY )?(\w+) ON (\w+) \(([^)]+)\)", sql
+            r"CREATE (UNIQUE )?INDEX (?:CONCURRENTLY )?(\w+) ON (\w+) \(((?:[^()]|\([^()]*\))+)\)",
+            sql,
         )
         if unique
     )
@@ -238,7 +249,17 @@ def _assert_migration_constraints(
         if isinstance(constraint, UniqueConstraint)
     )
     model_unique.update(
-        (table.name, tuple(column.name for column in index.columns))
+        (
+            table.name,
+            tuple(
+                str(
+                    expression.compile(
+                        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+                    )
+                ).replace(f"{table.name}.", "")
+                for expression in index.expressions
+            ),
+        )
         for table in Base.metadata.tables.values()
         for index in table.indexes
         if index.unique

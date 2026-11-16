@@ -15,6 +15,12 @@ from sqlalchemy.ext.asyncio import create_async_engine
 target_metadata = Base.metadata
 logger = logging.getLogger("alembic.runtime.migration")
 MIGRATION_LOCK_KEYS = (1313164626, 1296387405)
+# PostgreSQL-only indexes that models cannot declare (SQLite cannot create them), kept out of drift checks.
+POSTGRES_ONLY_INDEXES = {"ix_audit_case_created_transaction_ids"}
+
+
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
+    return not (type_ == "index" and name in POSTGRES_ONLY_INDEXES)
 
 
 def run_migrations_offline() -> None:
@@ -24,7 +30,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run(connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        include_object=include_object,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

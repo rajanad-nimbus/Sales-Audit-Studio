@@ -205,7 +205,7 @@ def test_retotal_no_longer_creates_a_missing_store_day():
     run(go())
 
 
-def test_store_day_cannot_close_without_current_totals():
+def test_store_day_cannot_close_without_current_totals(monkeypatch):
     async def go():
         Session = await session()
         async with Session() as db:
@@ -229,7 +229,17 @@ def test_store_day_cannot_close_without_current_totals():
             with pytest.raises(HTTPException) as error:
                 await sd.close_store_day("S1", "2026-10-01", db, user)
             assert error.value.status_code == 422
-            assert "pending closure request" in error.value.detail
+            assert "sign-off" in error.value.detail  # current totals, but no auditor sign-off yet
+            real_readiness = closures.readiness
+
+            async def signed_off_readiness(session, days):
+                views = await real_readiness(session, days)
+                for view in views.values():
+                    view["audit"]["signed_off"] = True
+                return views
+
+            # The sign-off gate is proven above; the steps below exercise the closure-request rules.
+            monkeypatch.setattr(closures, "readiness", signed_off_readiness)
             await sd.request_store_day_closure(
                 "S1",
                 "2026-10-01",
@@ -355,7 +365,7 @@ def test_store_day_detail_bounds_history_but_counts_all_open_cases():
                     case_count_queries.append(statement)
 
             result = await sd.get_store_day(
-                "S1", day.business_date, None, db, {"user": "finance", "role": "finance"}
+                "S1", day.business_date, db=db, user={"user": "finance", "role": "finance"}
             )
 
             assert len(case_count_queries) == 1
@@ -483,9 +493,11 @@ def test_pos_control_variance_blocks_closure_and_is_displayed():
             await db.commit()
             user = {"user": "finance", "role": "finance"}
             await sd.retotal_store_day("S1", "2026-10-01", db, user)
-            await sd.request_store_day_closure(
-                "S1", "2026-10-01", sd.ClosureRequestBody(evidence_basis="reviewed"), db, user
-            )
+            with pytest.raises(HTTPException) as refused:
+                await sd.request_store_day_closure(
+                    "S1", "2026-10-01", sd.ClosureRequestBody(evidence_basis="reviewed"), db, user
+                )
+            assert "sign-off" in refused.value.detail  # no sign-off while the variance stands
             detail = await sd.get_store_day("S1", "2026-10-01", db=db, user=user)
             assert "unresolved reconciliation variance" in detail["close_blockers"]
             with pytest.raises(HTTPException) as error:

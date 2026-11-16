@@ -49,8 +49,13 @@ def test_store_scoped_reconciliation_only_changes_assigned_store_data():
 
                 result = await run_reconciliation(
                     day,
-                    db,
-                    {"user": "finance", "role": "finance", "store_scoped": True, "stores": ["S1"]},
+                    db=db,
+                    user={
+                        "user": "finance",
+                        "role": "finance",
+                        "store_scoped": True,
+                        "stores": ["S1"],
+                    },
                 )
 
                 assert result["transactions_examined"] == 1

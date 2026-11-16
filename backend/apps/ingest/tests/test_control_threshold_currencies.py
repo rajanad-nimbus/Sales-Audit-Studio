@@ -2,7 +2,7 @@ import asyncio
 from decimal import Decimal
 
 import pytest
-from apps.controls.rules.routes import RuleBody, create_rule
+from apps.controls.rules.routes import RuleBody, approve_rule, create_rule, submit_rule
 from apps.ingest import reconciliation, routes, service
 from apps.store_days.routes import retotal_store_day
 from fastapi import HTTPException
@@ -71,6 +71,10 @@ def test_rules_apply_to_configured_currency_and_count_rules_are_dimensionless():
                         db,
                         user,
                     )
+                # Rules begin as worksheets; a different user must approve them before they evaluate.
+                for rule in (await db.execute(select(ConfiguredAuditRule))).scalars().all():
+                    await submit_rule(rule.id, db, user)
+                    await approve_rule(rule.id, db, {"user": "approver"})
                 await service.ingest(
                     db,
                     "POS",
@@ -130,7 +134,9 @@ def test_tolerance_applies_only_to_its_configured_currency():
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 user = {"user": "finance"}
                 policy = routes.ReconciliationPolicyRequest(
-                    amount_tolerance=Decimal("1"), amount_tolerance_currency="USD"
+                    amount_tolerance=Decimal("1"),
+                    amount_tolerance_currency="USD",
+                    reason="Currency specific tolerance test",
                 )
                 await routes.update_reconciliation_policy(policy, db, user)
                 assert (await routes.get_reconciliation_policy(db, user))[

@@ -31,7 +31,9 @@ class Voucher(Base):
     expires_on: Mapped[str | None] = mapped_column(String(10), index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
-    tender_type: Mapped[str] = mapped_column(String(100), default="Voucher", index=True)
+    tender_type: Mapped[str] = mapped_column(
+        String(100), default="Voucher", server_default="Voucher", index=True
+    )
     status: Mapped[str] = mapped_column(String(16), default="Issued", index=True)
     issued_by: Mapped[str] = mapped_column(String(255))
     redeemed_store_id: Mapped[str | None] = mapped_column(String(50))
@@ -62,7 +64,7 @@ class VoucherOption(Base):
     purge_days: Mapped[int | None] = mapped_column(Integer)
     updated_by: Mapped[str] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        DateTime(timezone=True), default=utcnow, server_default=func.now(), onupdate=utcnow
     )
 
     __table_args__ = (
@@ -83,14 +85,14 @@ class VoucherRoutingPolicy(Base):
 
     __tablename__ = "voucher_routing_policy"
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     hq_location: Mapped[dict | None] = mapped_column(JSON)
     income_partner: Mapped[str | None] = mapped_column(String(100))
     rules: Mapped[list] = mapped_column(JSON, default=list)
     revision: Mapped[str] = mapped_column(String(36))
     updated_by: Mapped[str] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        DateTime(timezone=True), default=utcnow, server_default=func.now(), onupdate=utcnow
     )
 
     __table_args__ = (CheckConstraint("id = 'default'", name="ck_voucher_routing_singleton"),)

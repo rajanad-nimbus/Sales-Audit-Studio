@@ -219,12 +219,12 @@ class RegisterEventAdjustment(Base):
     __tablename__ = "register_event_adjustments"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    event_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("register_events.id"), index=True
-    )
+    event_id: Mapped[str] = mapped_column(String(36), ForeignKey("register_events.id"), index=True)
     proposed_values: Mapped[dict] = mapped_column(JSON)
     rationale: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(24), default="Proposed", index=True)
+    status: Mapped[str] = mapped_column(
+        String(24), default="Proposed", server_default="Proposed", index=True
+    )
     proposed_by: Mapped[str] = mapped_column(String(255))
     reviewed_by: Mapped[str | None] = mapped_column(String(255))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

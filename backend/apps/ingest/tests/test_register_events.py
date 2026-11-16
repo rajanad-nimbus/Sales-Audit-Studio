@@ -114,8 +114,9 @@ def test_events_are_stored_with_their_amounts_and_never_twice():
         "received": 3,
         "created": 3,
         "duplicates_skipped": 0,
+        "quarantined": 0,
     }  # the sale is not a register event
-    assert second == {"received": 3, "created": 0, "duplicates_skipped": 3}
+    assert second == {"received": 3, "created": 0, "duplicates_skipped": 3, "quarantined": 0}
     assert rows == [
         ("paid_out", Decimal("25.00")),
         ("total", Decimal("1234.50")),

@@ -45,10 +45,13 @@ def test_missing_transaction_scope_on_postgres():
                 await db.commit()
                 user = {"store_scoped": True, "stores": ["S1"]}
                 assert [
-                    row["id"] for row in (await list_adjustments(None, None, db, user))["items"]
+                    row["id"]
+                    for row in (await list_adjustments(None, None, None, db, user))["items"]
                 ] == ["S1"]
                 assert (
-                    await list_adjustments(None, None, db, {"store_scoped": True, "stores": []})
+                    await list_adjustments(
+                        None, None, None, db, {"store_scoped": True, "stores": []}
+                    )
                 )["items"] == []
         finally:
             if engine:

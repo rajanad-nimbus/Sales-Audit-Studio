@@ -32,4 +32,4 @@ def test_total_definition_rejects_fields_outside_storage_contract(payload):
 
 def test_total_definition_rejects_oversized_nested_metadata():
     with pytest.raises(ValidationError, match="256 KiB"):
-        TotalDefinitionBody(name="Total", parameters=[{"value": "x" * (256 * 1024)}])
+        TotalDefinitionBody(name="Total", realms=[{"value": "x" * (256 * 1024)}])

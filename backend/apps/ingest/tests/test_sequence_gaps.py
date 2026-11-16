@@ -76,8 +76,10 @@ def test_register_events_fill_the_sequence_and_each_register_is_separate():
         await db.commit()
 
         assert await find_gaps(db, DAY) == {("S1", DAY): {"R1": [4]}}
-        detail = await store_day_sequence_gaps("S1", DAY, db, USER)
-        assert detail["registers"] == [{"register_id": "R1", "missing": [4], "count": 1}]
+        detail = await store_day_sequence_gaps("S1", DAY, db=db, user=USER)
+        assert detail["registers"] == [
+            {"register_id": "R1", "missing": [4], "count": 1, "dismissed": []}
+        ]
 
     run_with_db(scenario)
 

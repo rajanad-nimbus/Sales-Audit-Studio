@@ -129,7 +129,7 @@ async def reconcile(
     await run_shopify_day_controls(db, business_date, add, policy, store_ids=store_ids)
     await run_settlement_controls(db, txns, add, amount_tolerance, tolerance_currency)
 
-    counts, cases = create_reconciliation_cases(db, findings)
+    counts, cases = await create_reconciliation_cases(db, findings)
     return {
         "transactions_examined": len(txns),
         "matched_pairs": matched,
@@ -389,7 +389,7 @@ def match_pos_transaction(
     return 1
 
 
-def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
+async def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
     """Group findings and persist their cases, exceptions, and audit events."""
     groups = defaultdict(list)
     for finding in findings:
@@ -447,6 +447,8 @@ def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
                 close_impact="Yes" if amount else "No",
             )
         )
+        # The audit event references the case, and the models have no relationship to order the inserts.
+        await db.flush()
         audit(
             db,
             "CASE_CREATED",

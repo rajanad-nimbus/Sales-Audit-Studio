@@ -59,8 +59,10 @@ async def prepare_rule_evaluation(
 
     definitions_by_total = {f"Configured: {item.name}": item for item in definitions}
     for total_name, definition in definitions_by_total.items():
+        # Every configured total is known, so a rule aimed at the wrong level is reported even on a day with no data.
+        levels = totals_by_name.setdefault(total_name, {})
         if definition.level == "Store":
-            totals_by_name.setdefault(total_name, {}).setdefault(("Store", None), Decimal("0"))
+            levels.setdefault(("Store", None), Decimal("0"))
     applicable_totals = set(totals_by_name)
     if not applicable_totals:
         return RuleEvaluation(rules=[], observations={}, errors={})
@@ -131,6 +133,13 @@ async def prepare_rule_evaluation(
                 continue
         observations[rule.id] = level_observations
     return RuleEvaluation(rules=rules, observations=observations, errors=errors)
+
+
+def raise_first_rule_error(evaluation: RuleEvaluation) -> None:
+    """Refuse a re-total before it changes anything when an active rule cannot be evaluated."""
+    for rule in evaluation.rules:
+        if error := evaluation.errors.get(rule.id):
+            raise error
 
 
 async def evaluate_configured_rules(

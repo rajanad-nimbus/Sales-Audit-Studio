@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from apps.controls.foundation.routes import ReferenceBody, update_reference
-from apps.controls.rules.routes import RuleBody, create_rule
+from apps.controls.rules.routes import RuleBody, approve_rule, create_rule, submit_rule
 from apps.totals.routes import (
     activate_definition,
     create_definition,
@@ -123,11 +123,15 @@ def test_rule_invalidation_rolls_back_on_duplicate_and_trait_updates_are_store_s
                 db.expire_all()
                 assert (await db.get(StoreDay, "a")).totals_stale
                 assert not (await db.get(StoreDay, "b")).totals_stale
-                await create_rule(
+                drafted = await create_rule(
                     RuleBody(name="New rule", total_name="POS Net", threshold=Decimal("1")),
                     db,
                     {"user": "finance"},
                 )
+                db.expire_all()
+                assert not (await db.get(StoreDay, "b")).totals_stale  # a worksheet changes nothing
+                await submit_rule(drafted["id"], db, {"user": "finance"})
+                await approve_rule(drafted["id"], db, {"user": "approver"})
                 db.expire_all()
                 assert (await db.get(StoreDay, "b")).totals_stale
         finally:

@@ -110,7 +110,7 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
                 assert (await transactions_routes.transaction_detail(first.id, db, user))[
                     "linked_transactions"
                 ] == []
-                adjustment_page = await routes.list_adjustments(None, None, db, user)
+                adjustment_page = await routes.list_adjustments(None, None, None, db, user)
                 assert [row["id"] for row in adjustment_page["items"]] == ["a"]
                 for operation in (
                     routes.get_transaction(second.id, db, user),
@@ -149,7 +149,7 @@ def test_correction_endpoints_enforce_store_scope_before_limits_and_writes():
                 assert (await db.get(TransactionAdjustment, "b")).status == "Proposed"
                 assert (await db.get(TransactionAdjustment, "c")).status == "Proposed"
                 empty = {"user": "empty", "store_scoped": True, "stores": []}
-                assert (await routes.list_adjustments(None, None, db, empty))["items"] == []
+                assert (await routes.list_adjustments(None, None, None, db, empty))["items"] == []
         finally:
             await engine.dispose()
 

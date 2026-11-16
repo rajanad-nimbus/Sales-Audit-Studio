@@ -232,12 +232,6 @@ async def close_store_day(
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Store day is already closed")
-    current_readiness = (await readiness(db, [day]))[day.id]
-    if not current_readiness["audit"]["signed_off"]:
-        raise HTTPException(
-            status_code=422,
-            detail="Cannot close: auditor sign-off is required for current totals",
-        )
     totals = (
         (
             await db.execute(
@@ -286,6 +280,13 @@ async def close_store_day(
                 "Cannot close: a reconciliation variance is outside tolerance and has no "
                 "explanation; give a reason, or link the case or correction behind it"
             ),
+        )
+    # Sign-off is only meaningful once totals are current and nothing else blocks closure.
+    current_readiness = (await readiness(db, [day]))[day.id]
+    if not current_readiness["audit"]["signed_off"]:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot close: auditor sign-off is required for current totals",
         )
     request = (
         (

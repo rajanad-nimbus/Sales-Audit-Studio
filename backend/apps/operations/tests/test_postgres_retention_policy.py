@@ -246,7 +246,8 @@ def test_concurrent_first_policy_creation_returns_a_retryable_conflict(monkeypat
                         await db.execute(
                             select(AuditEvent)
                             .where(AuditEvent.object_type == "RetentionPolicy")
-                            .order_by(AuditEvent.seq)
+                            # seq comes from a migration trigger this create_all schema lacks
+                            .order_by(AuditEvent.created_at)
                         )
                     )
                     .scalars()

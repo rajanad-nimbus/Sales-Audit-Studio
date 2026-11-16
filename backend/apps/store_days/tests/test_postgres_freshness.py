@@ -8,6 +8,7 @@ import pytest
 from apps.controls.rules.routes import RuleBody, create_rule
 from apps.ingest.reconciliation import lock_reconciliation
 from apps.ingest.service import ingest
+from apps.store_days import closures
 from apps.store_days.freshness import lock_configuration, lock_store_day
 from apps.store_days.routes import close_store_day, open_store_day_record, retotal_store_day
 from apps.totals.routes import (
@@ -178,7 +179,7 @@ def test_ingestion_and_retotal_serialize_in_both_orders():
     asyncio.run(run())
 
 
-def test_store_day_close_waits_for_reconciliation_lock():
+def test_store_day_close_waits_for_reconciliation_lock(monkeypatch):
     async def run():
         schema = "zetsa_test_" + uuid.uuid4().hex
         admin = create_async_engine(POSTGRES_URL)
@@ -203,6 +204,7 @@ def test_store_day_close_waits_for_reconciliation_lock():
                         totals_stale=False,
                     )
                 )
+                await db.flush()  # PostgreSQL enforces the foreign keys the children point at
                 db.add_all(
                     [
                         AuditTotal(
@@ -238,6 +240,17 @@ def test_store_day_close_waits_for_reconciliation_lock():
                 )
                 await db.commit()
 
+            real_readiness = closures.readiness
+
+            async def signed_off_readiness(session, days):
+                views = await real_readiness(session, days)
+                for view in views.values():
+                    view["audit"]["signed_off"] = (
+                        True  # sign-off has its own tests; this one is the lock
+                    )
+                return views
+
+            monkeypatch.setattr(closures, "readiness", signed_off_readiness)
             async with sessions() as reconciliation_owner, sessions() as closer:
                 await lock_reconciliation(reconciliation_owner)
                 task = asyncio.create_task(

@@ -135,6 +135,15 @@ async def request_closure(db):
     await db.commit()
 
 
+async def sign_off(db):
+    """The auditor signs the current totals, as the sign-off route records it."""
+    day = await db.get(StoreDay, "day")
+    day.audit_signed_version = day.audit_version
+    day.audit_signed_by = "auditor"
+    day.audit_signed_at = datetime.now(UTC)
+    await db.commit()
+
+
 def test_a_variance_needing_a_reason_blocks_closure_until_it_is_explained():
     async def scenario(db):
         await totaled_day(db)
@@ -143,9 +152,13 @@ def test_a_variance_needing_a_reason_blocks_closure_until_it_is_explained():
             db,
             FINANCE,
         )
-        await request_closure(db)
+        await ingest(db, "POS", "d1", [sale("a")])  # complete data: a processed control total
+        db.add(manifest("Processed"))
+        (await db.get(StoreDay, "day")).totals_stale = False
+        await db.commit()
+        await request_closure(db)  # after the delivery, which would have superseded it
 
-        detail = await get_store_day("S1", DATE, None, db, FINANCE)
+        detail = await get_store_day("S1", DATE, db=db, user=FINANCE)
         row = next(t for t in detail["totals"] if t["name"] == "POS to GL Variance")
         assert row["outcome"] == "Needs reason" and not row["resolved"]
         assert "unresolved reconciliation variance" in detail["close_blockers"]
@@ -158,10 +171,14 @@ def test_a_variance_needing_a_reason_blocks_closure_until_it_is_explained():
         await explain(
             "S1", DATE, ExplanationBody(total_id=row["id"], reason="Rounding at GL"), db, FINANCE
         )
+        with pytest.raises(HTTPException) as unsigned:
+            await close_store_day("S1", DATE, db, FINANCE)
+        assert "sign-off" in unsigned.value.detail  # explained, but the auditor has not signed
+        await sign_off(db)
         closed = await close_store_day("S1", DATE, db, FINANCE)
         assert closed["status"] == "Closed"
 
-        detail = await get_store_day("S1", DATE, None, db, FINANCE)
+        detail = await get_store_day("S1", DATE, db=db, user=FINANCE)
         row = next(t for t in detail["totals"] if t["name"] == "POS to GL Variance")
         assert row["resolved"] and row["explanation"]["reason"] == "Rounding at GL"
 
@@ -251,7 +268,7 @@ def test_reopen_is_refused_in_a_closed_period_and_recorded_when_allowed():
         await db.commit()
 
         period = await close_period(PeriodCloseBody(period_end=DATE), db, FINANCE)
-        detail = await get_store_day("S1", DATE, None, db, FINANCE)
+        detail = await get_store_day("S1", DATE, db=db, user=FINANCE)
         assert detail["period_closed_through"] == DATE
         assert "closed through" in detail["reopen_blocked_by"][0]
         with pytest.raises(HTTPException) as refused:
@@ -262,7 +279,7 @@ def test_reopen_is_refused_in_a_closed_period_and_recorded_when_allowed():
 
         await reopen_period(period["id"], PeriodReopenBody(rationale="Audit fix"), db, FINANCE)
         await reopen_store_day("S1", DATE, ReopenRequest(rationale="Late deposit"), db, FINANCE)
-        detail = await get_store_day("S1", DATE, None, db, FINANCE)
+        detail = await get_store_day("S1", DATE, db=db, user=FINANCE)
         [reopen] = detail["reopens"]
         assert reopen["reason"] == "Late deposit" and reopen["closed_by"] == "closer"
         assert reopen["reopened_by"] == "finance.user"
@@ -370,9 +387,12 @@ def test_readiness_derives_data_audit_and_export_views():
         [view] = await list_store_days(None, 100, db, FINANCE)
         assert view["readiness"]["ingest"]["state"] == "Complete"
         assert view["readiness"]["export"]["state"] == "Exported"
+        assert not view["readiness"]["ready_to_close"]  # complete and clean, but not yet signed off
+        await sign_off(db)
+        [view] = await list_store_days(None, 100, db, FINANCE)
         assert view["readiness"]["ready_to_close"]
 
-        detail = await get_store_day("S1", DATE, None, db, FINANCE)
+        detail = await get_store_day("S1", DATE, db=db, user=FINANCE)
         assert detail["data_quality"]["state"] == "Final"
         assert {t["data_quality"] for t in detail["totals"]} == {"Final"}
 
@@ -396,7 +416,7 @@ def test_readiness_derives_data_audit_and_export_views():
             )
         )
         await db.commit()
-        detail = await get_store_day("S1", DATE, None, db, FINANCE)
+        detail = await get_store_day("S1", DATE, db=db, user=FINANCE)
         assert detail["readiness"]["ingest"]["state"] == "Incomplete"
         assert detail["readiness"]["audit"]["state"] == "Needs attention"
         assert detail["data_quality"]["state"] == "Partial"
@@ -416,7 +436,10 @@ def test_attention_lists_late_stores_and_stuck_store_days():
         assert next(r for r in result["late_stores"] if r["store_id"] == "S1")["store_day_open"]
         [stuck] = result["stuck_store_days"]
         assert stuck["store_id"] == "S1" and stuck["days_open"] == 10
-        assert stuck["holding_back"] == ["Data: No data"]
+        assert stuck["holding_back"] == [
+            "Data: No data",
+            "Audit: Auditor sign-off required for the current totals",
+        ]
 
     run_with_db(scenario)
 

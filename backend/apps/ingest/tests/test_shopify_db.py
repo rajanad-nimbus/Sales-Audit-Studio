@@ -98,6 +98,9 @@ def test_manual_sync_accepts_exactly_ninety_days():
 
 def test_manual_sync_fetches_and_stamps_configured_store(monkeypatch):
     class FakeDb:
+        async def scalar(self, *_args, **_kwargs):
+            return None
+
         def add(self, _row):
             pass
 

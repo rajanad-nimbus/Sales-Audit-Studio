@@ -4,7 +4,10 @@ from datetime import datetime
 
 from model_base import Base, utcnow
 from sqlalchemy import JSON, Boolean, DateTime, Index, Integer, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
+
+JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")  # matches migration 0105
 
 
 class ConfiguredTransactionAuditRule(Base):
@@ -16,14 +19,14 @@ class ConfiguredTransactionAuditRule(Base):
     name: Mapped[str] = mapped_column(String(150))
     error_code: Mapped[str] = mapped_column(String(64))
     record_type: Mapped[str | None] = mapped_column(String(50))
-    conditions: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    conditions: Mapped[list] = mapped_column(JSON_DOCUMENT, default=list, server_default="[]")
     match_mode: Mapped[str] = mapped_column(String(24), default="Match", server_default="Match")
     evaluation_scope: Mapped[str] = mapped_column(
         String(24), default="Transaction", server_default="Transaction"
     )
     start_date: Mapped[str | None] = mapped_column(String(10))
     end_date: Mapped[str | None] = mapped_column(String(10))
-    location_traits: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    location_traits: Mapped[list] = mapped_column(JSON_DOCUMENT, default=list, server_default="[]")
     execution_order: Mapped[int] = mapped_column(Integer, default=100, server_default="100")
     stop_processing: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     status: Mapped[str] = mapped_column(String(24), default="Worksheet", server_default="Worksheet")

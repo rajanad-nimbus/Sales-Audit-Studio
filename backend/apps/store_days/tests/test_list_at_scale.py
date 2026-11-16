@@ -107,6 +107,7 @@ def test_the_summary_gives_exact_counts_for_the_same_filters():
             "total": 300,
             "by_status": {"Closed": 120, "Auditing": 180},
             "totals_stale": 30,  # stores 0, 10 and 20, ten days each
+            "unsigned_audit_versions": 0,  # none has current totals awaiting an auditor
         }
         narrowed = await store_day_summary(None, "2026-10-09", None, "S00", db, FINANCE)
         assert narrowed["total"] == 20 and narrowed["by_status"] == {"Auditing": 20}

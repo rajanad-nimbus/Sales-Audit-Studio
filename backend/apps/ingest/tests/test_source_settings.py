@@ -14,6 +14,7 @@ def row(**kw):
             "enabled": True,
             "in_daily_batch": True,
             "manual_sync": True,
+            "require_day_close": False,
             "sync_frequency": None,
             "sync_time": None,
             "sync_weekday": None,

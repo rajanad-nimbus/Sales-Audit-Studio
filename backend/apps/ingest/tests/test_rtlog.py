@@ -156,7 +156,15 @@ def test_the_standard_sale_maps_to_a_pos_ingest_record():
         "001",
     )
     assert record["lines"][0]["gross_amount"] == "20" and record["lines"][0]["tax_amount"] == "1.05"
-    assert record["tenders"] == [{"tender_type": "Cash", "amount": "21.05", "reference": None}]
+    assert record["tenders"] == [
+        {
+            "tender_type": "Cash",
+            "amount": "21.05",
+            "reference": None,
+            "authorization": None,
+            "source_attributes": {"tender_group": "CASH", "tender_type_id": "1000"},
+        }
+    ]
 
 
 def test_change_comes_off_the_tender_that_was_overpaid():

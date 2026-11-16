@@ -113,7 +113,7 @@ def test_variance_report_lists_only_variances_with_their_tolerance_outcome():
     async def scenario(db):
         await base(db)
         report = await run("variances", None, None, "json", db, FINANCE)
-        assert [(r[0], r[2], r[7], r[9]) for r in report["rows"]] == [
+        assert [(r[0], r[2], r[8], r[10]) for r in report["rows"]] == [
             ("S2", "POS to GL Variance", Decimal("8"), "Needs reason"),
             ("S1", "POS to GL Variance", Decimal("3"), "Within tolerance"),
         ]
@@ -320,11 +320,11 @@ def test_tax_corrections_report_lists_only_approved_corrections_one_per_row():
     async def scenario(db):
         await add_tax(db)
         report = await run("tax-corrections", None, None, "json", db, FINANCE)
-        by_reason = {r[8]: r for r in report["rows"]}
+        by_reason = {r[9]: r for r in report["rows"]}
         assert set(by_reason) == {"adj reason", "bad reason"}  # the rejected one is not listed
-        assert by_reason["adj reason"][4] == Decimal("1.25")
-        assert by_reason["adj reason"][6] == "approver"
-        assert by_reason["bad reason"][4] == "Invalid"
+        assert by_reason["adj reason"][5] == "Tax amount adjustment +1.25"
+        assert by_reason["adj reason"][7] == "approver"
+        assert by_reason["bad reason"][5] == "Invalid tax adjustment"
         scoped = {"user": "m", "role": "analyst", "store_scoped": True, "stores": ["S2"]}
         assert (await run("tax-corrections", None, None, "json", db, scoped))["rows"] == []
         earlier = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()

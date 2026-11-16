@@ -180,14 +180,23 @@ def test_paid_out_without_reason_codes_warns_that_everything_would_be_flagged():
     assert "reason codes." in rules(file_of(with_reason))["PAIDOUT_REASON_REQ"][1]
 
 
+class NoSettingsDb:
+    """No saved system options, so the backdated-transaction limit is unlimited."""
+
+    async def scalar(self, *_args, **_kwargs):
+        return None
+
+
 def test_the_profile_endpoint_describes_a_file_and_refuses_a_bad_one():
     ok = PosLogRequest(format="rtlog", delivery_id="p1", content=file_of(SALE))
-    result = asyncio.run(profile_pos_log(ok, {"role": "analyst"}))
+    result = asyncio.run(profile_pos_log(ok, NoSettingsDb(), {"role": "analyst"}))
     assert result["layout"] == "v14" and result["transactions"] == 1
     with pytest.raises(HTTPException) as caught:
         asyncio.run(
             profile_pos_log(
-                PosLogRequest(format="rtlog", delivery_id="p2", content="nope"), {"role": "analyst"}
+                PosLogRequest(format="rtlog", delivery_id="p2", content="nope"),
+                NoSettingsDb(),
+                {"role": "analyst"},
             )
         )
     assert caught.value.status_code == 422

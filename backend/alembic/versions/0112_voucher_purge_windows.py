@@ -13,18 +13,12 @@ def upgrade():
     op.create_index(
         "ix_vouchers_tender_age", "vouchers", [sa.text("lower(tender_type)"), "issued_on", "id"]
     )
-    op.add_column(
-        "voucher_options",
-        sa.Column(
-            "purge_days",
-            sa.Integer(),
-            sa.CheckConstraint(
-                "purge_days IS NULL OR purge_days BETWEEN 0 AND 36500",
-                name="ck_voucher_options_purge_days",
-            ),
-            nullable=True,
-        ),
-    )
+    with op.batch_alter_table("voucher_options") as batch:
+        batch.add_column(sa.Column("purge_days", sa.Integer(), nullable=True))
+        batch.create_check_constraint(
+            "ck_voucher_options_purge_days",
+            "purge_days IS NULL OR purge_days BETWEEN 0 AND 36500",
+        )
     op.create_table(
         "voucher_identities",
         sa.Column("voucher_number", sa.String(100), primary_key=True),
@@ -67,4 +61,6 @@ def upgrade():
 def downgrade():
     op.drop_index("ix_vouchers_tender_age", table_name="vouchers")
     op.drop_table("voucher_identities")
-    op.drop_column("voucher_options", "purge_days")
+    with op.batch_alter_table("voucher_options") as batch:
+        batch.drop_constraint("ck_voucher_options_purge_days", type_="check")
+        batch.drop_column("purge_days")

@@ -18,7 +18,7 @@ from apps.controls.rules.models import ConfiguredAuditRule
 from apps.database_errors import violates_unique_constraint
 from apps.security import scope
 from apps.security.authentication import require_role
-from apps.store_days.freshness import invalidate_configuration
+from apps.store_days.freshness import invalidate_configuration, lock_configuration
 from apps.store_days.models import AuditTotal, StoreDay
 from apps.totals.calculation import store_location_traits
 from apps.totals.currency import validate_currency
@@ -314,6 +314,9 @@ async def create_rule(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "admin")),
 ):
+    await lock_configuration(
+        db
+    )  # definitions change under the exclusive lock; validate against a settled one
     threshold = await validate_rule_body(body, db)
     row = ConfiguredAuditRule(
         id=str(uuid.uuid4()),
@@ -382,7 +385,10 @@ async def validate_rule_body(body: RuleBody, db: AsyncSession) -> Decimal:
                 status_code=422,
                 detail=f"Configured total is evaluated at {configured.level} level",
             )
-    elif body.total_name not in {total["name"] for total in (*STANDARD_TOTALS, *TAX_TOTALS)}:
+    elif body.total_name not in {
+        "POS Net",  # the engine's net POS total, which also balances per register
+        *(total["name"] for total in (*STANDARD_TOTALS, *TAX_TOTALS)),
+    }:
         raise HTTPException(status_code=422, detail="Choose a supported Sales Audit total")
     elif body.balance_level != "Store" and not (
         body.total_name == "POS Net" and body.balance_level == "Register"
@@ -433,6 +439,7 @@ async def update_rule(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "admin")),
 ):
+    await lock_configuration(db)
     row = (
         await db.execute(
             select(ConfiguredAuditRule).where(ConfiguredAuditRule.id == rule_id).with_for_update()
@@ -545,6 +552,26 @@ async def approve_rule(
     actor = user["user"] or "ontology.user"
     if row.submitted_by == actor:
         raise HTTPException(status_code=409, detail="A different user must approve this rule")
+    # The totals it targets may have changed since it was drafted; an invalid rule must not go live.
+    await lock_configuration(db, exclusive=True)
+    await validate_rule_body(
+        RuleBody(
+            name=row.name,
+            total_name=row.total_name,
+            start_date=row.start_date,
+            end_date=row.end_date,
+            location_traits=row.location_traits or [],
+            execution_order=row.execution_order,
+            stop_processing=row.stop_processing,
+            balance_level=row.balance_level or "Store",
+            comparison=row.comparison,
+            threshold=row.threshold,
+            threshold_currency=row.threshold_currency,
+            severity=row.severity,
+            owner=row.owner,
+        ),
+        db,
+    )
     row.status, row.enabled = "Active", True
     row.approved_by, row.approved_at = actor, utcnow()
     row.updated_by = actor

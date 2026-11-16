@@ -301,7 +301,9 @@ def test_retotal_calculates_combined_totals_per_register():
                     "net", "S1", "2026-10-01", db, {"user": "finance"}
                 )
                 assert preview["value"] == Decimal("17")
-                assert preview["dimensions"] == [{"dimension": "R1", "value": Decimal("17")}]
+                assert preview["dimensions"] == [
+                    {"dimension": "R1", "rollup_key": None, "value": Decimal("17")}
+                ]
                 assert preview["record_count"] is None
                 await routes.retotal_store_day("S1", "2026-10-01", db, {"user": "finance"})
                 total = (
@@ -466,7 +468,7 @@ def test_configured_rules_require_a_store_level_total():
                 )
                 await db.commit()
 
-                with pytest.raises(HTTPException, match="requires a Store-level total") as exc:
+                with pytest.raises(HTTPException, match="is not available at that level") as exc:
                     await routes.retotal_store_day("S1", "2026-10-01", db, {"user": "finance"})
 
                 assert exc.value.status_code == 422
@@ -505,7 +507,7 @@ def test_rule_target_validation_uses_effective_definition_without_transactions()
                 )
                 await db.commit()
 
-                with pytest.raises(HTTPException, match="requires a Store-level total") as exc:
+                with pytest.raises(HTTPException, match="is not available at that level") as exc:
                     await routes.retotal_store_day("S1", "2026-10-01", db, {"user": "finance"})
 
                 assert exc.value.status_code == 422

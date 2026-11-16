@@ -82,8 +82,10 @@ def test_approval_discovers_follow_up_created_after_initial_lookup():
 
                 async def pause_after_lookup(statement, *args, **kwargs):
                     result = await execute(statement, *args, **kwargs)
+                    sql = str(statement)
                     if (
-                        "FROM audit_events JOIN cases" in str(statement)
+                        "FROM audit_events AS" in sql  # the lookup aliases the creation events
+                        and "JOIN cases" in sql
                         and not initial_lookup.is_set()
                     ):
                         initial_lookup.set()

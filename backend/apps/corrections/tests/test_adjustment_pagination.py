@@ -35,24 +35,26 @@ def test_adjustment_queue_is_paged_and_reports_unfiltered_status_counts():
                 )
                 await db.commit()
 
-                first = await list_adjustments(None, None, db, {"role": "finance"}, 1, 2)
+                first = await list_adjustments(None, None, None, db, {"role": "finance"}, 1, 2)
                 assert first["total"] == 5
                 assert first["pages"] == 3
                 assert first["status_counts"] == {"Proposed": 3, "Approved": 2, "Rejected": 0}
                 assert len(first["items"]) == 2
 
-                second = await list_adjustments(None, "Proposed", db, {"role": "finance"}, 2, 2)
+                second = await list_adjustments(
+                    None, None, "Proposed", db, {"role": "finance"}, 2, 2
+                )
                 assert second["total"] == 3
                 assert len(second["items"]) == 1
                 assert second["status_counts"] == first["status_counts"]
 
                 matching = await list_adjustments(
-                    None, None, db, {"role": "finance"}, 1, 50, "item 4"
+                    None, None, None, db, {"role": "finance"}, 1, 50, "item 4"
                 )
                 assert matching["total"] == 1
                 assert matching["items"][0]["id"] == "adjustment-4"
                 effect_match = await list_adjustments(
-                    None, None, db, {"role": "finance"}, 1, 50, "unique-effect"
+                    None, None, None, db, {"role": "finance"}, 1, 50, "unique-effect"
                 )
                 assert effect_match["total"] == 1
                 assert effect_match["items"][0]["id"] == "adjustment-4"
@@ -70,7 +72,7 @@ def test_adjustment_queue_rejects_unknown_status_filter():
                 await connection.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 with pytest.raises(HTTPException) as exc:
-                    await list_adjustments(None, "Unknown", db, {"role": "finance"})
+                    await list_adjustments(None, None, "Unknown", db, {"role": "finance"})
                 assert exc.value.status_code == 422
         finally:
             await engine.dispose()

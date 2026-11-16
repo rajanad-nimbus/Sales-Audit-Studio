@@ -11,6 +11,7 @@ def test_every_role_can_always_reach_its_chrome_and_nothing_extra():
             and access.api_allowed(role, "/api/batch/status")[0]
         )
     assert [s["key"] for s in access.screens_for("viewer") if s["allowed"]] == [
+        "my-preferences",
         "settings",
         "settings-access",
     ]
@@ -24,9 +25,16 @@ def test_every_role_can_always_reach_its_chrome_and_nothing_extra():
     }
     assert all(s["allowed"] for s in access.screens_for("admin"))
     store = {s["key"] for s in access.screens_for("store_manager") if s["allowed"]}
-    assert store == {"store-days", "transactions", "cash-office", "settings", "settings-access"}
+    assert store == {
+        "my-preferences",
+        "store-days",
+        "transactions",
+        "cash-office",
+        "settings",
+        "settings-access",
+    }
     staff = {s["key"] for s in access.screens_for("store_staff") if s["allowed"]}
-    assert staff == {"store-days", "settings", "settings-access"}
+    assert staff == {"my-preferences", "store-days", "settings", "settings-access"}
 
 
 def test_api_is_closed_to_roles_without_the_screen():
@@ -131,13 +139,19 @@ def test_a_screen_never_shows_to_a_role_whose_own_data_calls_would_be_refused():
     Otherwise the screen would open and then fail to load."""
     declared = _endpoint_roles()
     problems = []
+    # Optional panels that are deliberately narrower than their screen: the page hides or tolerates the 403.
+    gated_panels = {
+        "/api/vouchers/transactions/{transaction_id}/context",  # voucher evidence on transaction detail
+        "/api/vouchers/policy-package",  # policy promotion is IT/admin only
+        "/api/system-options/package",
+    }
     for s in access.SCREENS:
         for (method, path), roles in declared.items():
             if method != "GET" or not any(path == p or path.startswith(p + "/") for p in s.apis):
                 continue
             owners = access._owners(path.replace("{", "x").replace("}", "x"))
-            if s not in owners:
-                continue  # a longer prefix belongs to another screen
+            if s not in owners or path in gated_panels:
+                continue  # a longer prefix belongs to another screen, or the panel is role-gated on purpose
             for role in access.ROLES:
                 if access.can_open(role, s) and not role_allowed(role, roles, "GET", path):
                     problems.append(f"{role} may open '{s.label}' but GET {path} requires {roles}")
@@ -158,6 +172,26 @@ def test_checked_pairs_are_not_empty():
 
 
 # ---- the enforcement point itself --------------------------------------------------------------------------------
+def _stub_middleware_db(monkeypatch, middleware):
+    """The middleware records verified store users; give it a throwaway in-memory database."""
+    import asyncio
+
+    from models import Base
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+
+    async def build():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(build())
+    monkeypatch.setattr(
+        middleware, "async_session", async_sessionmaker(engine, expire_on_commit=False)
+    )
+
+
 def _call(monkeypatch, role, path, method="GET"):
     import asyncio
     import json
@@ -167,6 +201,8 @@ def _call(monkeypatch, role, path, method="GET"):
     from starlette.responses import PlainTextResponse
 
     from apps.security import middleware
+
+    _stub_middleware_db(monkeypatch, middleware)
 
     async def fake_user(request, authorization=None):
         if role is None:
@@ -232,6 +268,7 @@ def test_screens_are_grouped_for_the_menu_in_the_agreed_order():
         groups.setdefault(screen.group, []).append(screen.label)
 
     assert list(groups) == [
+        "Your Account",
         "Workspace",
         "Store Day Audit",
         "Investigate & Correct",

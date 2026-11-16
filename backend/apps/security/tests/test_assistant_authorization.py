@@ -43,6 +43,9 @@ def test_assistant_only_accessible_to_roles_allowed_case_context(monkeypatch, ro
     async def narrator(*_args):
         return None
 
+    from apps.security.tests.test_access import _stub_middleware_db  # noqa: PLC0415
+
+    _stub_middleware_db(monkeypatch, middleware)
     monkeypatch.setattr(middleware, "current_user", middleware_identity)
     monkeypatch.setitem(main.app.dependency_overrides, auth.current_user, identity)
     monkeypatch.setattr(chat, "build_context", context)

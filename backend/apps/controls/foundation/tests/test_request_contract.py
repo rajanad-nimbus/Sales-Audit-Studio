@@ -48,4 +48,4 @@ def test_store_reference_normalizes_location_traits():
         attributes={"location_traits": [" North ", "Mall"]},
     )
 
-    assert body.attributes["location_traits"] == ["North", "Mall"]
+    assert body.attributes["location_traits"] == ["Mall", "North"]

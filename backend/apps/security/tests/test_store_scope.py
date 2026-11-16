@@ -173,7 +173,7 @@ def test_store_days_are_filtered_and_other_stores_are_refused():
                 "S3",
             ]  # offered exactly their stores
             with pytest.raises(HTTPException) as e:
-                await sd.get_store_day("S2", "2026-10-01", None, db, mgr(["S1"]))
+                await sd.get_store_day("S2", "2026-10-01", db=db, user=mgr(["S1"]))
             assert e.value.status_code == 403
             for call in (
                 sd.retotal_store_day("S2", "2026-10-01", db, mgr(["S1"])),
@@ -310,11 +310,33 @@ def test_cash_writes_require_an_open_store_day_and_reject_closed_days():
 
 
 # ---- the middleware, before any handler runs ---------------------------------------------------------------------
+def _stub_middleware_db(monkeypatch, middleware):
+    """The middleware records verified store users; give it a throwaway in-memory database."""
+    import asyncio
+
+    from models import Base
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+
+    async def build():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(build())
+    monkeypatch.setattr(
+        middleware, "async_session", async_sessionmaker(engine, expire_on_commit=False)
+    )
+
+
 def _call(monkeypatch, user, path, method="GET"):
     from starlette.requests import Request
     from starlette.responses import PlainTextResponse
 
     from apps.security import middleware
+
+    _stub_middleware_db(monkeypatch, middleware)
 
     async def fake_user(request, authorization=None):
         return user

@@ -242,6 +242,15 @@ def parse_item(f: dict[str, str]) -> dict:
         for name, field in source_attribute_fields.items()
         if f[field].strip()
     }
+    status_code = source_attributes.get("item_status")
+    if status_code:
+        # Transaction detail accepts Sale or Return; any other RTLOG code stays visible under its own name.
+        normalized_status = {"S": "Sale", "R": "Return"}.get(status_code)
+        if normalized_status:
+            source_attributes["item_status"] = normalized_status
+        else:
+            del source_attributes["item_status"]
+            source_attributes["item_status_code"] = status_code
     if f["taxable"] in {"Y", "N"}:
         source_attributes["taxable"] = f["taxable"] == "Y"
     original_unit_retail = (

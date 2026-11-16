@@ -16,13 +16,13 @@ from sqlalchemy import case, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.audit.models import AuditEvent
-from apps.cash.models import ACHAdjustment, CashControl, CashDeposit
 from apps.cases.models import Case, EvidenceRequest
-from apps.csv_export import csv_row
+from apps.cash.models import ACHAdjustment, CashControl, CashDeposit
 from apps.controls.foundation.models import FoundationReference
+from apps.csv_export import csv_row
 from apps.ingest import reconciliation
-from apps.ingest.models import RegisterEvent
 from apps.ingest.manifests import iter_manifests, validate_business_date
+from apps.ingest.models import RegisterEvent
 from apps.ingest.sequence import find_gaps
 from apps.search import contains_literal
 from apps.security import scope
@@ -50,6 +50,7 @@ from apps.store_days.rule_evaluation import (
     add_configured_totals,
     evaluate_configured_rules,
     prepare_rule_evaluation,
+    raise_first_rule_error,
 )
 from apps.store_days.service import (
     OPTIONAL_COMPARISON_TOTALS,
@@ -63,6 +64,7 @@ from apps.totals.calculation import calculate_store_day, effective_definitions
 from apps.totals.currency import single_currency
 from apps.totals.over_short import TOTAL_NAME as OVER_SHORT_TOTAL
 from apps.totals.over_short import calculate as calculate_over_short
+from apps.totals.over_short import missing_accounted_for
 from apps.transactions.models import CanonicalTransaction
 
 router = APIRouter(prefix="/api/store-days", tags=["Store days"])
@@ -590,12 +592,16 @@ async def store_days_needing_attention(
             yield csv_row(columns)
             for offset in range(0, total, STORE_DAY_EXPORT_CHUNK):
                 days = (
-                    await db.execute(
-                        stuck_query.order_by(StoreDay.business_date, StoreDay.store_id)
-                        .offset(offset)
-                        .limit(STORE_DAY_EXPORT_CHUNK)
+                    (
+                        await db.execute(
+                            stuck_query.order_by(StoreDay.business_date, StoreDay.store_id)
+                            .offset(offset)
+                            .limit(STORE_DAY_EXPORT_CHUNK)
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 views = await readiness(db, days)
                 for day in days:
                     view = views[day.id]
@@ -881,7 +887,12 @@ async def store_day_sequence_gaps(
     for register, number, decision in selected:
         group = registers.setdefault(
             register,
-            {"register_id": register, "missing": [], "count": active_counts[register], "dismissed": []},
+            {
+                "register_id": register,
+                "missing": [],
+                "count": active_counts[register],
+                "dismissed": [],
+            },
         )
         if decision is None:
             group["missing"].append(number)
@@ -1240,6 +1251,7 @@ async def retotal_store_day(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    raise_first_rule_error(rule_evaluation)
     day.status, day.audit_version = "Re-totaling", day.audit_version + 1
     day.audit_signed_version = None
     day.audit_signed_by = None
@@ -1389,4 +1401,12 @@ async def retotal_store_day(
         "store_day": store_day_view(day),
         "transactions": calculation.transaction_count,
         "totals_created": len(calculated) + 2 + int(has_manifest) + int(over_short is not None),
+        "warnings": (
+            [
+                "Over/Short has no Accounted For total configured, so it cannot balance. "
+                "Define one (cash counted, tenders or deposits) under Totals, rules & GL mapping."
+            ]
+            if missing_accounted_for(definitions)
+            else []
+        ),
     }

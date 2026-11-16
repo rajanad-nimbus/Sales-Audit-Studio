@@ -28,6 +28,16 @@ class OverShort:
         return self.accountable - self.accounted
 
 
+def missing_accounted_for(definitions: Sequence[AuditTotalDefinition]) -> bool:
+    """True when Over/Short is defined but nothing says what the store can account for.
+
+    The installed totals define only the accountable side (sales). Until Finance configures an
+    Accounted For total (cash counted, tenders, deposits), no store day can show an Over/Short of zero.
+    """
+    members = [row for row in definitions if row.category == "Over/Short"]
+    return bool(members) and not any(row.over_short_group == ACCOUNTED for row in members)
+
+
 def calculate(
     definitions: Sequence[AuditTotalDefinition],
     configured_totals: Mapping[str, Mapping[str | None, Decimal]],
