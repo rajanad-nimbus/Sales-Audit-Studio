@@ -67,7 +67,13 @@ from apps.operations.models import (
     RetentionPolicy,
     RetentionRun,
 )
-from apps.security.models import StoreAssignment, UserPreference, UserSavedViews, VerifiedStoreUser
+from apps.security.models import (
+    StoreAssignment,
+    UserPreference,
+    UserRoleAssignment,
+    UserSavedViews,
+    VerifiedStoreUser,
+)
 from apps.store_days.models import (
     AuditTotal,
     PeriodClose,
@@ -143,6 +149,7 @@ __all__ = [
     "StoreAssignment",
     "UserPreference",
     "UserSavedViews",
+    "UserRoleAssignment",
     "VerifiedStoreUser",
     "Connector",
     "SystemOption",

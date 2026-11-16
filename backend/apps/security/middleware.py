@@ -1,12 +1,13 @@
 """Authentication and row-level authorization middleware for API requests."""
 
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
-import uuid
 
 from database import async_session
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
+from model_base import utcnow
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -15,9 +16,40 @@ from starlette.responses import Response
 from apps.audit.models import AuditEvent
 from apps.controls.foundation.models import StoreLocationTrait
 from apps.security import access, scope
-from apps.security.authentication import current_user
-from apps.security.models import StoreAssignment, VerifiedStoreUser
-from model_base import utcnow
+from apps.security.authentication import ASSIGNABLE_ROLES, STORE_ROLES, current_user
+from apps.security.models import StoreAssignment, UserRoleAssignment, VerifiedStoreUser
+
+
+async def record_verified_identity(db, user: dict, assignment_identifier: str) -> None:
+    """Keep a minimal directory of verified identities, so an administrator can assign their roles and stores."""
+    identifier = str(user.get("user") or "").strip().casefold()
+    if not identifier:
+        return
+    now = utcnow()
+    values = {
+        "assignment_identifier": assignment_identifier,
+        "user_identifier": identifier,
+        "identity_id": str(user["ontology_user_id"]) if user.get("ontology_user_id") else None,
+        "display_name": str(user.get("name") or identifier)[:255],
+        "role": user["role"],
+        "first_seen_at": now,
+        "last_seen_at": now,
+    }
+    refresh_before = now - timedelta(minutes=15)
+    insert = postgres_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
+    statement = insert(VerifiedStoreUser).values(**values)
+    statement = statement.on_conflict_do_update(
+        index_elements=[VerifiedStoreUser.assignment_identifier],
+        set_={
+            "identity_id": statement.excluded.identity_id,
+            "display_name": statement.excluded.display_name,
+            "role": statement.excluded.role,
+            "last_seen_at": statement.excluded.last_seen_at,
+        },
+        where=VerifiedStoreUser.last_seen_at < refresh_before,
+    )
+    await db.execute(statement)
+    await db.commit()
 
 
 async def ontology_authentication(
@@ -39,6 +71,20 @@ async def ontology_authentication(
         )
 
     user = request.state.user
+    user["role_source"] = "identity"
+    if user.get("real_role") != "admin":
+        # Studio authenticates; Nimbus decides the business role. An assignment applies to everyone but
+        # Studio administrators, whose own role (and any impersonation they choose) is left alone.
+        key = str(user.get("ontology_user_id") or user.get("user") or "").strip().casefold()
+        if key:
+            async with async_session() as db:
+                assignment = await db.get(UserRoleAssignment, key)
+                if assignment is not None and assignment.role in ASSIGNABLE_ROLES:
+                    user["role"] = assignment.role
+                    user["store_scoped"] = assignment.role in STORE_ROLES
+                    user["role_source"] = "assignment"
+                if user["role"] not in STORE_ROLES:
+                    await record_verified_identity(db, user, key)
     if user.get("role") in {"store_manager", "store_staff"} and not (
         user.get("real_role") == "admin" and user.get("impersonating")
     ):
@@ -49,45 +95,7 @@ async def ontology_authentication(
             )
             async with async_session() as db:
                 now = utcnow()
-                values = {
-                    "assignment_identifier": assignment_identifier,
-                    "user_identifier": identifier,
-                    "identity_id": str(user["ontology_user_id"])
-                    if user.get("ontology_user_id")
-                    else None,
-                    "display_name": str(user.get("name") or identifier)[:255],
-                    "role": user["role"],
-                    "first_seen_at": now,
-                    "last_seen_at": now,
-                }
-                refresh_before = now - timedelta(minutes=15)
-                dialect = db.get_bind().dialect.name
-                if dialect == "postgresql":
-                    statement = postgres_insert(VerifiedStoreUser).values(**values)
-                    statement = statement.on_conflict_do_update(
-                        index_elements=[VerifiedStoreUser.assignment_identifier],
-                        set_={
-                            "identity_id": statement.excluded.identity_id,
-                            "display_name": statement.excluded.display_name,
-                            "role": statement.excluded.role,
-                            "last_seen_at": statement.excluded.last_seen_at,
-                        },
-                        where=VerifiedStoreUser.last_seen_at < refresh_before,
-                    )
-                else:
-                    statement = sqlite_insert(VerifiedStoreUser).values(**values)
-                    statement = statement.on_conflict_do_update(
-                        index_elements=[VerifiedStoreUser.assignment_identifier],
-                        set_={
-                            "identity_id": statement.excluded.identity_id,
-                            "display_name": statement.excluded.display_name,
-                            "role": statement.excluded.role,
-                            "last_seen_at": statement.excluded.last_seen_at,
-                        },
-                        where=VerifiedStoreUser.last_seen_at < refresh_before,
-                    )
-                await db.execute(statement)
-                await db.commit()
+                await record_verified_identity(db, user, assignment_identifier)
                 assignment = (
                     await db.execute(
                         select(StoreAssignment)

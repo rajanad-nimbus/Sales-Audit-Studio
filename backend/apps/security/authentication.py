@@ -8,6 +8,10 @@ from fastapi import Depends, Header, HTTPException, Request
 ONTOLOGY_AUTH_URL = os.getenv("NIMBUS_ONTOLOGY_AUTH_URL", "").rstrip("/")
 AUTH_ENABLED = bool(ONTOLOGY_AUTH_URL)
 IMPERSONABLE = {"finance", "it", "analyst", "auditor", "store_manager", "store_staff"}
+# The business roles an administrator can give a verified person. Ontology Studio expresses only a coarse role
+# (admin, user, editor, viewer), so these are assigned here, keyed to Studio's stable identity. Administrators
+# are never assigned: Studio stays authoritative for them.
+ASSIGNABLE_ROLES = ("finance", "it", "analyst", "auditor", "store_manager", "store_staff")
 # Both store roles see only the stores assigned to them.
 STORE_ROLES = ("store_manager", "store_staff")
 # store_manager is limited to these areas, and within them to the stores assigned to the person in Ontology Studio.

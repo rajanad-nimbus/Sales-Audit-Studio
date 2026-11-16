@@ -387,7 +387,11 @@ SCREENS: tuple[Screen, ...] = (
         "Configuration",
         EVERYONE,
         ("/api/access/matrix",),
-        optional=("/api/access/store-assignments", "/api/foundation/location-traits"),
+        optional=(
+            "/api/access/store-assignments",
+            "/api/access/role-assignments",
+            "/api/foundation/location-traits",
+        ),
     ),
 )
 # Needed by every signed-in role to render the page chrome (freshness banner, identity).

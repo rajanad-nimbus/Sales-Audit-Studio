@@ -7,6 +7,7 @@ import { formatDateTime } from '@/lib/preferences';
 import { SkeletonRows } from '@/components/Feedback';
 import { Alert, Button, Card, Field } from '@/components/ui';
 import { useMe } from '@/components/MeProvider';
+import { RoleAssignments } from '@/components/settings/RoleAssignments';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 
 interface Matrix {
@@ -440,6 +441,7 @@ export default function AccessPage() {
           </div>
         </Card>
       </SettingsSection>
+      {me?.role === 'admin' && <RoleAssignments />}
       {me?.role === 'admin' && (
         <SettingsSection
           title="Store assignments"

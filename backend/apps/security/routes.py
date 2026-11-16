@@ -25,8 +25,19 @@ from apps.controls.foundation.models import FoundationReference, StoreLocationTr
 from apps.csv_export import csv_row
 from apps.security import access, scope
 from apps.security import authentication as auth
-from apps.security.authentication import STORE_ROLES, current_user, require_role
-from apps.security.models import StoreAssignment, UserPreference, UserSavedViews, VerifiedStoreUser
+from apps.security.authentication import (
+    ASSIGNABLE_ROLES,
+    STORE_ROLES,
+    current_user,
+    require_role,
+)
+from apps.security.models import (
+    StoreAssignment,
+    UserPreference,
+    UserRoleAssignment,
+    UserSavedViews,
+    VerifiedStoreUser,
+)
 from apps.store_days.models import StoreDay
 from apps.transactions.models import CanonicalTransaction
 
@@ -863,7 +874,7 @@ async def get_my_saved_views(
             )
         )
     ).scalar_one_or_none()
-    return {"views": row.views or []}
+    return {"views": (row.views if row else None) or []}
 
 
 @router.put("/api/me/saved-views/{scope_name}")
@@ -1350,6 +1361,199 @@ async def replace_store_assignment(
     await db.commit()
     await db.refresh(row)
     return store_assignment_view(row)
+
+
+class RoleAssignmentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assignment_identifier: str = Field(min_length=1, max_length=255)
+    role: Literal["finance", "it", "analyst", "auditor", "store_manager", "store_staff"]
+    reason: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("assignment_identifier")
+    @classmethod
+    def normalize_identifier(cls, value: str) -> str:
+        return value.strip().casefold()
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 10:
+            raise ValueError("Reason must contain at least 10 non-whitespace characters")
+        return value
+
+
+def role_assignment_view(person: VerifiedStoreUser, assignment: UserRoleAssignment | None) -> dict:
+    return {
+        "assignment_identifier": person.assignment_identifier,
+        "user_identifier": person.user_identifier,
+        "display_name": person.display_name,
+        "last_seen_at": person.last_seen_at,
+        "signed_in_role": person.role,
+        "assigned_role": assignment.role if assignment else None,
+        "assigned_by": assignment.assigned_by if assignment else None,
+        "assigned_at": assignment.assigned_at if assignment else None,
+        "reason": assignment.reason if assignment else None,
+    }
+
+
+@router.get("/api/access/role-assignments")
+async def list_role_assignments(
+    q: str | None = Query(default=None, max_length=100),
+    assigned: Literal["all", "assigned", "unassigned"] = "all",
+    page: int = Query(default=1, ge=1, le=100_000),
+    page_size: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("admin")),
+):
+    """People who have signed in through Ontology Studio, with the business role Nimbus gives each."""
+    filters = []
+    if assigned == "assigned":
+        filters.append(UserRoleAssignment.assignment_identifier.is_not(None))
+    elif assigned == "unassigned":
+        filters.append(UserRoleAssignment.assignment_identifier.is_(None))
+    needle = (q or "").strip().lower()
+    if needle:
+        filters.append(
+            or_(
+                func.lower(VerifiedStoreUser.display_name).contains(needle, autoescape=True),
+                func.lower(VerifiedStoreUser.user_identifier).contains(needle, autoescape=True),
+                func.lower(VerifiedStoreUser.assignment_identifier).contains(
+                    needle, autoescape=True
+                ),
+            )
+        )
+    joined = select(VerifiedStoreUser, UserRoleAssignment).outerjoin(
+        UserRoleAssignment,
+        UserRoleAssignment.assignment_identifier == VerifiedStoreUser.assignment_identifier,
+    )
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(VerifiedStoreUser)
+            .outerjoin(
+                UserRoleAssignment,
+                UserRoleAssignment.assignment_identifier == VerifiedStoreUser.assignment_identifier,
+            )
+            .where(*filters)
+        )
+    ).scalar_one()
+    rows = (
+        await db.execute(
+            joined.where(*filters)
+            .order_by(
+                func.lower(VerifiedStoreUser.display_name), VerifiedStoreUser.assignment_identifier
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    return {
+        "roles": [
+            {"key": role, "label": access.ROLE_LABELS.get(role, role)} for role in ASSIGNABLE_ROLES
+        ],
+        "items": [role_assignment_view(person, assignment) for person, assignment in rows],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "pages": max(1, -(-total // page_size)),
+        },
+    }
+
+
+@router.put("/api/access/role-assignments")
+async def set_role_assignment(
+    body: RoleAssignmentInput,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("admin")),
+):
+    """Give a verified person a business role. Administrators are never assigned; Studio decides those."""
+    person = await db.get(VerifiedStoreUser, body.assignment_identifier)
+    if person is None:
+        raise HTTPException(
+            status_code=422,
+            detail="This identity has not signed in through Ontology Studio yet. Ask them to sign in first.",
+        )
+    actor = user.get("user") or "ontology.user"
+    row = (
+        await db.execute(
+            select(UserRoleAssignment)
+            .where(UserRoleAssignment.assignment_identifier == body.assignment_identifier)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    before = {"role": row.role} if row else None
+    if row is None:
+        row = UserRoleAssignment(
+            assignment_identifier=body.assignment_identifier,
+            role=body.role,
+            reason=body.reason,
+            assigned_by=actor,
+        )
+        db.add(row)
+    else:
+        row.role, row.reason, row.assigned_by, row.assigned_at = (
+            body.role,
+            body.reason,
+            actor,
+            utcnow(),
+        )
+    db.add(
+        AuditEvent(
+            id=str(uuid.uuid4()),
+            event_type="ROLE_ASSIGNMENT_SET",
+            actor=actor,
+            object_type="UserRoleAssignment",
+            object_id=body.assignment_identifier,
+            action_description=(
+                f"{person.display_name} assigned the {access.ROLE_LABELS.get(body.role, body.role)} "
+                f"role: {body.reason}"
+            ),
+            before_state=before,
+            after_state={"role": body.role, "reason": body.reason},
+        )
+    )
+    await db.commit()
+    await db.refresh(row)
+    return role_assignment_view(person, row)
+
+
+@router.delete("/api/access/role-assignments/{assignment_identifier}")
+async def remove_role_assignment(
+    assignment_identifier: str,
+    reason: str = Query(min_length=10, max_length=2000),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("admin")),
+):
+    """Take a person's assigned role away, so their Ontology Studio role applies again."""
+    key = assignment_identifier.strip().casefold()
+    row = (
+        await db.execute(
+            select(UserRoleAssignment)
+            .where(UserRoleAssignment.assignment_identifier == key)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No role is assigned to this identity")
+    actor = user.get("user") or "ontology.user"
+    db.add(
+        AuditEvent(
+            id=str(uuid.uuid4()),
+            event_type="ROLE_ASSIGNMENT_REMOVED",
+            actor=actor,
+            object_type="UserRoleAssignment",
+            object_id=key,
+            action_description=f"Assigned {row.role} role removed: {reason.strip()}",
+            before_state={"role": row.role, "reason": row.reason},
+            after_state={"reason": reason.strip()},
+        )
+    )
+    await db.delete(row)
+    await db.commit()
+    return {"assignment_identifier": key, "removed": True}
 
 
 @router.get("/api/stores")
