@@ -7,7 +7,16 @@ import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { SkeletonRows } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
-import { Alert, Button, DataTable, EmptyState, Field, PageHeader, Pager } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  DataTable,
+  EmptyState,
+  Field,
+  PageHeader,
+  Pager,
+  useNameDialog,
+} from '@/components/ui';
 import type { Column } from '@/components/ui';
 import { TransactionBrief } from '@/components/transactions/TransactionBrief';
 
@@ -372,14 +381,13 @@ export default function TransactionsPage() {
     setPage(1);
     setExpanded(null);
   };
-  const saveCurrentView = () => {
-    const entered = window.prompt('Name this transaction view');
-    const name = entered?.trim();
+  const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
+  const saveCurrentView = async () => {
+    const name = await askViewName(
+      'Name this transaction view',
+      views.map((view) => view.name)
+    );
     if (!name) return;
-    if (name.length > 60) {
-      setError('Saved view names must be 60 characters or fewer.');
-      return;
-    }
     const filters = { ...f, q: qd };
     const savedFilters = Object.fromEntries(
       Object.entries(filters).filter(([, value]) => value !== '')
@@ -427,6 +435,7 @@ export default function TransactionsPage() {
 
   return (
     <div className="page-container transactions-page">
+      {viewNameDialog}
       <PageHeader
         title="Transactions"
         subtitle="Find a transaction, review its details, and investigate related cases."

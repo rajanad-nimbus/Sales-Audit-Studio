@@ -7,7 +7,15 @@ import { api, ACRow, Case } from '@/lib/api';
 import { CaseTable, SortKey, SortState } from '@/components/CaseTable';
 import { SkeletonRows } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
-import { Alert, Button, EmptyState, PageHeader, Pager, Toolbar } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageHeader,
+  Pager,
+  Toolbar,
+  useNameDialog,
+} from '@/components/ui';
 
 // Server-side sort keys (Case.* columns) for each table column.
 const SORT_PARAM: Record<SortKey, string> = {
@@ -58,6 +66,7 @@ export default function CasesPage() {
   const [statuses, setStatuses] = useState<{ value: string; count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [q, setQ] = useState('');
@@ -183,14 +192,13 @@ export default function CasesPage() {
     setPage(Number(view.params.page) || 1);
   };
 
-  const saveCurrentView = () => {
-    const entered = window.prompt('Name this Cases view');
-    const name = entered?.trim();
+  const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
+  const saveCurrentView = async () => {
+    const name = await askViewName(
+      'Name this Cases view',
+      savedViews.map((view) => view.name)
+    );
     if (!name) return;
-    if (name.length > 60) {
-      setError('Saved view names must be 60 characters or fewer.');
-      return;
-    }
     const params: SavedCaseView['params'] = {
       sort: sort ? SORT_PARAM[sort.key] : 'exposure',
       dir: sort?.dir ?? 'desc',
@@ -230,7 +238,9 @@ export default function CasesPage() {
       setPages(c.data.pages);
       setStatuses(f.data.status);
       setError(null);
+      setLoadFailed(false);
     } catch (e) {
+      if (mine === seq.current) setLoadFailed(true);
       if (mine === seq.current)
         setError(
           (e as { response?: { status?: number } })?.response?.status === 403
@@ -291,6 +301,7 @@ export default function CasesPage() {
 
   return (
     <div className="page-container">
+      {viewNameDialog}
       <PageHeader
         title="Cases"
         subtitle={
@@ -407,6 +418,7 @@ export default function CasesPage() {
       ) : (
         <CaseTable
           cases={rows}
+          failed={loadFailed}
           sort={sort ?? undefined}
           onSort={onSort}
           footer={

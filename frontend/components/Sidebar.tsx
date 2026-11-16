@@ -26,7 +26,7 @@ const icons: Record<string, React.ReactNode> = {
   totals: <path d="M5 5h14M5 12h14M5 19h14M8 3v4m8 2v6m-8 2v4" />,
   cash: <path d="M4 7h16v10H4zM7 11h4m3 2h3M7 17v2h10v-2" />,
   controls: <path d="M5 5h14M5 12h14M5 19h14M8 3v4m8 2v6m-8 2v4" />,
-  corrections: <path d="M5 4h11l3 3v13H5V4Zm3 6h8m-8 4h8m-8 4h5" />,
+  corrections: <path d="M4 20h4L19 9l-4-4L4 16v4Zm9-13 4 4" />,
   activity: <path d="M3 12h4l2.5-7 4 14 2.5-7H21" />,
   actions: <path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z" />,
   exports: <path d="M12 3v12m0-12 4 4m-4-4-4 4M5 15v4h14v-4" />,
@@ -34,6 +34,16 @@ const icons: Record<string, React.ReactNode> = {
     <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.3l2-1.5-2-3.4-2.3.9a7.5 7.5 0 0 0-2.2-1.3L14.4 3h-4l-.4 2.4a7.5 7.5 0 0 0-2.2 1.3l-2.3-.9-2 3.4 2 1.5a7.400 7.400 0 0 0 0 2.600l-2 1.500 2 3.400 2.300-.9a7.500 7.500 0 0 0 2.200 1.300l.4 2.400h4l.4-2.400a7.500 7.500 0 0 0 2.200-1.300l2.300.9 2-3.400-2-1.500c.1-.4.1-.9.1-1.300Z" />
   ),
   audit: <path d="M8 4h8l3 3v13H5V4h3Zm0 6h8M8 14h8M8 18h5" />,
+  storeDays: <path d="M5 6h14v14H5zM5 10h14M9 3v4m6-4v4" />,
+  history: <path d="M4 12a8 8 0 1 0 2.5-5.8M4 5v4h4M12 8v4l3 2" />,
+  sum: <path d="M17 6V4H7l6 8-6 8h10v-2" />,
+  items: <path d="M4 4h7l9 9-7 7-9-9V4Zm4 4h.01" />,
+  tender: <path d="M3 6h18v12H3zM3 10h18M7 15h3" />,
+  bank: <path d="M4 10l8-6 8 6H4Zm2 0v8m4-8v8m4-8v8m4-8v8M3 20h18" />,
+  cashier: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" />,
+  agent: (
+    <path d="M7 7h10v10H7zM10 10h4v4h-4zM9 3v4m6-4v4M9 17v4m6-4v4M3 9h4m-4 6h4m10-6h4m-4 6h4" />
+  ),
 };
 
 const Icon = ({ name }: { name: string }) => (

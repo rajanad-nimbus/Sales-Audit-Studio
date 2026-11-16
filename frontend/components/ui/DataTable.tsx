@@ -41,6 +41,8 @@ interface DataTableProps<T> {
   onSort?: (sortKey: string) => void;
   emptyTitle?: string;
   emptyHint?: React.ReactNode;
+  /** The last load failed. With no rows, the body says so instead of claiming nothing matched. */
+  failed?: boolean;
   /** Rendered under the table inside the same card, for example a `Pager`. */
   footer?: React.ReactNode;
   loadingRows?: number;
@@ -67,6 +69,7 @@ export function DataTable<T>({
   onSort,
   emptyTitle = 'Nothing to show',
   emptyHint,
+  failed,
   footer,
   loadingRows,
   rowClassName,
@@ -460,7 +463,15 @@ export function DataTable<T>({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={columns.length}>
-                  <EmptyState title={emptyTitle}>{emptyHint}</EmptyState>
+                  {failed ? (
+                    <EmptyState title="Results could not be loaded">
+                      <p>
+                        Nothing is listed because the request failed, not because of your filters.
+                      </p>
+                    </EmptyState>
+                  ) : (
+                    <EmptyState title={emptyTitle}>{emptyHint}</EmptyState>
+                  )}
                 </td>
               </tr>
             )}

@@ -8,6 +8,7 @@ export type { Column, SortState } from './DataTable';
 export { EmptyState } from './EmptyState';
 export { Field } from './Field';
 export { MetricGrid, MetricTile } from './MetricTile';
+export { useNameDialog } from './NameDialog';
 export { Drawer, Modal } from './Overlay';
 export { PageHeader } from './PageHeader';
 export { Pager } from './Pager';

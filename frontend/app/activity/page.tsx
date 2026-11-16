@@ -5,7 +5,15 @@ import Link from 'next/link';
 import { api, AuditEvent } from '@/lib/api';
 import { downloadBlob } from '@/lib/csv';
 import { formatDateTime, formatNumber } from '@/lib/preferences';
-import { Alert, Button, DataTable, EmptyState, PageHeader, Segmented } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  Segmented,
+  useNameDialog,
+} from '@/components/ui';
 
 interface Evt extends AuditEvent {
   after?: any;
@@ -141,14 +149,13 @@ export default function ActivityPage() {
     setOnlyAlerts(view.params.alerts_only ?? false);
   };
 
-  const saveCurrentView = () => {
-    const entered = window.prompt('Name this Agent Activity view');
-    const name = entered?.trim();
+  const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
+  const saveCurrentView = async () => {
+    const name = await askViewName(
+      'Name this Agent Activity view',
+      savedViews.map((view) => view.name)
+    );
     if (!name) return;
-    if (name.length > 60) {
-      toast('Saved view names must be 60 characters or fewer.', 'error');
-      return;
-    }
     const params: SavedActivityView['params'] = { agent };
     if (q.trim()) params.q = q.trim();
     if (onlyAlerts) params.alerts_only = true;
@@ -307,6 +314,7 @@ export default function ActivityPage() {
   };
   return (
     <div className="page-container">
+      {viewNameDialog}
       <PageHeader
         title="Agent Activity"
         subtitle="Everything agents, connectors and people did, newest first. Read-only audit trail."

@@ -54,3 +54,17 @@ it('opens a focused row with Enter without also opening it from a nested action'
   fireEvent.keyDown(screen.getByRole('row', { name: 'case-1 Review' }), { key: 'Enter' });
   expect(openRow).toHaveBeenCalledExactlyOnceWith(row);
 });
+
+it('says the load failed instead of showing the empty filter message', () => {
+  render(
+    <DataTable<{ id: string }>
+      columns={[{ key: 'id', header: 'Case', render: (row) => row.id }]}
+      rows={[]}
+      rowKey={(row) => row.id}
+      emptyTitle="No matching cases"
+      failed
+    />
+  );
+  expect(screen.getByText('Results could not be loaded')).toBeInTheDocument();
+  expect(screen.queryByText('No matching cases')).toBeNull();
+});

@@ -18,6 +18,7 @@ import {
   Segmented,
   Tabs,
   Toolbar,
+  useNameDialog,
 } from '@/components/ui';
 import { ErrorPatterns } from '@/components/ErrorPatterns';
 import { errorPath } from '@/components/AuditErrorDetail';
@@ -241,14 +242,13 @@ export default function AuditErrorsPage() {
     setQ(view.params.q ?? '');
   };
 
-  const saveCurrentView = () => {
-    const entered = window.prompt('Name this Audit Errors view');
-    const name = entered?.trim();
+  const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
+  const saveCurrentView = async () => {
+    const name = await askViewName(
+      'Name this Audit Errors view',
+      savedViews.map((view) => view.name)
+    );
     if (!name) return;
-    if (name.length > 60) {
-      setError('Saved view names must be 60 characters or fewer.');
-      return;
-    }
     const params: SavedAuditErrorsView['params'] = { show, days };
     if (family) params.family = family;
     if (q.trim()) params.q = q.trim();
@@ -260,6 +260,7 @@ export default function AuditErrorsPage() {
 
   return (
     <div className="page-container">
+      {viewNameDialog}
       <PageHeader
         title="Audit Errors"
         subtitle="Every Sales Audit error type, how many are open, and how each one is fixed. Open one to see what it means, where it is corrected, and the cases that hold it."

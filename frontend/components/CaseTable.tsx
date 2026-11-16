@@ -125,11 +125,13 @@ export function CaseTable({
   sort,
   onSort,
   footer,
+  failed,
 }: {
   cases: Case[];
   sort?: SortState;
   onSort?: (k: SortKey) => void;
   footer?: React.ReactNode;
+  failed?: boolean;
 }) {
   const router = useRouter();
   return (
@@ -144,6 +146,7 @@ export function CaseTable({
       emptyTitle="No cases found"
       emptyHint={<p>Nothing matches this view.</p>}
       footer={footer}
+      failed={failed}
     />
   );
 }

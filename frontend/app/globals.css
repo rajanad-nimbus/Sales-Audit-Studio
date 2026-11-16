@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 /* Design tokens live in ./styles/tokens.css. Do not add raw colors, radii or font sizes here: use the tokens. */
 /* Style follows the Ontology Studio app: flat surfaces, bordered cards, navy/blue accents, no ornament. */
 
@@ -5863,4 +5861,18 @@ button:active:not(:disabled) {
 }
 .ac-chip.add:hover:not(:disabled) {
   border-color: color-mix(in oklab, var(--fg-tertiary) 55%, var(--border));
+}
+
+/* Small buttons keep a comfortable click target. */
+.main-content .btn-sm:not(.alert-close),
+.main-content .btn-small:not(.alert-close) {
+  min-height: 2rem;
+}
+/* A hint under one field must not push its neighbours out of line: align the row on its labels. */
+.form-row:has(.field .hint) {
+  align-items: flex-start;
+}
+.form-row:has(.field .hint) > button,
+.form-row:has(.field .hint) > a {
+  margin-top: calc(var(--text-sm) * var(--leading-normal) + var(--space-xs));
 }

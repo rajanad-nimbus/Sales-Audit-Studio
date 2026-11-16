@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
-import { Alert } from '@/components/ui';
+import { Alert, useNameDialog } from '@/components/ui';
 
 export type SummaryFilters = {
   store: string;
@@ -81,13 +81,13 @@ export function SummarySavedViews({ scope, label, filters, onApply, saveDisabled
       .catch(() => setSyncError(true));
   };
 
-  const saveCurrent = () => {
-    const name = window.prompt(`Name this ${label} view`)?.trim();
+  const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
+  const saveCurrent = async () => {
+    const name = await askViewName(
+      `Name this ${label} view`,
+      views.map((view) => view.name)
+    );
     if (!name) return;
-    if (name.length > 60) {
-      window.alert('Saved view names must be 60 characters or fewer.');
-      return;
-    }
     const params: SavedSummaryView['params'] = {};
     if (filters.store) params.store_id = filters.store;
     if (filters.dateFrom) params.date_from = filters.dateFrom;
@@ -103,6 +103,7 @@ export function SummarySavedViews({ scope, label, filters, onApply, saveDisabled
 
   return (
     <>
+      {viewNameDialog}
       {syncError && (
         <Alert tone="warning">
           Saved views are available on this device, but could not sync to your account.

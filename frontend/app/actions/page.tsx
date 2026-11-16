@@ -13,7 +13,7 @@ import {
 } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useDataChanged } from '@/lib/sync';
-import { Alert, Badge, Button, Segmented } from '@/components/ui';
+import { Alert, Badge, Button, Segmented, useNameDialog } from '@/components/ui';
 
 interface F {
   q: string;
@@ -482,8 +482,10 @@ export default function ActionCenter() {
     </th>
   );
 
+  const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
   return (
     <div className="ac">
+      {viewNameDialog}
       <div className="ac-main">
         <div className="cc-top">
           <div>
@@ -582,9 +584,11 @@ export default function ActionCenter() {
           ))}
           <button
             className="ac-chip add"
-            onClick={() => {
-              const enteredName = window.prompt('Name this view');
-              const name = enteredName?.trim();
+            onClick={async () => {
+              const name = await askViewName(
+                'Name this Action Center view',
+                views.map((view) => view.name)
+              );
               if (name) {
                 persistViews([
                   ...views.filter(

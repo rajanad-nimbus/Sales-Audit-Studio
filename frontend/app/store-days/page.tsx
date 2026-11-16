@@ -24,6 +24,7 @@ import {
   Segmented,
   Tabs,
   Toolbar,
+  useNameDialog,
 } from '@/components/ui';
 import { StoreSelect } from '@/components/StoreSelect';
 import { StoreDayBrief } from '@/components/storeDays/StoreDayBrief';
@@ -52,13 +53,13 @@ interface Attention {
   stuck_after_days: number;
   stuck_store_days: StuckDay[];
   stuck_truncated: boolean;
-}
   close_summary?: {
     closed_automatically: number;
     closed_by_person: number;
     open: number;
     not_opened: number;
   };
+}
 type ListTab = 'days' | 'late' | 'stuck';
 interface SavedStoreDaysView {
   name: string;
@@ -102,6 +103,7 @@ export default function StoreDaysPage() {
   const [days, setDays] = useState<StoreDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
@@ -302,10 +304,13 @@ export default function StoreDaysPage() {
         setHasMore(list.headers?.['x-has-more'] === 'true');
         setSummary(counts.data);
         setError(null);
+        setLoadFailed(false);
       }
     } catch {
-      if (request === listRequest.current)
+      if (request === listRequest.current) {
+        setLoadFailed(true);
         setError('Unable to load Store Days. Sign in with a Finance or IT role.');
+      }
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
@@ -402,14 +407,13 @@ export default function StoreDaysPage() {
     setExpanded(null);
   };
 
-  const saveCurrentView = () => {
-    const entered = window.prompt('Name this Store Days view');
-    const name = entered?.trim();
+  const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
+  const saveCurrentView = async () => {
+    const name = await askViewName(
+      'Name this Store Days view',
+      savedViews.map((view) => view.name)
+    );
     if (!name) return;
-    if (name.length > 60) {
-      setError('Saved view names must be 60 characters or fewer.');
-      return;
-    }
     persistSavedViews([
       ...savedViews.filter((view) => view.name.toLocaleLowerCase() !== name.toLocaleLowerCase()),
       { name, params: currentViewParams() },
@@ -486,6 +490,7 @@ export default function StoreDaysPage() {
 
   return (
     <div className="page-container">
+      {viewNameDialog}
       <PageHeader
         title="Store Days & Totals"
         subtitle="Versioned balancing totals for the controlled store-day audit lifecycle. Select a Store Day to see its totals, closure, cases and history."
@@ -555,11 +560,6 @@ export default function StoreDaysPage() {
         </MetricGrid>
       )}
 
-      <Card className="card-open">
-        <Tabs
-          value={tab}
-          onChange={(id) => {
-            setTab(id as ListTab);
       {attention?.close_summary && (
         <p className="hint">
           {attention.business_date}: {formatNumber(attention.close_summary.closed_automatically)} of{' '}
@@ -570,6 +570,11 @@ export default function StoreDaysPage() {
         </p>
       )}
 
+      <Card className="card-open">
+        <Tabs
+          value={tab}
+          onChange={(id) => {
+            setTab(id as ListTab);
             setExpanded(null);
           }}
           items={[
@@ -722,15 +727,15 @@ export default function StoreDaysPage() {
               </Button>
             </Toolbar>
             {attentionExportError && <Alert tone="error">{attentionExportError}</Alert>}
+            <p className="hint">
+              Store days from before today that were not closed automatically, oldest first, with
+              what is holding each one back. A day closes on the next run once that is resolved.
+            </p>
             <DataTable
               columns={[
                 {
                   key: 'store',
                   header: 'Store',
-            <p className="hint">
-              Store days from before today that were not closed automatically, oldest first, with
-              what is holding each one back. A day closes on the next run once that is resolved.
-            </p>
                   primary: true,
                   stopRowClick: true,
                   render: (d: StuckDay) => <Link href={dayPath(d)}>{d.store_id}</Link>,
@@ -887,6 +892,7 @@ export default function StoreDaysPage() {
               },
             ]}
             rows={loading ? null : days}
+            failed={loadFailed}
             rowKey={dayKey}
             csvFileName="store-days-visible.csv"
             onRowClick={(d) => setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))}

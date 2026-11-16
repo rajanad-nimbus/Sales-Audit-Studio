@@ -62,6 +62,8 @@ import { Alert, Badge, Button, Card, EmptyState, Field, PageHeader } from '@/com
 />
 ```
 
+Pass `failed` when the last load failed, so an empty table says the results could not be loaded instead of showing the empty-filter message. Ask for a name with `useNameDialog()` (render its `dialog`, await its `ask`), never `window.prompt`.
+
 `rows={null}` shows a loading skeleton; an empty array keeps the column headings and footer visible with an empty state in the table body. Sortable headings show a direction indicator. Wide tables scroll inside a keyboard-focusable results region, while pagination stays outside that region. Enter opens a focused row; nested buttons and links retain their own keyboard actions. Toasts stay `useToast()` from `components/Feedback`.
 
 ## Adopting in existing screens
