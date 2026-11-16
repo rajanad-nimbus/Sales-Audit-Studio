@@ -554,7 +554,11 @@ def normalize_order(order: dict, store_id: str, transactions: list[dict] | None 
         "financial_status": order.get("financial_status") or "pending",
         "fulfillment_status": order.get("fulfillment_status"),
         "order_number": order.get("order_number"),
-        "customer_id": (order.get("customer") or {}).get("id"),
+        "customer_id": (
+            str((order.get("customer") or {}).get("id"))
+            if (order.get("customer") or {}).get("id") is not None
+            else None
+        ),
         "note": order.get("note"),
         "taxes": order_taxes(order),
     }

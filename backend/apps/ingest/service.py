@@ -16,7 +16,17 @@ from apps.ingest.common import COMPOSITE_SCOPE_BATCH_SIZE, LINEAGE, REQUIRED, SI
 from apps.ingest.manifests import validate_business_date
 from apps.ingest.models import SourceRecord
 from apps.ingest.shopify import ingest as shopify_ingest
+from apps.security.sensitive_data import (
+    contains_sensitive_payment_data,
+    mask_pan_value,
+    redact_sensitive_fields,
+)
 from apps.store_days.freshness import invalidate_totals_many, lock_store_days
+from apps.system.options import (
+    credit_card_number_mask,
+    credit_card_security_level,
+    max_backdated_transaction_days,
+)
 from apps.totals.currency import validate_currency
 from apps.transactions import detail as transaction_detail
 from apps.transactions.models import (
@@ -26,13 +36,22 @@ from apps.transactions.models import (
     TransactionTax,
     TransactionTender,
 )
+from apps.transactions.customer_attributes import (
+    normalize_customer_attributes,
+    redact_customer_attribute_payload,
+    redact_customer_attributes,
+)
+from apps.transactions.references import normalize_user_references
 
 STRING_FIELD_LIMITS = {
     "source_record_id": 255,
     "store_id": 50,
+    "customer_id": 100,
+    "customer_identification_type": 50,
     "register_id": 50,
     "transaction_number": 30,
     "cashier_id": 100,
+    "salesperson_id": 100,
     "channel_id": 50,
     "tender_type": 50,
     "payment_reference": 255,
@@ -65,18 +84,38 @@ class PreparedRecord:
     payload: bytes
     digest: str
     record_id: str
+    legacy_digest: str
     parsed: dict | None
     parse_error: str | None
+    source_event_time: datetime | None = None
 
 
-def prepare_record(source: str, record: dict) -> PreparedRecord:
+def prepare_record(source: str, record: dict, mask_character: str = "•") -> PreparedRecord:
     """Serialize, identify, and validate one incoming record without database access."""
-    payload = json.dumps(record, sort_keys=True, default=str).encode()
+    safe_record = redact_sensitive_fields(record, mask_character)
+    details = safe_record.get("details") if isinstance(safe_record.get("details"), dict) else None
+    for container in (safe_record, details):
+        if container is not None and "customer_attributes" in container:
+            try:
+                container["customer_attributes"] = redact_customer_attributes(
+                    container["customer_attributes"], mask_character
+                )
+            except ValueError:
+                # The parser will quarantine malformed attributes; keep their payload safe meanwhile.
+                container["customer_attributes"] = redact_customer_attribute_payload(
+                    container["customer_attributes"], mask_character
+                )
+    payload = json.dumps(safe_record, sort_keys=True, default=str).encode()
     identity = shopify_ingest.identity_payload(record) if source == "Shopify" else record
-    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
+    identity_text = json.dumps(identity, sort_keys=True, default=str).encode()
+    legacy_digest = hashlib.sha256(identity_text).hexdigest()
+    safe_identity = redact_sensitive_fields(identity, mask_character)
+    digest = hashlib.sha256(
+        json.dumps(safe_identity, sort_keys=True, default=str).encode()
+    ).hexdigest()
     supplied_id = record.get("source_record_id")
     record_id = (
-        supplied_id
+        mask_pan_value(supplied_id, mask_character)
         if isinstance(supplied_id, str)
         and supplied_id.strip()
         and len(supplied_id) <= STRING_FIELD_LIMITS["source_record_id"]
@@ -89,7 +128,16 @@ def prepare_record(source: str, record: dict) -> PreparedRecord:
             parsed["settlement_date"] = parse_settlement_date(record, parsed["ts"])
     except ValueError as exc:
         parse_error = str(exc)
-    return PreparedRecord(record, payload, digest, record_id, parsed, parse_error)
+    return PreparedRecord(
+        record,
+        payload,
+        digest,
+        record_id,
+        legacy_digest,
+        parsed,
+        parse_error,
+        parsed.get("ts") if parsed else None,
+    )
 
 
 def parse_settlement_date(record: dict, event_timestamp: datetime) -> str:
@@ -106,7 +154,11 @@ def parse_settlement_date(record: dict, event_timestamp: datetime) -> str:
 async def lock_delivery_store_days(db, prepared: list[PreparedRecord]):
     """Lock valid store days in deterministic order before delivery persistence."""
     keys = {
-        (prepared_record.record.get("store_id"), prepared_record.parsed["ts"].date().isoformat())
+        (
+            prepared_record.record.get("store_id"),
+            prepared_record.parsed.get("business_date")
+            or prepared_record.parsed["ts"].date().isoformat(),
+        )
         for prepared_record in prepared
         if prepared_record.parsed
         and isinstance(prepared_record.record.get("store_id"), str)
@@ -144,6 +196,7 @@ def persist_prepared_records(
     prepared: list[PreparedRecord],
     prior_hashes,
     days,
+    mask_character: str = "•",
 ) -> IngestResult:
     """Apply idempotency, archive accepted records, and create canonical transactions."""
     result = IngestResult()
@@ -153,7 +206,7 @@ def persist_prepared_records(
         digest = prepared_record.digest
         result.stats["received"] += 1
         prior = prior_hashes[record_id]
-        if digest in prior:
+        if digest in prior or prepared_record.legacy_digest in prior:
             result.stats["duplicates_skipped"] += 1
             continue
         archived = archive_source_record(db, source, delivery_id, prepared_record, prior)
@@ -163,12 +216,15 @@ def persist_prepared_records(
         source_record, parsed = archived
         result.stats["archived"] += 1
         store_id = record.get("store_id")
-        day_key = (store_id, parsed["ts"].date().isoformat()) if isinstance(store_id, str) else None
+        business_date = parsed.get("business_date") or parsed["ts"].date().isoformat()
+        day_key = (store_id, business_date) if isinstance(store_id, str) else None
         if day_key in days:
             result.changed_days.add(day_key)
         if parsed.get("manifest"):
             continue
-        transaction = create_canonical_transaction(db, source, record, parsed, source_record)
+        transaction = create_canonical_transaction(
+            db, source, record, parsed, source_record, mask_character
+        )
         collect_return_reference(result.return_reference_keys, record, transaction)
         source_record.status, source_record.extracted_at = "Processed", utcnow()
         result.stats["canonical_created"] += 1
@@ -192,7 +248,9 @@ def archive_source_record(db, source, delivery_id, prepared_record: PreparedReco
         payload=prepared_record.payload,
         payload_hash=prepared_record.digest,
         received_at=utcnow(),
-        source_event_time=parsed["ts"] if parsed else utcnow(),
+        source_event_time=(
+            prepared_record.source_event_time or (parsed["ts"] if parsed else utcnow())
+        ),
         status="Quarantined" if reason else "Archived",
         quarantine_reason=reason,
     )
@@ -201,12 +259,12 @@ def archive_source_record(db, source, delivery_id, prepared_record: PreparedReco
     return None if reason else (source_record, parsed)
 
 
-def create_canonical_transaction(db, source, record, parsed, source_record):
+def create_canonical_transaction(db, source, record, parsed, source_record, mask_character="•"):
     """Create a canonical transaction and persist its validated transaction details."""
     timestamp = parsed["ts"]
     transaction = CanonicalTransaction(
         id=str(uuid.uuid4()),
-        business_date=timestamp.date().isoformat(),
+        business_date=parsed.get("business_date") or timestamp.date().isoformat(),
         transaction_date=timestamp,
         event_timestamp=timestamp,
         processing_timestamp=utcnow(),
@@ -216,19 +274,26 @@ def create_canonical_transaction(db, source, record, parsed, source_record):
         currency=record.get("currency", "USD"),
         signed_amount=SIGN[record["record_type"]] * parsed["amount"],
         store_id=record["store_id"],
+        customer_id=parsed.get("customer_id") or record.get("customer_id") or None,
+        customer_identification_type=record.get("customer_identification_type") or None,
+        customer_attributes=redact_customer_attributes(
+            parsed.get("customer_attributes"), mask_character
+        ),
+        user_references=redact_sensitive_fields(parsed.get("user_references"), mask_character),
         register_id=record.get("register_id"),
         transaction_number=record.get("transaction_number"),
         cashier_id=record.get("cashier_id"),
+        salesperson_id=record.get("salesperson_id"),
         channel_id=record.get("channel_id") or "store",
         tender_type=record.get("tender_type"),
-        payment_reference=record.get("payment_reference"),
-        settlement_reference=record.get("settlement_reference"),
+        payment_reference=mask_pan_value(record.get("payment_reference"), mask_character),
+        settlement_reference=mask_pan_value(record.get("settlement_reference"), mask_character),
         source_record_id=source_record.id,
         reconciliation_status="Unmatched",
         disposition="Open",
     )
     db.add(transaction)
-    store_detail(db, transaction, parsed.get("detail"))
+    store_detail(db, transaction, parsed.get("detail"), mask_character)
     return transaction
 
 
@@ -272,9 +337,33 @@ def parse(source: str, rec: dict) -> dict:
     cashier = rec.get("cashier_id")
     if cashier is not None and not cashier.strip():
         raise ValueError("cashier_id must not be blank")
+    salesperson = rec.get("salesperson_id")
+    if salesperson is not None and (not salesperson.strip() or salesperson != salesperson.strip()):
+        raise ValueError("salesperson_id must not be blank or have surrounding whitespace")
+    customer_id_type = rec.get("customer_identification_type")
+    if customer_id_type is not None and (
+        not customer_id_type.strip() or customer_id_type != customer_id_type.strip()
+    ):
+        raise ValueError(
+            "customer_identification_type must not be blank or have surrounding whitespace"
+        )
     if source == "Shopify":
-        return shopify_ingest.parse(rec)
-    return parse_transaction(source, rec)
+        parsed = shopify_ingest.parse(rec)
+    else:
+        parsed = parse_transaction(source, rec)
+    parsed["business_date"] = resolve_business_date(rec, parsed["ts"])
+    return parsed
+
+
+def resolve_business_date(record: dict, event_timestamp: datetime) -> str:
+    """Honor the source-assigned retail business date; fall back to the event's local date."""
+    supplied = record.get("business_date")
+    if supplied in (None, ""):
+        return event_timestamp.date().isoformat()
+    try:
+        return validate_business_date(supplied)
+    except (ValueError, TypeError):
+        raise ValueError("business_date must use YYYY-MM-DD") from None
 
 
 def validate_source_identifiers(rec: dict) -> None:
@@ -323,6 +412,7 @@ def parse_manifest(rec: dict) -> dict:
             raise ValueError("invalid manifest values")
         return {
             "manifest": True,
+            "business_date": business_date,
             "count": count,
             "total": total,
             "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00"),
@@ -353,22 +443,38 @@ def parse_transaction(source: str, rec: dict) -> dict:
         detail = transaction_detail.extract(rec, SIGN[rec["record_type"]])
     except (ValueError, InvalidOperation, OverflowError) as exc:
         raise ValueError(f"invalid transaction detail: {exc}") from exc
-    return {"amount": amount, "ts": ts, "detail": detail}
+    source_details = rec.get("details") if isinstance(rec.get("details"), dict) else {}
+    return {
+        "amount": amount,
+        "ts": ts,
+        "detail": detail,
+        "customer_attributes": normalize_customer_attributes(
+            rec.get("customer_attributes") or source_details.get("customer_attributes")
+        ),
+        "user_references": normalize_user_references(rec.get("user_references")),
+    }
 
 
-def store_detail(db, tx: CanonicalTransaction, detail: dict | None) -> None:
+def store_detail(db, tx: CanonicalTransaction, detail: dict | None, mask_character="•") -> None:
     """Persist the lines, tax, discounts and tenders of a transaction and record whether they add up to its amount."""
     if not detail:
         return
     for ln in detail["lines"]:
+        ln["source_attributes"] = redact_sensitive_fields(ln["source_attributes"], mask_character)
         db.add(TransactionLine(id=str(uuid.uuid4()), transaction_id=tx.id, **ln))
     for t in detail["taxes"]:
         db.add(TransactionTax(id=str(uuid.uuid4()), transaction_id=tx.id, **t))
     for d in detail["discounts"]:
         db.add(TransactionDiscount(id=str(uuid.uuid4()), transaction_id=tx.id, **d))
-    for t in detail["tenders"]:
-        db.add(TransactionTender(id=str(uuid.uuid4()), transaction_id=tx.id, **t))
-    tx.original_reference, tx.return_reason = detail["original_reference"], detail["return_reason"]
+    tx.original_reference = mask_pan_value(detail["original_reference"], mask_character)
+    tx.return_reason = detail["return_reason"]
+    for tender in detail["tenders"]:
+        tender["reference"] = mask_pan_value(tender["reference"], mask_character)
+        tender["authorization"] = mask_pan_value(tender["authorization"], mask_character)
+        tender["source_attributes"] = redact_sensitive_fields(
+            tender["source_attributes"], mask_character
+        )
+        db.add(TransactionTender(id=str(uuid.uuid4()), transaction_id=tx.id, **tender))
     tx.detail_status = transaction_detail.check(detail, tx.signed_amount)["status"]
 
 
@@ -471,10 +577,34 @@ async def link_return_page(db, pending: list[CanonicalTransaction]) -> int:
 
 
 async def ingest(db, source: str, delivery_id: str, records: list[dict]) -> dict:
-    prepared = [prepare_record(source, record) for record in records]
+    mask_character = await credit_card_number_mask(db)
+    prepared = [prepare_record(source, record, mask_character) for record in records]
+    if await credit_card_security_level(db) == "Block":
+        for item in prepared:
+            if contains_sensitive_payment_data(item.record):
+                item.parse_error = (
+                    "Cardholder data is blocked by the configured card security policy"
+                )
+                item.parsed = None
+    if source in {"POS", "Shopify"}:
+        max_age_days = await max_backdated_transaction_days(db)
+        if max_age_days is not None:
+            today = utcnow().date()
+            for item in prepared:
+                if item.parsed and not item.parsed.get("manifest"):
+                    event_date = item.parsed["ts"].astimezone(UTC).date()
+                    age_days = (today - event_date).days
+                    if age_days > max_age_days:
+                        item.parse_error = (
+                            f"Transaction is {age_days} days old; configured maximum backdated "
+                            f"age is {max_age_days} days"
+                        )
+                        item.parsed = None
     days = await lock_delivery_store_days(db, prepared)
     prior_hashes = await load_prior_record_hashes(db, source, prepared)
-    result = persist_prepared_records(db, source, delivery_id, prepared, prior_hashes, days)
+    result = persist_prepared_records(
+        db, source, delivery_id, prepared, prior_hashes, days, mask_character
+    )
     await invalidate_totals_many(db, [days[key] for key in sorted(result.changed_days)], "ingest")
     await db.flush()
     result.stats["returns_linked"] = await link_returns(db, result.return_reference_keys)

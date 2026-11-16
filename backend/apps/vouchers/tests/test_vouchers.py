@@ -116,7 +116,7 @@ def test_only_expired_unredeemed_vouchers_can_be_escheated():
             await escheat_vouchers(EscheatBody(voucher_numbers=["OLD1", "LIVE"]), db, FINANCE)
         assert live.value.status_code == 422 and "LIVE" in live.value.detail
         done = await escheat_vouchers(EscheatBody(voucher_numbers=["OLD1", "OLD2"]), db, FINANCE)
-        assert done == {"escheated": 2, "amount": Decimal("15")}
+        assert done == {"escheated": 2, "amount": Decimal("15"), "amounts": {"USD": Decimal("15")}}
         with pytest.raises(HTTPException) as gone:
             await redeem_voucher("OLD1", RedeemBody(store_id="S1"), db, FINANCE)
         assert "escheated" in gone.value.detail

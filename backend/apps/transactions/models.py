@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from model_base import Base, utcnow
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -26,8 +26,13 @@ class CanonicalTransaction(Base):
     signed_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     quantity: Mapped[int | None] = mapped_column(Integer)
     store_id: Mapped[str] = mapped_column(String(50), index=True)
+    customer_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    customer_identification_type: Mapped[str | None] = mapped_column(String(50))
+    customer_attributes: Mapped[dict | None] = mapped_column(JSON)
+    user_references: Mapped[dict | None] = mapped_column(JSON)
     register_id: Mapped[str | None] = mapped_column(String(50))
     cashier_id: Mapped[str | None] = mapped_column(String(100))
+    salesperson_id: Mapped[str | None] = mapped_column(String(100))
     channel_id: Mapped[str] = mapped_column(String(50))
     tender_type: Mapped[str | None] = mapped_column(String(50), index=True)
     payment_reference: Mapped[str | None] = mapped_column(String(255), index=True)
@@ -85,6 +90,9 @@ class TransactionLine(Base):
     description: Mapped[str | None] = mapped_column(String(255))
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2))
+    original_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    price_override_reason: Mapped[str | None] = mapped_column(String(255))
+    source_attributes: Mapped[dict | None] = mapped_column(JSON)
     gross_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     tax_code: Mapped[str | None] = mapped_column(String(30))
     tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=0, server_default="0")
@@ -134,3 +142,4 @@ class TransactionTender(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     reference: Mapped[str | None] = mapped_column(String(255))
     authorization: Mapped[str | None] = mapped_column(String(100))
+    source_attributes: Mapped[dict | None] = mapped_column(JSON)

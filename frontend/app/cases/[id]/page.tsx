@@ -8,6 +8,7 @@ import { Alert, Badge, Button, Card, DataTable, Field } from '@/components/ui';
 import { PriorityBadge, StatusBadge } from '@/components/CaseTable';
 import { AgentModeNotice, useAgentMode } from '@/components/AgentMode';
 import { useMe } from '@/components/UserMenu';
+import { formatDateTime } from '@/lib/preferences';
 import {
   api,
   CaseDetail,
@@ -76,7 +77,7 @@ const outcomeTone = (s: string) =>
 const pretty = (s: string) => s.replace(/_/g, ' ');
 const apiError = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback;
-const when = (iso: string) => new Date(iso).toLocaleString();
+const when = (iso: string) => formatDateTime(iso);
 
 function slaInfo(due: string | null) {
   if (!due) return { text: 'No SLA', tone: '' };
@@ -95,11 +96,19 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [error, setError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [validations, setValidations] = useState<Validation[]>([]);
-  const [validationCandidates, setValidationCandidates] = useState<Record<string, ValidationCandidate[]>>({});
-  const [validationCandidatePages, setValidationCandidatePages] = useState<Record<string, ValidationCandidatePage>>({});
-  const [selectedValidationSources, setSelectedValidationSources] = useState<Record<string, string[]>>({});
+  const [validationCandidates, setValidationCandidates] = useState<
+    Record<string, ValidationCandidate[]>
+  >({});
+  const [validationCandidatePages, setValidationCandidatePages] = useState<
+    Record<string, ValidationCandidatePage>
+  >({});
+  const [selectedValidationSources, setSelectedValidationSources] = useState<
+    Record<string, string[]>
+  >({});
   const [validationRationales, setValidationRationales] = useState<Record<string, string>>({});
-  const [loadingValidationCandidates, setLoadingValidationCandidates] = useState<Record<string, boolean>>({});
+  const [loadingValidationCandidates, setLoadingValidationCandidates] = useState<
+    Record<string, boolean>
+  >({});
   const [policies, setPolicies] = useState<PolicyEval[]>([]);
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
@@ -128,6 +137,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     Record<string, { amount: string; exposure: string }>
   >({});
   const [amountReviewReason, setAmountReviewReason] = useState('');
+  const [exceptionOverrideReasons, setExceptionOverrideReasons] = useState<Record<string, string>>(
+    {}
+  );
+  const [exceptionOverrideRejections, setExceptionOverrideRejections] = useState<
+    Record<string, string>
+  >({});
 
   const load = useCallback(async () => {
     try {
@@ -144,20 +159,24 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setDetail(d.data);
       setWorkflows(w.data);
       setValidations(v.data);
-      const candidatePages = await Promise.all(v.data
-        .filter((validation: Validation) => validation.status !== 'Complete')
-        .map(async (validation: Validation) => {
-          try {
-            const response = await api.get<ValidationCandidatePage>(
-              `/api/validations/${validation.id}/candidates`
-            );
-            return [validation.id, response.data] as const;
-          } catch {
-            return [validation.id, { items: [], has_more: false, next_cursor: null }] as const;
-          }
-        }));
+      const candidatePages = await Promise.all(
+        v.data
+          .filter((validation: Validation) => validation.status !== 'Complete')
+          .map(async (validation: Validation) => {
+            try {
+              const response = await api.get<ValidationCandidatePage>(
+                `/api/validations/${validation.id}/candidates`
+              );
+              return [validation.id, response.data] as const;
+            } catch {
+              return [validation.id, { items: [], has_more: false, next_cursor: null }] as const;
+            }
+          })
+      );
       setValidationCandidatePages(Object.fromEntries(candidatePages));
-      setValidationCandidates(Object.fromEntries(candidatePages.map(([validationId, page]) => [validationId, page.items])));
+      setValidationCandidates(
+        Object.fromEntries(candidatePages.map(([validationId, page]) => [validationId, page.items]))
+      );
       setPolicies(p.data);
       setEvidence(e.data);
       setTimeline(t.data);
@@ -176,13 +195,19 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     setLoadingMoreRecords(true);
     try {
       const { event_timestamp, transaction_id } = reconciliation.next_cursor;
-      const params = new URLSearchParams({ cursor_timestamp: event_timestamp, cursor_id: transaction_id });
+      const params = new URLSearchParams({
+        cursor_timestamp: event_timestamp,
+        cursor_id: transaction_id,
+      });
       const response = await api.get(`/api/cases/${id}/reconciliation?${params}`);
-      setReconciliation((current) => current && ({
-        ...response.data,
-        records: [...current.records, ...response.data.records],
-        sources: [...new Set([...current.sources, ...response.data.sources])],
-      }));
+      setReconciliation(
+        (current) =>
+          current && {
+            ...response.data,
+            records: [...current.records, ...response.data.records],
+            sources: [...new Set([...current.sources, ...response.data.sources])],
+          }
+      );
     } catch (e) {
       toast(apiError(e, 'Unable to load more source records.'), 'error');
     } finally {
@@ -202,12 +227,32 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         const truncated = { ...current.truncated, [section]: response.data.has_more };
         const next_cursor = { ...current.next_cursor, [section]: response.data.next_cursor };
         if (section === 'exceptions')
-          return { ...current, exceptions: [...current.exceptions, ...additions], truncated, next_cursor };
+          return {
+            ...current,
+            exceptions: [...current.exceptions, ...additions],
+            truncated,
+            next_cursor,
+          };
         if (section === 'findings')
-          return { ...current, findings: [...current.findings, ...additions], truncated, next_cursor };
+          return {
+            ...current,
+            findings: [...current.findings, ...additions],
+            truncated,
+            next_cursor,
+          };
         if (section === 'recommendations')
-          return { ...current, recommendations: [...current.recommendations, ...additions], truncated, next_cursor };
-        return { ...current, decisions: [...current.decisions, ...additions], truncated, next_cursor };
+          return {
+            ...current,
+            recommendations: [...current.recommendations, ...additions],
+            truncated,
+            next_cursor,
+          };
+        return {
+          ...current,
+          decisions: [...current.decisions, ...additions],
+          truncated,
+          next_cursor,
+        };
       });
     } catch (e) {
       toast(apiError(e, `Unable to load older ${section}.`), 'error');
@@ -267,11 +312,15 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     const sourceRecordIds = selectedValidationSources[vId] ?? [];
     const rationale = validationRationales[vId]?.trim() ?? '';
     if (!sourceRecordIds.length || rationale.length < 10) {
-      toast('Select fresh source records and provide a verification rationale of at least 10 characters.', 'error');
+      toast(
+        'Select fresh source records and provide a verification rationale of at least 10 characters.',
+        'error'
+      );
       return;
     }
     return act(
-      () => api.post(`/api/validations/${vId}/run`, { source_record_ids: sourceRecordIds, rationale }),
+      () =>
+        api.post(`/api/validations/${vId}/run`, { source_record_ids: sourceRecordIds, rationale }),
       'Validation evidence recorded.'
     );
   };
@@ -736,11 +785,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <b>Validate the outcome</b>
                 <p>Expected: {v.expected_observation}</p>
                 <p className="hint">
-                  Select newly received records that demonstrate the outcome and explain how they verify it.
-                  Unrelated transactions cannot complete validation.
+                  Select newly received records that demonstrate the outcome and explain how they
+                  verify it. Unrelated transactions cannot complete validation.
                 </p>
                 {(validationCandidates[v.id] ?? []).length === 0 ? (
-                  <p className="cc-empty">No new source records have arrived for this store day yet.</p>
+                  <p className="cc-empty">
+                    No new source records have arrived for this store day yet.
+                  </p>
                 ) : (
                   <div className="case-stack">
                     {(validationCandidates[v.id] ?? []).map((candidate) => {
@@ -752,16 +803,23 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             type="checkbox"
                             checked={checked}
                             disabled={!checked && selected.length >= 500}
-                            onChange={() => setSelectedValidationSources((current) => ({
-                              ...current,
-                              [v.id]: checked
-                                ? selected.filter((sourceId) => sourceId !== candidate.source_record_id)
-                                : [...selected, candidate.source_record_id],
-                            }))}
+                            onChange={() =>
+                              setSelectedValidationSources((current) => ({
+                                ...current,
+                                [v.id]: checked
+                                  ? selected.filter(
+                                      (sourceId) => sourceId !== candidate.source_record_id
+                                    )
+                                  : [...selected, candidate.source_record_id],
+                              }))
+                            }
                           />{' '}
-                          <b>{candidate.source_system} {candidate.transaction_type}</b>
+                          <b>
+                            {candidate.source_system} {candidate.transaction_type}
+                          </b>
                           <span>
-                            {money(candidate.amount, candidate.currency)} · {when(candidate.received_at)}
+                            {money(candidate.amount, candidate.currency)} ·{' '}
+                            {when(candidate.received_at)}
                             {candidate.payment_reference || candidate.settlement_reference
                               ? ` · ${candidate.payment_reference || candidate.settlement_reference}`
                               : ''}
@@ -775,7 +833,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         disabled={loadingValidationCandidates[v.id]}
                         onClick={() => loadMoreValidationCandidates(v.id)}
                       >
-                        {loadingValidationCandidates[v.id] ? 'Loading…' : 'Load more candidate records'}
+                        {loadingValidationCandidates[v.id]
+                          ? 'Loading…'
+                          : 'Load more candidate records'}
                       </Button>
                     )}
                   </div>
@@ -785,10 +845,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   <textarea
                     rows={2}
                     value={validationRationales[v.id] ?? ''}
-                    onChange={(event) => setValidationRationales((current) => ({
-                      ...current,
-                      [v.id]: event.target.value,
-                    }))}
+                    onChange={(event) =>
+                      setValidationRationales((current) => ({
+                        ...current,
+                        [v.id]: event.target.value,
+                      }))
+                    }
                     placeholder="Explain what in the selected records confirms this workflow succeeded."
                     style={{ width: '100%', marginTop: 6 }}
                   />
@@ -796,7 +858,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
               <Button
                 variant="primary"
-                disabled={busy || !(selectedValidationSources[v.id]?.length) || (validationRationales[v.id]?.trim().length ?? 0) < 10}
+                disabled={
+                  busy ||
+                  !selectedValidationSources[v.id]?.length ||
+                  (validationRationales[v.id]?.trim().length ?? 0) < 10
+                }
                 onClick={() => validate(v.id)}
               >
                 Run validation
@@ -876,6 +942,19 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   },
                   { key: 'c1', header: 'Source', render: (x) => x.source_system },
                   {
+                    key: 'c1b',
+                    header: 'Rule',
+                    render: (x) => x.detection_rule_name ?? '—',
+                  },
+                  {
+                    key: 'c1a',
+                    header: 'Balance group',
+                    render: (x) =>
+                      x.balance_level
+                        ? `${x.balance_level}${x.balance_dimension ? ` · ${x.balance_dimension}` : ''}`
+                        : '—',
+                  },
+                  {
                     key: 'c2',
                     header: 'Amount',
                     numeric: true,
@@ -897,10 +976,162 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 rowKey={(x) => String(x.id)}
               />
             )}
+            {exceptions.length > 0 && (
+              <div className="stack-sm">
+                <h3>Sales audit error disposition</h3>
+                <p className="hint">
+                  An analyst may request an override with a rationale. Finance must approve or
+                  reject it with a reason; the requester cannot review their own request.
+                </p>
+                {exceptions.map((item) => {
+                  const path = `/api/audit-errors/${encodeURIComponent(item.exception_type)}/exceptions/${item.id}/override`;
+                  const canRequest =
+                    me?.role === 'analyst' && item.status === 'Open' && !item.override_requested_by;
+                  const canReview =
+                    me?.role === 'finance' &&
+                    !!item.override_requested_by &&
+                    !item.override_approved_at;
+                  return (
+                    <div
+                      key={item.id}
+                      className="check-row"
+                      style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}
+                    >
+                      <div className="grow">
+                        <b>{pretty(item.exception_type)}</b> · {item.status}
+                        {item.override_reason && (
+                          <small className="act-sub">Reason: {item.override_reason}</small>
+                        )}
+                        {item.override_requested_by && (
+                          <small className="act-sub">
+                            Requested by {item.override_requested_by}
+                            {item.override_approved_by
+                              ? ` · Approved by ${item.override_approved_by}`
+                              : ' · Finance approval pending'}
+                          </small>
+                        )}
+                      </div>
+                      {canRequest && (
+                        <div className="stack-sm" style={{ minWidth: 280 }}>
+                          <Field label="Override rationale">
+                            <input
+                              value={exceptionOverrideReasons[item.id] ?? ''}
+                              onChange={(e) =>
+                                setExceptionOverrideReasons((current) => ({
+                                  ...current,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                              maxLength={4000}
+                              placeholder="Why is this error acceptable for this case?"
+                            />
+                          </Field>
+                          <Button
+                            size="sm"
+                            disabled={
+                              busy || (exceptionOverrideReasons[item.id] ?? '').trim().length < 10
+                            }
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
+                                await api.post(path, {
+                                  reason: exceptionOverrideReasons[item.id].trim(),
+                                });
+                                setExceptionOverrideReasons((current) => ({
+                                  ...current,
+                                  [item.id]: '',
+                                }));
+                                toast('Override sent to Finance for approval.', 'success');
+                                await load();
+                              } catch (e) {
+                                toast(apiError(e, 'Could not request the override.'), 'error');
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            Request override
+                          </Button>
+                        </div>
+                      )}
+                      {canReview && (
+                        <div className="stack-sm" style={{ minWidth: 280 }}>
+                          <Button
+                            size="sm"
+                            disabled={busy}
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
+                                await api.post(`${path}/approve`);
+                                toast('Audit error override approved.', 'success');
+                                await load();
+                              } catch (e) {
+                                toast(apiError(e, 'Could not approve the override.'), 'error');
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            Approve override
+                          </Button>
+                          <Field label="Reason for rejection">
+                            <input
+                              value={exceptionOverrideRejections[item.id] ?? ''}
+                              onChange={(e) =>
+                                setExceptionOverrideRejections((current) => ({
+                                  ...current,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                              maxLength={4000}
+                              placeholder="Explain what evidence or action is still required"
+                            />
+                          </Field>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={
+                              busy ||
+                              (exceptionOverrideRejections[item.id] ?? '').trim().length < 10
+                            }
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
+                                await api.post(`${path}/reject`, {
+                                  reason: exceptionOverrideRejections[item.id].trim(),
+                                });
+                                setExceptionOverrideRejections((current) => ({
+                                  ...current,
+                                  [item.id]: '',
+                                }));
+                                toast(
+                                  'Override rejected; the exception can be reviewed again.',
+                                  'success'
+                                );
+                                await load();
+                              } catch (e) {
+                                toast(apiError(e, 'Could not reject the override.'), 'error');
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            Reject with reason
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {detail.truncated.exceptions && (
               <div className="case-actions">
-                <Button variant="secondary" disabled={loadingHistory.exceptions}
-                  onClick={() => loadMoreHistory('exceptions')}>
+                <Button
+                  variant="secondary"
+                  disabled={loadingHistory.exceptions}
+                  onClick={() => loadMoreHistory('exceptions')}
+                >
                   {loadingHistory.exceptions ? 'Loading…' : 'Load older exceptions'}
                 </Button>
               </div>
@@ -925,8 +1156,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             )}
             {detail.truncated.findings && (
               <div className="case-actions">
-                <Button variant="secondary" disabled={loadingHistory.findings}
-                  onClick={() => loadMoreHistory('findings')}>
+                <Button
+                  variant="secondary"
+                  disabled={loadingHistory.findings}
+                  onClick={() => loadMoreHistory('findings')}
+                >
                   {loadingHistory.findings ? 'Loading…' : 'Load older findings'}
                 </Button>
               </div>
@@ -968,8 +1202,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               ))}
               {detail.truncated.recommendations && (
                 <div className="case-actions">
-                  <Button variant="secondary" disabled={loadingHistory.recommendations}
-                    onClick={() => loadMoreHistory('recommendations')}>
+                  <Button
+                    variant="secondary"
+                    disabled={loadingHistory.recommendations}
+                    onClick={() => loadMoreHistory('recommendations')}
+                  >
                     {loadingHistory.recommendations ? 'Loading…' : 'Load older recommendations'}
                   </Button>
                 </div>
@@ -991,8 +1228,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               ))}
               {detail.truncated.decisions && (
                 <div className="case-actions">
-                  <Button variant="secondary" disabled={loadingHistory.decisions}
-                    onClick={() => loadMoreHistory('decisions')}>
+                  <Button
+                    variant="secondary"
+                    disabled={loadingHistory.decisions}
+                    onClick={() => loadMoreHistory('decisions')}
+                  >
                     {loadingHistory.decisions ? 'Loading…' : 'Load older decisions'}
                   </Button>
                 </div>
@@ -1102,7 +1342,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 </div>
                 {reconciliation.has_more && (
                   <div className="case-actions">
-                    <Button variant="secondary" disabled={loadingMoreRecords} onClick={loadMoreRecords}>
+                    <Button
+                      variant="secondary"
+                      disabled={loadingMoreRecords}
+                      onClick={loadMoreRecords}
+                    >
                       {loadingMoreRecords ? 'Loading…' : 'Load more source records'}
                     </Button>
                   </div>

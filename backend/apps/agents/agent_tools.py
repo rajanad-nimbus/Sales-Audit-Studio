@@ -12,11 +12,13 @@ from integrations.ontology.ontology_integration import integration as ontology_i
 from sqlalchemy import select
 
 from apps.ingest.models import SourceRecord
+from apps.security.sensitive_data import redact_sensitive_preview
 from apps.store_days.models import (
     AuditTotal,
     StoreDay,
 )
 from apps.transactions.models import CanonicalTransaction
+from apps.transactions.views import redact_customer_id_preview
 
 MAX_ROWS = 25
 MAX_PAYLOAD_CHARS = 1500
@@ -154,10 +156,11 @@ class EvidenceTools:
         if not rec:
             return {"error": "not found"}
         text = rec.payload.decode("utf-8", "replace")
+        preview = redact_sensitive_preview(redact_customer_id_preview(text[:MAX_PAYLOAD_CHARS]))
         return {
             "source_record_id": rec.id,
             "source_system": rec.source_system,
-            "payload": text[:MAX_PAYLOAD_CHARS],
+            "payload": preview,
             "truncated": len(text) > MAX_PAYLOAD_CHARS,
         }
 
@@ -226,6 +229,7 @@ class EvidenceTools:
                     "total_id": r.id,
                     "name": r.total_name,
                     "dimension": r.dimension_key,
+                    "rollup_key": r.rollup_key,
                     "calculated": _money(r.calculated_amount),
                     "declared": _money(r.declared_amount),
                     "variance": _money(r.variance_amount),

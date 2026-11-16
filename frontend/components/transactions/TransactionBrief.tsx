@@ -1,4 +1,5 @@
 'use client';
+import { formatNumber } from '@/lib/preferences';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
@@ -81,7 +82,7 @@ export function TransactionBrief({ id }: { id: string }) {
       {brief.line_count > 0 && (
         <div>
           <b>
-            {brief.line_count.toLocaleString()} line{brief.line_count === 1 ? '' : 's'}
+            {formatNumber(brief.line_count)} line{brief.line_count === 1 ? '' : 's'}
           </b>
           <ul>
             {brief.lines.map((l) => (

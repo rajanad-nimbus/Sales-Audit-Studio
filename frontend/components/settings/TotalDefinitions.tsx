@@ -1,6 +1,9 @@
 'use client';
-import { useMemo, useState } from 'react';
-import { api } from '@/lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, money } from '@/lib/api';
+import { apiError } from '@/lib/storeDays';
+import { downloadBlob } from '@/lib/csv';
+import { StoreSelect } from '@/components/StoreSelect';
 import { useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import {
@@ -14,6 +17,8 @@ import {
   MetricGrid,
   MetricTile,
 } from '@/components/ui';
+import type { Column } from '@/components/ui';
+import { formatDateTime, formatNumber } from '@/lib/preferences';
 
 /** One stored revision, as returned by GET /api/total-definitions. */
 export type TotalRevision = {
@@ -24,6 +29,9 @@ export type TotalRevision = {
   description: string | null;
   aggregation: string;
   measure: string;
+  parameters?: { realm: RestrictionRealm; field: string }[];
+  rollups?: { realm: RestrictionRealm; field: string }[];
+  usages?: { destination_id: string }[];
   source_system: string | null;
   transaction_types: string[];
   tender_type: string | null;
@@ -33,6 +41,7 @@ export type TotalRevision = {
   end_date: string | null;
   calculation_basis: string;
   combined_total_ids: string[];
+  combined_total_operators?: string[];
   combined_operator: string | null;
   updated_by: string | null;
   submitted_by?: string | null;
@@ -88,6 +97,17 @@ type Impact = {
   rows: ImpactRow[];
 };
 
+type CalculationPreview = {
+  definition: TotalRevision;
+  store_id: string;
+  business_date: string;
+  value: number | string;
+  currency: string | null;
+  record_count: number | null;
+  dimensions: { dimension: string | null; rollup_key?: string | null; value: number | string }[];
+};
+type ExportDestination = { id: string; name: string; enabled: boolean };
+
 /** Every revision of one total: the one in use, and a newer draft (or submission) if there is one. */
 type TotalGroup = { name: string; live: TotalRevision | null; draft: TotalRevision | null };
 
@@ -95,6 +115,63 @@ const DRAFT = 'Worksheet';
 const PENDING = 'Pending Approval';
 const notLive = (row: TotalRevision) => row.status === DRAFT || row.status === PENDING;
 const LEVELS = ['Store', 'Register', 'Cashier', 'Tender'];
+type RestrictionRealm = 'Transaction' | 'Line' | 'Tax' | 'Tender' | 'Discount';
+type Restriction = {
+  realm: RestrictionRealm;
+  field: string;
+  operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'is_empty' | 'not_empty';
+  value: string;
+};
+const restrictionFields: Record<
+  RestrictionRealm,
+  { key: string; label: string; numeric?: boolean }[]
+> = {
+  Transaction: [
+    { key: 'transaction_type', label: 'Record type' },
+    { key: 'transaction_subtype', label: 'Subtype' },
+    { key: 'source_lineage', label: 'Source' },
+    { key: 'currency', label: 'Currency' },
+    { key: 'signed_amount', label: 'Signed amount', numeric: true },
+    { key: 'quantity', label: 'Quantity', numeric: true },
+    { key: 'register_id', label: 'Register' },
+    { key: 'cashier_id', label: 'Cashier' },
+    { key: 'salesperson_id', label: 'Salesperson' },
+    { key: 'channel_id', label: 'Channel' },
+    { key: 'tender_type', label: 'Tender type' },
+    { key: 'detail_status', label: 'Detail status' },
+    { key: 'return_reason', label: 'Return reason' },
+    { key: 'transaction_number', label: 'Transaction number' },
+    { key: 'business_date', label: 'Business date' },
+  ],
+  Line: [
+    { key: 'item_code', label: 'Item code' },
+    { key: 'quantity', label: 'Line quantity', numeric: true },
+    { key: 'unit_price', label: 'Unit price', numeric: true },
+    { key: 'gross_amount', label: 'Gross amount', numeric: true },
+    { key: 'tax_code', label: 'Tax code' },
+    { key: 'tax_amount', label: 'Tax amount', numeric: true },
+    { key: 'return_reason', label: 'Return reason' },
+  ],
+  Tax: [
+    { key: 'tax_code', label: 'Tax code' },
+    { key: 'tax_name', label: 'Tax name' },
+    { key: 'rate', label: 'Tax rate', numeric: true },
+    { key: 'taxable_amount', label: 'Taxable amount', numeric: true },
+    { key: 'tax_amount', label: 'Tax amount', numeric: true },
+  ],
+  Tender: [
+    { key: 'tender_type', label: 'Tender type' },
+    { key: 'amount', label: 'Amount', numeric: true },
+    { key: 'reference', label: 'Reference' },
+    { key: 'authorization', label: 'Authorization' },
+  ],
+  Discount: [
+    { key: 'kind', label: 'Kind' },
+    { key: 'code', label: 'Code' },
+    { key: 'description', label: 'Description' },
+    { key: 'amount', label: 'Amount', numeric: true },
+  ],
+};
 // Fields the server owns; everything else is carried into the next revision unchanged.
 const SERVER_FIELDS = [
   'id',
@@ -110,7 +187,8 @@ const SERVER_FIELDS = [
 ];
 
 const number = (v: string | number | null) =>
-  v === null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  v === null ? '—' : formatNumber(Number(v), { maximumFractionDigits: 2 });
+const measuredValue = (v: string | number) => formatNumber(Number(v), { maximumFractionDigits: 4 });
 const signed = (v: string | number) => (Number(v) > 0 ? `+${number(v)}` : number(v));
 const detail = (e: any, fallback: string) => e?.response?.data?.detail ?? fallback;
 
@@ -128,19 +206,57 @@ function groupRevisions(revisions: TotalRevision[]): TotalGroup[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function calculation(row: TotalRevision) {
-  return row.calculation_basis === 'Combined'
-    ? `Combined (${row.combined_operator || '?'})`
-    : `${row.aggregation} of ${row.measure.toLowerCase()}`;
+function calculation(row: TotalRevision, references: TotalRevision[] = []) {
+  if (row.calculation_basis !== 'Combined') {
+    const measureParameter = row.parameters?.[0];
+    if (measureParameter) {
+      return `${row.aggregation} of ${measureParameter.realm}.${measureParameter.field}${row.rollups?.length ? ` · grouped by ${row.rollups.map((item) => `${item.realm}.${item.field}`).join(', ')}` : ''}`;
+    }
+    return `${row.aggregation} of ${row.measure.toLowerCase()}${row.rollups?.length ? ` · grouped by ${row.rollups.map((item) => `${item.realm}.${item.field}`).join(', ')}` : ''}`;
+  }
+  const operators = row.combined_total_operators?.length
+    ? row.combined_total_operators
+    : [row.combined_operator || '?'];
+  if (!row.combined_total_ids?.length) return `Combined (${operators.join(' ')})`;
+  const names = new Map(references.map((total) => [total.id, total.name]));
+  return (
+    row.combined_total_ids
+      .map(
+        (id, index) =>
+          `${index > 0 ? `${operators[index - 1] ?? '?'} ` : ''}${names.get(id) ?? 'Unavailable total'}`
+      )
+      .join(' ') +
+    (row.rollups?.length
+      ? ` · grouped by ${row.rollups.map((item) => `${item.realm}.${item.field}`).join(', ')}`
+      : '')
+  );
 }
 
 function filter(row: TotalRevision) {
   return [...row.transaction_types, row.tender_type].filter(Boolean).join(', ') || 'All records';
 }
 
+function restrictionSummary(row: TotalRevision) {
+  if (!Array.isArray(row.restrictions) || row.restrictions.length === 0) return 'None';
+  return (row.restrictions as Restriction[])
+    .map((item) => {
+      const operator = item.operator.replaceAll('_', ' ');
+      const value = ['is_empty', 'not_empty'].includes(item.operator) ? '' : ` ${item.value}`;
+      return `${item.realm}.${item.field} ${operator}${value}`;
+    })
+    .join(' AND ');
+}
+
 function dates(row: TotalRevision) {
   if (!row.start_date && !row.end_date) return 'Always';
   return `${row.start_date ?? 'Start'} to ${row.end_date ?? 'open-ended'}`;
+}
+
+function locationTraits(row: TotalRevision | null) {
+  const traits = row?.location_traits;
+  return Array.isArray(traits) && traits.every((trait) => typeof trait === 'string')
+    ? [...traits].sort()
+    : [];
 }
 
 export function TotalDefinitions({
@@ -150,15 +266,107 @@ export function TotalDefinitions({
   revisions: TotalRevision[];
   onChanged: () => Promise<void>;
 }) {
+  const toast = useToast();
+  const { me } = useMe();
   const groups = useMemo(() => groupRevisions(revisions), [revisions]);
+  const totalsById = revisions;
   const [openName, setOpenName] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [packageError, setPackageError] = useState<string | null>(null);
+  const [packagePreview, setPackagePreview] = useState<{
+    fileName: string;
+    bundle: Record<string, unknown>;
+    result: {
+      valid: boolean;
+      preview_token: string | null;
+      errors: { row: number; message: string }[];
+      counts: { worksheets: number; skipped_protected: number };
+      definitions: {
+        row: number;
+        name: string;
+        source_revision: number;
+        target_revision: number;
+        action: string;
+      }[];
+    };
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const packageInput = useRef<HTMLInputElement>(null);
   const open = groups.find((group) => group.name === openName) ?? null;
   const drafts = groups.filter((group) => group.draft?.status === DRAFT).length;
   const awaiting = groups.filter((group) => group.draft?.status === PENDING).length;
 
+  const downloadDefinitionPackage = async () => {
+    setExporting(true);
+    setPackageError(null);
+    try {
+      const { data } = await api.get('/api/total-definitions/package');
+      const date = new Date().toISOString().slice(0, 10);
+      downloadBlob(
+        `audit-total-definitions-${date}.json`,
+        new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
+      );
+      toast('Total definition snapshot downloaded.', 'success');
+    } catch {
+      setPackageError('Could not download total definitions.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const previewDefinitionPackage = async (file?: File) => {
+    if (!file) return;
+    setImporting(true);
+    setPackageError(null);
+    setPackagePreview(null);
+    try {
+      if (file.size > 2_000_000) throw new Error('Snapshots must be smaller than 2 MB.');
+      const bundle = JSON.parse(await file.text()) as Record<string, unknown>;
+      const { data } = await api.post('/api/total-definitions/package/preview', bundle);
+      setPackagePreview({ fileName: file.name, bundle, result: data });
+    } catch (cause) {
+      setPackageError(
+        cause instanceof SyntaxError
+          ? 'The selected file is not valid JSON.'
+          : cause instanceof Error && !('response' in cause)
+            ? cause.message
+            : apiError(cause, 'Could not preview this total definition snapshot.')
+      );
+    } finally {
+      setImporting(false);
+      if (packageInput.current) packageInput.current.value = '';
+    }
+  };
+
+  const applyDefinitionPackage = async () => {
+    if (!packagePreview?.result.valid || !packagePreview.result.preview_token) return;
+    setImporting(true);
+    setPackageError(null);
+    try {
+      const { data } = await api.post('/api/total-definitions/package/apply', {
+        ...packagePreview.bundle,
+        preview_token: packagePreview.result.preview_token,
+      });
+      setPackagePreview(null);
+      await onChanged();
+      toast(`Imported ${data.imported.length} total worksheet(s).`, 'success');
+    } catch (cause) {
+      setPackageError(
+        apiError(cause, 'Could not import this snapshot. Preview it again and retry.')
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <Card title="Audit total definitions">
+      {packageError && (
+        <Alert tone="error" onDismiss={() => setPackageError(null)}>
+          {packageError}
+        </Alert>
+      )}
       <p>
         Live revisions are calculated during Store Day re-totaling. A change is saved as a draft and
         only goes live after its impact on store days is previewed, submitted, and approved by a
@@ -168,6 +376,32 @@ export function TotalDefinitions({
         <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
           New total
         </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!revisions.length || exporting}
+          onClick={() => void downloadDefinitionPackage()}
+        >
+          {exporting ? 'Preparing snapshot…' : 'Download all revisions'}
+        </Button>
+        {(me?.role === 'finance' || me?.role === 'admin') && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={importing}
+            onClick={() => packageInput.current?.click()}
+          >
+            {importing ? 'Preparing import…' : 'Import snapshot'}
+          </Button>
+        )}
+        <input
+          ref={packageInput}
+          type="file"
+          accept=".json,application/json"
+          className="sr-only"
+          aria-label="Choose an audit total definitions snapshot"
+          onChange={(event) => void previewDefinitionPackage(event.currentTarget.files?.[0])}
+        />
         {drafts > 0 && (
           <span className="page-sub">
             {drafts} draft{drafts === 1 ? '' : 's'} waiting to be previewed and submitted.
@@ -175,6 +409,65 @@ export function TotalDefinitions({
         )}
         {awaiting > 0 && <span className="page-sub">{awaiting} awaiting a second approver.</span>}
       </div>
+      {packagePreview && (
+        <div className="stack-sm mt-md">
+          <h3>Import preview: {packagePreview.fileName}</h3>
+          <p>
+            {packagePreview.result.counts.worksheets} worksheet(s) will be created.{' '}
+            {packagePreview.result.counts.skipped_protected} system-required definition(s) will be
+            skipped. All imported totals remain inactive until reviewed and approved.
+          </p>
+          {packagePreview.result.errors.length > 0 && (
+            <Alert tone="error">
+              {packagePreview.result.errors.map((item) => (
+                <div key={`${item.row}-${item.message}`}>
+                  Row {item.row}: {item.message}
+                </div>
+              ))}
+            </Alert>
+          )}
+          {packagePreview.result.definitions.length > 0 && (
+            <DataTable
+              rows={packagePreview.result.definitions}
+              rowKey={(row) => `${row.row}-${row.name}`}
+              columns={[
+                { key: 'name', header: 'Total', primary: true, render: (row) => row.name },
+                {
+                  key: 'revision',
+                  header: 'Revisions',
+                  render: (row) => `${row.source_revision} → ${row.target_revision}`,
+                },
+                { key: 'action', header: 'Action', render: (row) => row.action },
+              ]}
+            />
+          )}
+          <div className="cluster">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={
+                !packagePreview.result.valid ||
+                importing ||
+                (me?.role !== 'finance' && me?.role !== 'admin')
+              }
+              onClick={() => void applyDefinitionPackage()}
+            >
+              {importing ? 'Importing…' : 'Create worksheets'}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={importing}
+              onClick={() => setPackagePreview(null)}
+            >
+              Cancel
+            </Button>
+            {me?.role !== 'finance' && me?.role !== 'admin' && (
+              <span className="page-sub">Finance role is required to create worksheets.</span>
+            )}
+          </div>
+        </div>
+      )}
       <div className="mt-md">
         <DataTable
           rows={groups}
@@ -186,12 +479,32 @@ export function TotalDefinitions({
             {
               key: 'calculation',
               header: 'Calculation',
-              render: (g) => calculation((g.draft ?? g.live)!),
+              render: (g) => calculation((g.draft ?? g.live)!, totalsById),
             },
             {
               key: 'source',
               header: 'Source',
               render: (g) => (g.draft ?? g.live)!.source_system || 'Any',
+            },
+            {
+              key: 'restrictions',
+              header: 'Restrictions',
+              render: (g) => {
+                const count = Array.isArray((g.draft ?? g.live)!.restrictions)
+                  ? ((g.draft ?? g.live)!.restrictions as unknown[]).length
+                  : 0;
+                return count ? `${count} condition${count === 1 ? '' : 's'}` : 'None';
+              },
+            },
+            {
+              key: 'export_usage',
+              header: 'Export usage',
+              render: (g) => {
+                const usages = (g.draft ?? g.live)!.usages ?? [];
+                return usages.length
+                  ? `${usages.length} destination${usages.length === 1 ? '' : 's'}`
+                  : 'All destinations';
+              },
             },
             { key: 'level', header: 'Level', render: (g) => (g.draft ?? g.live)!.level },
             {
@@ -225,6 +538,9 @@ export function TotalDefinitions({
         <TotalDrawer
           key={open.name}
           group={open}
+          availableTotals={groups.flatMap((item) =>
+            item.live && item.live.active ? [item.live] : []
+          )}
           onClose={() => setOpenName(null)}
           onChanged={onChanged}
         />
@@ -233,6 +549,9 @@ export function TotalDefinitions({
         <Drawer title="New total" onClose={() => setCreating(false)}>
           <DraftForm
             base={null}
+            availableTotals={groups.flatMap((group) =>
+              group.live && group.live.active ? [group.live] : []
+            )}
             onCancel={() => setCreating(false)}
             onSaved={async (saved) => {
               await onChanged();
@@ -248,10 +567,12 @@ export function TotalDefinitions({
 
 function TotalDrawer({
   group,
+  availableTotals,
   onClose,
   onChanged,
 }: {
   group: TotalGroup;
+  availableTotals: TotalRevision[];
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
@@ -262,7 +583,13 @@ function TotalDrawer({
   const [busy, setBusy] = useState<'preview' | 'submit' | 'activate' | 'return' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [returnReason, setReturnReason] = useState('');
+  const [testStore, setTestStore] = useState('');
+  const [testDate, setTestDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [calculationPreview, setCalculationPreview] = useState<CalculationPreview | null>(null);
+  const [calculationBusy, setCalculationBusy] = useState(false);
+  const [calculationError, setCalculationError] = useState<string | null>(null);
   const draft = group.draft;
+  const previewTarget = draft ?? group.live;
   const pending = draft?.status === PENDING;
   // The approver must be someone other than the editor and the submitter.
   const ownSubmission =
@@ -282,6 +609,26 @@ function TotalDrawer({
       setError(detail(e, 'Could not preview the impact.'));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const runCalculationPreview = async () => {
+    if (!previewTarget || !testStore || !testDate) return;
+    setCalculationBusy(true);
+    setCalculationError(null);
+    setCalculationPreview(null);
+    try {
+      const { data } = await api.get<CalculationPreview>(
+        `/api/total-definitions/${previewTarget.id}/preview`,
+        { params: { store_id: testStore, business_date: testDate } }
+      );
+      setCalculationPreview(data);
+    } catch (cause) {
+      setCalculationError(
+        detail(cause, 'Could not calculate this total for the selected Store Day.')
+      );
+    } finally {
+      setCalculationBusy(false);
     }
   };
 
@@ -334,9 +681,11 @@ function TotalDrawer({
       >
         <DraftForm
           base={draft ?? group.live}
+          availableTotals={availableTotals}
           onCancel={() => setEditing(false)}
           onSaved={async () => {
             setImpact(null);
+            setCalculationPreview(null);
             await onChanged();
             setEditing(false);
           }}
@@ -406,18 +755,120 @@ function TotalDrawer({
             title={`${pending ? 'Submitted' : 'Draft'} r${draft.revision}`}
             row={draft}
             compare={group.live}
+            references={availableTotals}
           />
         )}
         <RevisionSummary
           title={group.live ? `Live r${group.live.revision}` : 'Not live yet'}
           row={group.live}
+          references={availableTotals}
         />
+        {previewTarget && (
+          <section className="stack stack-sm">
+            <h3>Test calculation</h3>
+            <p className="hint">
+              Read-only calculation using current Store Day data and this saved revision. Save the
+              worksheet first if you have changed its fields.
+            </p>
+            {calculationError && (
+              <Alert tone="error" onDismiss={() => setCalculationError(null)}>
+                {calculationError}
+              </Alert>
+            )}
+            <div className="form-row">
+              <StoreSelect
+                value={testStore}
+                label="Test store"
+                onChange={(value) => {
+                  setTestStore(value);
+                  setCalculationPreview(null);
+                }}
+              />
+              <Field label="Business date">
+                <input
+                  type="date"
+                  value={testDate}
+                  onChange={(event) => {
+                    setTestDate(event.target.value);
+                    setCalculationPreview(null);
+                  }}
+                />
+              </Field>
+              <Button
+                size="sm"
+                disabled={calculationBusy || !testStore || !testDate}
+                onClick={() => void runCalculationPreview()}
+              >
+                {calculationBusy ? 'Calculating…' : 'Calculate total'}
+              </Button>
+            </div>
+            {calculationPreview && (
+              <>
+                <MetricGrid>
+                  <MetricTile
+                    label="Calculated value"
+                    value={
+                      calculationPreview.currency
+                        ? money(calculationPreview.value, calculationPreview.currency)
+                        : measuredValue(calculationPreview.value)
+                    }
+                  />
+                  <MetricTile
+                    label="Records counted"
+                    value={formatNumber(calculationPreview.record_count ?? 0)}
+                  />
+                  <MetricTile
+                    label="Revision"
+                    value={`r${calculationPreview.definition.revision}`}
+                  />
+                </MetricGrid>
+                <DataTable
+                  columns={
+                    [
+                      {
+                        key: 'dimension',
+                        header: previewTarget.level === 'Store' ? 'Total' : previewTarget.level,
+                        primary: true,
+                        render: (row) => row.dimension ?? 'Whole store',
+                      },
+                      {
+                        key: 'rollup_key',
+                        header: 'Roll-up group',
+                        render: (row) => {
+                          if (!row.rollup_key) return '—';
+                          try {
+                            return (JSON.parse(row.rollup_key) as [string, string, unknown][])
+                              .map(([realm, field, value]) => `${realm}.${field}: ${value ?? '—'}`)
+                              .join(' · ');
+                          } catch {
+                            return row.rollup_key;
+                          }
+                        },
+                      },
+                      {
+                        key: 'value',
+                        header: 'Value',
+                        numeric: true,
+                        render: (row) =>
+                          calculationPreview.currency
+                            ? money(row.value, calculationPreview.currency)
+                            : measuredValue(row.value),
+                      },
+                    ] satisfies Column<CalculationPreview['dimensions'][number]>[]
+                  }
+                  rows={calculationPreview.dimensions}
+                  rowKey={(row) => `${row.dimension ?? 'store'}|${row.rollup_key ?? ''}`}
+                  emptyTitle="No matching records"
+                  emptyHint="The selected filters produced no parameter values for this Store Day."
+                />
+              </>
+            )}
+          </section>
+        )}
         {pending && (
           <Alert tone={ownSubmission ? 'info' : 'warning'}>
             Submitted by {draft?.submitted_by ?? 'someone'}
-            {draft?.submitted_at
-              ? ` on ${new Date(draft.submitted_at).toLocaleString()}`
-              : ''}.{' '}
+            {draft?.submitted_at ? ` on ${formatDateTime(draft.submitted_at)}` : ''}.{' '}
             {ownSubmission
               ? 'Another Finance user must review the impact and approve it.'
               : 'Preview the impact; you can approve it only if it is unchanged since submission.'}
@@ -465,10 +916,12 @@ function RevisionSummary({
   title,
   row,
   compare,
+  references,
 }: {
   title: string;
   row: TotalRevision | null;
   compare?: TotalRevision | null;
+  references: TotalRevision[];
 }) {
   if (!row) {
     return (
@@ -479,9 +932,10 @@ function RevisionSummary({
     );
   }
   const items: [string, (r: TotalRevision) => string][] = [
-    ['Calculation', calculation],
+    ['Calculation', (r) => calculation(r, references)],
     ['Source', (r) => r.source_system || 'Any'],
     ['Records', filter],
+    ['Dataset restrictions', restrictionSummary],
     ['Level', (r) => r.level],
     ['Effective', dates],
     ['In use', (r) => (r.active ? 'Yes' : 'No, retired')],
@@ -672,10 +1126,12 @@ function ImpactReport({ impact }: { impact: Impact }) {
 /** Edit form for the next draft revision; fields it does not show are carried over as they are. */
 function DraftForm({
   base,
+  availableTotals,
   onCancel,
   onSaved,
 }: {
   base: TotalRevision | null;
+  availableTotals: TotalRevision[];
   onCancel: () => void;
   onSaved: (saved: TotalRevision) => Promise<void>;
 }) {
@@ -691,10 +1147,105 @@ function DraftForm({
     start_date: base?.start_date ?? '',
     end_date: base?.end_date ?? '',
     active: base?.active ?? true,
+    calculation_basis: base?.calculation_basis ?? 'Raw',
+    combined_total_ids: base?.combined_total_ids ?? [],
+    combined_total_operators: base?.combined_total_operators?.length
+      ? base.combined_total_operators
+      : base?.combined_operator
+        ? Array(Math.max(0, (base.combined_total_ids?.length ?? 0) - 1)).fill(
+            base.combined_operator
+          )
+        : [],
+    parameters: (Array.isArray(base?.parameters) ? base.parameters : []) as {
+      realm: RestrictionRealm;
+      field: string;
+    }[],
+    rollups: (Array.isArray(base?.rollups) ? base.rollups : []) as {
+      realm: RestrictionRealm;
+      field: string;
+    }[],
+    usages: (Array.isArray(base?.usages) ? base.usages : []) as { destination_id: string }[],
+    restrictions: (Array.isArray(base?.restrictions) ? base.restrictions : []) as Restriction[],
   });
+  const [destinations, setDestinations] = useState<ExportDestination[]>([]);
+  const [destinationsLoaded, setDestinationsLoaded] = useState(false);
+  const [destinationsError, setDestinationsError] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .get<ExportDestination[]>('/api/exports/destinations')
+      .then(({ data }) => {
+        setDestinations(data);
+        setDestinationsLoaded(true);
+        setDestinationsError(null);
+      })
+      .catch((cause) => setDestinationsError(detail(cause, 'Could not load export destinations.')));
+  }, []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const combined = base?.calculation_basis === 'Combined';
+  const combined = form.calculation_basis === 'Combined';
+  const expectedTraits = JSON.stringify(locationTraits(base));
+  const componentChoices = availableTotals.filter(
+    (total) =>
+      total.name !== form.name &&
+      total.level === form.level &&
+      total.measure === form.measure &&
+      total.aggregation === form.aggregation &&
+      JSON.stringify(total.parameters ?? []) === JSON.stringify(form.parameters) &&
+      JSON.stringify(total.rollups ?? []) === JSON.stringify(form.rollups) &&
+      JSON.stringify(locationTraits(total)) === expectedTraits
+  );
+  const formulaValid =
+    !combined ||
+    (form.combined_total_ids.length >= 2 &&
+      form.combined_total_ids.every((id) => componentChoices.some((total) => total.id === id)) &&
+      form.combined_total_operators.length === form.combined_total_ids.length - 1);
+  const restrictionsValid = form.restrictions.every(
+    (restriction) =>
+      ['is_empty', 'not_empty'].includes(restriction.operator) ||
+      restriction.value.trim().length > 0
+  );
+  const parameter = form.parameters[0];
+  const validRollupRealms = combined
+    ? Object.keys(restrictionFields)
+    : [...new Set(['Transaction', parameter?.realm ?? 'Transaction'])];
+  const rollupOptions = validRollupRealms.flatMap((realm) =>
+    restrictionFields[realm as RestrictionRealm].map((field) => ({
+      value: `${realm}.${field.key}`,
+      label: `${realm} · ${field.label}`,
+    }))
+  );
+  const parameterFields = parameter ? restrictionFields[parameter.realm] : [];
+  const parameterField = parameterFields.find((field) => field.key === parameter?.field);
+  const parameterValid =
+    !parameter || form.aggregation === 'Count' || parameterField?.numeric === true;
+  const parameterOptions = Object.entries(restrictionFields).flatMap(([realm, fields]) =>
+    fields
+      .filter((field) => form.aggregation === 'Count' || field.numeric)
+      .map((field) => ({
+        value: `${realm}.${field.key}`,
+        label: `${realm} · ${field.label}`,
+      }))
+  );
+  const addComponent = () => {
+    const next = componentChoices.find((total) => !form.combined_total_ids.includes(total.id));
+    if (!next || form.combined_total_ids.length >= 20) return;
+    setForm({
+      ...form,
+      combined_total_ids: [...form.combined_total_ids, next.id],
+      combined_total_operators:
+        form.combined_total_ids.length > 0
+          ? [...form.combined_total_operators, '+']
+          : form.combined_total_operators,
+    });
+  };
+  const removeLastComponent = () => {
+    if (form.combined_total_ids.length <= 1) return;
+    setForm({
+      ...form,
+      combined_total_ids: form.combined_total_ids.slice(0, -1),
+      combined_total_operators: form.combined_total_operators.slice(0, -1),
+    });
+  };
   const set = (field: keyof typeof form) => (e: React.ChangeEvent<any>) =>
     setForm({ ...form, [field]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
 
@@ -717,6 +1268,22 @@ function DraftForm({
         .filter(Boolean),
       start_date: form.start_date || null,
       end_date: form.end_date || null,
+      calculation_basis: form.calculation_basis,
+      parameters: combined ? [] : form.parameters,
+      rollups: form.rollups,
+      usages: form.usages,
+      combined_total_ids: combined ? form.combined_total_ids : [],
+      combined_total_operators: combined ? form.combined_total_operators : [],
+      restrictions: combined
+        ? []
+        : form.restrictions.map((item) => ({
+            ...item,
+            value: ['is_empty', 'not_empty'].includes(item.operator) ? null : item.value,
+          })),
+      combined_operator:
+        combined && form.combined_total_ids.length === 2
+          ? (form.combined_total_operators[0] ?? base?.combined_operator ?? null)
+          : null,
       status: DRAFT,
     };
     try {
@@ -750,12 +1317,26 @@ function DraftForm({
       <Field label="Description">
         <textarea rows={2} value={form.description} onChange={set('description')} />
       </Field>
+      <Field label="Calculation basis">
+        <select
+          value={form.calculation_basis}
+          onChange={(event) =>
+            setForm({
+              ...form,
+              calculation_basis: event.target.value,
+              ...(event.target.value === 'Combined'
+                ? { parameters: [], restrictions: [] }
+                : { rollups: form.rollups.filter((item) => item.realm === 'Transaction') }),
+            })
+          }
+        >
+          <option value="Raw">Raw transaction data</option>
+          <option value="Combined">Formula from other totals</option>
+        </select>
+      </Field>
       {combined ? (
-        <p className="hint">
-          This is a combined total. Its operands and operator are kept as they are.
-        </p>
-      ) : (
-        <>
+        <fieldset className="stack stack-sm">
+          <legend>Combined-total formula</legend>
           <div className="form-row">
             <Field label="Aggregation">
               <select value={form.aggregation} onChange={set('aggregation')}>
@@ -770,6 +1351,140 @@ function DraftForm({
               </select>
             </Field>
           </div>
+          <p className="hint">
+            Choose 2 to 20 compatible live totals. Operators are evaluated left to right, so each
+            step is explicit in the formula.
+          </p>
+          {form.combined_total_ids.map((id, index) => {
+            const selected = componentChoices.find((total) => total.id === id);
+            return (
+              <div className="form-row" key={`${index}-${id}`}>
+                {index > 0 && (
+                  <Field label={`Operator ${index}`}>
+                    <select
+                      value={form.combined_total_operators[index - 1] ?? '+'}
+                      onChange={(event) => {
+                        const operators = [...form.combined_total_operators];
+                        operators[index - 1] = event.target.value;
+                        setForm({ ...form, combined_total_operators: operators });
+                      }}
+                    >
+                      <option value="+">Add (+)</option>
+                      <option value="-">Subtract (−)</option>
+                    </select>
+                  </Field>
+                )}
+                <Field label={`Total ${index + 1}`}>
+                  <select
+                    value={id}
+                    onChange={(event) => {
+                      const identifiers = [...form.combined_total_ids];
+                      identifiers[index] = event.target.value;
+                      setForm({ ...form, combined_total_ids: identifiers });
+                    }}
+                  >
+                    {!selected && <option value={id}>Unavailable or retired total</option>}
+                    {componentChoices.map((total) => (
+                      <option
+                        key={total.id}
+                        value={total.id}
+                        disabled={total.id !== id && form.combined_total_ids.includes(total.id)}
+                      >
+                        {total.name} · {total.level}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            );
+          })}
+          {componentChoices.length < 2 && (
+            <Alert tone="warning">At least two other live totals are required for a formula.</Alert>
+          )}
+          <div className="cluster">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={
+                form.combined_total_ids.length >= 20 ||
+                componentChoices.length <= form.combined_total_ids.length
+              }
+              onClick={addComponent}
+            >
+              Add total
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={form.combined_total_ids.length <= 2}
+              onClick={removeLastComponent}
+            >
+              Remove last total
+            </Button>
+          </div>
+        </fieldset>
+      ) : (
+        <>
+          <div className="form-row">
+            <Field label="Aggregation">
+              <select
+                value={form.aggregation}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    aggregation: event.target.value,
+                    measure: event.target.value === 'Count' ? 'Amount' : form.measure,
+                    parameters:
+                      event.target.value === 'Sum' && parameter && !parameterField?.numeric
+                        ? []
+                        : form.parameters,
+                  })
+                }
+              >
+                <option>Sum</option>
+                <option>Count</option>
+              </select>
+            </Field>
+            <Field
+              label="Parameter to sum or count"
+              hint="Leave on default to use transaction amount or tax."
+            >
+              <select
+                value={parameter ? `${parameter.realm}.${parameter.field}` : ''}
+                onChange={(event) => {
+                  const [realm, field] = event.target.value.split('.');
+                  setForm({
+                    ...form,
+                    measure: event.target.value ? 'Amount' : form.measure,
+                    parameters: event.target.value
+                      ? [{ realm: realm as RestrictionRealm, field }]
+                      : [],
+                    rollups: form.rollups.filter(
+                      (item) => item.realm === 'Transaction' || item.realm === realm
+                    ),
+                  });
+                }}
+              >
+                <option value="">Default transaction amount or tax</option>
+                {parameterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {!parameter && (
+              <Field label="Default measure">
+                <select value={form.measure} onChange={set('measure')}>
+                  <option>Amount</option>
+                  {form.aggregation === 'Sum' && <option>Tax</option>}
+                </select>
+              </Field>
+            )}
+          </div>
+          {!parameterValid && (
+            <Alert tone="error">Sum requires a numeric parameter. Choose another field.</Alert>
+          )}
           <Field label="Source system" hint="Leave empty for any source.">
             <input value={form.source_system} onChange={set('source_system')} />
           </Field>
@@ -779,8 +1494,240 @@ function DraftForm({
           <Field label="Tender type" hint="Leave empty for every tender.">
             <input value={form.tender_type} onChange={set('tender_type')} />
           </Field>
+          <fieldset className="stack stack-sm">
+            <legend>Dataset restrictions</legend>
+            <p className="hint">
+              Conditions in each realm use AND. Each related realm must have at least one matching
+              record; line, tender, and discount records are not multiplied into the total.
+            </p>
+            {form.restrictions.map((restriction, index) => {
+              const realmFields = restrictionFields[restriction.realm];
+              const selectedField = realmFields.find((field) => field.key === restriction.field);
+              const operators = selectedField?.numeric
+                ? ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'is_empty', 'not_empty']
+                : ['eq', 'ne', 'contains', 'is_empty', 'not_empty'];
+              return (
+                <div className="form-row" key={`restriction-${index}`}>
+                  <Field label={`Realm ${index + 1}`}>
+                    <select
+                      value={restriction.realm}
+                      onChange={(event) => {
+                        const realm = event.target.value as RestrictionRealm;
+                        const next = [...form.restrictions];
+                        next[index] = {
+                          realm,
+                          field: restrictionFields[realm][0].key,
+                          operator: restrictionFields[realm][0].numeric ? 'gt' : 'eq',
+                          value: '',
+                        };
+                        setForm({ ...form, restrictions: next });
+                      }}
+                    >
+                      {Object.keys(restrictionFields).map((realm) => (
+                        <option key={realm}>{realm}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Field">
+                    <select
+                      value={restriction.field}
+                      onChange={(event) => {
+                        const field = realmFields.find((item) => item.key === event.target.value)!;
+                        const next = [...form.restrictions];
+                        next[index] = {
+                          ...restriction,
+                          field: field.key,
+                          operator: field.numeric ? 'gt' : 'eq',
+                          value: '',
+                        };
+                        setForm({ ...form, restrictions: next });
+                      }}
+                    >
+                      {realmFields.map((field) => (
+                        <option key={field.key} value={field.key}>
+                          {field.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Condition">
+                    <select
+                      value={restriction.operator}
+                      onChange={(event) => {
+                        const next = [...form.restrictions];
+                        next[index] = {
+                          ...restriction,
+                          operator: event.target.value as Restriction['operator'],
+                          value: '',
+                        };
+                        setForm({ ...form, restrictions: next });
+                      }}
+                    >
+                      {operators.map((operator) => (
+                        <option key={operator} value={operator}>
+                          {operator.replaceAll('_', ' ')}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {!['is_empty', 'not_empty'].includes(restriction.operator) && (
+                    <Field label="Value">
+                      <input
+                        type={selectedField?.numeric ? 'number' : 'text'}
+                        step="any"
+                        value={restriction.value}
+                        onChange={(event) => {
+                          const next = [...form.restrictions];
+                          next[index] = { ...restriction, value: event.target.value };
+                          setForm({ ...form, restrictions: next });
+                        }}
+                      />
+                    </Field>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        restrictions: form.restrictions.filter((_, i) => i !== index),
+                      })
+                    }
+                  >
+                    Remove
+                  </Button>
+                </div>
+              );
+            })}
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={form.restrictions.length >= 100}
+              onClick={() =>
+                setForm({
+                  ...form,
+                  restrictions: [
+                    ...form.restrictions,
+                    { realm: 'Line', field: 'item_code', operator: 'eq', value: '' },
+                  ],
+                })
+              }
+            >
+              Add restriction
+            </Button>
+          </fieldset>
         </>
       )}
+      <fieldset className="stack stack-sm">
+        <legend>Roll-up groups</legend>
+        <p className="hint">
+          Split this total into up to three groups. The balancing level remains the store, register,
+          cashier, or tender dimension used for reconciliation.
+        </p>
+        {form.rollups.map((rollup, index) => (
+          <div className="form-row" key={`rollup-${index}`}>
+            <Field label={`Group field ${index + 1}`}>
+              <select
+                value={`${rollup.realm}.${rollup.field}`}
+                onChange={(event) => {
+                  const [realm, field] = event.target.value.split('.') as [
+                    RestrictionRealm,
+                    string,
+                  ];
+                  const next = [...form.rollups];
+                  next[index] = { realm, field };
+                  setForm({ ...form, rollups: next });
+                }}
+              >
+                {rollupOptions.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    disabled={form.rollups.some(
+                      (selected, selectedIndex) =>
+                        selectedIndex !== index &&
+                        `${selected.realm}.${selected.field}` === option.value
+                    )}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                setForm({ ...form, rollups: form.rollups.filter((_, i) => i !== index) })
+              }
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={
+            form.rollups.length >= 3 ||
+            rollupOptions.every((item) =>
+              form.rollups.some((selected) => `${selected.realm}.${selected.field}` === item.value)
+            )
+          }
+          onClick={() => {
+            const next = rollupOptions.find(
+              (item) =>
+                !form.rollups.some(
+                  (selected) => `${selected.realm}.${selected.field}` === item.value
+                )
+            );
+            if (!next) return;
+            const [realm, field] = next.value.split('.') as [RestrictionRealm, string];
+            setForm({ ...form, rollups: [...form.rollups, { realm, field }] });
+          }}
+        >
+          Add group field
+        </Button>
+      </fieldset>
+      <fieldset className="stack stack-sm">
+        <legend>Export usage</legend>
+        <p className="hint">
+          Choose which destinations receive this total. With no destinations selected, the total
+          remains available to every destination.
+        </p>
+        {destinationsError && <Alert tone="warning">{destinationsError}</Alert>}
+        {!destinationsLoaded && !destinationsError && <p className="hint">Loading destinations…</p>}
+        {destinations.map((destination) => (
+          <label className="cluster" key={destination.id}>
+            <input
+              type="checkbox"
+              checked={form.usages.some((usage) => usage.destination_id === destination.id)}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  usages: event.target.checked
+                    ? [...form.usages, { destination_id: destination.id }]
+                    : form.usages.filter((usage) => usage.destination_id !== destination.id),
+                })
+              }
+            />
+            {destination.name}
+            {!destination.enabled ? ' · disabled' : ''}
+          </label>
+        ))}
+        {destinationsLoaded &&
+          form.usages
+            .filter(
+              (usage) =>
+                !destinations.some((destination) => destination.id === usage.destination_id)
+            )
+            .map((usage) => (
+              <Alert key={usage.destination_id} tone="warning">
+                A configured destination is unavailable ({usage.destination_id}). Remove it before
+                saving this revision.
+              </Alert>
+            ))}
+      </fieldset>
       <Field label="Balancing level">
         <select value={form.level} onChange={set('level')}>
           {LEVELS.map((level) => (
@@ -804,7 +1751,9 @@ function DraftForm({
         <Button
           size="sm"
           variant="primary"
-          disabled={saving || !form.name.trim()}
+          disabled={
+            saving || !form.name.trim() || !formulaValid || !restrictionsValid || !parameterValid
+          }
           onClick={() => void save()}
         >
           {saving ? 'Saving…' : 'Save draft'}

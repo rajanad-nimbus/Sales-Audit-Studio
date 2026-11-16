@@ -87,11 +87,15 @@ describe('Store day detail: completeness and readiness', () => {
   it('lists the transaction numbers missing from each register', async () => {
     await open(detail(), ME('finance'), {
       [`GET ${DAY}/sequence-gaps`]: {
-        registers: [{ register_id: 'R1', missing: [4, 9], count: 2 }],
+        registers: [{ register_id: 'R1', missing: [4, 9], count: 2, dismissed: [] }],
       },
     });
-    expect(await screen.findByText(/missing from 1 register/)).toBeInTheDocument();
-    expect(screen.getByText('R1: 4, 9')).toBeInTheDocument();
+    expect(await screen.findByText(/2 transaction numbers are missing/)).toBeInTheDocument();
+    expect(screen.getByText(/R1: 4, 9/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Review gaps' }));
+    expect(screen.getByRole('heading', { name: 'Register R1' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '4' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '9' })).toBeInTheDocument();
   });
 
   it('still opens the day when the gap check is unavailable', async () => {
@@ -295,5 +299,74 @@ describe('Store day detail: reopening', () => {
     await open(closed());
     await userEvent.click(screen.getByRole('button', { name: 'Reopen…' }));
     expect(screen.getByText('This Store Day has never been reopened.')).toBeInTheDocument();
+  });
+});
+
+describe('Store day detail: organized status and totals', () => {
+  const plain = (
+    id: string,
+    name: string,
+    level: string,
+    dimension: string | null,
+    amount: string
+  ) =>
+    total({
+      id,
+      name,
+      level,
+      dimension,
+      calculated_amount: amount,
+      declared_amount: null,
+      variance_amount: null,
+      outcome: null,
+      tolerance: undefined,
+    });
+  const mixed = [
+    total({}),
+    plain('t-net', 'POS Net', 'Store', null, '100.00'),
+    plain('t-card', 'POS Net', 'Tender', 'Card', '60.00'),
+    plain('t-r2', 'POS Net', 'Register', 'R2', '40.00'),
+    plain('t-r1', 'POS Net', 'Register', 'R1', '60.00'),
+  ];
+
+  it('groups totals into balancing, store figures and one table per breakdown', async () => {
+    await open(detail({ totals: mixed }));
+    const balancing = screen.getByRole('region', { name: 'Balancing' });
+    expect(within(balancing).getByText('POS to GL Variance')).toBeInTheDocument();
+    expect(within(balancing).getByRole('button', { name: 'Explain…' })).toBeInTheDocument();
+    const store = screen.getByRole('region', { name: 'Store totals' });
+    expect(within(store).getByText('POS Net')).toBeInTheDocument();
+    expect(within(store).queryByRole('columnheader', { name: 'Declared' })).toBeNull();
+    const registers = screen.getByRole('region', { name: 'By register' });
+    const rows = within(registers).getAllByRole('row').slice(1);
+    expect(rows.map((r) => within(r).getAllByRole('cell')[0].textContent)).toEqual([
+      'R1POS Net',
+      'R2POS Net',
+    ]);
+    expect(screen.getByRole('region', { name: 'By tender' })).toBeInTheDocument();
+  });
+
+  it('narrows to the groups with a variance when asked', async () => {
+    await open(detail({ totals: mixed }));
+    await userEvent.click(screen.getByRole('button', { name: 'Out of balance 1' }));
+    expect(screen.getByRole('region', { name: 'Balancing' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Store totals' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'By register' })).toBeNull();
+  });
+
+  it('collects what stands in the way of closure in one list, with the actions in the header', async () => {
+    await open(
+      detail({
+        close_blockers: ['1 open case'],
+        store_day: { ...detail().store_day, totals_stale: true },
+      })
+    );
+    const list = screen.getByRole('list', { name: 'Needs attention' });
+    expect(screen.getByText('Needs attention (3)')).toBeInTheDocument();
+    expect(within(list).getByText('Closure blockers (1)')).toBeInTheDocument();
+    expect(within(list).getByText(/New data arrived/)).toBeInTheDocument();
+    expect(within(list).getByText(/1 variance needs an explanation/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-total' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1 open of 1' })).toBeInTheDocument();
   });
 });

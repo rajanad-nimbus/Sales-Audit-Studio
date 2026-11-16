@@ -103,7 +103,8 @@ ExportRecord (1) ──→ CanonicalTransaction
 - `register_id` — register/terminal identifier
 - `channel_id` — sales channel (physical, online, etc.)
 - `merchant_account` — merchant account for this transaction
-- `customer_id` — customer reference (masked if needed)
+- `customer_id` — source customer reference retained for reconciliation and approved exports; masked in transaction and correction views, with no customer name or contact details collected
+- `salesperson_id` — employee identifier supplied for the transaction, retained for audit review and approved exports
 - `session_id` — store session/shift identifier
 - `parent_transaction_id` — if this is a return/reversal/adjustment
 - `related_transaction_ids` — array of related transaction IDs
@@ -129,6 +130,15 @@ ExportRecord (1) ──→ CanonicalTransaction
 - (payment_reference, settlement_date)
 - (reconciliation_status, business_date)
 - (exception_ids)
+
+### TransactionTender
+
+**Purpose:** Preserve each payment instrument used to settle a transaction.
+
+- `transaction_id` — associated canonical transaction
+- `tender_type` and `amount` — payment instrument and signed amount
+- `reference` and `authorization` — source tender reference and authorization code
+- `source_attributes` — bounded scalar POS metadata such as tender group, entry mode, terminal and authorization source; card number and expiration are excluded
 
 ### Exception
 

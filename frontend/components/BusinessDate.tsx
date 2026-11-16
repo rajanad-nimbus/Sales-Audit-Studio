@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { api, BatchStatus } from '@/lib/api';
+import { formatBusinessDate } from '@/lib/preferences';
 import { useLive } from '@/lib/sync';
 
 export function BusinessDate() {
@@ -15,7 +16,7 @@ export function BusinessDate() {
   if (!st) return null;
   const d = st.data_as_of;
   const label = d
-    ? new Date(`${d}T00:00:00`).toLocaleDateString('en-US', {
+    ? formatBusinessDate(d, {
         weekday: 'short',
         month: 'short',
         day: 'numeric',

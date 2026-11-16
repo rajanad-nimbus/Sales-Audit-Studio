@@ -34,6 +34,6 @@ export const REPORT_PAGES = {
   taxCorrections: page(
     'tax-corrections',
     'Tax corrections',
-    "Approved corrections to a transaction's tax, one row each, with who approved them."
+    'Approved tax amount, summary row, and item line corrections, with before/after detail and reviewer.'
   ),
 } satisfies Record<string, ReportPage>;

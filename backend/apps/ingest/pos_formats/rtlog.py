@@ -214,6 +214,41 @@ def timestamp(raw: str) -> str:
 
 def parse_item(f: dict[str, str]) -> dict:
     sold = signed(f["quantity_sign"] or "P", f["quantity"])
+    override_reason = f["override_reason"].strip() or None
+    source_attribute_fields = {
+        "item_type": "item_type",
+        "item_status": "status",
+        "item_number_type": "item_number_type",
+        "format_id": "format_id",
+        "reference_item": "reference_item",
+        "non_merch_item": "non_merch_item",
+        "voucher_number": "voucher",
+        "department": "department",
+        "class": "class",
+        "subclass": "subclass",
+        "selling_unit": "selling_unit",
+        "pump": "pump",
+        "reference_1": "reference_1",
+        "reference_2": "reference_2",
+        "reference_3": "reference_3",
+        "reference_4": "reference_4",
+        "swiped": "swiped",
+        "salesperson": "salesperson",
+        "expiration": "expiration",
+        "drop_ship": "drop_ship",
+    }
+    source_attributes = {
+        name: f[field].strip()
+        for name, field in source_attribute_fields.items()
+        if f[field].strip()
+    }
+    if f["taxable"] in {"Y", "N"}:
+        source_attributes["taxable"] = f["taxable"] == "Y"
+    original_unit_retail = (
+        signed("P", f["original_unit_retail"])
+        if f["original_unit_retail"].strip()
+        else None
+    )
     return {
         "item_code": f["item"]
         or f["non_merch_item"]
@@ -227,6 +262,13 @@ def parse_item(f: dict[str, str]) -> dict:
         "subclass": f["subclass"],
         "quantity": clean(sold),
         "unit_price": clean(signed("P", f["unit_retail"])),
+        "original_unit_price": (
+            clean(original_unit_retail)
+            if original_unit_retail is not None and (override_reason or original_unit_retail != 0)
+            else None
+        ),
+        "price_override_reason": override_reason,
+        "source_attributes": source_attributes or None,
         "taxable": f["taxable"] == "Y",
         "return_reason": f["return_reason"] or None,
         "tax_code": None,
@@ -247,13 +289,28 @@ def parse_discount(f: dict[str, str], line_no: int) -> dict:
 
 
 def parse_tender(f: dict[str, str]) -> dict:
+    source_attributes = {
+        key: value or None
+        for key, value in (
+            ("tender_group", f["group"]),
+            ("tender_type_id", f["type_id"]),
+            ("authorization_source", f["authorization_source"]),
+            ("cardholder_verification", f["cardholder_verification"]),
+            ("entry_mode", f["entry_mode"]),
+            ("terminal", f["terminal"]),
+            ("special_condition", f["special_condition"]),
+            ("coupon_reference", f["coupon_reference"]),
+        )
+        if value
+    }
     return {
         "tender_type": standard.tender_type(f["group"]),
         "group": f["group"],
         "type_id": f["type_id"],
         "amount": clean(signed(f["sign"] or "P", f["amount"])),
-        "reference": f["voucher"] or f["coupon"] or None,
+        "reference": f["voucher"] or f["coupon"] or f["coupon_reference"] or None,
         "authorization": f["authorization"] or None,
+        "source_attributes": source_attributes or None,
     }
 
 
@@ -325,6 +382,23 @@ def parse_rtlog(text: str, name: str = "RTLOG") -> standard.StandardLog:
                 "original_register_id": f["original_register"] or None,
                 "reason_code": f["reason_code"] or None,
                 "vendor": f["vendor"] or None,
+                "details": {
+                    key: value
+                    for key, value in (
+                        ("vendor_number", f["vendor"]),
+                        ("vendor_invoice_number", f["vendor_invoice"]),
+                        ("payment_reference_number", f["payment_reference"]),
+                        ("proof_of_delivery_number", f["proof_of_delivery"]),
+                    )
+                    if value
+                }
+                | {
+                    "user_references": [
+                        {"field": index, "value": f[f"reference_{index}"]}
+                        for index in range(1, 5)
+                        if f[f"reference_{index}"]
+                    ]
+                },
                 "value": clean(signed(f["value_sign"] or "P", f["value"])) if f["value"] else None,
                 "lines": [],
                 "discounts": [],

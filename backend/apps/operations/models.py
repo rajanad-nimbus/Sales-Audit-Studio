@@ -56,6 +56,10 @@ class BatchRun(Base):
     matched_pairs: Mapped[int] = mapped_column(Integer, default=0)
     cases_created: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
+    store_day_open_status: Mapped[str | None] = mapped_column(String(20))
+    store_days_opened: Mapped[int] = mapped_column(Integer, default=0)
+    store_days_already_open: Mapped[int] = mapped_column(Integer, default=0)
+    store_day_open_error: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index(

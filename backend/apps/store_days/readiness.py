@@ -10,7 +10,7 @@ import json
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.models import Case
@@ -18,7 +18,10 @@ from apps.cases.models import Exception as ExceptionRow
 from apps.controls.foundation.models import FoundationReference
 from apps.exports.models import ExportBatch, ExportItem
 from apps.ingest.common import LINEAGE
-from apps.ingest.models import SourceRecord
+from apps.ingest.models import RegisterEvent, SourceRecord
+from apps.ingest.pos_formats.standard import DAY_CLOSE
+from apps.ingest import source_settings
+from apps.ingest.sequence import find_gaps, undismissed_gaps
 from apps.security import scope
 from apps.store_days.models import AuditTotal, StoreDay
 from apps.store_days.variances import evaluate_days, unresolved
@@ -174,6 +177,23 @@ async def export_states(db: AsyncSession, keys: list[Key]) -> dict[Key, dict]:
     return result
 
 
+async def unresolved_sequence_gap_counts(db: AsyncSession, days: list[StoreDay]) -> dict[Key, int]:
+    """Count current register-number gaps, excluding the latest audited dismissals."""
+    if not days:
+        return {}
+    day_by_key = {(day.store_id, day.business_date): day for day in days}
+    gaps: dict[Key, dict[str, list[int]]] = {}
+    for batch in chunks(list(day_by_key)):
+        raw = await find_gaps(db, day_keys=set(batch))
+        gaps.update(await undismissed_gaps(db, raw))
+    counts = {key: 0 for key in day_by_key}
+    for key, registers in gaps.items():
+        if key not in day_by_key:
+            continue
+        counts[key] = sum(len(numbers) for numbers in registers.values())
+    return counts
+
+
 def ingest_view(transactions: int, manifest_statuses: set[str], gap_open: bool) -> dict:
     if gap_open:
         state, detail = INCOMPLETE, "Fewer transactions arrived than the store's control total"
@@ -188,12 +208,65 @@ def ingest_view(transactions: int, manifest_statuses: set[str], gap_open: bool) 
     return {"state": state, "transactions": transactions, "detail": detail}
 
 
+async def day_close_markers(db: AsyncSession, keys: list[Key]) -> dict[Key, dict[str, int]]:
+    """Count POS register events and explicit Day Close markers for the selected store days."""
+    result: dict[Key, dict[str, int]] = {}
+    for batch in chunks(keys):
+        rows = await db.execute(
+            select(
+                RegisterEvent.store_id,
+                RegisterEvent.business_date,
+                func.count(),
+                func.sum(case((RegisterEvent.event_type == DAY_CLOSE, 1), else_=0)),
+            )
+            .where(tuple_(RegisterEvent.store_id, RegisterEvent.business_date).in_(batch))
+            .group_by(RegisterEvent.store_id, RegisterEvent.business_date)
+        )
+        result.update(
+            {
+                (store, business_date): {"events": event_count, "markers": marker_count or 0}
+                for store, business_date, event_count, marker_count in rows
+            }
+        )
+    return result
+
+
+def with_day_close(
+    ingest: dict, counts: dict[str, int] | None, *, required: bool = False
+) -> dict:
+    """Expose the POS close marker separately from transaction/control-total completeness."""
+    events = counts["events"] if counts else 0
+    markers = counts["markers"] if counts else 0
+    state = "Not provided" if events == 0 else "Received" if markers else "Not received"
+    result = {
+        **ingest,
+        "day_close": {
+            "state": state,
+            "events": events,
+            "markers": markers,
+            "required": required,
+        },
+    }
+    if required and not markers:
+        result["state"] = INCOMPLETE
+        missing = "Required POS Day Close marker has not been received"
+        result["detail"] = f'{ingest["detail"]}; {missing}' if ingest["detail"] else missing
+    return result
+
+
 async def ingest_states(db: AsyncSession, keys: list[Key]) -> dict[Key, dict]:
     manifests = await manifests_by_key(db, keys)
     counts = await transaction_counts(db, keys)
     gaps = await missing_data_errors(db, keys)
+    markers = await day_close_markers(db, keys)
+    require_day_close = (await source_settings.load(db))["POS"]["require_day_close"]
     return {
-        key: ingest_view(counts.get(key, 0), manifests.get(key, set()), key in gaps) for key in keys
+        key: with_day_close(
+            ingest_view(counts.get(key, 0), manifests.get(key, set()), key in gaps),
+            markers.get(key),
+            required=require_day_close,
+        )
+        for key in keys
     }
 
 
@@ -226,44 +299,88 @@ async def readiness(
     counts = await transaction_counts(db, keys)
     cases = case_counts if case_counts is not None else await open_case_counts(db, keys)
     gaps = await missing_data_errors(db, keys)
+    markers = await day_close_markers(db, keys)
     exports = await export_states(db, keys)
+    sequence_gaps = await unresolved_sequence_gap_counts(db, days)
     evaluations = await evaluate_days(db, days, await current_totals(db, days))
+    require_day_close = (await source_settings.load(db))["POS"]["require_day_close"]
     result = {}
     for day, key in zip(days, keys, strict=True):
-        ingest = ingest_view(counts.get(key, 0), manifests.get(key, set()), key in gaps)
+        ingest = with_day_close(
+            ingest_view(counts.get(key, 0), manifests.get(key, set()), key in gaps),
+            markers.get(key),
+            required=require_day_close,
+        )
         variances = len(unresolved(evaluations.get(day.id, {})))
         open_case_count = cases.get(key, 0)
+        missing_transactions = sequence_gaps.get(key, 0)
         if day.audit_version < 1:
             audit_state, audit_detail = NOT_TOTALED, "Re-total the store day to calculate it"
         elif day.totals_stale:
             audit_state, audit_detail = OUT_OF_DATE, "New data or configuration since the totals"
-        elif open_case_count or variances:
+        elif open_case_count or variances or missing_transactions:
             audit_state = NEEDS_ATTENTION
             audit_detail = ", ".join(
                 part
                 for part in (
                     f"{open_case_count} open case(s)" if open_case_count else "",
                     f"{variances} unexplained variance(s)" if variances else "",
+                    f"{missing_transactions} unresolved transaction number gap(s)"
+                    if missing_transactions
+                    else "",
                 )
                 if part
             )
         else:
             audit_state, audit_detail = CLEAN, "No open errors or unexplained variances"
+        signed_off = (
+            day.audit_signed_version == day.audit_version
+            and bool(day.audit_signed_by)
+            and day.audit_signed_at is not None
+            and ingest["state"] == COMPLETE
+            and audit_state == CLEAN
+        )
+        if audit_state == CLEAN:
+            audit_detail = (
+                f"Audited by {day.audit_signed_by}"
+                if signed_off
+                else "Totals are clean; auditor sign-off is required"
+            )
         export = exports.get(
             key, {"state": NOT_EXPORTED, "records": 0, "pending": 0, "acknowledged": 0}
+        )
+        audit_status = {
+            NOT_TOTALED: "Re-Totalling/Auditing Required",
+            OUT_OF_DATE: "Re-Totalling/Auditing Required",
+            NEEDS_ATTENTION: "Store Errors Pending",
+            CLEAN: "Audited" if signed_off else "Totaled",
+        }[audit_state]
+        overall_status = (
+            "Sales Audit Complete"
+            if ingest["state"] == COMPLETE and audit_state == CLEAN and signed_off
+            else "Sales Audit In Progress"
         )
         result[day.id] = {
             "ingest": ingest,
             "audit": {
                 "state": audit_state,
+                "resa_status": audit_status,
+                "overall_status": overall_status,
                 "open_cases": open_case_count,
                 "unexplained_variances": variances,
+                "missing_transactions": missing_transactions,
                 "detail": audit_detail,
+                "signed_off": signed_off,
+                "signed_version": day.audit_signed_version,
+                "signed_by": day.audit_signed_by,
+                "signed_at": day.audit_signed_at,
+                "signoff_rationale": day.audit_signoff_rationale,
             },
             "export": export,
             "ready_to_close": day.status != "Closed"
             and ingest["state"] == COMPLETE
-            and audit_state == CLEAN,
+            and audit_state == CLEAN
+            and signed_off,
         }
     return result
 
@@ -275,6 +392,10 @@ def holding_back(view: dict) -> list[str]:
         reasons.append(f"Data: {view['ingest']['state']}")
     if view["audit"]["state"] != CLEAN:
         reasons.append(f"Audit: {view['audit']['detail'] or view['audit']['state']}")
+    elif not view["audit"].get("signed_off"):
+        reasons.append("Audit: Auditor sign-off required for the current totals")
+    if view["export"]["state"] in (EXPORTING,):
+        reasons.append(f"Export: {view['export']['pending']} record(s) awaiting delivery")
     return reasons
 
 

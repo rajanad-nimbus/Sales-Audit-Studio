@@ -19,7 +19,7 @@ from model_base import utcnow
 from sqlalchemy import text, update
 
 from apps.ingest import service as ingest
-from apps.ingest import source_settings
+from apps.ingest import auto_audit, source_settings
 from apps.ingest.models import SourceSetting
 from apps.ingest.shopify import adapter as shopify_adapter
 
@@ -203,6 +203,13 @@ async def run_if_due(session_factory=async_session, now: datetime | None = None)
             )
             await _record_outcome(db, now, status, message)
             await db.commit()
+            automatic_audit = await auto_audit.reconcile_after_import(
+                db, SOURCE, feed.get(SOURCE, [])
+            )
+            if automatic_audit and any(run.get("error") for run in automatic_audit["runs"]):
+                log.warning(
+                    "Automatic audit had errors after scheduled Shopify sync: %s", automatic_audit
+                )
         except Exception as exc:  # a failed run is recorded and retried at the next scheduled time; it must never stop the loop
             await db.rollback()
             status = "Skipped" if isinstance(exc, SourceDisabledDuringSync) else "Failed"

@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatNumber } from '@/lib/preferences';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { downloadBlob } from '@/lib/csv';
 import { useToast } from '@/components/Feedback';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { useMe } from '@/components/MeProvider';
@@ -52,20 +54,34 @@ interface Attention {
   stuck_truncated: boolean;
 }
 type ListTab = 'days' | 'late' | 'stuck';
+interface SavedStoreDaysView {
+  name: string;
+  params: Record<string, string>;
+}
 interface Summary {
   total: number;
   by_status: Record<string, number>;
   totals_stale: number;
+  unsigned_audit_versions?: number;
 }
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const validIsoDate = (value: string | null) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
+    ? value
+    : null;
+};
 
 function ReadinessBadge({ r, part }: { r?: Readiness; part: 'ingest' | 'audit' | 'export' }) {
   if (!r) return <>—</>;
   const view = r[part];
+  const label = part === 'audit' ? (r.audit.resa_status ?? r.audit.state) : view.state;
+  const badgeState = part === 'audit' ? label : view.state;
   return (
     <span title={'detail' in view ? view.detail : `${view.records} record(s)`}>
-      <Badge variant={readinessVariant(view.state)} size="sm">
-        {view.state}
+      <Badge variant={readinessVariant(badgeState)} size="sm">
+        {label}
       </Badge>
     </span>
   );
@@ -80,6 +96,8 @@ export default function StoreDaysPage() {
   const [days, setDays] = useState<StoreDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const [showOpen, setShowOpen] = useState(false);
   const [openStore, setOpenStore] = useState('');
@@ -89,6 +107,7 @@ export default function StoreDaysPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
+  const [filtersReady, setFiltersReady] = useState(false);
   const [storeFilter, setStoreFilter] = useState('');
   const [dateFrom, setDateFrom] = useState(daysAgo(30));
   const [dateTo, setDateTo] = useState('');
@@ -99,11 +118,135 @@ export default function StoreDaysPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState<ListTab>('days');
   const [attention, setAttention] = useState<Attention | null>(null);
+  const [attentionExporting, setAttentionExporting] = useState(false);
+  const [attentionExportError, setAttentionExportError] = useState<string | null>(null);
   const yesterday = daysAgo(1);
   const [lateDate, setLateDate] = useState(yesterday);
   const [latePage, setLatePage] = useState(1);
   const [lateSize, setLateSize] = useState(100);
   const [stuckAfter, setStuckAfter] = useState(3);
+  const [savedViews, setSavedViews] = useState<SavedStoreDaysView[]>([]);
+  const [savedViewsError, setSavedViewsError] = useState(false);
+  const savedViewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const attentionRequest = useRef(0);
+  const listRequest = useRef(0);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const initialQuery = (params.get('q') ?? '').slice(0, 50);
+    const initialDateFrom = params.has('date_from')
+      ? (validIsoDate(params.get('date_from')) ?? '')
+      : daysAgo(30);
+    const candidateDateTo = validIsoDate(params.get('date_to'));
+    setQ(initialQuery);
+    setDebouncedQ(initialQuery);
+    setStoreFilter((params.get('store_id') ?? '').slice(0, 50));
+    setDateFrom(initialDateFrom);
+    setDateTo(
+      candidateDateTo && (!initialDateFrom || candidateDateTo >= initialDateFrom)
+        ? candidateDateTo
+        : ''
+    );
+    setStatusFilter((params.get('status') ?? '').slice(0, 32));
+    const requestedTab = params.get('tab');
+    if (requestedTab === 'days' || requestedTab === 'late' || requestedTab === 'stuck')
+      setTab(requestedTab);
+    const requestedPageSize = Number(params.get('page_size'));
+    if ([25, 50, 100, 200].includes(requestedPageSize)) setPageSize(requestedPageSize);
+    const requestedPage = Number(params.get('page'));
+    if (Number.isInteger(requestedPage) && requestedPage >= 1 && requestedPage <= 100_000)
+      setPage(requestedPage);
+    const requestedLateDate = validIsoDate(params.get('late_date'));
+    if (requestedLateDate) setLateDate(requestedLateDate);
+    const requestedLatePage = Number(params.get('late_page'));
+    if (
+      Number.isInteger(requestedLatePage) &&
+      requestedLatePage >= 1 &&
+      requestedLatePage <= 100_000
+    )
+      setLatePage(requestedLatePage);
+    const requestedLateSize = Number(params.get('late_size'));
+    if ([50, 100, 200, 500].includes(requestedLateSize)) setLateSize(requestedLateSize);
+    const requestedStuckAfter = Number(params.get('stuck_after'));
+    if ([1, 3, 7, 14].includes(requestedStuckAfter)) setStuckAfter(requestedStuckAfter);
+    setFiltersReady(true);
+
+    let localViews: SavedStoreDaysView[] = [];
+    try {
+      localViews = JSON.parse(localStorage.getItem('nimbus_store_days_views') || '[]');
+    } catch {
+      /* ignore */
+    }
+    api
+      .get<{ views: SavedStoreDaysView[] }>('/api/me/saved-views/store_days')
+      .then(async ({ data }) => {
+        if (data.views.length === 0 && localViews.length > 0) {
+          setSavedViews(localViews);
+          await api.put('/api/me/saved-views/store_days', { views: localViews });
+        } else {
+          setSavedViews(data.views);
+        }
+        setSavedViewsError(false);
+      })
+      .catch(() => {
+        setSavedViews(localViews);
+        setSavedViewsError(true);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!filtersReady) return;
+    const params = new URLSearchParams(window.location.search);
+    const query = debouncedQ.trim();
+    for (const key of [
+      'q',
+      'store_id',
+      'date_from',
+      'date_to',
+      'status',
+      'tab',
+      'page_size',
+      'page',
+      'late_date',
+      'late_page',
+      'late_size',
+      'stuck_after',
+    ])
+      params.delete(key);
+    if (query) params.set('q', query);
+    if (storeFilter) params.set('store_id', storeFilter);
+    params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    if (statusFilter) params.set('status', statusFilter);
+    if (tab !== 'days') params.set('tab', tab);
+    if (pageSize !== 50) params.set('page_size', String(pageSize));
+    if (page > 1) params.set('page', String(page));
+    if (tab === 'late' || lateDate !== yesterday) params.set('late_date', lateDate);
+    if (latePage > 1) params.set('late_page', String(latePage));
+    if (lateSize !== 100) params.set('late_size', String(lateSize));
+    if (stuckAfter !== 3) params.set('stuck_after', String(stuckAfter));
+    const queryString = params.toString();
+    history.replaceState(
+      null,
+      '',
+      queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname
+    );
+  }, [
+    filtersReady,
+    debouncedQ,
+    storeFilter,
+    dateFrom,
+    dateTo,
+    statusFilter,
+    tab,
+    pageSize,
+    page,
+    lateDate,
+    latePage,
+    lateSize,
+    stuckAfter,
+    yesterday,
+  ]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 300);
@@ -111,6 +254,8 @@ export default function StoreDaysPage() {
   }, [q]);
 
   const loadAttention = useCallback(async () => {
+    if (!filtersReady) return;
+    const request = ++attentionRequest.current;
     try {
       const { data } = await api.get('/api/store-days/attention', {
         params: {
@@ -120,16 +265,18 @@ export default function StoreDaysPage() {
           late_page_size: lateSize,
         },
       });
-      setAttention(data);
+      if (request === attentionRequest.current) setAttention(data);
     } catch {
-      setAttention(null);
+      if (request === attentionRequest.current) setAttention(null);
     }
-  }, [lateDate, stuckAfter, latePage, lateSize]);
+  }, [filtersReady, lateDate, stuckAfter, latePage, lateSize]);
   useEffect(() => {
     loadAttention();
   }, [loadAttention]);
 
   const load = useCallback(async () => {
+    if (!filtersReady) return;
+    const request = ++listRequest.current;
     setLoading(true);
     const scope = {
       store_id: storeFilter || undefined,
@@ -144,19 +291,152 @@ export default function StoreDaysPage() {
         }),
         api.get('/api/store-days/summary', { params: scope }),
       ]);
-      setDays(list.data);
-      setHasMore(list.headers?.['x-has-more'] === 'true');
-      setSummary(counts.data);
-      setError(null);
+      if (request === listRequest.current) {
+        setDays(list.data);
+        setHasMore(list.headers?.['x-has-more'] === 'true');
+        setSummary(counts.data);
+        setError(null);
+      }
     } catch {
-      setError('Unable to load Store Days. Sign in with a Finance or IT role.');
+      if (request === listRequest.current)
+        setError('Unable to load Store Days. Sign in with a Finance or IT role.');
     } finally {
-      setLoading(false);
+      if (request === listRequest.current) setLoading(false);
     }
-  }, [storeFilter, dateFrom, dateTo, debouncedQ, statusFilter, pageSize, page]);
+  }, [filtersReady, storeFilter, dateFrom, dateTo, debouncedQ, statusFilter, pageSize, page]);
   useEffect(() => {
     load();
   }, [load]);
+
+  const exportStoreDays = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { data } = await api.get('/api/store-days', {
+        params: {
+          store_id: storeFilter || undefined,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+          q: debouncedQ.trim() || undefined,
+          status: statusFilter || undefined,
+          format: 'csv',
+        },
+        responseType: 'blob',
+      });
+      downloadBlob('store-days.csv', data);
+    } catch (e) {
+      const statusCode = (e as { response?: { status?: number } }).response?.status;
+      setExportError(
+        statusCode === 413
+          ? 'This export exceeds 50,000 store days. Narrow the status, date, or store filters and try again.'
+          : 'Could not download the filtered Store Days.'
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const persistSavedViews = (next: SavedStoreDaysView[]) => {
+    setSavedViews(next);
+    try {
+      localStorage.setItem('nimbus_store_days_views', JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+    savedViewSaveQueue.current = savedViewSaveQueue.current
+      .catch(() => undefined)
+      .then(() => api.put('/api/me/saved-views/store_days', { views: next }))
+      .then(() => setSavedViewsError(false))
+      .catch(() => setSavedViewsError(true));
+  };
+
+  const currentViewParams = (): Record<string, string> => {
+    const params: Record<string, string> = {
+      date_from: dateFrom,
+      tab,
+      stuck_after: String(stuckAfter),
+    };
+    if (debouncedQ.trim()) params.q = debouncedQ.trim();
+    if (storeFilter) params.store_id = storeFilter;
+    if (dateTo) params.date_to = dateTo;
+    if (statusFilter) params.status = statusFilter;
+    if (pageSize !== 50) params.page_size = String(pageSize);
+    if (page > 1) params.page = String(page);
+    if (tab === 'late' || lateDate !== yesterday) params.late_date = lateDate;
+    if (latePage > 1) params.late_page = String(latePage);
+    if (lateSize !== 100) params.late_size = String(lateSize);
+    return params;
+  };
+
+  const applySavedView = (view: SavedStoreDaysView) => {
+    const params = view.params;
+    setQ(params.q ?? '');
+    setDebouncedQ(params.q ?? '');
+    setStoreFilter(params.store_id ?? '');
+    setDateFrom(Object.hasOwn(params, 'date_from') ? params.date_from : daysAgo(30));
+    setDateTo(params.date_to ?? '');
+    setStatusFilter(params.status ?? '');
+    setTab(['days', 'late', 'stuck'].includes(params.tab) ? (params.tab as ListTab) : 'days');
+    setPageSize(
+      [25, 50, 100, 200].includes(Number(params.page_size)) ? Number(params.page_size) : 50
+    );
+    setPage(Number(params.page) > 0 && Number(params.page) <= 100_000 ? Number(params.page) : 1);
+    setLateDate(validIsoDate(params.late_date ?? null) ?? yesterday);
+    setLatePage(
+      Number(params.late_page) > 0 && Number(params.late_page) <= 100_000
+        ? Number(params.late_page)
+        : 1
+    );
+    setLateSize(
+      [50, 100, 200, 500].includes(Number(params.late_size)) ? Number(params.late_size) : 100
+    );
+    setStuckAfter(
+      [1, 3, 7, 14].includes(Number(params.stuck_after)) ? Number(params.stuck_after) : 3
+    );
+    setExpanded(null);
+  };
+
+  const saveCurrentView = () => {
+    const entered = window.prompt('Name this Store Days view');
+    const name = entered?.trim();
+    if (!name) return;
+    if (name.length > 60) {
+      setError('Saved view names must be 60 characters or fewer.');
+      return;
+    }
+    persistSavedViews([
+      ...savedViews.filter((view) => view.name.toLocaleLowerCase() !== name.toLocaleLowerCase()),
+      { name, params: currentViewParams() },
+    ]);
+  };
+
+  const exportAttention = async (queue: 'late' | 'stuck') => {
+    setAttentionExporting(true);
+    setAttentionExportError(null);
+    try {
+      const { data } = await api.get('/api/store-days/attention', {
+        params: {
+          format: 'csv',
+          queue,
+          business_date: lateDate,
+          stuck_after_days: stuckAfter,
+        },
+        responseType: 'blob',
+      });
+      downloadBlob(`store-days-${queue}.csv`, data);
+    } catch (e) {
+      const statusCode = (e as { response?: { status?: number } }).response?.status;
+      setAttentionExportError(
+        statusCode === 413
+          ? queue === 'late'
+            ? 'The late-store export exceeds 50,000 rows. Use an account with a narrower store scope.'
+            : 'The stuck-day export exceeds 50,000 rows. Increase the age threshold or narrow the store scope.'
+          : 'Could not download this Store Days queue.'
+      );
+    } finally {
+      setAttentionExporting(false);
+    }
+  };
 
   /** A change to what is being listed starts again from the first page, with nothing open. */
   const refilter = (change: () => void) => {
@@ -174,7 +454,9 @@ export default function StoreDaysPage() {
     () => ({
       ready: days.filter((d) => d.readiness?.ready_to_close).length,
       incomplete: days.filter((d) => d.readiness && d.readiness.ingest.state !== 'Complete').length,
-      attention: days.filter((d) => d.readiness && d.readiness.audit.state !== 'Clean').length,
+      attention: days.filter(
+        (d) => d.readiness && (d.readiness.audit.state !== 'Clean' || !d.readiness.audit.signed_off)
+      ).length,
     }),
     [days]
   );
@@ -253,13 +535,17 @@ export default function StoreDaysPage() {
 
       {summary && (
         <MetricGrid>
-          <MetricTile label="Store Days" value={summary.total.toLocaleString()} />
+          <MetricTile label="Store Days" value={formatNumber(summary.total)} />
           <MetricTile
             label="Not closed"
-            value={(summary.total - (summary.by_status.Closed ?? 0)).toLocaleString()}
+            value={formatNumber(summary.total - (summary.by_status.Closed ?? 0))}
           />
-          <MetricTile label="Closed" value={(summary.by_status.Closed ?? 0).toLocaleString()} />
-          <MetricTile label="Totals out of date" value={summary.totals_stale.toLocaleString()} />
+          <MetricTile label="Closed" value={formatNumber(summary.by_status.Closed ?? 0)} />
+          <MetricTile label="Totals out of date" value={formatNumber(summary.totals_stale)} />
+          <MetricTile
+            label="Current totals without sign-off"
+            value={formatNumber(summary.unsigned_audit_versions ?? 0)}
+          />
         </MetricGrid>
       )}
 
@@ -276,12 +562,33 @@ export default function StoreDaysPage() {
             { id: 'stuck', label: 'Stuck store days', count: attention?.stuck_store_days.length },
           ]}
         />
+        {savedViewsError && (
+          <Alert tone="warning">
+            Saved views are available on this device, but could not sync to your account.
+          </Alert>
+        )}
+        <div className="ac-presets" aria-label="Saved Store Days views">
+          {savedViews.map((view, index) => (
+            <span key={`${view.name}-${index}`} className="ac-chip saved">
+              <button onClick={() => applySavedView(view)}>{view.name}</button>
+              <button
+                aria-label={`Delete view ${view.name}`}
+                onClick={() => persistSavedViews(savedViews.filter((_, row) => row !== index))}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          <button className="ac-chip add" onClick={saveCurrentView}>
+            + Save current view
+          </button>
+        </div>
         {tab === 'late' && (
           <>
             <Toolbar
               count={
                 attention
-                  ? `${attention.late_total.toLocaleString()} of ${attention.expected_stores.toLocaleString()} active stores`
+                  ? `${formatNumber(attention.late_total)} of ${formatNumber(attention.expected_stores)} active stores`
                   : undefined
               }
             >
@@ -296,7 +603,15 @@ export default function StoreDaysPage() {
                   }}
                 />
               </Field>
+              <Button
+                size="sm"
+                disabled={attentionExporting || !attention || attention.late_total === 0}
+                onClick={() => exportAttention('late')}
+              >
+                {attentionExporting ? 'Preparing…' : 'Download all late stores'}
+              </Button>
             </Toolbar>
+            {attentionExportError && <Alert tone="error">{attentionExportError}</Alert>}
             <p className="hint">
               Active stores whose data for this date is not complete: no transactions, no control
               total to check them against, or fewer transactions than the control total.
@@ -308,6 +623,7 @@ export default function StoreDaysPage() {
                   header: 'Store',
                   primary: true,
                   render: (r: LateStore) => r.store_id,
+                  csvValue: (r: LateStore) => r.store_id,
                 },
                 {
                   key: 'state',
@@ -317,23 +633,32 @@ export default function StoreDaysPage() {
                       {r.state}
                     </Badge>
                   ),
+                  csvValue: (r: LateStore) => r.state,
                 },
-                { key: 'detail', header: 'Detail', render: (r: LateStore) => r.detail },
+                {
+                  key: 'detail',
+                  header: 'Detail',
+                  render: (r: LateStore) => r.detail,
+                  csvValue: (r: LateStore) => r.detail,
+                },
                 {
                   key: 'tx',
                   header: 'Transactions',
                   numeric: true,
                   render: (r: LateStore) => r.transactions,
+                  csvValue: (r: LateStore) => r.transactions,
                 },
                 {
                   key: 'open',
                   header: 'Store Day',
                   render: (r: LateStore) =>
                     r.store_day_open ? <Link href={dayPath(r)}>Open</Link> : 'Not opened',
+                  csvValue: (r: LateStore) => (r.store_day_open ? 'Open' : 'Not opened'),
                 },
               ]}
               rows={attention ? attention.late_stores : null}
               rowKey={(r: LateStore) => r.store_id}
+              csvFileName="store-days-late-visible.csv"
               emptyTitle="Every active store's data is complete for this date"
               footer={
                 attention &&
@@ -372,7 +697,15 @@ export default function StoreDaysPage() {
                   label: `Open over ${n} day${n === 1 ? '' : 's'}`,
                 }))}
               />
+              <Button
+                size="sm"
+                disabled={attentionExporting || !attention?.stuck_store_days.length}
+                onClick={() => exportAttention('stuck')}
+              >
+                {attentionExporting ? 'Preparing…' : 'Download all stuck days'}
+              </Button>
             </Toolbar>
+            {attentionExportError && <Alert tone="error">{attentionExportError}</Alert>}
             <DataTable
               columns={[
                 {
@@ -381,27 +714,32 @@ export default function StoreDaysPage() {
                   primary: true,
                   stopRowClick: true,
                   render: (d: StuckDay) => <Link href={dayPath(d)}>{d.store_id}</Link>,
+                  csvValue: (d: StuckDay) => d.store_id,
                 },
                 {
                   key: 'date',
                   header: 'Business date',
                   nowrap: true,
                   render: (d: StuckDay) => d.business_date,
+                  csvValue: (d: StuckDay) => d.business_date,
                 },
                 {
                   key: 'age',
                   header: 'Days open',
                   numeric: true,
                   render: (d: StuckDay) => d.days_open,
+                  csvValue: (d: StuckDay) => d.days_open,
                 },
                 {
                   key: 'why',
                   header: 'Holding it back',
                   render: (d: StuckDay) => d.holding_back.join(' · '),
+                  csvValue: (d: StuckDay) => d.holding_back.join('; '),
                 },
               ]}
               rows={attention ? attention.stuck_store_days : null}
               rowKey={dayKey}
+              csvFileName="store-days-stuck-visible.csv"
               onRowClick={(d: StuckDay) =>
                 setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))
               }
@@ -429,6 +767,7 @@ export default function StoreDaysPage() {
                 onChange={(e) => refilter(() => setQ(e.target.value))}
                 placeholder="Search store"
                 aria-label="Search Store Days"
+                maxLength={50}
               />
               <StoreSelect
                 value={storeFilter}
@@ -449,16 +788,24 @@ export default function StoreDaysPage() {
                 min={dateFrom || undefined}
                 onChange={(e) => refilter(() => setDateTo(e.target.value))}
               />
+              <Button
+                size="sm"
+                disabled={exporting || loading || days.length === 0}
+                onClick={exportStoreDays}
+              >
+                {exporting ? 'Preparing…' : 'Download filtered CSV'}
+              </Button>
             </Toolbar>
+            {exportError && <Alert tone="error">{exportError}</Alert>}
             {summary && (
               <Segmented
                 value={statusFilter}
                 onChange={(v) => refilter(() => setStatusFilter(v))}
                 options={[
-                  { value: '', label: `All ${summary.total.toLocaleString()}` },
+                  { value: '', label: `All ${formatNumber(summary.total)}` },
                   ...statuses.map((status) => ({
                     value: status,
-                    label: `${status} ${summary.by_status[status].toLocaleString()}`,
+                    label: `${status} ${formatNumber(summary.by_status[status])}`,
                   })),
                 ]}
               />
@@ -474,12 +821,14 @@ export default function StoreDaysPage() {
                 primary: true,
                 stopRowClick: true,
                 render: (d) => <Link href={dayPath(d)}>{d.store_id}</Link>,
+                csvValue: (d) => d.store_id,
               },
               {
                 key: 'date',
                 header: 'Business date',
                 nowrap: true,
                 render: (d) => d.business_date,
+                csvValue: (d) => d.business_date,
               },
               {
                 key: 'status',
@@ -489,31 +838,37 @@ export default function StoreDaysPage() {
                     {d.status}
                   </Badge>
                 ),
+                csvValue: (d) => d.status,
               },
               {
                 key: 'data',
                 header: 'Data',
                 render: (d) => <ReadinessBadge r={d.readiness} part="ingest" />,
+                csvValue: (d) => d.readiness?.ingest.state ?? '',
               },
               {
                 key: 'audit',
                 header: 'Audit',
                 render: (d) => <ReadinessBadge r={d.readiness} part="audit" />,
+                csvValue: (d) => d.readiness?.audit.resa_status ?? d.readiness?.audit.state ?? '',
               },
               {
                 key: 'export',
                 header: 'Export',
                 render: (d) => <ReadinessBadge r={d.readiness} part="export" />,
+                csvValue: (d) => d.readiness?.export.state ?? '',
               },
               {
                 key: 'ver',
                 header: 'Version',
                 numeric: true,
                 render: (d) => `v${d.audit_version}`,
+                csvValue: (d) => d.audit_version,
               },
             ]}
             rows={loading ? null : days}
             rowKey={dayKey}
+            csvFileName="store-days-visible.csv"
             onRowClick={(d) => setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))}
             expandedKey={expanded}
             renderDetail={(d) => (

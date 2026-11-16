@@ -9,6 +9,12 @@ from sqlalchemy import func, select
 
 from apps.ingest.models import RegisterEvent
 from apps.ingest.pos_formats import standard
+from apps.security.sensitive_data import (
+    contains_sensitive_payment_data,
+    mask_pan_value,
+    redact_sensitive_fields,
+)
+from apps.system.options import credit_card_number_mask, credit_card_security_level
 from apps.transactions.models import CanonicalTransaction
 
 CENT = Decimal("0.01")
@@ -30,6 +36,13 @@ def event_amount(tx: dict) -> Decimal | None:
 async def ingest_register_events(db, log: standard.StandardLog, currency: str = "USD") -> dict:
     """Store a log's register events; one already stored (same source record id) is skipped."""
     events = standard.register_events(log)
+    block_card_data = await credit_card_security_level(db) == "Block"
+    mask_character = await credit_card_number_mask(db)
+    for event in events:
+        event["_card_data_blocked"] = block_card_data and contains_sensitive_payment_data(event)
+        if not event["_card_data_blocked"]:
+            for field in ("source_record_id", "transaction_number", "original_transaction_number"):
+                event[field] = mask_pan_value(event.get(field), mask_character)
     known: set[str] = set()
     for start in range(0, len(events), BATCH):
         ids = [e["source_record_id"] for e in events[start : start + BATCH]]
@@ -45,8 +58,14 @@ async def ingest_register_events(db, log: standard.StandardLog, currency: str = 
             .all()
         )
     created = 0
+    quarantined = 0
+    duplicates_skipped = 0
     for tx in events:
+        if tx["_card_data_blocked"]:
+            quarantined += 1
+            continue
         if tx["source_record_id"] in known:
+            duplicates_skipped += 1
             continue
         known.add(tx["source_record_id"])
         db.add(
@@ -65,6 +84,7 @@ async def ingest_register_events(db, log: standard.StandardLog, currency: str = 
                 original_transaction_number=tx["original_transaction_number"],
                 original_register_id=tx["original_register_id"],
                 reason_code=tx["reason_code"],
+                details=redact_sensitive_fields(tx.get("details") or {}, mask_character),
                 amount=event_amount(tx),
                 currency=currency,
             )
@@ -74,7 +94,8 @@ async def ingest_register_events(db, log: standard.StandardLog, currency: str = 
     return {
         "received": len(events),
         "created": created,
-        "duplicates_skipped": len(events) - created,
+        "duplicates_skipped": duplicates_skipped,
+        "quarantined": quarantined,
     }
 
 

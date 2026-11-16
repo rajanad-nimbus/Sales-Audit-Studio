@@ -2,12 +2,12 @@
 
 import json
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import func, not_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.audit.models import AuditEvent
@@ -20,6 +20,21 @@ router = APIRouter(prefix="/api/audit")
 MAX_EXPORT_EVENTS = 100000
 EXPORT_PAGE_SIZE = 500
 MAX_EVENT_TYPE_FILTERS = 50
+ACTIVITY_ACTOR_GROUPS = {
+    "reconciliation": ("reconciliation-engine",),
+    "investigation": ("investigation-agent",),
+    "policy": ("policy-engine",),
+    "orchestrator": ("orchestrator",),
+    "resolution": ("resolution-agent",),
+    "validation": ("validation-agent",),
+    "connectors": (
+        "batch-scheduler",
+        "shopify-connector",
+        "shopify-webhook",
+        "export-service",
+    ),
+}
+ACTIVITY_ALERT_MARKERS = ("FAIL", "ERROR", "REJECT", "BREACH", "QUARANTIN")
 
 VERIFY_SQL = text("""
     WITH chain AS (
@@ -231,6 +246,76 @@ def conditions(event_type, actor, case_id, date_from, date_to, q):
     return conds
 
 
+def activity_conditions(agent: str, q: str | None, alerts_only: bool) -> list:
+    conds = []
+    if agent == "people":
+        automated = [
+            AuditEvent.actor.like(f"{prefix}%")
+            for prefixes in ACTIVITY_ACTOR_GROUPS.values()
+            for prefix in prefixes
+        ]
+        conds.extend((AuditEvent.actor != "system", not_(or_(*automated))))
+    elif agent != "all":
+        conds.append(
+            or_(*(AuditEvent.actor.like(f"{prefix}%") for prefix in ACTIVITY_ACTOR_GROUPS[agent]))
+        )
+    if q:
+        conds.append(
+            or_(
+                contains_literal(AuditEvent.actor, q),
+                contains_literal(AuditEvent.event_type, q),
+                contains_literal(AuditEvent.action_description, q),
+            )
+        )
+    if alerts_only:
+        conds.append(
+            or_(*(AuditEvent.event_type.ilike(f"%{marker}%") for marker in ACTIVITY_ALERT_MARKERS))
+        )
+    return conds
+
+
+@router.get("/activity/page")
+async def page_activity(
+    agent: Literal[
+        "all",
+        "reconciliation",
+        "investigation",
+        "policy",
+        "orchestrator",
+        "resolution",
+        "validation",
+        "connectors",
+        "people",
+    ] = "all",
+    q: Annotated[str | None, Query(max_length=500)] = None,
+    alerts_only: bool = False,
+    limit: int = Query(200, ge=1, le=500),
+    before_seq: int | None = Query(None, ge=1),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """Browse Agent Activity with the same filters as its full audit export."""
+    conds = activity_conditions(agent, q, alerts_only)
+    if before_seq is not None:
+        conds.append(AuditEvent.seq < before_seq)
+    rows = list(
+        (
+            await db.execute(
+                select(AuditEvent).where(*conds).order_by(AuditEvent.seq.desc()).limit(limit + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [event(row) for row in rows],
+        "has_more": has_more,
+        "next_before_seq": rows[-1].seq if has_more and rows else None,
+    }
+
+
 @router.get("/page")
 async def page(
     event_type: Annotated[str | None, Query(max_length=5100)] = None,
@@ -307,3 +392,27 @@ async def export(
     conds = conditions(event_type, actor, case_id, date_from, date_to, q)
     head_seq, head_hash, count = await prepare_export(db, conds, format)
     return export_response(db, conds, format, head_seq, head_hash, count)
+
+
+@router.get("/activity/export")
+async def export_activity(
+    agent: Literal[
+        "all",
+        "reconciliation",
+        "investigation",
+        "policy",
+        "orchestrator",
+        "resolution",
+        "validation",
+        "connectors",
+        "people",
+    ] = "all",
+    q: Annotated[str | None, Query(max_length=500)] = None,
+    alerts_only: bool = False,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_role("finance", "it")),
+):
+    """Export the complete Agent Activity filter result, pinned to the audit-chain head."""
+    conds = activity_conditions(agent, q, alerts_only)
+    head_seq, head_hash, count = await prepare_export(db, conds, "csv")
+    return export_response(db, conds, "csv", head_seq, head_hash, count)

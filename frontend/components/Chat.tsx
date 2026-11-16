@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatDateTime } from '@/lib/preferences';
 import { Button } from '@/components/ui';
 
 /* ---------- types ---------- */
@@ -467,7 +468,7 @@ export function ChatPanel() {
       active.messages
         .map(
           (m) =>
-            `### ${m.role === 'user' ? 'You' : 'Nimbus Assistant'} (${new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})\n\n${m.content}\n`
+            `### ${m.role === 'user' ? 'You' : 'Nimbus Assistant'} (${formatDateTime(m.ts, { hour: '2-digit', minute: '2-digit' })})\n\n${m.content}\n`
         )
         .join('\n---\n\n')
     );
@@ -603,7 +604,7 @@ export function ChatPanel() {
                   <small>
                     {s.context.type === 'case' ? s.context.label : 'All cases'} ·{' '}
                     {s.messages.filter((m) => m.role === 'user').length} question(s) ·{' '}
-                    {new Date(s.updatedAt).toLocaleDateString()}
+                    {formatDateTime(s.updatedAt, { dateStyle: 'medium' })}
                   </small>
                   <em>
                     {s.messages[s.messages.length - 1]?.content.replace(/[*`#]/g, '').slice(0, 70)}
@@ -692,7 +693,7 @@ export function ChatPanel() {
                     <div className="as-meta">
                       <b>Nimbus Assistant</b>
                       <span>
-                        {new Date(m.ts).toLocaleTimeString([], {
+                        {formatDateTime(m.ts, {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}

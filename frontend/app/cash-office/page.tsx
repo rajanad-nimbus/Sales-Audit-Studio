@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
+import { downloadBlob } from '@/lib/csv';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { useMe } from '@/components/MeProvider';
 import { Alert, Button, DataTable } from '@/components/ui';
@@ -40,6 +41,11 @@ export default function CashOfficePage() {
     [controlTotal, setControlTotal] = useState(0),
     [depositTotal, setDepositTotal] = useState(0),
     [notice, setNotice] = useState<string | null>(null);
+  const [historyStore, setHistoryStore] = useState('');
+  const [historyDate, setHistoryDate] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [exporting, setExporting] = useState<'controls' | 'deposits' | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [store, setStore] = useState(''),
     [date, setDate] = useState(new Date().toISOString().slice(0, 10)),
     [register, setRegister] = useState(''),
@@ -55,10 +61,17 @@ export default function CashOfficePage() {
     if (me?.store_scoped && me.stores?.length === 1 && !store) setStore(me.stores[0]);
   }, [me]);
   const load = useCallback(async () => {
+    setHistoryLoading(true);
     try {
+      const filters = {
+        store_id: historyStore || undefined,
+        business_date: historyDate || undefined,
+      };
       const [a, b] = await Promise.all([
-        api.get('/api/cash-controls', { params: { skip: 0, limit: 100 } }),
-        api.get('/api/cash-controls/deposits', { params: { skip: 0, limit: 100 } }),
+        api.get('/api/cash-controls', { params: { ...filters, skip: 0, limit: 100 } }),
+        api.get('/api/cash-controls/deposits', {
+          params: { ...filters, skip: 0, limit: 100 },
+        }),
       ]);
       setRows(a.data);
       setDeposits(b.data);
@@ -66,12 +79,19 @@ export default function CashOfficePage() {
       setDepositTotal(Number(b.headers['x-total-count'] ?? b.data.length));
     } catch {
       setNotice('Unable to load cash controls. Sign in with a Finance or IT role.');
+    } finally {
+      setHistoryLoading(false);
     }
-  }, []);
+  }, [historyStore, historyDate]);
   const loadMoreControls = async () => {
     try {
       const { data } = await api.get('/api/cash-controls', {
-        params: { skip: rows.length, limit: 100 },
+        params: {
+          store_id: historyStore || undefined,
+          business_date: historyDate || undefined,
+          skip: rows.length,
+          limit: 100,
+        },
       });
       setRows((current) => [...current, ...data]);
     } catch {
@@ -81,7 +101,12 @@ export default function CashOfficePage() {
   const loadMoreDeposits = async () => {
     try {
       const { data } = await api.get('/api/cash-controls/deposits', {
-        params: { skip: deposits.length, limit: 100 },
+        params: {
+          store_id: historyStore || undefined,
+          business_date: historyDate || undefined,
+          skip: deposits.length,
+          limit: 100,
+        },
       });
       setDeposits((current) => [...current, ...data]);
     } catch {
@@ -91,6 +116,31 @@ export default function CashOfficePage() {
   useEffect(() => {
     load();
   }, [load]);
+  const exportHistory = async (kind: 'controls' | 'deposits') => {
+    setExporting(kind);
+    setExportError(null);
+    try {
+      const path = kind === 'controls' ? '/api/cash-controls' : '/api/cash-controls/deposits';
+      const { data } = await api.get(path, {
+        params: {
+          store_id: historyStore || undefined,
+          business_date: historyDate || undefined,
+          format: 'csv',
+        },
+        responseType: 'blob',
+      });
+      downloadBlob(kind === 'controls' ? 'cash-controls.csv' : 'cash-deposits.csv', data);
+    } catch (e) {
+      const statusCode = (e as { response?: { status?: number } }).response?.status;
+      setExportError(
+        statusCode === 413
+          ? 'This export exceeds 50,000 rows. Filter by store or business date and try again.'
+          : 'Could not download the filtered Cash Office history.'
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
   const submit = async () => {
     try {
       const { data } = await api.post('/api/cash-controls', {
@@ -202,7 +252,30 @@ export default function CashOfficePage() {
         </div>
       </div>
       <div className="cc-card">
-        <h3>Cash controls</h3>
+        <h3>History filters</h3>
+        <p className="page-sub">Apply the same store and business date to both cash histories.</p>
+        <div className="profile-form">
+          <StoreSelect value={historyStore} onChange={setHistoryStore} emptyLabel="All stores" />
+          <input
+            type="date"
+            value={historyDate}
+            aria-label="Filter cash history by business date"
+            onChange={(event) => setHistoryDate(event.target.value)}
+          />
+        </div>
+        {exportError && <Alert tone="error">{exportError}</Alert>}
+      </div>
+      <div className="cc-card">
+        <div className="cc-history-heading">
+          <h3>Cash controls</h3>
+          <Button
+            size="sm"
+            disabled={historyLoading || controlTotal === 0 || exporting !== null}
+            onClick={() => exportHistory('controls')}
+          >
+            {exporting === 'controls' ? 'Preparing…' : 'Download matching CSV'}
+          </Button>
+        </div>
         <Data
           headers={[
             'Store / date',
@@ -227,7 +300,12 @@ export default function CashOfficePage() {
           Showing {rows.length} of {controlTotal} cash controls.
         </p>
         {rows.length < controlTotal && (
-          <Button variant="secondary" size="sm" onClick={loadMoreControls}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={historyLoading}
+            onClick={loadMoreControls}
+          >
             Load more
           </Button>
         )}
@@ -235,7 +313,16 @@ export default function CashOfficePage() {
       <OverShortReport />
       <VoucherLedger />
       <div className="cc-card">
-        <h3>Banked deposits</h3>
+        <div className="cc-history-heading">
+          <h3>Banked deposits</h3>
+          <Button
+            size="sm"
+            disabled={historyLoading || depositTotal === 0 || exporting !== null}
+            onClick={() => exportHistory('deposits')}
+          >
+            {exporting === 'deposits' ? 'Preparing…' : 'Download matching CSV'}
+          </Button>
+        </div>
         <Data
           headers={[
             'Store / date',
@@ -258,7 +345,12 @@ export default function CashOfficePage() {
           Showing {deposits.length} of {depositTotal} deposits.
         </p>
         {deposits.length < depositTotal && (
-          <Button variant="secondary" size="sm" onClick={loadMoreDeposits}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={historyLoading}
+            onClick={loadMoreDeposits}
+          >
             Load more
           </Button>
         )}

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CommandCenter } from '@/components/CommandCenter';
@@ -309,7 +309,12 @@ describe('CommandCenter', () => {
     expect(await screen.findByText('Close for Nov 2')).toBeTruthy();
     expect(screen.getByText(/1 ready to close, 3 blocked, 1 with no store day yet\./)).toBeTruthy();
     expect(screen.getByText('Needs attention')).toBeTruthy();
-    expect(screen.getByText(/S7 \(Audit: 2 open case\(s\)\)/)).toBeTruthy();
+    const blocked = screen.getByRole('list', { name: 'Example store days blocked from closing' });
+    expect(within(blocked).getByRole('link', { name: 'Review S7' })).toHaveAttribute(
+      'href',
+      '/store-days/S7/2026-11-02'
+    );
+    expect(within(blocked).getByText(/Audit: 2 open case\(s\)/)).toBeInTheDocument();
     expect(screen.getByText('Acknowledged')).toBeTruthy();
     expect(screen.getByText('Not exported yet')).toBeTruthy();
   });
@@ -345,5 +350,29 @@ describe('CommandCenter', () => {
     expect(await screen.findByText('C-1')).toBeTruthy();
     expect(screen.queryByText(/^Since /)).toBeNull();
     expect(screen.queryByText('New')).toBeNull();
+  });
+
+  it('shows ongoing monitoring: accuracy, exception rate and timeliness', async () => {
+    await renderAs(<CommandCenter />, ME('finance'), {
+      'GET /api/command-center': overview({
+        kpis: {
+          window_days: 30,
+          transactions: 4000,
+          exceptions: 40,
+          flagged_transactions: 40,
+          exception_rate: 10,
+          accuracy: 99,
+          close_target_days: 3,
+          due_store_days: 20,
+          closed_on_time: 15,
+          timeliness: 75,
+        },
+      }),
+    });
+    expect(await screen.findByText('Ongoing monitoring, last 30 days')).toBeTruthy();
+    expect(screen.getByText('99%')).toBeTruthy();
+    expect(screen.getByText('10 per 1,000')).toBeTruthy();
+    expect(screen.getByText('75%')).toBeTruthy();
+    expect(screen.getByText('15 of 20 store days closed within 3 days')).toBeTruthy();
   });
 });

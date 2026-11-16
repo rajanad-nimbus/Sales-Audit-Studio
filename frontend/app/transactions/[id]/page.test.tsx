@@ -50,6 +50,8 @@ const detail = {
   source: null,
   cases: [],
   cases_truncated: false,
+  errors: [],
+  errors_truncated: false,
   linked_transactions: [],
   adjustments: [],
   adjustments_truncated: false,
@@ -74,7 +76,13 @@ const change = (over: Record<string, unknown>) => ({
 function open(changes: object) {
   const value = { id: 't1' };
   const params = Object.assign(Promise.resolve(value), { status: 'fulfilled' as const, value });
-  mockApi({ [`GET ${TX}`]: detail, [`GET ${TX}/changes`]: changes });
+  mockApi({
+    [`GET ${TX}`]: detail,
+    [`GET ${TX}/changes`]: changes,
+    [`GET ${TX}/comments`]: { items: [], has_more: false },
+    [`GET ${TX}/errors`]: { items: [] },
+    [`GET ${TX}/audit-trail`]: { items: [], total: 0, page: 1, page_size: 25, pages: 0 },
+  });
   render(
     <Suspense fallback="loading">
       <TransactionPage params={params} />

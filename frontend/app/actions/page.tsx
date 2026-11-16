@@ -1,7 +1,16 @@
 'use client';
 
+import { formatNumber } from '@/lib/preferences';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ACRow, BatchStatus, caseMoney, compact, currencyBreakdown, CurrencyAmount } from '@/lib/api';
+import {
+  api,
+  ACRow,
+  BatchStatus,
+  caseMoney,
+  compact,
+  currencyBreakdown,
+  CurrencyAmount,
+} from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useDataChanged } from '@/lib/sync';
 import { Alert, Badge, Button, Segmented } from '@/components/ui';
@@ -63,6 +72,17 @@ interface Group {
   breached: number;
   oldest_hours: number;
 }
+interface ActionSort {
+  sort: string;
+  dir: 'asc' | 'desc';
+}
+interface SavedActionView {
+  name: string;
+  f: F;
+  sort: ActionSort;
+  groupBy?: string;
+  pageSize?: 20 | 50 | 100;
+}
 
 const PRESETS: { name: string; f: Partial<F>; sort?: string; dir?: string }[] = [
   { name: 'Needs decision', f: { stage: 'decision' }, sort: 'exposure', dir: 'desc' },
@@ -85,6 +105,21 @@ const GROUPS = [
   ['priority', 'Priority'],
   ['assignee', 'Assignee'],
 ];
+const SORTS = new Set([
+  'sla',
+  'exposure',
+  'amount',
+  'age',
+  'store',
+  'type',
+  'date',
+  'case_number',
+  'status',
+  'priority',
+  'evidence',
+]);
+const GROUP_KEYS = new Set(GROUPS.map(([key]) => key));
+const PAGE_SIZES = new Set([20, 50, 100]);
 const FILTER_FOR_GROUP: Record<string, keyof F> = {
   case_type: 'case_type',
   store: 'store',
@@ -120,25 +155,54 @@ export default function ActionCenter() {
   const skipReset = useRef(1); // effect runs to ignore: the mount, plus one more if a saved view is restored
   const [restored, setRestored] = useState(false);
   useEffect(() => {
-    // Restore the last view (so Back from a case lands in the same list); an explicit ?q= wins.
-    try {
-      const saved = JSON.parse(sessionStorage.getItem('nimbus_actions_view') || 'null');
-      if (saved) {
-        skipReset.current += 1;
-        setF({ ...EMPTY, ...saved.f });
-        if (saved.sort) setSort(saved.sort);
-        setGroupBy(saved.groupBy ?? '');
-        setPageSize(saved.pageSize ?? 50);
-        setPage(saved.page ?? 1);
+    // A shared URL is authoritative. Otherwise restore the last view so Back from a case
+    // lands in the same queue.
+    const params = new URLSearchParams(window.location.search);
+    const urlKeys = new Set([
+      ...Object.keys(EMPTY),
+      'sort',
+      'dir',
+      'group_by',
+      'page',
+      'page_size',
+    ]);
+    const hasUrlView = [...params.keys()].some((key) => urlKeys.has(key));
+    if (hasUrlView) {
+      const next = { ...EMPTY };
+      (Object.keys(EMPTY) as (keyof F)[]).forEach((key) => {
+        const value = params.get(key);
+        if (value !== null) next[key] = value;
+      });
+      setF(next);
+      const sortKey = params.get('sort');
+      const direction = params.get('dir');
+      if (sortKey && SORTS.has(sortKey))
+        setSort({ sort: sortKey, dir: direction === 'desc' ? 'desc' : 'asc' });
+      const group = params.get('group_by');
+      if (group && GROUP_KEYS.has(group)) setGroupBy(group);
+      const requestedSize = Number(params.get('page_size'));
+      if (PAGE_SIZES.has(requestedSize)) setPageSize(requestedSize);
+      const requestedPage = Number(params.get('page'));
+      if (Number.isInteger(requestedPage) && requestedPage > 0 && requestedPage <= 10_000)
+        setPage(requestedPage);
+    } else {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem('nimbus_actions_view') || 'null');
+        if (saved) {
+          skipReset.current += 1;
+          setF({ ...EMPTY, ...saved.f });
+          if (saved.sort) setSort(saved.sort);
+          setGroupBy(saved.groupBy ?? '');
+          setPageSize(saved.pageSize ?? 50);
+          setPage(saved.page ?? 1);
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
-    const q = new URLSearchParams(window.location.search).get('q');
-    if (q) setF((x) => ({ ...x, q }));
     setRestored(true);
   }, []);
-  const [sort, setSort] = useState({ sort: 'sla', dir: 'asc' });
+  const [sort, setSort] = useState<ActionSort>({ sort: 'sla', dir: 'asc' });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [groupBy, setGroupBy] = useState('');
@@ -167,23 +231,52 @@ export default function ActionCenter() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [views, setViews] = useState<{ name: string; f: F; sort: typeof sort }[]>([]);
+  const [views, setViews] = useState<SavedActionView[]>([]);
+  const [viewsError, setViewsError] = useState(false);
+  const viewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const seq = useRef(0);
 
   useEffect(() => {
+    let active = true;
+    let localViews: SavedActionView[] = [];
     try {
-      setViews(JSON.parse(localStorage.getItem('nimbus_views') || '[]'));
+      localViews = JSON.parse(localStorage.getItem('nimbus_views') || '[]');
     } catch {
       /* ignore */
     }
+    api
+      .get<{ views: SavedActionView[] }>('/api/me/saved-views/action_center')
+      .then(async ({ data }) => {
+        if (!active) return;
+        if (data.views.length === 0 && localViews.length > 0) {
+          setViews(localViews);
+          await api.put('/api/me/saved-views/action_center', { views: localViews });
+        } else {
+          setViews(data.views);
+        }
+        if (active) setViewsError(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setViews(localViews);
+        setViewsError(true);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
-  const persistViews = (v: typeof views) => {
+  const persistViews = (v: SavedActionView[]) => {
     setViews(v);
     try {
       localStorage.setItem('nimbus_views', JSON.stringify(v));
     } catch {
       /* ignore */
     }
+    viewSaveQueue.current = viewSaveQueue.current
+      .catch(() => undefined)
+      .then(() => api.put('/api/me/saved-views/action_center', { views: v }))
+      .then(() => setViewsError(false))
+      .catch(() => setViewsError(true));
   };
 
   const load = useCallback(async () => {
@@ -270,11 +363,26 @@ export default function ActionCenter() {
       /* ignore */
     }
   }, [restored, f, sort, groupBy, pageSize, page]);
+  useEffect(() => {
+    if (!restored) return;
+    const params = new URLSearchParams(qs(f));
+    params.set('sort', sort.sort);
+    params.set('dir', sort.dir);
+    if (groupBy) params.set('group_by', groupBy);
+    if (pageSize !== 50) params.set('page_size', String(pageSize));
+    if (page > 1) params.set('page', String(page));
+    const query = params.toString();
+    history.replaceState(
+      null,
+      '',
+      query ? `${window.location.pathname}?${query}` : window.location.pathname
+    );
+  }, [restored, f, sort, groupBy, pageSize, page]);
 
   const set = (patch: Partial<F>) => setF((x) => ({ ...x, ...patch }));
   const applyPreset = (p: (typeof PRESETS)[number]) => {
     setF({ ...EMPTY, ...p.f });
-    setSort({ sort: p.sort ?? 'sla', dir: p.dir ?? 'asc' });
+    setSort({ sort: p.sort ?? 'sla', dir: p.dir === 'desc' ? 'desc' : 'asc' });
     setGroupBy('');
   };
   const advCount = (
@@ -322,9 +430,12 @@ export default function ActionCenter() {
   };
 
   const download = async () => {
-    const { data } = await api.get(`/api/action-center/export.csv?${qs(f, sort)}`, {
-      responseType: 'blob',
-    });
+    const { data } = await api.get(
+      `/api/action-center/export.csv?${qs(f, { sort: sort.sort, dir: sort.dir })}`,
+      {
+        responseType: 'blob',
+      }
+    );
     const a = document.createElement('a');
     a.href = URL.createObjectURL(data);
     a.download = 'action-center.csv';
@@ -400,9 +511,7 @@ export default function ActionCenter() {
           </Alert>
         )}
         {batch?.last_failed && (
-          <Alert tone="error">
-            The most recent batch run failed. Check Imports for details.
-          </Alert>
+          <Alert tone="error">The most recent batch run failed. Check Imports for details.</Alert>
         )}
         {error && <Alert tone="error">{error}</Alert>}
 
@@ -439,6 +548,11 @@ export default function ActionCenter() {
           </div>
         )}
 
+        {viewsError && (
+          <Alert tone="warning">
+            Saved views are available on this device, but could not sync to your account.
+          </Alert>
+        )}
         <div className="ac-presets">
           {PRESETS.map((p) => (
             <button key={p.name} className="ac-chip" onClick={() => applyPreset(p)}>
@@ -451,7 +565,9 @@ export default function ActionCenter() {
                 onClick={() => {
                   setF(v.f);
                   setSort(v.sort);
-                  setGroupBy('');
+                  setGroupBy(v.groupBy ?? '');
+                  setPageSize(v.pageSize ?? 50);
+                  setPage(1);
                 }}
               >
                 {v.name}
@@ -467,8 +583,16 @@ export default function ActionCenter() {
           <button
             className="ac-chip add"
             onClick={() => {
-              const name = window.prompt('Name this view');
-              if (name) persistViews([...views, { name, f, sort }]);
+              const enteredName = window.prompt('Name this view');
+              const name = enteredName?.trim();
+              if (name) {
+                persistViews([
+                  ...views.filter(
+                    (view) => view.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
+                  ),
+                  { name, f, sort, groupBy, pageSize: pageSize as 20 | 50 | 100 },
+                ]);
+              }
             }}
           >
             + Save view
@@ -741,7 +865,7 @@ export default function ActionCenter() {
                     }}
                   >
                     <td className="font-medium">{g.key}</td>
-                    <td>{g.count.toLocaleString()}</td>
+                    <td>{formatNumber(g.count)}</td>
                     <td>
                       {g.stale_amount_cases
                         ? 'Review required'
@@ -759,7 +883,7 @@ export default function ActionCenter() {
                     <td>
                       {g.breached ? (
                         <Badge variant="error" size="sm">
-                          {g.breached.toLocaleString()}
+                          {formatNumber(g.breached)}
                         </Badge>
                       ) : (
                         '-'
@@ -875,8 +999,8 @@ export default function ActionCenter() {
               <span>
                 {total === 0
                   ? '0'
-                  : `${((page - 1) * pageSize + 1).toLocaleString()}–${Math.min(page * pageSize, total).toLocaleString()}`}{' '}
-                of {total.toLocaleString()}
+                  : `${formatNumber((page - 1) * pageSize + 1)}–${formatNumber(Math.min(page * pageSize, total))}`}{' '}
+                of {formatNumber(total)}
               </span>
               <span className="ac-spacer" />
               <select
@@ -899,7 +1023,7 @@ export default function ActionCenter() {
                 Previous
               </Button>
               <span>
-                Page {page} of {pages.toLocaleString()}
+                Page {page} of {formatNumber(pages)}
               </span>
               <Button
                 size="sm"
@@ -920,7 +1044,7 @@ export default function ActionCenter() {
           <div className="ac-modal-box">
             <h2>{confirm.label}</h2>
             <p>
-              This applies to <b>{(confirm.ids?.length ?? count).toLocaleString()}</b> case(s)
+              This applies to <b>{formatNumber(confirm.ids?.length ?? count)}</b> case(s)
               {!confirm.ids && allMatching ? ' matching your current filters' : ''}.
             </p>
             {['approve', 'escalate', 'investigate', 'advance'].includes(confirm.id) && (

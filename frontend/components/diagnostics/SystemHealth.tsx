@@ -13,6 +13,7 @@ import {
 } from '@/components/ui';
 import type { BadgeVariant } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
+import { formatDateTime } from '@/lib/preferences';
 
 type Status = 'ok' | 'warning' | 'critical';
 interface Check {
@@ -74,7 +75,7 @@ export function SystemHealth() {
           {health.status === 'ok'
             ? `All ${health.checks.length} checks pass.`
             : `${health.checks.filter((c) => c.status !== 'ok').length} of ${health.checks.length} checks need attention.`}{' '}
-          Checked {new Date(health.checked_at).toLocaleTimeString()}.
+          Checked {formatDateTime(health.checked_at, { hour: 'numeric', minute: '2-digit' })}.
         </Alert>
       )}
       <MetricGrid>

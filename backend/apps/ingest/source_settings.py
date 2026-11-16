@@ -1,9 +1,10 @@
 """Which sources are on, and how each one may bring data in.
 
-Three switches per source, kept in the database so IT can change them without a restart:
+Per-source controls, kept in the database so IT can change them without a restart:
   enabled         master switch; off means nothing from this source is accepted, by any route
   in_daily_batch  the scheduled batch pulls this source
   manual_sync     a person may sync or upload it by hand
+  require_day_close  POS store days need an explicit Day Close marker before completion
 A source with no row behaves as it always did.
 """
 
@@ -54,6 +55,7 @@ def effective(source: str, row: SourceSetting | None) -> dict:
             "enabled": row.enabled,
             "in_daily_batch": row.in_daily_batch,
             "manual_sync": row.manual_sync,
+            "require_day_close": row.require_day_close,
             "sync_frequency": row.sync_frequency,
             "sync_time": row.sync_time,
             "sync_weekday": row.sync_weekday,
@@ -66,6 +68,7 @@ def effective(source: str, row: SourceSetting | None) -> dict:
         "enabled": True,
         "in_daily_batch": source != "Shopify" or shopify_configured(),
         "manual_sync": True,
+        "require_day_close": False,
         "sync_frequency": None,
         "sync_time": None,
         "sync_weekday": None,

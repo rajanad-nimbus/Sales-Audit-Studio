@@ -1,4 +1,5 @@
 'use client';
+import { formatNumber } from '@/lib/preferences';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { CopyButton } from '@/components/Feedback';
@@ -120,11 +121,11 @@ export function AuditIntegrity() {
         <Card title="Newest events">
           <Alert tone={latest.intact ? 'success' : 'error'}>
             {latest.intact
-              ? `The newest ${latest.checked.toLocaleString()} events are intact.`
+              ? `The newest ${formatNumber(latest.checked)} events are intact.`
               : `${latest.broken_events} event(s) do not match their hash, starting at event ${latest.first_broken_seq}. The audit trail may have been altered.`}
           </Alert>
           <MetricGrid>
-            <MetricTile label="Events checked" value={latest.checked.toLocaleString()} />
+            <MetricTile label="Events checked" value={formatNumber(latest.checked)} />
             <MetricTile label="Latest event" value={`#${latest.head_seq ?? '—'}`} />
             <MetricTile label="First event" value={`#${latest.first_seq ?? '—'}`} />
           </MetricGrid>
@@ -144,10 +145,10 @@ export function AuditIntegrity() {
             {scan.broken > 0
               ? `${scan.broken} event(s) do not match, starting at event ${scan.firstBroken}.`
               : scan.finished
-                ? `All ${scan.checked.toLocaleString()} events are intact.`
+                ? `All ${formatNumber(scan.checked)} events are intact.`
                 : running
-                  ? `Checking… ${scan.checked.toLocaleString()} events so far, through #${scan.through.toLocaleString()} of #${scan.headSeq.toLocaleString()}.`
-                  : `Stopped after ${scan.checked.toLocaleString()} events, through #${scan.through.toLocaleString()} of #${scan.headSeq.toLocaleString()}.`}
+                  ? `Checking… ${formatNumber(scan.checked)} events so far, through #${formatNumber(scan.through)} of #${formatNumber(scan.headSeq)}.`
+                  : `Stopped after ${formatNumber(scan.checked)} events, through #${formatNumber(scan.through)} of #${formatNumber(scan.headSeq)}.`}
           </Alert>
         </Card>
       )}

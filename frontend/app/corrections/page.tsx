@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatDateTime, formatNumber } from '@/lib/preferences';
+import { downloadBlob } from '@/lib/csv';
 import { useToast } from '@/components/Feedback';
 import {
   Alert,
@@ -19,6 +21,7 @@ import {
 } from '@/components/ui';
 import { describe, pretty, statusLabel, statusVariant } from '@/lib/corrections';
 import type { Adjustment } from '@/lib/corrections';
+import { PaidOutCorrectionQueue } from '@/components/registerEvents/PaidOutCorrectionQueue';
 
 type Filter = 'All' | 'Proposed' | 'Approved' | 'Rejected';
 const FILTERS: Filter[] = ['All', 'Proposed', 'Approved', 'Rejected'];
@@ -31,13 +34,41 @@ export default function CorrectionsPage() {
   const [pages, setPages] = useState(1);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [filter, setFilter] = useState<Filter>('All');
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [adjustmentId, setAdjustmentId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [filtersReady, setFiltersReady] = useState(false);
+
+  useEffect(() => {
+    const initialQuery = new URLSearchParams(window.location.search).get('q') ?? '';
+    const initialAdjustmentId =
+      new URLSearchParams(window.location.search).get('adjustment_id') ?? null;
+    setQ(initialQuery);
+    setDebouncedQ(initialQuery);
+    setAdjustmentId(initialAdjustmentId);
+    setFiltersReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!filtersReady) return;
+    const params = new URLSearchParams();
+    if (debouncedQ) params.set('q', debouncedQ);
+    if (adjustmentId) params.set('adjustment_id', adjustmentId);
+    const query = params.toString();
+    history.replaceState(
+      null,
+      '',
+      query ? `${window.location.pathname}?${query}` : window.location.pathname
+    );
+  }, [adjustmentId, debouncedQ, filtersReady]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQ(q.trim()), 300);
@@ -47,11 +78,13 @@ export default function CorrectionsPage() {
   useEffect(() => setPage(1), [filter, debouncedQ, pageSize]);
 
   const load = useCallback(async () => {
+    if (!filtersReady) return;
     try {
       const response = await api.get('/api/transaction-adjustments', {
         params: {
           page,
           page_size: pageSize,
+          ...(adjustmentId ? { adjustment_id: adjustmentId } : {}),
           ...(filter !== 'All' ? { status: filter } : {}),
           ...(debouncedQ ? { q: debouncedQ } : {}),
         },
@@ -60,11 +93,16 @@ export default function CorrectionsPage() {
       setTotal(response.data.total);
       setPages(response.data.pages);
       setStatusCounts(response.data.status_counts);
+      setOpenId(
+        adjustmentId && response.data.items.some((row: Adjustment) => row.id === adjustmentId)
+          ? adjustmentId
+          : null
+      );
       setError(null);
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? 'Unable to load correction queue.');
     }
-  }, [debouncedQ, filter, page, pageSize]);
+  }, [adjustmentId, debouncedQ, filter, filtersReady, page, pageSize]);
   useEffect(() => {
     load();
   }, [load]);
@@ -82,21 +120,68 @@ export default function CorrectionsPage() {
     }
   };
 
+  const downloadFilteredCsv = async () => {
+    setExporting(true);
+    setExportError(null);
+    setExportNotice(null);
+    try {
+      const params = new URLSearchParams({ format: 'csv' });
+      if (filter !== 'All') params.set('status', filter);
+      if (debouncedQ) params.set('q', debouncedQ);
+      if (adjustmentId) params.set('adjustment_id', adjustmentId);
+      const { data, headers } = await api.get(`/api/transaction-adjustments?${params}`, {
+        responseType: 'blob',
+      });
+      downloadBlob('transaction-corrections.csv', data);
+      if (headers?.['x-corrections-truncated'] === 'true') {
+        setExportNotice(
+          'The export reached its 50,000 row limit. Narrow the status or search filters to export the remaining corrections.'
+        );
+      }
+    } catch {
+      setExportError('Could not download filtered corrections.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const all = rows ?? [];
-  const count = (s: Filter) => s === 'All' ? Object.values(statusCounts).reduce((a, b) => a + b, 0) : statusCounts[s] ?? 0;
+  const count = (s: Filter) =>
+    s === 'All' ? Object.values(statusCounts).reduce((a, b) => a + b, 0) : (statusCounts[s] ?? 0);
   const shown = all;
 
   return (
     <div className="page-container">
       <PageHeader
-        title="Transaction Corrections"
-        subtitle="Correct the audited view without changing the original source. Every proposal is attributable, reviewed and retained."
+        title="Corrections"
+        subtitle="Review governed transaction corrections and paid-out detail repairs while preserving original source records."
         actions={
-          <Button variant="primary" onClick={() => router.push('/corrections/new')}>
-            New correction
-          </Button>
+          <>
+            {total > 0 && (
+              <Button
+                variant="secondary"
+                disabled={exporting || rows === null}
+                onClick={() => void downloadFilteredCsv()}
+              >
+                {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => router.push('/corrections/new')}>
+              New correction
+            </Button>
+          </>
         }
       />
+      {exportError && (
+        <Alert tone="error" onDismiss={() => setExportError(null)}>
+          {exportError}
+        </Alert>
+      )}
+      {exportNotice && (
+        <Alert tone="warning" onDismiss={() => setExportNotice(null)}>
+          {exportNotice}
+        </Alert>
+      )}
       {error && (
         <Alert tone="error" onDismiss={() => setError(null)}>
           {error}
@@ -119,7 +204,8 @@ export default function CorrectionsPage() {
           onClick={() => setFilter('Rejected')}
         />
       </MetricGrid>
-      <Card title={`Finance review queue (${total.toLocaleString()})`}>
+      <PaidOutCorrectionQueue />
+      <Card title={`Finance review queue (${formatNumber(total)})`}>
         <p className="hint">
           Approve only when the rationale and source evidence support the proposed change. Select a
           row to read the full rationale.
@@ -141,6 +227,19 @@ export default function CorrectionsPage() {
               label: `${x === 'Proposed' ? 'Awaiting review' : x} ${count(x)}`,
             }))}
           />
+          {(q || adjustmentId) && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setQ('');
+                setDebouncedQ('');
+                setAdjustmentId(null);
+                setOpenId(null);
+              }}
+            >
+              Clear search
+            </Button>
+          )}
         </Toolbar>
         <DataTable
           columns={[
@@ -156,17 +255,20 @@ export default function CorrectionsPage() {
                   </small>
                 </>
               ),
+              csvValue: (r) => `${pretty(r.adjustment_type)} (${r.proposed_by})`,
             },
             {
               key: 'effect',
               header: 'Proposed effect',
               render: (r) => describe(r.adjustment_type, r.proposed_values),
+              csvValue: (r) => describe(r.adjustment_type, r.proposed_values),
             },
             {
               key: 'when',
               header: 'Submitted',
               nowrap: true,
-              render: (r) => new Date(r.created_at).toLocaleDateString(),
+              render: (r) => formatDateTime(r.created_at, { dateStyle: 'medium' }),
+              csvValue: (r) => r.created_at,
             },
             {
               key: 'status',
@@ -183,11 +285,14 @@ export default function CorrectionsPage() {
                   )}
                 </>
               ),
+              csvValue: (r) =>
+                `${statusLabel(r.status)}${r.reviewed_by ? ` · ${r.reviewed_by}` : ''}`,
             },
             {
               key: 'actions',
               header: '',
               stopRowClick: true,
+              csvSkip: true,
               render: (r) =>
                 r.status === 'Proposed' && (
                   <div className="action-buttons">
@@ -208,7 +313,12 @@ export default function CorrectionsPage() {
           ]}
           rows={rows === null ? null : shown}
           rowKey={(r) => r.id}
-          onRowClick={(r) => setOpenId(openId === r.id ? null : r.id)}
+          csvFileName="corrections-visible.csv"
+          onRowClick={(r) => {
+            const next = openId === r.id ? null : r.id;
+            setOpenId(next);
+            setAdjustmentId(next);
+          }}
           expandedKey={openId}
           renderDetail={(r) => (
             <dl className="kv">
@@ -220,7 +330,7 @@ export default function CorrectionsPage() {
               </dd>
               <dt>Submitted</dt>
               <dd>
-                {new Date(r.created_at).toLocaleString()} by {r.proposed_by}
+                {formatDateTime(r.created_at)} by {r.proposed_by}
               </dd>
               {r.reviewed_by && (
                 <>
@@ -239,8 +349,14 @@ export default function CorrectionsPage() {
             count('All') === 0 ? 'Use "New correction" to propose the first one.' : undefined
           }
         />
-        <Pager page={page} pages={pages} total={total} pageSize={pageSize}
-          onPage={setPage} onPageSize={setPageSize} />
+        <Pager
+          page={page}
+          pages={pages}
+          total={total}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={setPageSize}
+        />
       </Card>
     </div>
   );

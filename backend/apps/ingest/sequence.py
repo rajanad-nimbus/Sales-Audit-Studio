@@ -8,16 +8,19 @@ the numbers seen across both should have no holes between the first and the last
 from collections import defaultdict
 from decimal import Decimal
 
-from sqlalchemy import select, union_all
+from sqlalchemy import select, tuple_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.audit.models import AuditEvent
 from apps.cases.models import Case
 from apps.ingest.common import LINEAGE
 from apps.ingest.models import RegisterEvent
+from apps.store_days.models import StoreDay
 from apps.transactions.models import CanonicalTransaction
 
 CODE = "MISSING_TRAN"
 MAX_GAP_SPAN = 100_000  # a larger hole is a numbering reset, not missing transactions
+CHUNK = 250
 
 
 def missing_numbers(numbers: set[int]) -> list[int]:
@@ -43,6 +46,7 @@ async def find_gaps(
     business_date: str | None = None,
     store_ids: set[str] | None = None,
     store_id: str | None = None,
+    day_keys: set[tuple[str, str]] | None = None,
 ) -> dict[tuple[str, str], dict[str, list[int]]]:
     """Missing numbers by store day, then register."""
     sales = select(
@@ -70,6 +74,13 @@ async def find_gaps(
     if store_id:
         sales = sales.where(CanonicalTransaction.store_id == store_id)
         events = events.where(RegisterEvent.store_id == store_id)
+    if day_keys is not None:
+        sales = sales.where(
+            tuple_(CanonicalTransaction.store_id, CanonicalTransaction.business_date).in_(day_keys)
+        )
+        events = events.where(
+            tuple_(RegisterEvent.store_id, RegisterEvent.business_date).in_(day_keys)
+        )
 
     seen: dict[tuple[str, str, str], set[int]] = defaultdict(set)
     for store, day, register, number in (await db.execute(union_all(sales, events))).all():
@@ -85,6 +96,71 @@ async def find_gaps(
     return dict(found)
 
 
+async def undismissed_gaps(
+    db: AsyncSession, by_day: dict[tuple[str, str], dict[str, list[int]]]
+) -> dict[tuple[str, str], dict[str, list[int]]]:
+    """Remove gaps whose latest audited disposition says the number was not a transaction."""
+    if not by_day:
+        return {}
+    keys = list(by_day)
+    day_id_by_key: dict[tuple[str, str], str] = {}
+    for offset in range(0, len(keys), CHUNK):
+        rows = await db.execute(
+            select(StoreDay.id, StoreDay.store_id, StoreDay.business_date).where(
+                tuple_(StoreDay.store_id, StoreDay.business_date).in_(keys[offset : offset + CHUNK])
+            )
+        )
+        day_id_by_key.update({(store, day): day_id for day_id, store, day in rows})
+    if not day_id_by_key:
+        return by_day
+
+    key_by_day_id = {day_id: key for key, day_id in day_id_by_key.items()}
+    latest: dict[tuple[str, str, int], AuditEvent] = {}
+    day_ids = list(key_by_day_id)
+    for offset in range(0, len(day_ids), CHUNK):
+        events = await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.object_type == "RegisterSequenceGap",
+                AuditEvent.object_id.in_(day_ids[offset : offset + CHUNK]),
+                AuditEvent.event_type.in_(
+                    ["REGISTER_SEQUENCE_GAP_DISMISSED", "REGISTER_SEQUENCE_GAP_RESTORED"]
+                ),
+            )
+            .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        )
+        for event in events.scalars():
+            state = event.after_state or {}
+            register, number = state.get("register_id"), state.get("transaction_number")
+            if register is None or number is None:
+                continue
+            try:
+                latest.setdefault((event.object_id, str(register), int(number)), event)
+            except (TypeError, ValueError):
+                continue
+
+    dismissed = {
+        (key_by_day_id[day_id], register, number)
+        for (day_id, register, number), event in latest.items()
+        if event.event_type == "REGISTER_SEQUENCE_GAP_DISMISSED"
+    }
+    active: dict[tuple[str, str], dict[str, list[int]]] = {}
+    for key, registers in by_day.items():
+        day_id = day_id_by_key.get(key)
+        kept = {
+            register: [
+                number
+                for number in numbers
+                if day_id is None or (key, register, number) not in dismissed
+            ]
+            for register, numbers in registers.items()
+        }
+        kept = {register: numbers for register, numbers in kept.items() if numbers}
+        if kept:
+            active[key] = kept
+    return active
+
+
 async def run_sequence_rules(
     db: AsyncSession,
     add,
@@ -92,7 +168,7 @@ async def run_sequence_rules(
     store_ids: set[str] | None = None,
 ) -> int:
     """Raise one MISSING_TRAN finding per store day with gaps. Returns how many it raised."""
-    by_day = await find_gaps(db, business_date, store_ids)
+    by_day = await undismissed_gaps(db, await find_gaps(db, business_date, store_ids))
     if not by_day:
         return 0
 

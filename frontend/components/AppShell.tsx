@@ -13,10 +13,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ChatProvider>
       <div className="app-layout">
+        <a className="skip-link" href="#main-content">
+          Skip to workspace
+        </a>
         <Sidebar />
         <div className="app-body">
           <TopBar />
-          <main className="main-content">
+          <main className="main-content" id="main-content" tabIndex={-1}>
             <div className="container">
               <AccessGuard>{children}</AccessGuard>
             </div>

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api, AuditRow } from '@/lib/api';
 import { CopyButton, SkeletonRows, useToast } from '@/components/Feedback';
 import { CaseLink } from '@/components/MeProvider';
+import { formatDateTime, formatNumber } from '@/lib/preferences';
 import { Alert, Button, DataTable, PageHeader } from '@/components/ui';
 
 interface Verify {
@@ -126,7 +127,7 @@ export default function AuditPage() {
           'Checking integrity…'
         ) : v.intact ? (
           <>
-            <b>Chain intact.</b> {v.checked.toLocaleString()} events verified. Head #{v.head_seq}:{' '}
+            <b>Chain intact.</b> {formatNumber(v.checked)} events verified. Head #{v.head_seq}:{' '}
             <code>{v.head_hash.slice(0, 16)}…</code>
           </>
         ) : (
@@ -221,9 +222,7 @@ export default function AuditPage() {
             {
               key: 'time',
               header: 'Time',
-              render: (e) => (
-                <span className="text-sm nowrap">{new Date(e.created_at).toLocaleString()}</span>
-              ),
+              render: (e) => <span className="text-sm nowrap">{formatDateTime(e.created_at)}</span>,
             },
             {
               key: 'event',
@@ -268,7 +267,7 @@ export default function AuditPage() {
           emptyTitle="No events match."
           footer={
             <div className="ac-pager pager-sticky">
-              <span>{total.toLocaleString()} event(s)</span>
+              <span>{formatNumber(total)} event(s)</span>
               <span className="ac-spacer" />
               <Button
                 size="sm"
@@ -279,7 +278,7 @@ export default function AuditPage() {
                 Previous
               </Button>
               <span>
-                Page {page} of {pages.toLocaleString()}
+                Page {page} of {formatNumber(pages)}
               </span>
               <Button
                 size="sm"

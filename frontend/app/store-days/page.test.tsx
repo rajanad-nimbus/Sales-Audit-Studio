@@ -11,7 +11,13 @@ vi.mock('@/components/StoreSelect', async () => ({
 
 const readiness = (ingest: string, audit: string, exportState: string, ready = false) => ({
   ingest: { state: ingest, transactions: 5, detail: `data ${ingest}` },
-  audit: { state: audit, open_cases: 0, unexplained_variances: 0, detail: `audit ${audit}` },
+  audit: {
+    state: audit,
+    signed_off: audit === 'Clean',
+    open_cases: 0,
+    unexplained_variances: 0,
+    detail: `audit ${audit}`,
+  },
   export: { state: exportState, records: 0, pending: 0, acknowledged: 0 },
   ready_to_close: ready,
 });

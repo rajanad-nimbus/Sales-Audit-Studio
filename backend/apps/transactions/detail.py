@@ -7,7 +7,9 @@ and flagged Unbalanced, because that is an audit finding and not a reason to hid
 
 from __future__ import annotations
 
+import math
 import random
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 CENT = Decimal("0.01")
@@ -22,6 +24,7 @@ TEXT_LIMITS = {
     "line description": 255,
     "line tax_code": 30,
     "line return_reason": 255,
+    "line price_override_reason": 255,
     "tax_code": 30,
     "tax_name": 100,
     "discount code": 100,
@@ -134,12 +137,21 @@ def parse_line(line: dict, number: int, sign: int) -> dict:
     description = optional_text(line.get("description"), "line description")
     tax_code = optional_text(line.get("tax_code"), "line tax_code")
     return_reason = optional_text(line.get("return_reason"), "line return_reason")
+    price_override_reason = optional_text(
+        line.get("price_override_reason"), "line price_override_reason"
+    )
     quantity = decimal_value(line.get("quantity"), f"line {number} quantity")
     if quantity <= 0:
         raise ValueError(f"line {number} quantity must be positive")
     if quantity > MAX_QUANTITY or quantity != quantity.quantize(Decimal("0.001")):
         raise ValueError(f"line {number} quantity exceeds supported precision")
     price = money(line.get("unit_price"), f"line {number} unit_price")
+    original_price = (
+        money(line["original_unit_price"], f"line {number} original_unit_price")
+        if line.get("original_unit_price") not in (None, "")
+        else None
+    )
+    source_attributes = parse_source_attributes(line.get("source_attributes"), number)
     gross = (
         money(line["gross_amount"], f"line {number} gross_amount")
         if line.get("gross_amount") is not None
@@ -159,12 +171,67 @@ def parse_line(line: dict, number: int, sign: int) -> dict:
         "description": description,
         "quantity": quantity * sign,
         "unit_price": price,
+        "original_unit_price": original_price,
+        "price_override_reason": price_override_reason,
+        "source_attributes": source_attributes,
         "gross_amount": gross * sign,
         "tax_code": tax_code,
         "tax_rate": rate,
         "tax_amount": tax * sign,
         "return_reason": return_reason,
     }
+
+
+def parse_source_attributes(value: object, number: int) -> dict | None:
+    """Keep a bounded map of source-specific item attributes without allowing nested payloads."""
+    attributes = parse_scalar_attributes(value, f"line {number} source_attributes", 40)
+    if attributes is None:
+        return None
+    item_status = attributes.get("item_status")
+    if item_status not in (None, "", "Sale", "Return"):
+        raise ValueError(f"line {number} item_status must be Sale or Return")
+    uom_quantity = attributes.get("uom_quantity")
+    if uom_quantity not in (None, ""):
+        if (
+            isinstance(uom_quantity, bool)
+            or not isinstance(uom_quantity, (int, float))
+            or not math.isfinite(uom_quantity)
+            or uom_quantity <= 0
+            or round(uom_quantity * 1000) != uom_quantity * 1000
+        ):
+            raise ValueError(f"line {number} uom_quantity must be positive with at most 3 decimals")
+    order_date = attributes.get("customer_order_date")
+    if order_date not in (None, ""):
+        if not isinstance(order_date, str):
+            raise ValueError(f"line {number} customer_order_date must be an ISO date")
+        try:
+            attributes["customer_order_date"] = date.fromisoformat(order_date).isoformat()
+        except ValueError:
+            raise ValueError(f"line {number} customer_order_date must be an ISO date") from None
+    return_without_inventory = attributes.get("return_without_inventory")
+    if return_without_inventory not in (None, "") and not isinstance(return_without_inventory, bool):
+        raise ValueError(f"line {number} return_without_inventory must be true or false")
+    return attributes
+
+
+def parse_scalar_attributes(value: object, field: str, max_fields: int = 20) -> dict | None:
+    """Keep a small bounded map of scalar source metadata, excluding nested payloads."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or len(value) > max_fields:
+        raise ValueError(f"{field} must be an object with at most {max_fields} fields")
+    attributes: dict[str, str | int | float | bool | None] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key.strip() or len(key) > 64:
+            raise ValueError(f"{field} keys must be 1 to 64 characters")
+        if isinstance(item, str) and len(item) > 255:
+            raise ValueError(f"{field} value {key} exceeds 255 characters")
+        if item is not None and not isinstance(item, (str, int, float, bool)):
+            raise ValueError(f"{field} value {key} must be a scalar")
+        if isinstance(item, float) and not math.isfinite(item):
+            raise ValueError(f"{field} value {key} must be finite")
+        attributes[key] = item
+    return attributes
 
 
 def parse_discount(discount: dict, number: int, sign: int, line_count: int) -> dict:
@@ -197,6 +264,9 @@ def parse_tender(tender: dict, number: int, sign: int) -> dict:
         "tender_type": tender["tender_type"],
         "reference": optional_text(tender.get("reference"), "tender reference"),
         "authorization": optional_text(tender.get("authorization"), "tender authorization"),
+        "source_attributes": parse_scalar_attributes(
+            tender.get("source_attributes"), f"tender {number} source_attributes"
+        ),
         "amount": money(tender.get("amount"), f"tender {number} amount", allow_zero=False) * sign,
     }
 

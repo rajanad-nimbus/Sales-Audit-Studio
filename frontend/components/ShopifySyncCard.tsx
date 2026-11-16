@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { formatDateTime } from '@/lib/preferences';
 import { useToast } from '@/components/Feedback';
 import { Alert, Button, Card, Field } from '@/components/ui';
 import type { Source } from '@/lib/sources';
@@ -16,7 +17,7 @@ const RANGES = [
 const MAX_CUSTOM_DAYS = 90;
 const apiError = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback;
-const when = (iso: string) => new Date(iso).toLocaleString();
+const when = (iso: string) => formatDateTime(iso);
 const localDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 

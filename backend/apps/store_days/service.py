@@ -55,6 +55,7 @@ def total_view(total: AuditTotal) -> dict:
         "definition_revision": total.definition_revision,
         "level": total.level,
         "dimension": total.dimension_key,
+        "rollup_key": total.rollup_key,
         "calculated_amount": total.calculated_amount,
         "declared_amount": total.declared_amount,
         "variance_amount": total.variance_amount,

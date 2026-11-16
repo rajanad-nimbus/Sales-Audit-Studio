@@ -3,6 +3,7 @@ export interface Source {
   enabled: boolean;
   in_daily_batch: boolean;
   manual_sync: boolean;
+  require_day_close: boolean;
   pulled: boolean;
   configured: boolean | null;
   last_received_at: string | null;

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { applyUserPreferences, type UserPreferences } from '@/lib/preferences';
 
 export interface Screen {
   key: string;
@@ -37,7 +38,15 @@ export function MeProvider({ children }: { children: React.ReactNode }) {
   const load = useCallback(() => {
     api
       .get('/api/me')
-      .then((r) => setMe(r.data))
+      .then(async (r) => {
+        setMe(r.data);
+        try {
+          const { data } = await api.get<UserPreferences>('/api/me/preferences');
+          applyUserPreferences(data);
+        } catch {
+          /* Preferences are optional for loading the signed-in application. */
+        }
+      })
       .catch(() => setMe(null));
   }, []);
   useEffect(() => {

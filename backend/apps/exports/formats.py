@@ -6,6 +6,7 @@ record per row, and a trailer carrying the row count so the reader can detect a 
 and xml wraps the same rows in elements.
 """
 
+import json
 import re
 from xml.sax.saxutils import escape
 
@@ -30,7 +31,21 @@ def flat_value(value: object) -> str:
     """One field of a flat record: no delimiter or line break can split it."""
     if value is None:
         return ""
+    if isinstance(value, (dict, list)):
+        return (
+            json.dumps(value, separators=(",", ":"), default=str)
+            .replace("%", "%25")
+            .replace("|", "%7C")
+            .replace("\r", "%0D")
+            .replace("\n", "%0A")
+        )
     return re.sub(r"[\s|]+", " ", str(value)).strip()
+
+
+def xml_value(value: object) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(",", ":"), default=str)
+    return "" if value is None else str(value)
 
 
 def render_flat(
@@ -66,7 +81,7 @@ def render_xml(dataset: str, idempotency_key: str, generated_at: str, records: l
         out.append("  <record>")
         for column, value in record.items():
             tag = element_name(column)
-            out.append(f"    <{tag}>{escape('' if value is None else str(value))}</{tag}>")
+            out.append(f"    <{tag}>{escape(xml_value(value))}</{tag}>")
         out.append("  </record>")
     out.append("</export>")
     return ("\n".join(out) + "\n").encode()

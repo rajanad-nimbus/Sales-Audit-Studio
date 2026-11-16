@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { Theme } from './theme';
 
 interface ThemeContextType {
@@ -35,9 +35,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, [theme, mounted]);
 
-  const setTheme = (newTheme: Theme) => {
+  useEffect(() => {
+    const applyPreferenceTheme = (event: Event) => {
+      const value = (event as CustomEvent<Theme>).detail;
+      if (value === 'system' || value === 'light' || value === 'dark') setThemeState(value);
+    };
+    window.addEventListener('nimbus:preference-theme', applyPreferenceTheme);
+    return () => window.removeEventListener('nimbus:preference-theme', applyPreferenceTheme);
+  }, []);
+
+  const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
-  };
+  }, []);
 
   return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
 }

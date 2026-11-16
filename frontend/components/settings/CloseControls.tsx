@@ -5,6 +5,7 @@ import { useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import { Alert, Badge, Button, Card, DataTable, Field } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
+import { formatDateTime } from '@/lib/preferences';
 
 interface ToleranceRule {
   id: string;
@@ -25,6 +26,11 @@ interface Period {
   reopened_by: string | null;
   reopened_reason: string | null;
 }
+interface StoreDayOrderPolicy {
+  enabled: boolean;
+  updated_by: string | null;
+  updated_at: string | null;
+}
 
 // The reconciliation comparisons that block closure; configured totals are added when readable.
 const COMPARISONS = ['POS to GL Variance', 'Processor to Bank Variance', 'POS Control Declared'];
@@ -34,11 +40,98 @@ const EMPTY = { total_name: '', location_trait: '', within_amount: '0', case_amo
 export function CloseControls() {
   const { me } = useMe();
   const canEdit = !!me && (me.role === 'finance' || me.role === 'admin');
+  const canConfigureOrder = !!me && (me.role === 'it' || me.role === 'admin');
   return (
     <div className="stack">
+      <StoreDayOrder canConfigure={canConfigureOrder} />
       <Tolerances canEdit={canEdit} />
       <Periods canEdit={canEdit} />
     </div>
+  );
+}
+
+function StoreDayOrder({ canConfigure }: { canConfigure: boolean }) {
+  const toast = useToast();
+  const [policy, setPolicy] = useState<StoreDayOrderPolicy | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.get<StoreDayOrderPolicy>(
+        '/api/system-options/store-days-worked-in-order'
+      );
+      setPolicy(data);
+      setEnabled(data.enabled);
+    } catch (e) {
+      setError(apiError(e, 'Could not load the store-day ordering policy.'));
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { data } = await api.put<StoreDayOrderPolicy>(
+        '/api/system-options/store-days-worked-in-order',
+        { enabled }
+      );
+      setPolicy(data);
+      toast(
+        enabled
+          ? 'Store days will now close in business-date order.'
+          : 'Store-day date ordering is disabled.',
+        'success'
+      );
+    } catch (e) {
+      setError(apiError(e, 'Could not save the store-day ordering policy.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Store-day processing order">
+      <p>
+        When enabled, Finance cannot close a store day while any earlier date for that store remains
+        open. This helps teams work each location’s audit backlog in date order.
+      </p>
+      {error && (
+        <Alert tone="error" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      <div className="form-row">
+        <Field label="Require date order">
+          <select
+            value={String(enabled)}
+            disabled={!canConfigure || !policy}
+            onChange={(event) => setEnabled(event.target.value === 'true')}
+          >
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </Field>
+        {canConfigure && (
+          <Button
+            variant="primary"
+            disabled={busy || !policy || enabled === policy.enabled}
+            onClick={() => void save()}
+          >
+            {busy ? 'Saving…' : 'Save policy'}
+          </Button>
+        )}
+        <span className="hint">
+          {policy?.updated_by
+            ? `Last changed by ${policy.updated_by}${policy.updated_at ? ` · ${formatDateTime(policy.updated_at)}` : ''}`
+            : 'Default: off'}
+        </span>
+      </div>
+    </Card>
   );
 }
 
@@ -401,7 +494,8 @@ function Periods({ canEdit }: { canEdit: boolean }) {
             {
               key: 'closed',
               header: 'Closed',
-              render: (p) => `${p.closed_by} · ${new Date(p.closed_at).toLocaleDateString()}`,
+              render: (p) =>
+                `${p.closed_by} · ${formatDateTime(p.closed_at, { dateStyle: 'medium' })}`,
             },
             {
               key: 'note',

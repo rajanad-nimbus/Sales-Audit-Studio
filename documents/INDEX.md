@@ -16,7 +16,10 @@
 - [Shopify integration](backend/SHOPIFY_INTEGRATION.md)
 - [Store scope](backend/STORE_SCOPE.md)
 - [Theme](THEME.md)
+- [General audit process](AUDIT_PROCESS.md)
+- [ReSA workflow parity](RESA_PARITY.md)
 - [Build summary](BUILD_SUMMARY.md)
+- [Domain terms](../CONTEXT.md)
 
 All Markdown documentation is kept in this directory so documentation changes
 are easy to discover, review, and package separately from application code.

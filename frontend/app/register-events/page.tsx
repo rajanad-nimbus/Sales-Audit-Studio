@@ -1,5 +1,7 @@
 'use client';
 
+import { formatNumber } from '@/lib/preferences';
+import { downloadBlob } from '@/lib/csv';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
@@ -55,9 +57,19 @@ interface F {
   flagged: string;
   date_from: string;
   date_to: string;
+  register_id: string;
+  cashier_id: string;
 }
-const EMPTY: F = { q: '', store_id: '', event_type: '', flagged: '', date_from: '', date_to: '' };
-
+const EMPTY: F = {
+  q: '',
+  store_id: '',
+  event_type: '',
+  flagged: '',
+  date_from: '',
+  date_to: '',
+  register_id: '',
+  cashier_id: '',
+};
 const TYPE_LABELS: Record<string, string> = {
   void: 'Void',
   post_void: 'Post-void',
@@ -84,6 +96,7 @@ const COLUMNS: Column<Row>[] = [
     sortKey: 'business_date',
     nowrap: true,
     render: (r) => r.business_date,
+    csvValue: (r) => r.business_date,
   },
   {
     key: 'time',
@@ -91,13 +104,31 @@ const COLUMNS: Column<Row>[] = [
     sortKey: 'time',
     nowrap: true,
     render: (r) => r.event_time.slice(11, 16),
+    csvValue: (r) => r.event_time.slice(11, 16),
   },
-  { key: 'store', header: 'Store', sortKey: 'store', render: (r) => r.store_id },
-  { key: 'register', header: 'Register', render: (r) => r.register_id ?? '—' },
-  { key: 'cashier', header: 'Cashier', render: (r) => r.cashier_id ?? '—' },
+  {
+    key: 'store',
+    header: 'Store',
+    sortKey: 'store',
+    render: (r) => r.store_id,
+    csvValue: (r) => r.store_id,
+  },
+  {
+    key: 'register',
+    header: 'Register',
+    render: (r) => r.register_id ?? '—',
+    csvValue: (r) => r.register_id,
+  },
+  {
+    key: 'cashier',
+    header: 'Cashier',
+    render: (r) => r.cashier_id ?? '—',
+    csvValue: (r) => r.cashier_id,
+  },
   {
     key: 'type',
     header: 'Event',
+    csvValue: (r) => `${typeLabel(r.event_type)}${r.sub_type ? ` / ${r.sub_type}` : ''}`,
     sortKey: 'type',
     render: (r) => (
       <>
@@ -109,6 +140,8 @@ const COLUMNS: Column<Row>[] = [
   {
     key: 'tran',
     header: 'Transaction',
+    csvValue: (r) =>
+      `${r.transaction_number === '0' ? '' : r.transaction_number}${r.original_transaction_number ? ` (cancels ${r.original_transaction_number})` : ''}`,
     render: (r) => (
       <>
         {r.transaction_number === '0' ? '—' : r.transaction_number}
@@ -118,21 +151,28 @@ const COLUMNS: Column<Row>[] = [
       </>
     ),
   },
-  { key: 'reason', header: 'Reason', render: (r) => r.reason_code ?? '—' },
+  {
+    key: 'reason',
+    header: 'Reason',
+    render: (r) => r.reason_code ?? '—',
+    csvValue: (r) => r.reason_code,
+  },
   {
     key: 'amount',
     header: 'Amount',
     sortKey: 'amount',
     numeric: true,
     render: (r) => (r.amount ? money(r.amount, r.currency) : '—'),
+    csvValue: (r) => (r.amount ? `${r.currency} ${r.amount}` : ''),
   },
   {
     key: 'audit',
     header: 'Audit',
     stopRowClick: true,
+    csvValue: (r) => r.audit_code,
     render: (r) =>
       r.audit_code ? (
-        <Link href={`/audit-errors?code=${encodeURIComponent(r.audit_code)}`}>
+        <Link href={`/audit-errors/${encodeURIComponent(r.audit_code)}`}>
           <Badge variant="error" size="sm">
             {r.audit_code}
           </Badge>
@@ -151,9 +191,12 @@ export default function RegisterEventsPage() {
   const [pageSize, setPageSize] = useState(50);
   // The row open under the table, if any. Cleared whenever a different page of rows arrives.
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [requestedEventId, setRequestedEventId] = useState<string | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [data, setData] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [ready, setReady] = useState(false);
   const seq = useRef(0);
 
@@ -166,6 +209,7 @@ export default function RegisterEventsPage() {
     });
     setF(next);
     setQd(next.q);
+    setRequestedEventId(p.get('event_id'));
     setReady(true);
     api
       .get('/api/register-events/facets')
@@ -179,16 +223,28 @@ export default function RegisterEventsPage() {
       const v = k === 'q' ? qd : f[k];
       if (v) p.set(k, v);
     });
+    if (requestedEventId) p.set('event_id', requestedEventId);
     const s = p.toString();
     history.replaceState(null, '', s ? `?${s}` : window.location.pathname);
-  }, [ready, f, qd]);
+  }, [ready, f, qd, requestedEventId]);
   useEffect(() => {
     const t = setTimeout(() => setQd(f.q), 300);
     return () => clearTimeout(t);
   }, [f.q]);
   useEffect(() => {
     setPage(1);
-  }, [qd, f.store_id, f.event_type, f.flagged, f.date_from, f.date_to, sort, pageSize]);
+  }, [
+    qd,
+    f.store_id,
+    f.event_type,
+    f.flagged,
+    f.date_from,
+    f.date_to,
+    f.register_id,
+    f.cashier_id,
+    sort,
+    pageSize,
+  ]);
 
   const load = useCallback(async () => {
     if (!ready) return;
@@ -202,11 +258,16 @@ export default function RegisterEventsPage() {
       const v = k === 'q' ? qd : f[k];
       if (v) params[k] = k === 'flagged' ? true : v;
     });
+    if (requestedEventId) params.event_id = requestedEventId;
     try {
       const { data } = await api.get('/api/register-events', { params });
       if (mine === seq.current) {
         setData(data);
-        setExpanded(null);
+        setExpanded(
+          requestedEventId && data.items.some((row: Row) => row.id === requestedEventId)
+            ? requestedEventId
+            : null
+        );
         setError(null);
       }
     } catch (e) {
@@ -217,7 +278,7 @@ export default function RegisterEventsPage() {
             : 'Could not load register events.'
         );
     }
-  }, [ready, f, qd, sort, page, pageSize]);
+  }, [ready, f, qd, requestedEventId, sort, page, pageSize]);
   useEffect(() => {
     load();
   }, [load]);
@@ -226,10 +287,37 @@ export default function RegisterEventsPage() {
   });
 
   const set = (patch: Partial<F>) => setF((x) => ({ ...x, ...patch }));
-  const filtered = (Object.keys(f) as (keyof F)[]).some((k) => (k === 'q' ? qd : f[k]));
+  const downloadFilteredCsv = async () => {
+    setExporting(true);
+    setExportNotice(null);
+    try {
+      const params = new URLSearchParams({ ...sort, format: 'csv' });
+      (Object.keys(f) as (keyof F)[]).forEach((key) => {
+        const value = key === 'q' ? qd : f[key];
+        if (value) params.set(key, key === 'flagged' ? 'true' : value);
+      });
+      const response = await api.get(`/api/register-events?${params}`, { responseType: 'blob' });
+      downloadBlob(
+        `register_events_${f.date_from || 'all'}_${f.date_to || 'current'}.csv`,
+        response.data
+      );
+      if (response.headers?.['x-report-truncated'] === 'true') {
+        setExportNotice(
+          'The export includes the first 100,000 matching events. Narrow the filters to download a smaller range.'
+        );
+      }
+    } catch {
+      setError('Could not download filtered register events.');
+    } finally {
+      setExporting(false);
+    }
+  };
+  const filtered =
+    !!requestedEventId || (Object.keys(f) as (keyof F)[]).some((k) => (k === 'q' ? qd : f[k]));
   const clear = () => {
     setF(EMPTY);
     setQd('');
+    setRequestedEventId(null);
   };
   const toggleSort = (k: string) =>
     setSort((s) =>
@@ -245,7 +333,21 @@ export default function RegisterEventsPage() {
       <PageHeader
         title="Register Events"
         subtitle="Till and drawer activity with no sale behind it: voids, no-sales, paid-in and paid-out, pulls and loans, and till, register and store opens and closes."
+        actions={
+          <Button
+            variant="secondary"
+            disabled={!data?.total || exporting}
+            onClick={() => void downloadFilteredCsv()}
+          >
+            {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
+          </Button>
+        }
       />
+      {exportNotice && (
+        <Alert tone="warning" onDismiss={() => setExportNotice(null)}>
+          {exportNotice}
+        </Alert>
+      )}
       {error && (
         <Alert
           tone="error"
@@ -266,8 +368,8 @@ export default function RegisterEventsPage() {
           onClick={() => set({ event_type: '' })}
         >
           <small>All events</small>
-          <b>{typeTotal.toLocaleString()}</b>
-          <em>{data ? `${data.flagged.toLocaleString()} flagged by the audit` : ' '}</em>
+          <b>{formatNumber(typeTotal)}</b>
+          <em>{data ? `${formatNumber(data.flagged)} flagged by the audit` : ' '}</em>
         </button>
         {types.map(([t, c]) => (
           <button
@@ -277,15 +379,13 @@ export default function RegisterEventsPage() {
             onClick={() => set({ event_type: f.event_type === t ? '' : t })}
           >
             <small>{typeLabel(t)}</small>
-            <b>{c.toLocaleString()}</b>
+            <b>{formatNumber(c)}</b>
             <em> </em>
           </button>
         ))}
       </div>
 
-      <Toolbar
-        count={data ? `${data.total.toLocaleString()} ${filtered ? 'matching' : 'total'}` : ''}
-      >
+      <Toolbar count={data ? `${formatNumber(data.total)} ${filtered ? 'matching' : 'total'}` : ''}>
         <input
           className="grow"
           type="search"
@@ -312,6 +412,18 @@ export default function RegisterEventsPage() {
           <option value="">Any audit result</option>
           <option value="1">Flagged only</option>
         </select>
+        <input
+          aria-label="Register ID"
+          value={f.register_id}
+          onChange={(e) => set({ register_id: e.target.value })}
+          placeholder="Register ID"
+        />
+        <input
+          aria-label="Cashier ID"
+          value={f.cashier_id}
+          onChange={(e) => set({ cashier_id: e.target.value })}
+          placeholder="Cashier ID"
+        />
         <input
           type="date"
           aria-label="From business date"
@@ -355,9 +467,14 @@ export default function RegisterEventsPage() {
       ) : (
         <DataTable
           columns={COLUMNS}
+          csvFileName="register-events-visible.csv"
           rows={data.items}
           rowKey={(r) => r.id}
-          onRowClick={(r) => setExpanded((open) => (open === r.id ? null : r.id))}
+          onRowClick={(r) => {
+            const next = expanded === r.id ? null : r.id;
+            setExpanded(next);
+            setRequestedEventId(next);
+          }}
           expandedKey={expanded}
           renderDetail={(r) => <EventContext id={r.id} typeLabel={typeLabel} />}
           sort={{ key: sort.sort, dir: sort.dir as 'asc' | 'desc' }}

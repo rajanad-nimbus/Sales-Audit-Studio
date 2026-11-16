@@ -77,7 +77,13 @@ def explains(explanation: VarianceExplanation, required: str) -> bool:
 
 
 def explanation_key(total) -> tuple:
-    return (total.total_name, total.level, total.dimension_key, Decimal(total.variance_amount))
+    return (
+        total.total_name,
+        total.level,
+        total.dimension_key,
+        total.rollup_key,
+        Decimal(total.variance_amount),
+    )
 
 
 async def safe_traits(db: AsyncSession, store_id: str) -> set[str]:
@@ -153,6 +159,7 @@ def explanation_view(row: VarianceExplanation) -> dict:
     return {
         "id": row.id,
         "audit_version": row.audit_version,
+        "rollup_key": row.rollup_key,
         "variance_amount": row.variance_amount,
         "outcome": row.outcome,
         "reason": row.reason,

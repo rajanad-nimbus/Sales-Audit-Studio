@@ -129,3 +129,35 @@ describe('Transactions page: opening a row in place', () => {
     expect(within(document.body).getAllByRole('row').length).toBeLessThanOrEqual(3);
   });
 });
+
+describe('Transaction filters', () => {
+  it('reveals specialist filters and keeps their active count visible when collapsed', async () => {
+    window.history.replaceState(null, '', '/transactions');
+    mockApi(routes());
+    render(<TransactionsPage />);
+    await screen.findAllByText('Sale');
+    expect(screen.queryByRole('textbox', { name: 'Register ID' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'More filters' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Register ID' }), 'R1');
+    await userEvent.click(screen.getByRole('button', { name: 'Fewer filters (1 active)' }));
+    expect(screen.getByRole('button', { name: 'More filters (1 active)' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.getByRole('button', { name: 'More filters' })).toBeInTheDocument();
+    window.history.replaceState(null, '', '/transactions');
+  });
+
+  it('reveals specialist filters supplied in a shared URL', async () => {
+    window.history.replaceState(null, '', '/transactions?register_id=R1');
+    mockApi(routes());
+    render(<TransactionsPage />);
+    expect(await screen.findByRole('textbox', { name: 'Register ID' })).toHaveValue('R1');
+    expect(screen.getByRole('button', { name: 'Fewer filters (1 active)' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    window.history.replaceState(null, '', '/transactions');
+  });
+});

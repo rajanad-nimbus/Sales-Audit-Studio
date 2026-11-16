@@ -1,5 +1,6 @@
 // Shared by Agent Activity and the Agents configuration page.
 // Every automated actor the backend writes to the audit trail. Anything else is a person.
+import { formatDateTime } from './preferences';
 export const GROUPS = [
   { key: 'reconciliation', label: 'Reconciliation', actors: ['reconciliation-engine'] },
   { key: 'investigation', label: 'Investigation', actors: ['investigation-agent'] },
@@ -57,7 +58,7 @@ export const ago = (iso: string) => {
         ? `${Math.round(s / 60)}m ago`
         : s < 86400
           ? `${Math.round(s / 3600)}h ago`
-          : new Date(iso).toLocaleDateString();
+          : formatDateTime(iso, { dateStyle: 'medium' });
 };
 export const dayLabel = (iso: string) => {
   const d = new Date(iso),
@@ -71,5 +72,5 @@ export const dayLabel = (iso: string) => {
     ? 'Today'
     : diff === 1
       ? 'Yesterday'
-      : d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+      : formatDateTime(d, { weekday: 'long', month: 'short', day: 'numeric' });
 };

@@ -6,14 +6,18 @@ from typing import Annotated, Literal
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import String, cast, func, literal, or_, select, union
 from sqlalchemy import case as sql_case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.ingest.models import SourceRecord
+from apps.csv_export import csv_table
 from apps.search import contains_literal
 from apps.security import scope
 from apps.security.authentication import require_role
+from apps.security.sensitive_data import redact_sensitive_fields
+from apps.transactions.comments import router as comments_router
 from apps.transactions.detail_routes import (
     MAX_PAYLOAD_CHARS as MAX_PAYLOAD_CHARS,
 )
@@ -47,10 +51,11 @@ from apps.transactions.detail_routes import (
 from apps.transactions.detail_routes import (
     transaction_detail as transaction_detail,
 )
-from apps.transactions.models import CanonicalTransaction, TransactionLine
+from apps.transactions.models import CanonicalTransaction, TransactionLine, TransactionTender
 from apps.transactions.views import row_view as row_view
 
 router = APIRouter(prefix="/api/transactions", tags=["Transactions"])
+CSV_MAX_ROWS = 100_000
 SORTS = {
     "business_date": CanonicalTransaction.business_date,
     "event_timestamp": CanonicalTransaction.event_timestamp,
@@ -74,6 +79,10 @@ def conditions(
     q=None,
     skip_status=False,
     detail_status=None,
+    register_id=None,
+    cashier_id=None,
+    salesperson_id=None,
+    item_code=None,
 ) -> list:
     c = []
     if store_id:
@@ -88,6 +97,21 @@ def conditions(
         c.append(CanonicalTransaction.reconciliation_status == status)
     if detail_status:
         c.append(CanonicalTransaction.detail_status == detail_status)
+    if register_id:
+        c.append(CanonicalTransaction.register_id == register_id)
+    if cashier_id:
+        c.append(CanonicalTransaction.cashier_id == cashier_id)
+    if salesperson_id:
+        c.append(CanonicalTransaction.salesperson_id == salesperson_id)
+    if item_code:
+        c.append(
+            select(TransactionLine.transaction_id)
+            .where(
+                TransactionLine.transaction_id == CanonicalTransaction.id,
+                TransactionLine.item_code == item_code,
+            )
+            .exists()
+        )
     if date_from:
         c.append(CanonicalTransaction.business_date >= date_from)
     if date_to:
@@ -99,7 +123,19 @@ def conditions(
                 contains_literal(CanonicalTransaction.payment_reference, q),
                 contains_literal(CanonicalTransaction.settlement_reference, q),
                 contains_literal(CanonicalTransaction.register_id, q),
+                contains_literal(CanonicalTransaction.transaction_number, q),
+                contains_literal(CanonicalTransaction.cashier_id, q),
+                contains_literal(CanonicalTransaction.salesperson_id, q),
                 contains_literal(SourceRecord.source_record_id, q),
+                select(TransactionTender.id)
+                .where(
+                    TransactionTender.transaction_id == CanonicalTransaction.id,
+                    or_(
+                        contains_literal(TransactionTender.reference, q),
+                        contains_literal(TransactionTender.authorization, q),
+                    ),
+                )
+                .exists(),
             )
         )
     return c
@@ -132,6 +168,11 @@ async def list_transactions(
     date_to: date | None = None,
     q: Annotated[str | None, Query(max_length=255)] = None,
     detail_status: Annotated[str | None, Query(min_length=1, max_length=20)] = None,
+    register_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    cashier_id: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    salesperson_id: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    item_code: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    format: Literal["json", "csv"] = "json",
     sort: Literal[
         "business_date", "event_timestamp", "amount", "store", "type", "status", "tender", "source"
     ] = "business_date",
@@ -158,6 +199,10 @@ async def list_transactions(
         date_to,
         q,
         detail_status=detail_status,
+        register_id=register_id,
+        cashier_id=cashier_id,
+        salesperson_id=salesperson_id,
+        item_code=item_code,
     )
     # Status tiles intentionally ignore the selected status, while the result count
     # and net amount honor it. Compute both views in one grouped database pass.
@@ -172,6 +217,10 @@ async def list_transactions(
         q,
         skip_status=True,
         detail_status=detail_status,
+        register_id=register_id,
+        cashier_id=cashier_id,
+        salesperson_id=salesperson_id,
+        item_code=item_code,
     )
     selected_status = CanonicalTransaction.reconciliation_status == status if status else None
     selected_count = (
@@ -208,6 +257,62 @@ async def list_transactions(
         order, CanonicalTransaction.event_timestamp.desc(), CanonicalTransaction.id
     )
     rows_query = scope.restrict(rows_query, _, CanonicalTransaction.store_id)
+    if format == "csv":
+        item_count = (
+            select(func.count(TransactionLine.id))
+            .where(TransactionLine.transaction_id == CanonicalTransaction.id)
+            .correlate(CanonicalTransaction)
+            .scalar_subquery()
+        )
+        csv_query = select(CanonicalTransaction, SourceRecord, item_count).outerjoin(
+            SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id
+        )
+        csv_query = scope.restrict(csv_query.where(*where), _, CanonicalTransaction.store_id)
+        csv_query = csv_query.order_by(
+            order, CanonicalTransaction.event_timestamp.desc(), CanonicalTransaction.id
+        )
+        rows = (await db.execute(csv_query.limit(CSV_MAX_ROWS + 1))).all()
+        truncated = len(rows) > CSV_MAX_ROWS
+        rows = rows[:CSV_MAX_ROWS]
+        columns = (
+            "business_date",
+            "store_id",
+            "register_id",
+            "cashier_id",
+            "salesperson_id",
+            "source_system",
+            "transaction_type",
+            "tender_type",
+            "amount",
+            "currency",
+            "reconciliation_status",
+            "detail_status",
+            "item_count",
+            "reference",
+        )
+        values = (
+            (
+                row_view(transaction, source, item_count)[column]
+                if column != "reference"
+                else redact_sensitive_fields(
+                    {
+                        "reference": transaction.payment_reference
+                        or (source.source_record_id if source else None)
+                        or ""
+                    }
+                )["reference"]
+                for column in columns
+            )
+            for transaction, source, item_count in rows
+        )
+        return Response(
+            content=csv_table(columns, values),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": "attachment; filename=transactions.csv",
+                "X-Report-Truncated": str(truncated).lower(),
+            },
+        )
     rows = (await db.execute(rows_query.offset((page - 1) * page_size).limit(page_size))).all()
     counts = (
         dict(
@@ -276,4 +381,5 @@ async def facets(
     return {**facets_by_name, "date_min": lo, "date_max": hi}
 
 
+router.include_router(comments_router)
 router.include_router(detail_router)

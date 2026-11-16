@@ -56,6 +56,7 @@ async def run_daily_batch(
     feeds: dict | None = None,
     trigger: str = "manual",
     rerun: bool = False,
+    request=None,
 ) -> BatchRun:
     validate_batch_date(business_date)
     run = await claim_batch(db, business_date, trigger, rerun)
@@ -67,6 +68,32 @@ async def run_daily_batch(
         raise
     except Exception as exc:  # keep the failure visible instead of losing the run
         return await record_batch_failure(db, run.id, business_date, exc)
+
+    if trigger == "schedule":
+        try:
+            from apps.store_days.automation import open_next_business_day
+
+            opening = await open_next_business_day(db, business_date)
+            run.store_day_open_status = opening["status"]
+            run.store_days_opened = opening["opened"]
+            run.store_days_already_open = opening["already_open"]
+            run.store_day_open_error = opening["detail"]
+            await db.commit()
+        except Exception as exc:
+            logger.exception("Automatic next-day Store Day opening failed after batch %s", run.id)
+            await db.rollback()
+            run = await load_batch(db, run.id)
+            run.store_day_open_status = "Failed"
+            run.store_day_open_error = f"Store Day opening failed ({type(exc).__name__})"
+            await db.commit()
+
+    try:
+        from apps.exports.routes import auto_export_valid_transactions
+
+        await auto_export_valid_transactions(db, request)
+    except Exception:
+        logger.exception("Automatic transaction export could not start after batch %s", run.id)
+        await db.rollback()
 
     run = await load_batch(db, run.id)
     run = await run_optional_investigation(db, run, business_date)

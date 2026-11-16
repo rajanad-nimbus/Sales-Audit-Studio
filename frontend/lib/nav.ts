@@ -31,15 +31,23 @@ const ICONS: Record<string, string> = {
   '/cases': 'cases',
   '/activity': 'activity',
   '/store-days': 'totals',
+  '/total-history': 'totals',
+  '/misc-totals': 'totals',
   '/transactions': 'transactions',
+  '/item-summary': 'totals',
+  '/tender-summary': 'cash',
+  '/ledger': 'ledger',
   '/register-events': 'registerEvents',
+  '/register-summary': 'registerEvents',
   '/cash-office': 'cash',
+  '/ach': 'cash',
   '/audit-errors': 'auditErrors',
   '/corrections': 'corrections',
   '/audit': 'audit',
   '/foundation': 'foundation',
   '/imports': 'imports',
   '/exports': 'exports',
+  '/preferences': 'settings',
 };
 export const iconFor = (path: string) =>
   path.startsWith('/reports/')
@@ -49,12 +57,18 @@ export const iconFor = (path: string) =>
       : (ICONS[path] ?? 'controls');
 
 /**
+ * TEMPORARY: the only screens the menu shows while testing the Shopify store-day flow. The other
+ * screens still open by URL. Set to null to bring the full menu back.
+ */
+export const MENU_ONLY: string[] | null = null;
+
+/**
  * The menu for a role, built from the screens the server says it may open (GET /api/me). The
  * server owns each screen's label, group and order, so the menu cannot disagree with who may open
- * what. Configuration screens are left out of the menu.
+ * what. Configuration screens are left out of the menu. `only`, when given, narrows it to those paths.
  */
-export function navSections(screens: Screen[]): NavSection[] {
-  const allowed = screens.filter((s) => s.allowed);
+export function navSections(screens: Screen[], only: string[] | null = null): NavSection[] {
+  const allowed = screens.filter((s) => s.allowed && (!only || only.includes(s.path)));
   const item = (s: Screen): NavItem => ({
     label: s.label,
     href: s.path,

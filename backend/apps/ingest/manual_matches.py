@@ -1,5 +1,6 @@
 """Proposal and review workflows for manual reconciliation matches."""
 
+import logging
 import uuid
 
 from database import get_db
@@ -16,6 +17,7 @@ from apps.security.authentication import require_role
 from apps.transactions.models import CanonicalTransaction
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/api/reconciliation/matches")
@@ -168,7 +170,18 @@ async def approve_manual_match(
         actor=match.reviewed_by,
     )
     await db.commit()
-    return {"id": match.id, "status": match.status}
+    try:
+        from apps.exports.routes import auto_export_valid_transactions
+
+        automatic_exports = await auto_export_valid_transactions(
+            db,
+            store_ids=sorted({row.store_id for row in rows}),
+        )
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Automatic transaction export could not start after manual match")
+        automatic_exports = [{"preparation_error": type(exc).__name__}]
+    return {"id": match.id, "status": match.status, "automatic_exports": automatic_exports}
 
 
 @router.post("/api/reconciliation/matches/{match_id}/reject")

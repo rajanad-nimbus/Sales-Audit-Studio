@@ -2,10 +2,11 @@
 
 import uuid
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from integrations.ontology.nimbus import audit
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cash.models import CashControl, CashDeposit
 from apps.cash.schemas import CashControlBody, CashDepositBody
+from apps.csv_export import csv_row
 from apps.cash.service import (
     calculate_declaration,
     expected_cash_deposit,
@@ -26,6 +28,7 @@ from apps.security.authentication import require_role
 router = APIRouter(prefix="/api/cash-controls", tags=["Cash office"])
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
+MAX_CASH_EXPORT = 50_000
 
 
 def view(row: CashControl):
@@ -72,6 +75,7 @@ async def list_controls(
     response: Response = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+    format: Literal["json", "csv"] = "json",
 ):
     filters = []
     if store_id:
@@ -84,14 +88,50 @@ async def list_controls(
         select(func.count()).select_from(CashControl).where(*filters), user, CashControl.store_id
     )
     total = (await db.execute(total_query)).scalar_one()
+    ordering = (CashControl.business_date.desc(), CashControl.store_id, CashControl.id)
+    if format == "csv":
+        if total > MAX_CASH_EXPORT:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Export contains {total:,} cash controls; limit is {MAX_CASH_EXPORT:,}.",
+            )
+        columns = (
+            "store_id",
+            "business_date",
+            "register_id",
+            "cashier_id",
+            "tender_type",
+            "declared_cash",
+            "paid_out",
+            "safe_drop",
+            "expected_amount",
+            "variance_amount",
+            "status",
+            "declared_by",
+            "updated_at",
+        )
+
+        async def generate():
+            yield csv_row(columns)
+            result = await db.stream(
+                query.order_by(*ordering).execution_options(yield_per=1000)
+            )
+            try:
+                async for row in result.scalars():
+                    item = view(row)
+                    yield csv_row(item[column] for column in columns)
+            finally:
+                await result.close()
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="cash-controls.csv"'},
+        )
     rows = (
         (
             await db.execute(
-                query.order_by(
-                    CashControl.business_date.desc(), CashControl.store_id, CashControl.id
-                )
-                .offset(skip)
-                .limit(limit)
+                query.order_by(*ordering).offset(skip).limit(limit)
             )
         )
         .scalars()
@@ -256,6 +296,7 @@ async def list_deposits(
     response: Response = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+    format: Literal["json", "csv"] = "json",
 ):
     filters = []
     if store_id:
@@ -268,14 +309,47 @@ async def list_deposits(
         select(func.count()).select_from(CashDeposit).where(*filters), user, CashDeposit.store_id
     )
     total = (await db.execute(total_query)).scalar_one()
+    ordering = (CashDeposit.business_date.desc(), CashDeposit.store_id, CashDeposit.id)
+    if format == "csv":
+        if total > MAX_CASH_EXPORT:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Export contains {total:,} deposits; limit is {MAX_CASH_EXPORT:,}.",
+            )
+        columns = (
+            "store_id",
+            "business_date",
+            "deposit_reference",
+            "bank_account",
+            "deposited_amount",
+            "expected_amount",
+            "variance_amount",
+            "status",
+            "recorded_by",
+            "created_at",
+        )
+
+        async def generate():
+            yield csv_row(columns)
+            result = await db.stream(
+                query.order_by(*ordering).execution_options(yield_per=1000)
+            )
+            try:
+                async for row in result.scalars():
+                    item = deposit_view(row)
+                    yield csv_row(item[column] for column in columns)
+            finally:
+                await result.close()
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="cash-deposits.csv"'},
+        )
     rows = (
         (
             await db.execute(
-                query.order_by(
-                    CashDeposit.business_date.desc(), CashDeposit.store_id, CashDeposit.id
-                )
-                .offset(skip)
-                .limit(limit)
+                query.order_by(*ordering).offset(skip).limit(limit)
             )
         )
         .scalars()

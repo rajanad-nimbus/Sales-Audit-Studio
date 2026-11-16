@@ -4,7 +4,14 @@ import Link from 'next/link';
 import { api, caseMoney, money } from '@/lib/api';
 import { CaseLink } from '@/components/MeProvider';
 import { Alert, Badge } from '@/components/ui';
-import { apiError, dayApi, dayPath, outcomeVariant, readinessVariant } from '@/lib/storeDays';
+import {
+  apiError,
+  dayApi,
+  dayPath,
+  formatRollupKey,
+  outcomeVariant,
+  readinessVariant,
+} from '@/lib/storeDays';
 import type { StoreDayBrief as Brief } from '@/lib/storeDays';
 
 /**
@@ -37,8 +44,33 @@ export function StoreDayBrief({
 
   const { readiness, blockers, variances, cases } = brief;
   const parts = [
+    [
+      'Sales audit',
+      readiness.audit.overall_status ??
+        (readiness.audit.state === 'Clean' &&
+        readiness.ingest.state === 'Complete' &&
+        readiness.audit.signed_off
+          ? 'Sales Audit Complete'
+          : 'Sales Audit In Progress'),
+      'Overall store-day audit lifecycle',
+    ],
     ['Data', readiness.ingest.state, readiness.ingest.detail],
-    ['Audit', readiness.audit.state, readiness.audit.detail],
+    ...(readiness.ingest.day_close
+      ? [
+          [
+            'Store-level POS close',
+            readiness.ingest.day_close.state,
+            readiness.ingest.day_close.markers
+              ? `${readiness.ingest.day_close.markers} store-level close marker(s) received`
+              : readiness.ingest.day_close.required
+                ? 'The required store-level POS Day Close marker has not been received'
+                : readiness.ingest.day_close.events
+                  ? 'Register events arrived without the store-level Day Close marker'
+                  : 'The POS feed has not supplied register events or the store-level close marker',
+          ] as const,
+        ]
+      : []),
+    ['Audit', readiness.audit.resa_status ?? readiness.audit.state, readiness.audit.detail],
     [
       'Export',
       readiness.export.state,
@@ -83,9 +115,11 @@ export function StoreDayBrief({
           </b>
           <ul>
             {variances.top_unexplained.map((v) => (
-              <li key={`${v.name}|${v.level}|${v.dimension ?? ''}`}>
+              <li key={`${v.name}|${v.level}|${v.dimension ?? ''}|${v.rollup_key ?? ''}`}>
                 {v.name}
-                {v.dimension ? ` · ${v.dimension}` : ''}: {money(v.variance, v.currency)}{' '}
+                {v.dimension ? ` · ${v.dimension}` : ''}
+                {v.rollup_key ? ` · ${formatRollupKey(v.rollup_key)}` : ''}:{' '}
+                {money(v.variance, v.currency)}{' '}
                 <Badge variant={outcomeVariant(v.outcome, false)} size="sm">
                   {v.outcome}
                 </Badge>

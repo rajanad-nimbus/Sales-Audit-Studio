@@ -12,6 +12,7 @@ import {
   Segmented,
 } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
+import { formatDateTime, formatNumber } from '@/lib/preferences';
 
 interface Activity {
   window: {
@@ -69,16 +70,16 @@ export function AuditActivity() {
       />
       {error && <Alert tone="error">{error}</Alert>}
       <MetricGrid>
-        <MetricTile label="Events read" value={w ? w.events.toLocaleString() : '—'} />
+        <MetricTile label="Events read" value={w ? formatNumber(w.events) : '—'} />
         <MetricTile label="People" value={data ? data.by_actor.length : '—'} />
         <MetricTile
           label="Important changes"
-          value={data ? data.by_actor.reduce((n, a) => n + a.sensitive, 0).toLocaleString() : '—'}
+          value={data ? formatNumber(data.by_actor.reduce((n, a) => n + a.sensitive, 0)) : '—'}
         />
       </MetricGrid>
       {w?.from_time && w.to_time && (
         <p className="hint">
-          {new Date(w.from_time).toLocaleString()} to {new Date(w.to_time).toLocaleString()}
+          {formatDateTime(w.from_time)} to {formatDateTime(w.to_time)}
         </p>
       )}
       <Card title="Important changes">
@@ -94,7 +95,7 @@ export function AuditActivity() {
               key: 't',
               header: 'When',
               nowrap: true,
-              render: (e) => new Date(e.created_at).toLocaleString(),
+              render: (e) => formatDateTime(e.created_at),
             },
             { key: 'a', header: 'Who', primary: true, render: (e) => e.actor },
             {
@@ -123,7 +124,7 @@ export function AuditActivity() {
               key: 'l',
               header: 'Last active',
               nowrap: true,
-              render: (a) => new Date(a.last_at).toLocaleString(),
+              render: (a) => formatDateTime(a.last_at),
             },
           ]}
         />

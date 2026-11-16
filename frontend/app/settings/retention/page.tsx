@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { formatDateTime } from '@/lib/preferences';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { Alert, Button, Card, DataTable } from '@/components/ui';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -54,7 +55,7 @@ export default function RetentionPage() {
       const { data } = await api.get(`/api/operations/retention/${dataset}/preview`);
       setNote(
         data.retention_supported
-          ? `${dataset}: ${data.eligible_records} records are eligible after ${new Date(data.cutoff).toLocaleDateString()}. This is a preview. Nothing is removed.`
+          ? `${dataset}: ${data.eligible_records} records are eligible after ${formatDateTime(data.cutoff, { dateStyle: 'medium' })}. This is a preview. Nothing is removed.`
           : `${dataset}: ${data.eligible_records} records match the configured age. Audit events are append-only and hash-chained, so retention cannot archive or remove them.`
       );
     } catch (e) {
@@ -123,7 +124,8 @@ export default function RetentionPage() {
                 key: 'dataset',
                 header: 'Dataset',
                 primary: true,
-                render: (p) => p.dataset === 'audit_events' ? 'audit_events (append-only)' : p.dataset,
+                render: (p) =>
+                  p.dataset === 'audit_events' ? 'audit_events (append-only)' : p.dataset,
               },
               {
                 key: 'days',
@@ -147,7 +149,12 @@ export default function RetentionPage() {
               {
                 key: 'archive',
                 header: 'Archive first',
-                render: (p) => p.dataset === 'audit_events' ? 'Not applicable' : (p.archive_before_purge ? 'Yes' : 'No'),
+                render: (p) =>
+                  p.dataset === 'audit_events'
+                    ? 'Not applicable'
+                    : p.archive_before_purge
+                      ? 'Yes'
+                      : 'No',
               },
               {
                 key: 'actions',
@@ -197,7 +204,7 @@ export default function RetentionPage() {
                 key: 'when',
                 header: 'When',
                 nowrap: true,
-                render: (r) => new Date(r.created_at).toLocaleString(),
+                render: (r) => formatDateTime(r.created_at),
               },
             ]}
             rows={runs}

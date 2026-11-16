@@ -34,6 +34,7 @@ IMMUTABLE_FIELDS = (
     "currency",
     "payment_reference",
     "order_id",
+    "customer_id",
     "refund_id",
 )
 
@@ -87,6 +88,12 @@ def parse_shopify_order(rec: dict) -> dict:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=UTC)
 
+    customer_id = rec.get("customer_id")
+    if customer_id is not None and (
+        not isinstance(customer_id, str) or not customer_id.strip() or len(customer_id) > 100
+    ):
+        raise ValueError("customer_id must be non-empty text of at most 100 characters")
+
     financial_status = rec.get("financial_status", "pending")
     if not isinstance(financial_status, str):
         raise ValueError("financial_status must be a string")
@@ -98,6 +105,7 @@ def parse_shopify_order(rec: dict) -> dict:
         "amount": amount,
         "ts": ts,
         "financial_status": financial_status,
+        "customer_id": customer_id,
         "channel_id": "ecommerce",
         "detail": record_detail(rec, 1),
     }
@@ -191,6 +199,7 @@ def parse_shopify_day_total(rec: dict) -> dict:
         raise ValueError("invalid day total values") from None
     return {
         "manifest": True,
+        "business_date": business_date,
         **values,
         "ts": datetime.fromisoformat(f"{business_date}T00:00:00+00:00"),
     }

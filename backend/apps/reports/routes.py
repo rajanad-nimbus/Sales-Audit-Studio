@@ -9,6 +9,7 @@ A CSV download reads the same pages in turn, up to CSV_MAX_ROWS, and says when i
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Annotated
 
 from database import get_db
@@ -54,12 +55,18 @@ def date_filters(column, start: str | None, end: str | None) -> list:
     return filters
 
 
+def store_filters(column, store_id: str | None) -> list:
+    return [column == store_id] if store_id else []
+
+
 def page_of(found: list, limit: int) -> tuple[list, bool]:
     """The rows to show from a query that asked for one more than the page holds."""
     return found[:limit], len(found) > limit
 
 
-async def variance_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
+async def variance_report(
+    db: AsyncSession, user: dict, start, end, offset, limit, store_id=None
+) -> Report:
     """Every total with a variance on a store day's current version, and how it stands."""
     query = (
         select(StoreDay, AuditTotal)
@@ -72,6 +79,7 @@ async def variance_report(db: AsyncSession, user: dict, start, end, offset, limi
             AuditTotal.variance_amount.is_not(None),
             AuditTotal.variance_amount != 0,
             *date_filters(StoreDay.business_date, start, end),
+            *store_filters(StoreDay.store_id, store_id),
         )
         .order_by(
             StoreDay.business_date.desc(), StoreDay.store_id, AuditTotal.total_name, AuditTotal.id
@@ -99,6 +107,7 @@ async def variance_report(db: AsyncSession, user: dict, start, end, offset, limi
                 total.total_name,
                 total.level,
                 total.dimension_key or "",
+                total.rollup_key or "",
                 total.calculated_amount,
                 total.declared_amount,
                 total.variance_amount,
@@ -115,6 +124,7 @@ async def variance_report(db: AsyncSession, user: dict, start, end, offset, limi
             "Total",
             "Level",
             "Dimension",
+            "Roll-up",
             "Calculated",
             "Declared",
             "Variance",
@@ -128,7 +138,9 @@ async def variance_report(db: AsyncSession, user: dict, start, end, offset, limi
     }
 
 
-async def error_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
+async def error_report(
+    db: AsyncSession, user: dict, start, end, offset, limit, store_id=None
+) -> Report:
     """Audit errors by store and error code, with how many are still open."""
     is_open = sql_case((Case.status != "Closed", 1), else_=0)
     query = (
@@ -141,7 +153,10 @@ async def error_report(db: AsyncSession, user: dict, start, end, offset, limit) 
             func.coalesce(func.sum(ExceptionRow.exception_amount), 0),
         )
         .join(Case, Case.id == ExceptionRow.case_id)
-        .where(*date_filters(Case.business_date, start, end))
+        .where(
+            *date_filters(Case.business_date, start, end),
+            *store_filters(Case.store_id, store_id),
+        )
         .group_by(Case.store_id, ExceptionRow.exception_type, Case.currency)
         .order_by(
             Case.store_id,
@@ -174,11 +189,16 @@ async def error_report(db: AsyncSession, user: dict, start, end, offset, limit) 
     }
 
 
-async def status_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
+async def status_report(
+    db: AsyncSession, user: dict, start, end, offset, limit, store_id=None
+) -> Report:
     """Where every store day stands: data, audit and export."""
     query = (
         select(StoreDay)
-        .where(*date_filters(StoreDay.business_date, start, end))
+        .where(
+            *date_filters(StoreDay.business_date, start, end),
+            *store_filters(StoreDay.store_id, store_id),
+        )
         .order_by(StoreDay.business_date.desc(), StoreDay.store_id)
         .offset(offset)
         .limit(limit + 1)
@@ -219,7 +239,9 @@ async def status_report(db: AsyncSession, user: dict, start, end, offset, limit)
     }
 
 
-async def tax_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
+async def tax_report(
+    db: AsyncSession, user: dict, start, end, offset, limit, store_id=None
+) -> Report:
     """Tax collected by store, day and tax code."""
     group = (
         CanonicalTransaction.business_date,
@@ -242,7 +264,10 @@ async def tax_report(db: AsyncSession, user: dict, start, end, offset, limit) ->
             func.coalesce(func.sum(TransactionTax.tax_amount), 0),
         )
         .join(CanonicalTransaction, CanonicalTransaction.id == TransactionTax.transaction_id)
-        .where(*date_filters(CanonicalTransaction.business_date, start, end))
+        .where(
+            *date_filters(CanonicalTransaction.business_date, start, end),
+            *store_filters(CanonicalTransaction.store_id, store_id),
+        )
         .group_by(*group)
         .order_by(
             CanonicalTransaction.business_date.desc(),
@@ -275,14 +300,17 @@ async def tax_report(db: AsyncSession, user: dict, start, end, offset, limit) ->
     }
 
 
-async def tax_correction_report(db: AsyncSession, user: dict, start, end, offset, limit) -> Report:
-    """Approved corrections to a transaction's tax, one row each."""
+async def tax_correction_report(
+    db: AsyncSession, user: dict, start, end, offset, limit, store_id=None
+) -> Report:
+    """Approved tax amount, summary row, and item line corrections, one row each."""
     query = (
         select(
             CanonicalTransaction.store_id,
             CanonicalTransaction.business_date,
             CanonicalTransaction.id,
             CanonicalTransaction.currency,
+            TransactionAdjustment.adjustment_type,
             TransactionAdjustment.proposed_values,
             TransactionAdjustment.proposed_by,
             TransactionAdjustment.reviewed_by,
@@ -291,9 +319,10 @@ async def tax_correction_report(db: AsyncSession, user: dict, start, end, offset
         )
         .join(CanonicalTransaction, CanonicalTransaction.id == TransactionAdjustment.transaction_id)
         .where(
-            TransactionAdjustment.adjustment_type == "Tax",
+            TransactionAdjustment.adjustment_type.in_(("Tax", "TaxDetail", "TaxLine")),
             TransactionAdjustment.status == "Approved",
             *date_filters(CanonicalTransaction.business_date, start, end),
+            *store_filters(CanonicalTransaction.store_id, store_id),
         )
         .order_by(
             CanonicalTransaction.business_date.desc(),
@@ -313,23 +342,57 @@ async def tax_correction_report(db: AsyncSession, user: dict, start, end, offset
         day,
         transaction_id,
         currency,
+        adjustment_type,
         values,
         proposed_by,
         reviewed_by,
         reviewed_at,
         why,
     ) in found:
-        try:
-            delta = cent_value((values or {}).get("tax_delta"), "tax_delta")
-        except ValueError:
-            delta = "Invalid"
+        values = values if isinstance(values, dict) else {}
+        if adjustment_type == "Tax":
+            try:
+                amount_change = cent_value(values.get("tax_delta"), "tax_delta")
+                change_summary = f"Tax amount adjustment {amount_change:+.2f}"
+            except (ValueError, TypeError):
+                change_summary = "Invalid tax adjustment"
+        elif adjustment_type == "TaxDetail":
+            try:
+                before_amount = cent_value(values.get("before_tax_amount"), "before_tax_amount")
+                after_amount = cent_value(values.get("tax_amount"), "tax_amount")
+                before_base = cent_value(values.get("before_taxable_amount"), "before_taxable_amount")
+                after_base = cent_value(values.get("taxable_amount"), "taxable_amount")
+                before_rate = Decimal(str(values.get("before_rate"))) * 100
+                after_rate = Decimal(str(values.get("rate"))) * 100
+                change_summary = (
+                    f"{values.get('tax_code', '')} · {values.get('tax_name', '')}: "
+                    f"{before_rate:g}% → {after_rate:g}%, tax {before_amount:.2f} → "
+                    f"{after_amount:.2f}, taxable {before_base:.2f} → {after_base:.2f}"
+                )
+            except (ValueError, TypeError, ArithmeticError):
+                change_summary = "Invalid tax detail adjustment"
+        else:
+            try:
+                before_amount = cent_value(values.get("before_tax_amount"), "before_tax_amount")
+                after_amount = cent_value(values.get("tax_amount"), "tax_amount")
+                before_rate = Decimal(str(values.get("before_rate"))) * 100
+                after_rate = Decimal(str(values.get("rate"))) * 100
+                line_no = int(values.get("line_no"))
+                tax_code = values.get("tax_code") or "No tax code"
+                change_summary = (
+                    f"Line {line_no} · {tax_code}: {before_rate:g}% → {after_rate:g}%, "
+                    f"tax {before_amount:.2f} → {after_amount:.2f}"
+                )
+            except (ValueError, TypeError, ArithmeticError):
+                change_summary = "Invalid line tax adjustment"
         rows.append(
             [
                 store,
                 day,
                 transaction_id,
                 currency,
-                delta,
+                adjustment_type,
+                change_summary,
                 proposed_by,
                 reviewed_by or "",
                 reviewed_at,
@@ -342,6 +405,7 @@ async def tax_correction_report(db: AsyncSession, user: dict, start, end, offset
             "Business date",
             "Transaction",
             "Currency",
+            "Adjustment type",
             "Tax change",
             "Proposed by",
             "Approved by",
@@ -400,24 +464,28 @@ async def run_report(
     response: Response = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role(*ROLES)),
+    store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
 ):
     spec = REPORTS.get(name)
     if spec is None:
         raise HTTPException(status_code=404, detail="Unknown report")
+    store_id = store_id.strip() if store_id else None
+    if store_id:
+        scope.require_store(user, store_id)
     if format == "csv":
-        return await download(spec, name, db, user, start, end)
-    report = await spec.build(db, user, start, end, (page - 1) * page_size, page_size)
+        return await download(spec, name, db, user, start, end, store_id)
+    report = await spec.build(db, user, start, end, (page - 1) * page_size, page_size, store_id)
     response.headers["X-Has-More"] = "true" if report["has_more"] else "false"
     return {"title": spec.title, "page": page, "page_size": page_size, **report}
 
 
-async def download(spec: ReportSpec, name: str, db, user, start, end) -> Response:
+async def download(spec: ReportSpec, name: str, db, user, start, end, store_id=None) -> Response:
     """Read the report page by page into one CSV, stopping at CSV_MAX_ROWS."""
     columns: list = []
     rows: list = []
     offset, more = 0, True
     while more and len(rows) < CSV_MAX_ROWS:
-        chunk = await spec.build(db, user, start, end, offset, CSV_CHUNK)
+        chunk = await spec.build(db, user, start, end, offset, CSV_CHUNK, store_id)
         columns = chunk["columns"]
         rows.extend(chunk["rows"])
         more, offset = chunk["has_more"], offset + CSV_CHUNK

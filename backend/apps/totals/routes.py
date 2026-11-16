@@ -4,16 +4,19 @@ import hashlib
 import json
 import uuid
 from decimal import Decimal
+from typing import Literal
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.database_errors import violates_unique_constraint
+from apps.exports.models import ExportDestination
 from apps.ingest.manifests import validate_business_date
 from apps.security import scope
 from apps.security.authentication import require_role
@@ -35,6 +38,16 @@ from apps.totals.schemas import ActivationBody, ReturnBody, TotalDefinitionBody
 from .domain import serialize_definition, validate_definition
 
 router = APIRouter(prefix="/api/total-definitions", tags=["Audit totals"])
+
+
+class TotalDefinitionPackageBody(BaseModel):
+    format: Literal["zetsa.audit-total-definitions"]
+    version: Literal[1]
+    definitions: list[dict] = Field(min_length=1, max_length=500)
+
+
+class TotalDefinitionPackageApplyBody(TotalDefinitionPackageBody):
+    preview_token: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def view(row: AuditTotalDefinition) -> dict[str, object]:
@@ -79,23 +92,394 @@ async def validate_combined_references(
         .all()
     )
     if (
-        len(references) != 2
-        or len({row.name for row in references}) != 2
+        len(references) != len(body.combined_total_ids)
+        or len({row.name for row in references}) != len(body.combined_total_ids)
         or any(row.name == name for row in references)
     ):
         raise HTTPException(
             status_code=422,
-            detail="Combined totals require two existing totals other than themselves",
+            detail="Combined totals require existing, distinct totals other than themselves",
         )
-    if body.active and any(not row.active for row in references):
+    if body.active and any(not row.active or row.status != "Active" for row in references):
         raise HTTPException(
             status_code=422,
-            detail="An active combined total cannot reference an inactive total revision",
+            detail="An active combined total must reference active total revisions",
         )
-    if any(row.level != body.level or row.rollups != body.rollups for row in references):
+    parameters = [item.model_dump() for item in body.parameters]
+    rollups = [item.model_dump() for item in body.rollups]
+    if any(
+        row.level != body.level or row.rollups != rollups or row.parameters != parameters
+        for row in references
+    ):
         raise HTTPException(
             status_code=422, detail="Combined totals must use the same balancing level and roll-ups"
         )
+    if any(
+        row.aggregation != body.aggregation or row.measure != body.measure for row in references
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Combined totals must use the same aggregation and measure",
+        )
+    if any(row.location_traits != body.location_traits for row in references):
+        raise HTTPException(
+            status_code=422,
+            detail="Combined totals must use the same location traits",
+        )
+
+
+async def validate_total_usages(body: TotalDefinitionBody, db: AsyncSession) -> None:
+    """Reject export usage bindings that point at missing destinations."""
+    identifiers = [usage.destination_id for usage in body.usages]
+    if not identifiers:
+        return
+    existing = set(
+        (
+            await db.execute(
+                select(ExportDestination.id).where(ExportDestination.id.in_(identifiers))
+            )
+        ).scalars()
+    )
+    if existing != set(identifiers):
+        raise HTTPException(
+            status_code=422,
+            detail="Every total export usage must reference an existing destination",
+        )
+
+
+async def prepare_total_definition_package(db: AsyncSession, package: TotalDefinitionPackageBody):
+    """Resolve environment references and validate the latest revision of each packaged total."""
+    errors: list[dict] = []
+    latest_source: dict[str, tuple[int, dict]] = {}
+    source_ids: dict[str, str] = {}
+    for row_number, raw in enumerate(package.definitions, start=1):
+        name = raw.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append({"row": row_number, "message": "Total definition name is missing"})
+            continue
+        identifier = raw.get("id")
+        if isinstance(identifier, str) and identifier:
+            source_ids[identifier] = name.strip()
+        try:
+            revision = int(raw.get("revision") or 0)
+        except (TypeError, ValueError):
+            errors.append({"row": row_number, "message": "Revision must be an integer"})
+            continue
+        key = name.strip().casefold()
+        current = latest_source.get(key)
+        if current is None or revision > int(current[1].get("revision") or 0):
+            latest_source[key] = (row_number, raw)
+        elif revision == int(current[1].get("revision") or 0):
+            errors.append(
+                {"row": row_number, "message": f"Duplicate packaged revision {revision} for {name}"}
+            )
+
+    existing_rows = (
+        await db.execute(
+            select(AuditTotalDefinition).order_by(
+                AuditTotalDefinition.name, AuditTotalDefinition.revision
+            )
+        )
+    ).scalars().all()
+    existing_by_name: dict[str, AuditTotalDefinition] = {}
+    max_revision: dict[str, int] = {}
+    for row in existing_rows:
+        key = row.name.casefold()
+        max_revision[key] = max(max_revision.get(key, 0), row.revision)
+        existing_by_name[key] = row
+    destinations = (
+        await db.execute(
+            select(ExportDestination.id, ExportDestination.name, ExportDestination.enabled)
+        )
+    ).all()
+    destination_by_id = {identifier: name for identifier, name, _enabled in destinations}
+    destination_by_name = {
+        name.casefold(): identifier for identifier, name, _enabled in destinations
+    }
+
+    imported: list[dict] = []
+    skipped_protected = 0
+    used_names: set[str] = set()
+    for key, (row_number, raw) in sorted(latest_source.items(), key=lambda item: item[0]):
+        if raw.get("required_by_system") is True:
+            skipped_protected += 1
+            continue
+        current = existing_by_name.get(key)
+        if current and current.required_by_system:
+            errors.append(
+                {
+                    "row": row_number,
+                    "message": f"{current.name} is system-required in this environment and cannot be replaced",
+                }
+            )
+            continue
+        target_name = current.name if current else str(raw["name"]).strip()
+        if target_name.casefold() in used_names:
+            errors.append({"row": row_number, "message": f"Duplicate target total name {target_name}"})
+            continue
+        used_names.add(target_name.casefold())
+        fields = TotalDefinitionBody.model_fields
+        values = {key_name: raw[key_name] for key_name in fields if key_name in raw}
+        values.update(
+            {
+                "name": target_name,
+                "revision": None,
+                "status": "Worksheet",
+                "active": False,
+                "required_by_system": False,
+                "combined_total_ids": [],
+                "usages": [],
+            }
+        )
+        try:
+            body = TotalDefinitionBody.model_validate(values)
+            validate_draft(body)
+        except ValidationError as exc:
+            detail = "; ".join(
+                f"{'.'.join(str(part) for part in issue['loc'])}: {issue['msg']}"
+                for issue in exc.errors()
+            )
+            errors.append({"row": row_number, "message": detail})
+            continue
+        except HTTPException as exc:
+            errors.append({"row": row_number, "message": str(exc.detail)})
+            continue
+        imported.append(
+            {
+                "row": row_number,
+                "source_revision": int(raw.get("revision") or 0),
+                "name": target_name,
+                "source": raw,
+                "body": body,
+                "id": str(uuid.uuid4()),
+                "target_revision": max_revision.get(key, 0) + 1,
+                "combined_names": [],
+            }
+        )
+
+    import_by_name = {entry["name"].casefold(): entry for entry in imported}
+    all_target_ids = {
+        key: row.id for key, row in existing_by_name.items()
+    } | {key: entry["id"] for key, entry in import_by_name.items()}
+    combined_views: dict[str, dict] = {
+        key: {
+            "name": row.name,
+            "level": row.level,
+            "aggregation": row.aggregation,
+            "measure": row.measure,
+            "location_traits": row.location_traits or [],
+            "parameters": row.parameters or [],
+            "rollups": row.rollups or [],
+        }
+        for key, row in existing_by_name.items()
+    }
+    combined_views.update(
+        {
+            key: {
+                "name": entry["name"],
+                "level": entry["body"].level,
+                "aggregation": entry["body"].aggregation,
+                "measure": entry["body"].measure,
+                "location_traits": entry["body"].location_traits,
+                "parameters": [item.model_dump() for item in entry["body"].parameters],
+                "rollups": [item.model_dump() for item in entry["body"].rollups],
+            }
+            for key, entry in import_by_name.items()
+        }
+    )
+
+    for entry in imported:
+        raw = entry["source"]
+        body = entry["body"]
+        source_names = raw.get("combined_total_names")
+        if source_names is None:
+            source_ids_for_row = raw.get("combined_total_ids") or []
+            if not isinstance(source_ids_for_row, list):
+                errors.append({"row": entry["row"], "message": "Combined total references must be a list"})
+                continue
+            source_names = [
+                source_ids.get(identifier) if isinstance(identifier, str) else None
+                for identifier in source_ids_for_row
+            ]
+        elif not isinstance(source_names, list):
+            errors.append({"row": entry["row"], "message": "Combined total names must be a list"})
+            continue
+        source_component_ids = raw.get("combined_total_ids") or []
+        if not isinstance(source_component_ids, list):
+            errors.append({"row": entry["row"], "message": "Combined total references must be a list"})
+            continue
+        normalized_names = [
+            name.strip() for name in source_names if isinstance(name, str) and name.strip()
+        ]
+        if body.calculation_basis == "Combined" and len(normalized_names) != len(source_component_ids):
+            errors.append({"row": entry["row"], "message": "Combined totals need readable component names in the package"})
+            continue
+        if body.calculation_basis == "Combined" and (
+            entry["name"].casefold() in {name.casefold() for name in normalized_names}
+            or len({name.casefold() for name in normalized_names}) != len(normalized_names)
+        ):
+            errors.append({"row": entry["row"], "message": "Combined totals cannot reference themselves or repeat a component"})
+            continue
+        component_ids = []
+        for component_name in normalized_names:
+            component_key = component_name.casefold()
+            identifier = all_target_ids.get(component_key)
+            if identifier is None:
+                errors.append({"row": entry["row"], "message": f"Combined component {component_name!r} is missing in the target environment and package"})
+                break
+            component_ids.append(identifier)
+        usage_rows = raw.get("usage_destinations") or []
+        source_usages = raw.get("usages") or []
+        if not isinstance(usage_rows, list) or not isinstance(source_usages, list):
+            errors.append({"row": entry["row"], "message": "Export usages must be lists"})
+            continue
+        usage_names = [
+            row.get("name") if isinstance(row, dict) else None for row in usage_rows
+        ]
+        if len(usage_names) != len(source_usages):
+            usage_names = [
+                destination_by_id.get(row.get("destination_id"))
+                for row in source_usages
+                if isinstance(row, dict) and isinstance(row.get("destination_id"), str)
+            ]
+        if len(usage_names) != len(source_usages):
+            errors.append({"row": entry["row"], "message": "Every export usage needs a destination"})
+            continue
+        usage_ids = []
+        for index, usage_name in enumerate(usage_names):
+            identifier = (
+                destination_by_name.get(usage_name.casefold())
+                if isinstance(usage_name, str)
+                else None
+            )
+            if identifier is None and index < len(source_usages):
+                old_id = (
+                    source_usages[index].get("destination_id")
+                    if isinstance(source_usages[index], dict)
+                    else None
+                )
+                if isinstance(old_id, str) and old_id in destination_by_id:
+                    identifier = old_id
+            if identifier is None:
+                errors.append({"row": entry["row"], "message": f"Export destination {usage_name!r} is missing in the target environment"})
+                break
+            usage_ids.append(identifier)
+        if len(component_ids) != len(normalized_names) or len(usage_ids) != len(source_usages):
+            continue
+        values = body.model_dump()
+        values["combined_total_ids"] = component_ids
+        values["usages"] = [{"destination_id": identifier} for identifier in usage_ids]
+        try:
+            body = TotalDefinitionBody.model_validate(values)
+            validate_draft(body)
+            await validate_total_usages(body, db)
+        except ValidationError as exc:
+            detail = "; ".join(
+                f"{'.'.join(str(part) for part in issue['loc'])}: {issue['msg']}"
+                for issue in exc.errors()
+            )
+            errors.append({"row": entry["row"], "message": detail})
+            continue
+        except (HTTPException, ValueError) as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            errors.append({"row": entry["row"], "message": str(detail)})
+            continue
+        entry["body"] = body
+        entry["combined_names"] = normalized_names
+
+    imported_names = {entry["name"].casefold() for entry in imported}
+    dependencies = {
+        key: [
+            next((row.name.casefold() for row in existing_rows if row.id == identifier), "")
+            for identifier in (row.combined_total_ids or [])
+        ]
+        for key, row in existing_by_name.items()
+        if key not in imported_names
+    }
+    dependencies.update(
+        {
+            entry["name"].casefold(): [name.casefold() for name in entry["combined_names"]]
+            for entry in imported
+        }
+    )
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def has_cycle(name: str) -> bool:
+        if name in visiting:
+            return True
+        if name in visited:
+            return False
+        visiting.add(name)
+        if any(has_cycle(component) for component in dependencies.get(name, [])):
+            return True
+        visiting.remove(name)
+        visited.add(name)
+        return False
+
+    for entry in imported:
+        if has_cycle(entry["name"].casefold()):
+            errors.append(
+                {
+                    "row": entry["row"],
+                    "message": "Combined totals cannot contain a dependency cycle",
+                }
+            )
+            break
+
+    for entry in imported:
+        body = entry["body"]
+        if body.calculation_basis != "Combined":
+            continue
+        for component_name in entry["combined_names"]:
+            component = combined_views.get(component_name.casefold())
+            if component is None:
+                continue
+            if (
+                component["level"] != body.level
+                or component["aggregation"] != body.aggregation
+                or component["measure"] != body.measure
+                or component["location_traits"] != body.location_traits
+                or component["parameters"] != [item.model_dump() for item in body.parameters]
+                or component["rollups"] != [item.model_dump() for item in body.rollups]
+            ):
+                errors.append(
+                    {
+                        "row": entry["row"],
+                        "message": f"Combined component {component_name!r} does not match the total's level, measure, parameters, roll-ups, or location traits",
+                    }
+                )
+                break
+
+    state = {
+        "source": [
+            {"name": entry["name"], "revision": entry["source_revision"], "body": entry["body"].model_dump()}
+            for entry in imported
+        ],
+        "target_totals": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "revision": row.revision,
+                "status": row.status,
+                "active": row.active,
+                "required_by_system": row.required_by_system,
+                "configuration": view(row),
+            }
+            for row in existing_rows
+        ],
+        "destinations": sorted(
+            (
+                {"id": identifier, "name": name, "enabled": enabled}
+                for identifier, name, enabled in destinations
+            ),
+            key=lambda row: row["id"],
+        ),
+    }
+    token = hashlib.sha256(
+        json.dumps(state, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+    return imported, errors, token, skipped_protected
 
 
 def validate_draft(body: TotalDefinitionBody) -> None:
@@ -195,6 +579,154 @@ async def list_definitions(
     ]
 
 
+@router.get("/package")
+async def export_definition_package(
+    db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("finance", "it"))
+):
+    """Export every total revision with readable names for environment-specific references."""
+    definitions = (
+        await db.execute(
+            select(AuditTotalDefinition).order_by(
+                AuditTotalDefinition.name, AuditTotalDefinition.revision
+            )
+        )
+    ).scalars().all()
+    destinations = (
+        await db.execute(
+            select(
+                ExportDestination.id,
+                ExportDestination.name,
+                ExportDestination.enabled,
+            )
+        )
+    ).all()
+    names_by_id = {row.id: row.name for row in definitions}
+    destinations_by_id = {
+        destination_id: {"id": destination_id, "name": name, "enabled": enabled}
+        for destination_id, name, enabled in destinations
+    }
+
+
+@router.post("/package/preview")
+async def preview_definition_package(
+    package: TotalDefinitionPackageBody,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("finance", "it")),
+):
+    imported, errors, token, skipped_protected = await prepare_total_definition_package(
+        db, package
+    )
+    return {
+        "valid": not errors,
+        "preview_token": token if not errors else None,
+        "errors": errors,
+        "counts": {
+            "worksheets": len(imported),
+            "skipped_protected": skipped_protected,
+        },
+        "definitions": [
+            {
+                "row": entry["row"],
+                "name": entry["name"],
+                "source_revision": entry["source_revision"],
+                "target_revision": entry["target_revision"],
+                "action": "Create inactive Worksheet",
+            }
+            for entry in imported
+        ],
+    }
+
+
+@router.post("/package/apply")
+async def apply_definition_package(
+    request: TotalDefinitionPackageApplyBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance")),
+):
+    await lock_configuration(db, exclusive=True)
+    package = TotalDefinitionPackageBody(
+        format=request.format,
+        version=request.version,
+        definitions=request.definitions,
+    )
+    imported, errors, token, _ = await prepare_total_definition_package(db, package)
+    if token != request.preview_token:
+        raise HTTPException(
+            status_code=409,
+            detail="The target configuration changed since preview; review the package again",
+        )
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+    if not imported:
+        raise HTTPException(status_code=422, detail="The package contains no importable totals")
+
+    actor = user["user"] or "ontology.user"
+    rows = [
+        AuditTotalDefinition(
+            id=entry["id"],
+            revision=entry["target_revision"],
+            **entry["body"].model_dump(exclude={"revision"}),
+            updated_by=actor,
+        )
+        for entry in imported
+    ]
+    db.add_all(rows)
+    await db.flush()
+    for entry, row in zip(imported, rows, strict=True):
+        await validate_combined_references(entry["body"], db, name=row.name)
+        audit(
+            db,
+            "TOTAL_DEFINITION_IMPORTED",
+            None,
+            "AuditTotalDefinition",
+            row.id,
+            f"Imported total definition {row.name} revision {row.revision} as a Worksheet",
+            actor=actor,
+            after={
+                "revision": row.revision,
+                "configuration_hash": definition_fingerprint(
+                    entry["body"].model_dump(exclude={"revision"})
+                ),
+            },
+        )
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if _is_duplicate_total_revision(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="A total definition revision changed since preview; review the package again",
+            ) from exc
+        raise
+    return {"imported": [view(row) for row in rows]}
+    return {
+        "format": "zetsa.audit-total-definitions",
+        "version": 1,
+        "exported_at": utcnow(),
+        "definitions": [
+            {
+                **view(row),
+                "combined_total_names": [
+                    names_by_id.get(identifier) for identifier in row.combined_total_ids or []
+                ],
+                "usage_destinations": [
+                    destinations_by_id.get(
+                        usage.get("destination_id"),
+                        {
+                            "id": usage.get("destination_id"),
+                            "name": None,
+                            "enabled": None,
+                        },
+                    )
+                    for usage in row.usages or []
+                ],
+            }
+            for row in definitions
+        ],
+    }
+
+
 @router.post("")
 async def create_definition(
     body: TotalDefinitionBody,
@@ -203,6 +735,7 @@ async def create_definition(
 ):
     await lock_configuration(db, exclusive=True)
     validate_draft(body)
+    await validate_total_usages(body, db)
     await validate_combined_references(body, db, name=body.name)
     latest = (
         await db.execute(
@@ -287,6 +820,7 @@ async def update_definition(
     if not current:
         raise HTTPException(status_code=404, detail="Total definition not found")
     validate_draft(body)
+    await validate_total_usages(body, db)
     await validate_combined_references(body, db, name=current.name)
     latest = (
         await db.execute(
@@ -527,12 +1061,24 @@ async def preview_definition(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     dimensions = calculation.configured_totals.get(definition.id, {})
+    grouped_dimensions = calculation.configured_rollups.get(definition.id, {})
+    preview_dimensions = (
+        [
+            {"dimension": dimension, "rollup_key": rollup, "value": amount}
+            for (dimension, rollup), amount in grouped_dimensions.items()
+        ]
+        if definition.rollups
+        else [
+            {"dimension": dimension, "rollup_key": None, "value": amount}
+            for dimension, amount in dimensions.items()
+        ]
+    )
     return {
         "definition": view(definition),
         "store_id": store_id,
         "business_date": business_date,
-        "value": sum(dimensions.values(), Decimal("0")),
+        "value": sum((row["value"] for row in preview_dimensions), Decimal("0")),
         "currency": currency,
         "record_count": calculation.definition_counts.get(definition.id),
-        "dimensions": [{"dimension": key, "value": value} for key, value in dimensions.items()],
+        "dimensions": preview_dimensions,
     }

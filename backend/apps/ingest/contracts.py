@@ -179,11 +179,21 @@ class SourceFeedProfilePatch(BaseModel):
 
 
 class ReconciliationPolicyRequest(BaseModel):
+    reason: str = Field(min_length=10, max_length=2000)
     amount_tolerance: Decimal = Decimal("0")
     amount_tolerance_currency: str = "USD"
     settlement_day_tolerance: int = 0
+    duplicate_lookback_days: int = 0
     gap_min_count: int = 10
     gap_share: Decimal = Decimal("0.1")
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 10:
+            raise ValueError("Reason must contain at least 10 non-whitespace characters")
+        return normalized
 
 
 class ManualMatchRequest(BaseModel):
@@ -212,6 +222,7 @@ class SourceSettingPatch(BaseModel):
     enabled: bool | None = None
     in_daily_batch: bool | None = None
     manual_sync: bool | None = None
+    require_day_close: bool | None = None
     sync_frequency: Literal["off", "daily", "weekly"] | None = None
     sync_time: str | None = None  # HH:MM, 24 hour
     sync_weekday: int | None = Field(default=None, ge=0, le=6)  # 0 = Monday

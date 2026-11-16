@@ -2,6 +2,10 @@
 
 Flat surfaces, bordered cards, **navy as the only brand/accent hue**, light and dark modes. Live reference: `/design-system`.
 
+## Workspace presentation
+
+Use an open canvas with bounded content width; avoid wrapping the whole page in another card. Keep navigation icons unboxed, with navy reserved for the active destination. Navigation groups can collapse, and menu search reveals matching pages. Use the 15px root type scale, sentence-case table headers, and generous row spacing. Tables scroll within their surface on narrow screens.
+
 ## Layers
 
 | Layer             | Where                   | Rule                                                                                                                                                                                           |
@@ -57,7 +61,7 @@ import { Alert, Badge, Button, Card, EmptyState, Field, PageHeader } from '@/com
 />
 ```
 
-`rows={null}` shows a loading skeleton; an empty array shows the empty state. Toasts stay `useToast()` from `components/Feedback`.
+`rows={null}` shows a loading skeleton; an empty array keeps the column headings and footer visible with an empty state in the table body. Sortable headings show a direction indicator. Wide tables scroll inside a keyboard-focusable results region, while pagination stays outside that region. Enter opens a focused row; nested buttons and links retain their own keyboard actions. Toasts stay `useToast()` from `components/Feedback`.
 
 ## Adopting in existing screens
 

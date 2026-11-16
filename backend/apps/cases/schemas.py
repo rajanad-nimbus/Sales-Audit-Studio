@@ -82,12 +82,21 @@ class Exception(BaseModel):
     exception_type: str
     exception_family: str
     source_system: str
+    detection_rule_id: str
+    detection_rule_name: str | None = None
+    balance_level: str | None = None
+    balance_dimension: str | None = None
     exception_amount: Decimal
     estimated_exposure: Decimal
     severity: str
     confidence: str
     close_impact: str
     status: str
+    override_reason: str | None = None
+    override_requested_by: str | None = None
+    override_requested_at: datetime | None = None
+    override_approved_by: str | None = None
+    override_approved_at: datetime | None = None
     created_at: datetime
 
 

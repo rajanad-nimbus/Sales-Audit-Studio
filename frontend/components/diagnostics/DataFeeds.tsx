@@ -5,6 +5,7 @@ import { useLive } from '@/lib/sync';
 import { Alert, Badge, Button, Card, DataTable, PageHeader } from '@/components/ui';
 import type { BadgeVariant } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
+import { formatDateTime } from '@/lib/preferences';
 
 interface Feed {
   source_system: string;
@@ -26,7 +27,7 @@ const VARIANT: Record<Feed['state'], BadgeVariant> = {
   Stale: 'warning',
   'No data': 'secondary',
 };
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'Never');
+const when = (iso: string | null) => (iso ? formatDateTime(iso) : 'Never');
 
 /** When each source last sent data, how much came in, and what was set aside and why. */
 export function DataFeeds() {

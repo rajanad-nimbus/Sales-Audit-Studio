@@ -6,8 +6,9 @@ does not take the page down.
 """
 
 import logging
+import os
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from database import get_db
 from fastapi import APIRouter, Depends
@@ -20,6 +21,7 @@ from apps.agents.action_center_filters import me_name
 from apps.audit.error_routes import overview as error_overview
 from apps.audit.routes import recent_events
 from apps.cases.models import Case
+from apps.cases.models import Exception as ExceptionRow
 from apps.cash.routes import over_short_report
 from apps.diagnostics.feeds import feed_status
 from apps.diagnostics.health import system_health
@@ -38,6 +40,7 @@ from apps.store_days.readiness import (
     readiness,
 )
 from apps.store_days.routes import store_days_needing_attention
+from apps.transactions.models import CanonicalTransaction
 from apps.vouchers.routes import voucher_summary
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,10 @@ QUEUE_SIZE = 8
 ERROR_TYPES = 5
 ATTENTION_ROWS = 5
 ERROR_WINDOW_DAYS = 30
+# Settings: NIMBUS_KPI_WINDOW_DAYS is how far back the monitoring KPIs look.
+KPI_WINDOW_DAYS = int(os.getenv("NIMBUS_KPI_WINDOW_DAYS", "30"))
+# A store day is on time when it is closed within NIMBUS_CLOSE_TARGET_DAYS of its business date.
+CLOSE_TARGET_DAYS = int(os.getenv("NIMBUS_CLOSE_TARGET_DAYS", "3"))
 
 WORK_ROLES = ("admin", "analyst", "finance", "it", "auditor")
 STORE_DAY_ROLES = ("admin", "finance", "it")
@@ -55,6 +62,7 @@ EXPORT_ROLES = ("admin", "finance", "it", "auditor")
 HEALTH_ROLES = ("admin", "finance", "it", "auditor")
 CASH_ROLES = ("admin", "analyst", "finance", "it", "auditor")
 ACTIVITY_ROLES = ("admin", "analyst", "finance", "it", "auditor")
+KPI_ROLES = ("admin", "analyst", "finance", "it", "auditor")
 CASH_WINDOW_DAYS = 7
 ACTIVITY_ROWS = 8
 HOTSPOT_ROWS = 5
@@ -62,33 +70,53 @@ HOTSPOT_ROWS = 5
 CLOSE_CHECK_LIMIT = 500
 
 
+def close_blocker_counts():
+    return (
+        select(
+            ExceptionRow.case_id.label("case_id"),
+            func.count(ExceptionRow.id).label("close_blocking_errors"),
+        )
+        .where(
+            ExceptionRow.close_impact == "Yes",
+            ExceptionRow.status.not_in(("Overridden", "Closed", "Resolved")),
+        )
+        .group_by(ExceptionRow.case_id)
+        .subquery()
+    )
+
+
+async def prioritized_cases(db: AsyncSession, filters: list, user: dict, now: datetime) -> list[dict]:
+    blockers = close_blocker_counts()
+    statement = (
+        select(Case, func.coalesce(blockers.c.close_blocking_errors, 0))
+        .outerjoin(blockers, blockers.c.case_id == Case.id)
+        .where(*filters)
+        .order_by(
+            func.coalesce(blockers.c.close_blocking_errors, 0).desc(),
+            Case.sla_due_at.asc().nulls_last(),
+            Case.total_exposure.desc(),
+        )
+        .limit(QUEUE_SIZE)
+    )
+    rows = (await db.execute(scope.restrict(statement, user, Case.store_id))).all()
+    return [{**case_row(item, now), "close_blocking_errors": count} for item, count in rows]
+
+
 async def queue(db: AsyncSession, user: dict) -> list[dict]:
     """The cases to look at first: breached or nearest SLA, skipping anything snoozed."""
     now = datetime.now(UTC)
-    query = (
-        select(Case)
-        .where(
-            Case.status != "Closed",
-            or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now),
-        )
-        .order_by(Case.sla_due_at.asc().nulls_last(), Case.total_exposure.desc())
-        .limit(QUEUE_SIZE)
-    )
-    cases = (await db.execute(scope.restrict(query, user, Case.store_id))).scalars().all()
-    return [case_row(c, now) for c in cases]
+    filters = [
+        Case.status != "Closed",
+        or_(Case.snoozed_until.is_(None), Case.snoozed_until <= now),
+    ]
+    return await prioritized_cases(db, filters, user, now)
 
 
 async def mine(db: AsyncSession, user: dict) -> list[dict]:
     """Open cases assigned to the signed-in user, nearest SLA first."""
     now = datetime.now(UTC)
-    query = (
-        select(Case)
-        .where(Case.status != "Closed", Case.assigned_to == me_name(user))
-        .order_by(Case.sla_due_at.asc().nulls_last())
-        .limit(QUEUE_SIZE)
-    )
-    cases = (await db.execute(scope.restrict(query, user, Case.store_id))).scalars().all()
-    return [case_row(c, now) for c in cases]
+    filters = [Case.status != "Closed", Case.assigned_to == me_name(user)]
+    return await prioritized_cases(db, filters, user, now)
 
 
 async def hotspots(db: AsyncSession, user: dict) -> dict:
@@ -348,6 +376,85 @@ async def activity(db: AsyncSession, user: dict) -> dict:
     }
 
 
+def percent(part: int, whole: int) -> float | None:
+    return round(100 * part / whole, 1) if whole else None
+
+
+async def kpis(db: AsyncSession, user: dict) -> dict:
+    """Ongoing monitoring: transaction accuracy, exception rate and timeliness over the last month.
+
+    Accuracy is the share of transactions that were not flagged "Exception" by validation. The
+    exception rate counts every exception raised, per 1,000 transactions. Timeliness is the share
+    of store days now due that were closed within CLOSE_TARGET_DAYS of their business date.
+    """
+    today = datetime.now(UTC).date()
+    since = (today - timedelta(days=KPI_WINDOW_DAYS)).isoformat()
+    transactions = (
+        await db.execute(
+            scope.restrict(
+                select(func.count(CanonicalTransaction.id)).where(
+                    CanonicalTransaction.business_date >= since
+                ),
+                user,
+                CanonicalTransaction.store_id,
+            )
+        )
+    ).scalar_one()
+    flagged = (
+        await db.execute(
+            scope.restrict(
+                select(func.count(CanonicalTransaction.id)).where(
+                    CanonicalTransaction.business_date >= since,
+                    CanonicalTransaction.reconciliation_status == "Exception",
+                ),
+                user,
+                CanonicalTransaction.store_id,
+            )
+        )
+    ).scalar_one()
+    exceptions = (
+        await db.execute(
+            scope.restrict(
+                select(func.count(ExceptionRow.id))
+                .join(Case, Case.id == ExceptionRow.case_id)
+                .where(Case.business_date >= since),
+                user,
+                Case.store_id,
+            )
+        )
+    ).scalar_one()
+    days = (
+        await db.execute(
+            scope.restrict(
+                select(StoreDay.business_date, StoreDay.status, StoreDay.closed_at).where(
+                    StoreDay.business_date >= since,
+                    StoreDay.business_date
+                    <= (today - timedelta(days=CLOSE_TARGET_DAYS)).isoformat(),
+                ),
+                user,
+                StoreDay.store_id,
+            )
+        )
+    ).all()
+    on_time = 0
+    for business_date, status, closed_at in days:
+        if status == "Closed" and closed_at is not None:
+            due = date.fromisoformat(business_date) + timedelta(days=CLOSE_TARGET_DAYS)
+            on_time += closed_at.date() <= due
+    return {
+        "window_days": KPI_WINDOW_DAYS,
+        "transactions": transactions,
+        "exceptions": exceptions,
+        "exception_rate": round(1000 * exceptions / transactions, 1) if transactions else None,
+        "flagged_transactions": flagged,
+        "accuracy": percent(transactions - flagged, transactions),
+        "close_target_days": CLOSE_TARGET_DAYS,
+        "due_store_days": len(days),
+        "closed_on_time": on_time,
+        "timeliness": percent(on_time, len(days)),
+    }
+
+
 async def section(db: AsyncSession, user: dict, roles: tuple[str, ...], build, system_wide=False):
     if user["role"] not in roles or (system_wide and scope.scoped(user)):
         return None
@@ -377,4 +484,5 @@ async def command_center(
         "feeds": await section(db, user, HEALTH_ROLES, feeds, system_wide=True),
         "cash": await section(db, user, CASH_ROLES, cash),
         "activity": await section(db, user, ACTIVITY_ROLES, activity),
+        "kpis": await section(db, user, KPI_ROLES, kpis),
     }

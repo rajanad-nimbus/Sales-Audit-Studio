@@ -1,3 +1,4 @@
+import { formatNumber } from '@/lib/preferences';
 interface PagerProps {
   page: number;
   pages: number;
@@ -22,8 +23,8 @@ export function Pager({
   return (
     <div className="ac-pager">
       <span>
-        {from.toLocaleString()}–{Math.min(page * pageSize, total).toLocaleString()} of{' '}
-        {total.toLocaleString()}
+        {formatNumber(from)}–{formatNumber(Math.min(page * pageSize, total))} of{' '}
+        {formatNumber(total)}
       </span>
       <span className="ac-spacer" />
       <select
@@ -45,7 +46,7 @@ export function Pager({
         Previous
       </button>
       <span>
-        Page {page} of {pages.toLocaleString()}
+        Page {page} of {formatNumber(pages)}
       </span>
       <button
         className="btn-secondary btn-small"

@@ -7,7 +7,7 @@ is never the control; this is.
 
 from dataclasses import dataclass
 
-ROLES = ("admin", "finance", "it", "analyst", "auditor", "store_manager", "viewer")
+ROLES = ("admin", "finance", "it", "analyst", "auditor", "store_manager", "store_staff", "viewer")
 ROLE_LABELS = {
     "admin": "Administrator",
     "finance": "Finance Approver",
@@ -15,6 +15,7 @@ ROLE_LABELS = {
     "analyst": "Sales Auditor",
     "auditor": "Internal Auditor",
     "store_manager": "Store Manager",
+    "store_staff": "Store Sales Staff",
     "viewer": "Viewer",
 }
 EVERYONE = ROLES
@@ -39,6 +40,14 @@ class Screen:
 
 SCREENS: tuple[Screen, ...] = (
     Screen(
+        "my-preferences",
+        "/preferences",
+        "My Preferences",
+        "Your Account",
+        EVERYONE,
+        ("/api/me/preferences",),
+    ),
+    Screen(
         "command-center",
         "/",
         "Command Center",
@@ -60,7 +69,7 @@ SCREENS: tuple[Screen, ...] = (
         "Action Center",
         "Workspace",
         ("analyst", "finance", "auditor"),
-        ("/api/action-center",),
+        ("/api/action-center", "/api/me/saved-views"),
         optional=("/api/agent/eligible",),
     ),  # one-click agent approvals are Finance only; the page copes without them
     Screen(
@@ -87,16 +96,56 @@ SCREENS: tuple[Screen, ...] = (
         "/store-days",
         "Store Days & Totals",
         "Store Day Audit",
-        ("analyst", "finance", "store_manager", "auditor"),
-        ("/api/store-days",),
+        ("analyst", "finance", "it", "store_manager", "store_staff", "auditor"),
+        ("/api/store-days", "/api/me/saved-views"),
+    ),
+    Screen(
+        "total-history",
+        "/total-history",
+        "Total Audit Trail",
+        "Store Day Audit",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/total-history", "/api/stores"),
+    ),
+    Screen(
+        "misc-totals",
+        "/misc-totals",
+        "Miscellaneous Totals",
+        "Store Day Audit",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/misc-totals", "/api/stores"),
     ),
     Screen(
         "transactions",
         "/transactions",
         "Transactions",
         "Store Day Audit",
+        ("analyst", "finance", "it", "store_manager", "auditor"),
+        ("/api/transactions", "/api/me/saved-views"),
+    ),
+    Screen(
+        "item-summary",
+        "/item-summary",
+        "Item Summary",
+        "Store Day Audit",
         ("analyst", "finance", "it", "auditor"),
-        ("/api/transactions",),
+        ("/api/item-summary", "/api/stores"),
+    ),
+    Screen(
+        "tender-summary",
+        "/tender-summary",
+        "Tender Summary",
+        "Store Day Audit",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/tender-summary", "/api/stores"),
+    ),
+    Screen(
+        "ledger-view",
+        "/ledger",
+        "General Ledger View",
+        "Store Day Audit",
+        ("finance", "it"),
+        ("/api/gl/journal-preview", "/api/stores"),
     ),
     Screen(
         "register-events",
@@ -107,12 +156,28 @@ SCREENS: tuple[Screen, ...] = (
         ("/api/register-events",),
     ),
     Screen(
+        "register-summary",
+        "/register-summary",
+        "Cashier / Register Summary",
+        "Store Day Audit",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/register-summary", "/api/stores"),
+    ),
+    Screen(
         "cash-office",
         "/cash-office",
         "Cash Office",
         "Store Day Audit",
         ("analyst", "finance", "store_manager", "auditor"),
         ("/api/cash-controls", "/api/cash", "/api/vouchers"),
+    ),
+    Screen(
+        "ach-maintenance",
+        "/ach",
+        "ACH Maintenance",
+        "Store Day Audit",
+        ("finance", "it"),
+        ("/api/ach", "/api/stores"),
     ),
     Screen(
         "foundation",
@@ -128,7 +193,7 @@ SCREENS: tuple[Screen, ...] = (
         "Audit Errors",
         "Investigate & Correct",
         ("analyst", "finance", "it", "auditor"),
-        ("/api/audit-errors",),
+        ("/api/audit-errors", "/api/me/saved-views"),
     ),
     Screen(
         "corrections",
@@ -241,7 +306,7 @@ SCREENS: tuple[Screen, ...] = (
         "Agent Activity",
         "Diagnostics",
         ("analyst", "finance", "it", "auditor"),
-        ("/api/audit", "/api/agent/config"),
+        ("/api/audit", "/api/agent/config", "/api/me/saved-views"),
     ),
     Screen("settings", "/settings", "General", "Configuration", EVERYONE),
     Screen(
@@ -256,6 +321,11 @@ SCREENS: tuple[Screen, ...] = (
             "/api/ontology/integration",
             "/api/production-readiness",
             "/api/reconciliation/policy",
+            "/api/system-options",
+            "/api/vouchers/options",
+            "/api/vouchers/policy-package",
+            "/api/vouchers/routing-policy",
+            "/api/vouchers/retention",
         ),
     ),
     Screen(
@@ -263,16 +333,20 @@ SCREENS: tuple[Screen, ...] = (
         "/settings/controls",
         "Totals, rules & GL mapping",
         "Configuration",
-        ("analyst", "finance", "auditor"),
+        ("analyst", "finance", "it", "auditor"),
         ("/api/total-definitions", "/api/audit-rules", "/api/gl"),
     ),
     Screen(
         "settings-close",
         "/settings/close",
-        "Tolerances & period close",
+        "Tolerances, store-day order and period close",
         "Configuration",
         ("finance", "it", "auditor"),
-        ("/api/variance-tolerances", "/api/periods"),
+        (
+            "/api/variance-tolerances",
+            "/api/periods",
+            "/api/system-options/store-days-worked-in-order",
+        ),
     ),
     Screen(
         "settings-tenders",
@@ -312,7 +386,8 @@ SCREENS: tuple[Screen, ...] = (
         "Roles & access",
         "Configuration",
         EVERYONE,
-        ("/api/access",),
+        ("/api/access/matrix",),
+        optional=("/api/access/store-assignments", "/api/foundation/location-traits"),
     ),
 )
 # Needed by every signed-in role to render the page chrome (freshness banner, identity).

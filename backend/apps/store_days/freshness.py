@@ -187,7 +187,13 @@ async def invalidate_configuration_locked(
     result = await db.execute(
         update(StoreDay)
         .where(*conditions)
-        .values(totals_stale=case((StoreDay.audit_version > 0, True), else_=StoreDay.totals_stale))
+        .values(
+            totals_stale=case((StoreDay.audit_version > 0, True), else_=StoreDay.totals_stale),
+            audit_signed_version=None,
+            audit_signed_by=None,
+            audit_signed_at=None,
+            audit_signoff_rationale=None,
+        )
         .execution_options(synchronize_session=False)
     )
     affected_ids = select(StoreDay.id).where(*conditions)

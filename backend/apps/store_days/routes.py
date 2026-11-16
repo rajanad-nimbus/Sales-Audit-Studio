@@ -4,19 +4,24 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated
+from itertools import islice
+from typing import Annotated, Literal
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from integrations.ontology.nimbus import audit
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.audit.models import AuditEvent
+from apps.cash.models import ACHAdjustment, CashControl, CashDeposit
 from apps.cases.models import Case, EvidenceRequest
+from apps.csv_export import csv_row
 from apps.controls.foundation.models import FoundationReference
 from apps.ingest import reconciliation
+from apps.ingest.models import RegisterEvent
 from apps.ingest.manifests import iter_manifests, validate_business_date
 from apps.ingest.sequence import find_gaps
 from apps.search import contains_literal
@@ -61,7 +66,10 @@ from apps.totals.over_short import calculate as calculate_over_short
 from apps.transactions.models import CanonicalTransaction
 
 router = APIRouter(prefix="/api/store-days", tags=["Store days"])
+MAX_STORE_DAY_EXPORT = 50_000
+STORE_DAY_EXPORT_CHUNK = 250
 MAX_STORE_DAY_HISTORY_ITEMS = 200
+STORE_DAY_HISTORY_PAGE_SIZE = 100
 __all__ = [
     "ClosureRequestBody",
     "ClosureReviewBody",
@@ -77,6 +85,115 @@ __all__ = [
 class OpenStoreDayBody(BaseModel):
     store_id: str = Field(min_length=1, max_length=50)
     business_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class DeleteStoreDayBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+    confirmation: str = Field(min_length=1, max_length=120)
+
+
+@router.post("/{store_id}/{business_date}/delete")
+async def delete_empty_store_day(
+    store_id: str,
+    business_date: str,
+    body: DeleteStoreDayBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("it")),
+):
+    """Remove an accidental empty day placeholder while retaining its audit event."""
+    if scope.scoped(user):
+        raise HTTPException(status_code=403, detail="Removing a Store Day requires full access")
+    if body.confirmation != f"{store_id}/{business_date}":
+        raise HTTPException(status_code=422, detail="Store Day confirmation does not match")
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="A reason is required")
+
+    await lock_configuration(db)
+    await lock_store_day_identity(db, store_id, business_date)
+    day = await get_day(db, store_id, business_date, lock=True)
+    if day.status not in {"Open", "Auditing", "Reopened"} or day.audit_version != 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Only an unclosed Store Day with no calculated totals can be removed",
+        )
+
+    blockers = []
+    checks = (
+        (
+            "transactions",
+            CanonicalTransaction.store_id == store_id,
+            CanonicalTransaction.business_date == business_date,
+        ),
+        (
+            "register events",
+            RegisterEvent.store_id == store_id,
+            RegisterEvent.business_date == business_date,
+        ),
+        ("cases", Case.store_id == store_id, Case.business_date == business_date),
+        (
+            "cash controls",
+            CashControl.store_id == store_id,
+            CashControl.business_date == business_date,
+        ),
+        (
+            "cash deposits",
+            CashDeposit.store_id == store_id,
+            CashDeposit.business_date == business_date,
+        ),
+        (
+            "ACH adjustments",
+            ACHAdjustment.record_type == "Store",
+            ACHAdjustment.store_id == store_id,
+            ACHAdjustment.business_date == business_date,
+        ),
+    )
+    for label, *conditions in checks:
+        model = {
+            "transactions": CanonicalTransaction,
+            "register events": RegisterEvent,
+            "cases": Case,
+            "cash controls": CashControl,
+            "cash deposits": CashDeposit,
+            "ACH adjustments": ACHAdjustment,
+        }[label]
+        count = await db.scalar(select(func.count()).select_from(model).where(*conditions))
+        if count:
+            blockers.append(f"{count} {label}")
+
+    dependent_checks = (
+        ("calculated totals", AuditTotal),
+        ("closure requests", StoreDayClosureRequest),
+        ("variance explanations", variances.VarianceExplanation),
+    )
+    for label, model in dependent_checks:
+        count = await db.scalar(
+            select(func.count()).select_from(model).where(model.store_day_id == day.id)
+        )
+        if count:
+            blockers.append(f"{count} {label}")
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail="This Store Day contains business or audit records and cannot be removed: "
+            + ", ".join(blockers),
+        )
+
+    day_id = day.id
+    before = {"store_id": day.store_id, "business_date": day.business_date, "status": day.status}
+    audit(
+        db,
+        "STORE_DAY_DELETED",
+        None,
+        "StoreDay",
+        day_id,
+        f"Empty Store Day {store_id}/{business_date} removed: {reason}",
+        actor=user.get("user") or "ontology.user",
+        after={"before": before, "deleted": True, "reason": reason},
+    )
+    await db.delete(day)
+    await db.commit()
+    return {"deleted": True, "store_id": store_id, "business_date": business_date}
 
 
 async def open_store_day_record(
@@ -201,16 +318,102 @@ async def list_store_days(
     q: Annotated[str | None, Query(max_length=50)] = None,
     page: Annotated[int, Query(ge=1, le=100_000)] = 1,
     response: Response = None,
+    format: Literal["json", "csv"] = "json",
 ):
     """One page of store days, newest first. The filters run in the database, not the browser.
 
     There is no total: counting every store day is a scan. ``X-Has-More`` says whether another page
     follows, and ``/summary`` gives exact counts by status for the same filters.
     """
+    filters = day_filters(store_id, status, date_from, date_to, q)
+    base = scope.restrict(select(StoreDay).where(*filters), user, StoreDay.store_id)
+    if format == "csv":
+        total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+        if total > MAX_STORE_DAY_EXPORT:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Export contains {total:,} store days; limit is {MAX_STORE_DAY_EXPORT:,}. "
+                    "Narrow the filters."
+                ),
+            )
+        columns = (
+            "store_id",
+            "business_date",
+            "lifecycle_status",
+            "data_status",
+            "data_detail",
+            "transaction_count",
+            "day_close_status",
+            "audit_status",
+            "audit_detail",
+            "open_cases",
+            "unexplained_variances",
+            "missing_transaction_numbers",
+            "audit_version",
+            "signed_off",
+            "signed_by",
+            "signed_at",
+            "ready_to_close",
+            "export_status",
+            "export_records",
+            "export_pending",
+            "totals_stale",
+            "closed_at",
+            "closed_by",
+        )
+
+        async def generate():
+            yield csv_row(columns)
+            for offset in range(0, total, STORE_DAY_EXPORT_CHUNK):
+                query = (
+                    base.order_by(StoreDay.business_date.desc(), StoreDay.store_id)
+                    .offset(offset)
+                    .limit(STORE_DAY_EXPORT_CHUNK)
+                )
+                days = (await db.execute(query)).scalars().all()
+                views = await readiness(db, days)
+                for day in days:
+                    view = views[day.id]
+                    ingest = view["ingest"]
+                    audit_view = view["audit"]
+                    export_view = view["export"]
+                    yield csv_row(
+                        (
+                            day.store_id,
+                            day.business_date,
+                            day.status,
+                            ingest["state"],
+                            ingest["detail"],
+                            ingest["transactions"],
+                            ingest["day_close"]["state"],
+                            audit_view["resa_status"],
+                            audit_view["detail"],
+                            audit_view["open_cases"],
+                            audit_view["unexplained_variances"],
+                            audit_view["missing_transactions"],
+                            day.audit_version,
+                            str(audit_view["signed_off"]).lower(),
+                            audit_view["signed_by"],
+                            audit_view["signed_at"],
+                            str(view["ready_to_close"]).lower(),
+                            export_view["state"],
+                            export_view["records"],
+                            export_view["pending"],
+                            str(day.totals_stale).lower(),
+                            day.closed_at,
+                            day.closed_by,
+                        )
+                    )
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="store-days.csv"'},
+        )
+
     query = (
-        scope.restrict(select(StoreDay), user, StoreDay.store_id)
-        .where(*day_filters(store_id, status, date_from, date_to, q))
-        .order_by(StoreDay.business_date.desc(), StoreDay.store_id)
+        base.order_by(StoreDay.business_date.desc(), StoreDay.store_id)
         .offset((page - 1) * limit)
         .limit(limit + 1)
     )
@@ -253,11 +456,32 @@ async def store_day_summary(
             )
         )
     ).scalar_one()
+    unsigned = (
+        await db.execute(
+            scope.restrict(
+                select(func.count())
+                .select_from(StoreDay)
+                .where(
+                    *base,
+                    StoreDay.audit_version > 0,
+                    StoreDay.totals_stale.is_(False),
+                    (
+                        StoreDay.audit_signed_version.is_distinct_from(StoreDay.audit_version)
+                        | StoreDay.audit_signed_by.is_(None)
+                        | StoreDay.audit_signed_at.is_(None)
+                    ),
+                ),
+                user,
+                StoreDay.store_id,
+            )
+        )
+    ).scalar_one()
     counts = {status: count for status, count in by_status}
     return {
         "total": sum(counts.values()),
         "by_status": counts,
         "totals_stale": stale,
+        "unsigned_audit_versions": unsigned,
     }
 
 
@@ -270,6 +494,8 @@ async def store_days_needing_attention(
     user: dict = Depends(require_role("finance", "it")),
     late_page: Annotated[int, Query(ge=1, le=100_000)] = 1,
     late_page_size: Annotated[int, Query(ge=10, le=500)] = 100,
+    format: Literal["json", "csv"] = "json",
+    queue: Literal["late", "stuck"] = "late",
 ):
     """Late stores for one business date (a page of them), and open days that have stopped moving."""
     today = datetime.now(UTC).date()
@@ -279,6 +505,134 @@ async def store_days_needing_attention(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if format == "csv" and queue == "late":
+        _expected_stores, late_rows = await late_stores(db, user, expected_date)
+        if len(late_rows) > MAX_STORE_DAY_EXPORT:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Export contains {len(late_rows):,} late stores; "
+                    f"limit is {MAX_STORE_DAY_EXPORT:,}. Use a narrower store access scope."
+                ),
+            )
+        columns = (
+            "store_id",
+            "business_date",
+            "store_day_open",
+            "data_status",
+            "transaction_count",
+            "detail",
+        )
+
+        async def generate_late():
+            yield csv_row(columns)
+            for row in late_rows:
+                yield csv_row(
+                    (
+                        row["store_id"],
+                        row["business_date"],
+                        str(row["store_day_open"]).lower(),
+                        row["state"],
+                        row["transactions"],
+                        row["detail"],
+                    )
+                )
+
+        return StreamingResponse(
+            generate_late(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="store-days-late.csv"'},
+        )
+
+    if format == "csv" and queue == "stuck":
+        cutoff = (today - timedelta(days=stuck_after_days)).isoformat()
+        stuck_query = scope.restrict(
+            select(StoreDay).where(
+                StoreDay.status != "Closed",
+                StoreDay.business_date <= cutoff,
+            ),
+            user,
+            StoreDay.store_id,
+        )
+        total = (
+            await db.execute(select(func.count()).select_from(stuck_query.subquery()))
+        ).scalar_one()
+        if total > MAX_STORE_DAY_EXPORT:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Export contains {total:,} stuck store days; "
+                    f"limit is {MAX_STORE_DAY_EXPORT:,}. Increase the day threshold."
+                ),
+            )
+        columns = (
+            "store_id",
+            "business_date",
+            "lifecycle_status",
+            "days_open",
+            "holding_back",
+            "data_status",
+            "data_detail",
+            "transaction_count",
+            "audit_status",
+            "audit_detail",
+            "open_cases",
+            "unexplained_variances",
+            "missing_transaction_numbers",
+            "audit_version",
+            "signed_off",
+            "export_status",
+            "export_pending",
+        )
+
+        async def generate_stuck():
+            yield csv_row(columns)
+            for offset in range(0, total, STORE_DAY_EXPORT_CHUNK):
+                days = (
+                    await db.execute(
+                        stuck_query.order_by(StoreDay.business_date, StoreDay.store_id)
+                        .offset(offset)
+                        .limit(STORE_DAY_EXPORT_CHUNK)
+                    )
+                ).scalars().all()
+                views = await readiness(db, days)
+                for day in days:
+                    view = views[day.id]
+                    audit_view = view["audit"]
+                    reasons = holding_back(view) or [
+                        "Ready to close; request closure"
+                        if view["ready_to_close"]
+                        else f"Status {day.status}"
+                    ]
+                    yield csv_row(
+                        (
+                            day.store_id,
+                            day.business_date,
+                            day.status,
+                            (today - datetime.fromisoformat(day.business_date).date()).days,
+                            " · ".join(reasons),
+                            view["ingest"]["state"],
+                            view["ingest"]["detail"],
+                            view["ingest"]["transactions"],
+                            audit_view["resa_status"],
+                            audit_view["detail"],
+                            audit_view["open_cases"],
+                            audit_view["unexplained_variances"],
+                            audit_view["missing_transactions"],
+                            day.audit_version,
+                            str(audit_view["signed_off"]).lower(),
+                            view["export"]["state"],
+                            view["export"]["pending"],
+                        )
+                    )
+
+        return StreamingResponse(
+            generate_stuck(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="store-days-stuck.csv"'},
+        )
+
     expected_stores, late = await late_stores(db, user, expected_date)
 
     cutoff = (today - timedelta(days=stuck_after_days)).isoformat()
@@ -333,15 +687,14 @@ async def store_days_needing_attention(
 async def store_selector(
     db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))
 ):
-    if scope.scoped(user):
-        return sorted(scope.allowed_stores(user) or [])
     stores = union(
         select(CanonicalTransaction.store_id.label("store_id")).where(
             CanonicalTransaction.store_id.is_not(None),
         ),
         select(StoreDay.store_id.label("store_id")).where(StoreDay.store_id.is_not(None)),
     ).subquery()
-    return (await db.execute(select(stores.c.store_id).order_by(stores.c.store_id))).scalars().all()
+    query = scope.restrict(select(stores.c.store_id), user, stores.c.store_id)
+    return (await db.execute(query.order_by(stores.c.store_id))).scalars().all()
 
 
 BRIEF_ITEMS = 5
@@ -441,6 +794,7 @@ async def store_day_brief(
                     "name": t.total_name,
                     "level": t.level,
                     "dimension": t.dimension_key,
+                    "rollup_key": t.rollup_key,
                     "variance": t.variance_amount,
                     "currency": t.currency,
                     "outcome": evaluations[t.id]["outcome"],
@@ -470,22 +824,81 @@ async def store_day_brief(
 async def store_day_sequence_gaps(
     store_id: str,
     business_date: str,
+    page: Annotated[int, Query(ge=1, le=100000)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 100,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
 ):
-    """Transaction numbers missing from each register's sequence for one store day."""
+    """Return a bounded page of missing transaction numbers for one store day."""
     scope.require_store(user, store_id)
-    await get_day(db, store_id, business_date)
+    day = await get_day(db, store_id, business_date)
     gaps = (await find_gaps(db, business_date, store_id=store_id)).get(
         (store_id, business_date), {}
     )
+    decisions = (
+        (
+            await db.execute(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.object_type == "RegisterSequenceGap",
+                    AuditEvent.object_id == day.id,
+                    AuditEvent.event_type.in_(
+                        ["REGISTER_SEQUENCE_GAP_DISMISSED", "REGISTER_SEQUENCE_GAP_RESTORED"]
+                    ),
+                )
+                .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    latest_decisions = {}
+    for event in decisions:
+        state = event.after_state or {}
+        key = (state.get("register_id"), state.get("transaction_number"))
+        if key[0] and key[1] is not None:
+            latest_decisions.setdefault(key, event)
+    dismissed = {
+        key: event
+        for key, event in latest_decisions.items()
+        if event.event_type == "REGISTER_SEQUENCE_GAP_DISMISSED"
+    }
+    active_counts = {
+        register: sum((register, number) not in dismissed for number in numbers)
+        for register, numbers in gaps.items()
+    }
+    total = sum(len(numbers) for numbers in gaps.values())
+    ordered = (
+        (register, number, dismissed.get((register, number)))
+        for register, numbers in sorted(gaps.items())
+        for number in numbers
+    )
+    pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, pages)
+    start = (page - 1) * page_size
+    selected = list(islice(ordered, start, start + page_size))
+    registers: dict[str, dict] = {}
+    for register, number, decision in selected:
+        group = registers.setdefault(
+            register,
+            {"register_id": register, "missing": [], "count": active_counts[register], "dismissed": []},
+        )
+        if decision is None:
+            group["missing"].append(number)
+        else:
+            group["dismissed"].append(
+                {
+                    "number": number,
+                    "reason": (decision.after_state or {}).get("reason"),
+                    "actor": decision.actor,
+                    "decided_at": decision.created_at,
+                }
+            )
     return {
         "store_id": store_id,
         "business_date": business_date,
-        "registers": [
-            {"register_id": register, "missing": numbers, "count": len(numbers)}
-            for register, numbers in sorted(gaps.items())
-        ],
+        "registers": [registers[key] for key in sorted(registers)],
+        "pagination": {"page": page, "page_size": page_size, "total": total, "pages": pages},
     }
 
 
@@ -494,6 +907,10 @@ async def get_store_day(
     store_id: str,
     business_date: str,
     version: Annotated[int | None, Query(ge=1)] = None,
+    history_page: Annotated[int, Query(ge=1, le=10000)] = 1,
+    history_page_size: Annotated[int, Query(ge=1, le=STORE_DAY_HISTORY_PAGE_SIZE)] = 100,
+    history_q: Annotated[str | None, Query(max_length=200)] = None,
+    history_event_type: Annotated[str | None, Query(max_length=100)] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
 ):
@@ -507,7 +924,12 @@ async def get_store_day(
                 .where(
                     AuditTotal.store_day_id == day.id, AuditTotal.audit_version == selected_version
                 )
-                .order_by(AuditTotal.level, AuditTotal.total_name, AuditTotal.dimension_key)
+                .order_by(
+                    AuditTotal.level,
+                    AuditTotal.total_name,
+                    AuditTotal.dimension_key,
+                    AuditTotal.rollup_key,
+                )
             )
         )
         .scalars()
@@ -582,6 +1004,12 @@ async def get_store_day(
     day_readiness = (await readiness(db, [day], {(store_id, business_date): open_case_count}))[
         day.id
     ]
+    if day_readiness["audit"].get("missing_transactions", 0):
+        blockers.append(
+            f"{day_readiness['audit']['missing_transactions']} unresolved transaction number gap(s)"
+        )
+    if not day_readiness["audit"]["signed_off"]:
+        blockers.append("Auditor sign-off required for the current totals version")
     quality = data_quality(day, day_readiness["ingest"]["state"], selected_version)
     unexplained = sum(
         1 for total in current_totals if not current_evaluations[total.id]["resolved"]
@@ -620,13 +1048,44 @@ async def get_store_day(
     )
     requests_truncated = len(requests) > MAX_STORE_DAY_HISTORY_ITEMS
     requests = requests[:MAX_STORE_DAY_HISTORY_ITEMS]
+    history_filters = [
+        AuditEvent.object_type.in_(["StoreDay", "RegisterSequenceGap"]),
+        AuditEvent.object_id == day.id,
+    ]
+    if history_event_type:
+        history_filters.append(AuditEvent.event_type == history_event_type)
+    if history_q and history_q.strip():
+        term = history_q.strip()
+        history_filters.append(
+            contains_literal(AuditEvent.action_description, term)
+            | contains_literal(AuditEvent.actor, term)
+            | contains_literal(AuditEvent.event_type, term)
+        )
+    history_base = select(AuditEvent).where(*history_filters).order_by(None)
+    history_types = (
+        (
+            await db.execute(
+                select(AuditEvent.event_type)
+                .where(
+                    AuditEvent.object_type.in_(["StoreDay", "RegisterSequenceGap"]),
+                    AuditEvent.object_id == day.id,
+                )
+                .distinct()
+                .order_by(AuditEvent.event_type)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    history_total = (
+        await db.execute(select(func.count()).select_from(history_base.subquery()))
+    ).scalar_one()
     history = (
         (
             await db.execute(
-                select(AuditEvent)
-                .where(AuditEvent.object_type == "StoreDay", AuditEvent.object_id == day.id)
-                .order_by(AuditEvent.seq.desc())
-                .limit(100)
+                history_base.order_by(AuditEvent.seq.desc())
+                .offset((history_page - 1) * history_page_size)
+                .limit(history_page_size)
             )
         )
         .scalars()
@@ -726,6 +1185,13 @@ async def get_store_day(
             }
             for event in history
         ],
+        "history_pagination": {
+            "total": history_total,
+            "page": history_page,
+            "page_size": history_page_size,
+            "pages": max(1, -(-history_total // history_page_size)),
+        },
+        "history_event_types": history_types,
     }
 
 
@@ -768,10 +1234,21 @@ async def retotal_store_day(
         calculated, definitions, calculation.configured_totals
     )
 
-    rule_evaluation = await prepare_rule_evaluation(db, calculated, definitions, currency)
+    try:
+        rule_evaluation = await prepare_rule_evaluation(
+            db, calculated, definitions, currency, business_date, store_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     day.status, day.audit_version = "Re-totaling", day.audit_version + 1
+    day.audit_signed_version = None
+    day.audit_signed_by = None
+    day.audit_signed_at = None
+    day.audit_signoff_rationale = None
     for (name, level, dimension), amount in calculated.items():
         definition = definition_by_key.get((name, level, dimension))
+        if definition is not None and definition.rollups:
+            continue
         db.add(
             AuditTotal(
                 id=str(uuid.uuid4()),
@@ -786,6 +1263,29 @@ async def retotal_store_day(
                 currency=currency,
             )
         )
+    definitions_by_id = {definition.id: definition for definition in definitions}
+    for definition_id, groups in calculation.configured_rollups.items():
+        definition = definitions_by_id.get(definition_id)
+        if definition is None or not definition.rollups:
+            continue
+        for (dimension, rollup_key), amount in groups.items():
+            if rollup_key is None:
+                continue
+            db.add(
+                AuditTotal(
+                    id=str(uuid.uuid4()),
+                    store_day_id=day.id,
+                    audit_version=day.audit_version,
+                    total_name=f"Configured: {definition.name}",
+                    level=definition.level,
+                    dimension_key=dimension,
+                    rollup_key=rollup_key,
+                    calculated_amount=amount,
+                    definition_id=definition.id,
+                    definition_revision=definition.revision,
+                    currency=currency,
+                )
+            )
     pos_net = calculated.get(("POS Net", "Store", None), Decimal("0"))
     if has_manifest:
         db.add(

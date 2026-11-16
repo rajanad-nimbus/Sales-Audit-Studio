@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { notifyDataChanged } from './sync';
+import { currentUserPreferences, formatNumber } from './preferences';
 
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
@@ -12,7 +13,8 @@ api.interceptors.request.use((config) => {
     if (as) config.headers['X-Impersonate-Role'] = as;
     // An admin acting as a store manager chooses which stores to simulate; a real store manager's stores come from Ontology Studio.
     const stores = localStorage.getItem('nimbus_impersonate_stores');
-    if (as === 'store_manager' && stores) config.headers['X-Impersonate-Stores'] = stores;
+    if ((as === 'store_manager' || as === 'store_staff') && stores)
+      config.headers['X-Impersonate-Stores'] = stores;
   } catch {
     /* storage unavailable */
   }
@@ -69,14 +71,24 @@ export interface Case {
 
 export interface NimbusException {
   id: string;
+  case_id?: string;
   exception_type: string;
   exception_family: string;
   source_system: string;
+  detection_rule_id: string;
+  detection_rule_name?: string | null;
+  balance_level?: string | null;
+  balance_dimension?: string | null;
   exception_amount: string;
   estimated_exposure: string;
   severity: string;
   close_impact: string;
   status: string;
+  override_reason?: string | null;
+  override_requested_by?: string | null;
+  override_requested_at?: string | null;
+  override_approved_by?: string | null;
+  override_approved_at?: string | null;
 }
 
 export interface Finding {
@@ -152,10 +164,10 @@ export interface AuditEvent {
 }
 
 export const money = (v: string | number, currency = 'USD') =>
-  Number(v).toLocaleString('en-US', { style: 'currency', currency });
+  formatNumber(Number(v), { style: 'currency', currency });
 
 export const caseMoney = (v: string | number, currency: string | null | undefined) =>
-  currency ? money(v, currency) : `${Number(v).toLocaleString('en-US')} (currency unknown)`;
+  currency ? money(v, currency) : `${formatNumber(Number(v))} (currency unknown)`;
 
 export interface CurrencyAmount {
   currency: string | null;
@@ -251,7 +263,10 @@ export interface BatchStatus {
   last_failed?: boolean;
 }
 export const compact = (n: number) =>
-  new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+  new Intl.NumberFormat(currentUserPreferences().locale, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
 
 export interface ExportDest {
   id: string;

@@ -24,14 +24,20 @@ from apps.cases.models import (
     Workflow,
 )
 from apps.cash.models import (
+    ACHAdjustment,
     CashControl,
     CashDeposit,
 )
 from apps.controls.foundation.models import (
+    FoundationImportRun,
     FoundationReference,
+    StoreLocationTrait,
 )
 from apps.controls.rules.models import (
     ConfiguredAuditRule,
+)
+from apps.controls.rules.transaction_models import (
+    ConfiguredTransactionAuditRule,
 )
 from apps.corrections.models import (
     TransactionAdjustment,
@@ -49,6 +55,7 @@ from apps.ingest.models import (
     ReconciliationMatch,
     ReconciliationPolicy,
     RegisterEvent,
+    RegisterEventAdjustment,
     ShopifyReferenceStage,
     ShopifyReferenceSyncState,
     SourceFeedProfile,
@@ -60,6 +67,7 @@ from apps.operations.models import (
     RetentionPolicy,
     RetentionRun,
 )
+from apps.security.models import StoreAssignment, UserPreference, UserSavedViews, VerifiedStoreUser
 from apps.store_days.models import (
     AuditTotal,
     PeriodClose,
@@ -70,6 +78,7 @@ from apps.store_days.models import (
 )
 from apps.system.models import (
     Connector,
+    SystemOption,
 )
 from apps.totals.models import (
     AuditTotalDefinition,
@@ -84,6 +93,9 @@ from apps.transactions.models import (
 )
 from apps.vouchers.models import (
     Voucher,
+    VoucherIdentity,
+    VoucherOption,
+    VoucherRoutingPolicy,
 )
 from model_base import Base, utcnow
 
@@ -102,10 +114,14 @@ __all__ = [
     "Recommendation",
     "ValidationObligation",
     "Workflow",
+    "ACHAdjustment",
     "CashControl",
     "CashDeposit",
     "FoundationReference",
+    "StoreLocationTrait",
+    "FoundationImportRun",
     "ConfiguredAuditRule",
+    "ConfiguredTransactionAuditRule",
     "TransactionAdjustment",
     "ExportBatch",
     "ExportDestination",
@@ -115,6 +131,7 @@ __all__ = [
     "ReconciliationMatch",
     "ReconciliationPolicy",
     "RegisterEvent",
+    "RegisterEventAdjustment",
     "ShopifyReferenceStage",
     "ShopifyReferenceSyncState",
     "SourceFeedProfile",
@@ -123,12 +140,20 @@ __all__ = [
     "BatchRun",
     "RetentionPolicy",
     "RetentionRun",
+    "StoreAssignment",
+    "UserPreference",
+    "UserSavedViews",
+    "VerifiedStoreUser",
     "Connector",
+    "SystemOption",
     "AuditTotal",
     "StoreDay",
     "StoreDayClosureRequest",
     "PeriodClose",
     "Voucher",
+    "VoucherOption",
+    "VoucherIdentity",
+    "VoucherRoutingPolicy",
     "VarianceExplanation",
     "VarianceTolerance",
     "AuditTotalDefinition",

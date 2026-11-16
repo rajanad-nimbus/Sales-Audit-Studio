@@ -19,6 +19,7 @@ class TotalDefinitionLike(Protocol):
     over_short_group: str | None
     over_short_operator: str | None
     combined_total_ids: list[str]
+    combined_total_operators: list[str]
     combined_operator: str | None
     start_date: str | None
     end_date: str | None
@@ -85,15 +86,18 @@ def validate_category(definition: TotalDefinitionLike) -> None:
 
 def validate_combination(definition: TotalDefinitionLike) -> None:
     """Validate operand identities and operation for combined totals."""
-    if definition.calculation_basis == "Combined" and (
-        len(definition.combined_total_ids) != 2 or len(set(definition.combined_total_ids)) != 2
+    if definition.calculation_basis != "Combined":
+        return
+    identifiers = definition.combined_total_ids
+    if len(identifiers) < 2 or len(identifiers) > 20 or len(set(identifiers)) != len(identifiers):
+        raise ValueError("Combined totals require two distinct existing totals (2 to 20)")
+    operators = getattr(definition, "combined_total_operators", None) or [
+        definition.combined_operator
+    ] * (len(identifiers) - 1)
+    if len(operators) != len(identifiers) - 1 or any(
+        operator not in VALID_OPERATORS for operator in operators
     ):
-        raise ValueError("Combined totals require two distinct existing totals")
-    if (
-        definition.calculation_basis == "Combined"
-        and definition.combined_operator not in VALID_OPERATORS
-    ):
-        raise ValueError("Combined totals require an addition or subtraction operator")
+        raise ValueError("Combined totals require one addition or subtraction operator per pair")
 
 
 def validate_effective_dates(definition: TotalDefinitionLike) -> None:

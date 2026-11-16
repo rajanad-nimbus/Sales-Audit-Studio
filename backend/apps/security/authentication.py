@@ -7,10 +7,15 @@ from fastapi import Depends, Header, HTTPException, Request
 
 ONTOLOGY_AUTH_URL = os.getenv("NIMBUS_ONTOLOGY_AUTH_URL", "").rstrip("/")
 AUTH_ENABLED = bool(ONTOLOGY_AUTH_URL)
-IMPERSONABLE = {"finance", "it", "analyst", "auditor", "store_manager"}
+IMPERSONABLE = {"finance", "it", "analyst", "auditor", "store_manager", "store_staff"}
+# Both store roles see only the stores assigned to them.
+STORE_ROLES = ("store_manager", "store_staff")
 # store_manager is limited to these areas, and within them to the stores assigned to the person in Ontology Studio.
 STORE_MANAGER_CASH_PREFIXES = ("/api/cash", "/api/cash-controls")
-STORE_MANAGER_PREFIXES = (*STORE_MANAGER_CASH_PREFIXES, "/api/store-days")
+# A store manager also reads the store's own transactions, to review them before they are audited.
+STORE_MANAGER_PREFIXES = (*STORE_MANAGER_CASH_PREFIXES, "/api/store-days", "/api/transactions")
+# Store sales staff only follow whether their store's days have arrived and balance (read-only).
+STORE_STAFF_PREFIXES = ("/api/store-days",)
 # Where the identity carries the user's stores: a dotted path into the Ontology Studio user object (a list, or a comma-separated string).
 STORE_CLAIM = os.getenv("NIMBUS_ONTOLOGY_STORE_CLAIM", "stores")
 
@@ -44,7 +49,7 @@ def stores_from_identity(identity: dict, claim: str | None = None) -> list[str]:
 def _role_map() -> dict[str, str]:
     raw = os.getenv(
         "NIMBUS_ONTOLOGY_ROLE_MAP",
-        "admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,auditor:auditor,store_manager:store_manager",
+        "admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,auditor:auditor,store_manager:store_manager,store_staff:store_staff",
     )
     return dict(item.split(":", 1) for item in raw.split(",") if ":" in item)
 
@@ -146,7 +151,7 @@ def normalize_identity(identity: dict, request: Request) -> dict:
         "impersonating": role != real_role,
         "ontology_role": ontology_role,
         "ontology_user_id": identity.get("id"),
-        "store_scoped": role == "store_manager",
+        "store_scoped": role in STORE_ROLES,
         "stores": stores,
     }
 
@@ -155,7 +160,7 @@ def resolve_identity_stores(
     identity: dict, request: Request, real_role: str, role: str
 ) -> list[str] | None:
     """Resolve assigned stores, requiring admins to explicitly scope simulated store managers."""
-    if role != "store_manager":
+    if role not in STORE_ROLES:
         return None
     if real_role == "admin":
         return [
@@ -171,7 +176,7 @@ def role_allowed(role: str, roles: tuple[str, ...], method: str, path: str) -> b
 
     finance-only endpoints are approvals and stay finance-only; endpoints open to both finance and it are shared
     work, which analysts may do; auditors may read whatever finance or it may read; store managers get cash and
-    store-day access only.
+    store-day access (and read-only transactions); store sales staff get read-only store-day access.
     """
     if role == "admin" or role in roles:
         return True
@@ -187,6 +192,12 @@ def role_allowed(role: str, roles: tuple[str, ...], method: str, path: str) -> b
             return False
         return method == "GET" or any(
             _path_is_within(path, prefix) for prefix in STORE_MANAGER_CASH_PREFIXES
+        )
+    if role == "store_staff":
+        return (
+            shared
+            and method == "GET"
+            and any(_path_is_within(path, prefix) for prefix in STORE_STAFF_PREFIXES)
         )
     return False
 

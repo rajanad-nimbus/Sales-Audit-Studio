@@ -6,7 +6,7 @@ from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,8 +15,9 @@ from apps.ingest import reconciliation
 from apps.security import scope
 from apps.security.authentication import require_role
 from apps.store_days import variances
-from apps.store_days.models import AuditTotal, StoreDayClosureRequest
+from apps.store_days.models import AuditTotal, StoreDay, StoreDayClosureRequest
 from apps.store_days.periods import reopen_guards
+from apps.store_days.readiness import CLEAN, COMPLETE, readiness
 from apps.store_days.service import (
     OPTIONAL_COMPARISON_TOTALS,
     REQUIRED_COMPARISON_TOTALS,
@@ -24,6 +25,7 @@ from apps.store_days.service import (
     get_day,
     store_day_view,
 )
+from apps.system.options import store_days_worked_in_order
 
 closure_router = APIRouter(prefix="/api/store-days", tags=["Store days"])
 
@@ -40,6 +42,63 @@ class ClosureReviewBody(BaseModel):
     rationale: str = Field(min_length=1, max_length=2000)
 
 
+class AuditSignoffBody(BaseModel):
+    rationale: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("rationale")
+    @classmethod
+    def require_meaningful_rationale(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 10:
+            raise ValueError("Auditor sign-off rationale must be at least 10 characters")
+        return value
+
+
+@closure_router.post("/{store_id}/{business_date}/audit-signoff")
+async def sign_off_store_day_audit(
+    store_id: str,
+    business_date: str,
+    body: AuditSignoffBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst")),
+):
+    scope.require_store(user, store_id)
+    await reconciliation.lock_reconciliation(db)
+    day = await get_day(db, store_id, business_date, lock=True)
+    if day.status == "Closed":
+        raise HTTPException(status_code=409, detail="A closed Store Day cannot be signed off")
+    view = (await readiness(db, [day]))[day.id]
+    if view["ingest"]["state"] != COMPLETE or view["audit"]["state"] != CLEAN:
+        raise HTTPException(
+            status_code=422,
+            detail="Auditor sign-off requires complete data and clean current totals",
+        )
+    if view["audit"]["signed_off"]:
+        raise HTTPException(status_code=409, detail="Current totals already have auditor sign-off")
+    actor = user["user"] or "ontology.user"
+    day.audit_signed_version = day.audit_version
+    day.audit_signed_by = actor
+    day.audit_signed_at = utcnow()
+    day.audit_signoff_rationale = body.rationale
+    audit(
+        db,
+        "STORE_DAY_AUDIT_SIGNED_OFF",
+        None,
+        "StoreDay",
+        day.id,
+        f"Totals version {day.audit_version} signed off: {body.rationale}",
+        actor=actor,
+    )
+    await db.commit()
+    return {
+        "signed_off": True,
+        "signed_version": day.audit_signed_version,
+        "signed_by": day.audit_signed_by,
+        "signed_at": day.audit_signed_at,
+        "signoff_rationale": day.audit_signoff_rationale,
+    }
+
+
 @closure_router.post("/{store_id}/{business_date}/closure-requests")
 async def request_store_day_closure(
     store_id: str,
@@ -51,9 +110,38 @@ async def request_store_day_closure(
     scope.require_store(user, store_id)
     if not body.evidence_basis.strip():
         raise HTTPException(status_code=422, detail="Closure evidence basis is required")
+    await reconciliation.lock_reconciliation(db)
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Store day is already closed")
+    if await store_days_worked_in_order(db):
+        earlier_open_day = (
+            await db.execute(
+                select(StoreDay.business_date, StoreDay.status)
+                .where(
+                    StoreDay.store_id == store_id,
+                    StoreDay.business_date < business_date,
+                    StoreDay.status != "Closed",
+                )
+                .order_by(StoreDay.business_date)
+                .limit(1)
+            )
+        ).first()
+        if earlier_open_day:
+            earlier_date, earlier_status = earlier_open_day
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Cannot close {business_date}: earlier store day {earlier_date} "
+                    f"is still {earlier_status}. Close store days in date order."
+                ),
+            )
+    current_readiness = (await readiness(db, [day]))[day.id]
+    if not current_readiness["audit"]["signed_off"]:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot request closure: auditor sign-off is required for current totals",
+        )
     pending = (
         (
             await db.execute(
@@ -144,6 +232,12 @@ async def close_store_day(
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Store day is already closed")
+    current_readiness = (await readiness(db, [day]))[day.id]
+    if not current_readiness["audit"]["signed_off"]:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot close: auditor sign-off is required for current totals",
+        )
     totals = (
         (
             await db.execute(

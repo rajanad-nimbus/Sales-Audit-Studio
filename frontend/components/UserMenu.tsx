@@ -11,6 +11,7 @@ const PERSONAS = [
   ['analyst', 'Sales Auditor'],
   ['finance', 'Finance Approver'],
   ['store_manager', 'Store Manager'],
+  ['store_staff', 'Store Sales Staff'],
   ['it', 'IT Support Admin'],
   ['auditor', 'Internal Audit'],
 ] as const;
@@ -18,6 +19,7 @@ const ROLE_LABEL: Record<string, string> = {
   analyst: 'Sales Auditor',
   finance: 'Finance Approver',
   store_manager: 'Store Manager',
+  store_staff: 'Store Sales Staff',
   it: 'IT Support Admin',
   auditor: 'Internal Audit',
   admin: 'Administrator',
@@ -28,7 +30,7 @@ export { useMe } from './MeProvider';
 export function UserMenu() {
   const { me } = useMe();
   const [open, setOpen] = useState(false);
-  const [pickStores, setPickStores] = useState(false);
+  const [pickStores, setPickStores] = useState<string | null>(null);
   const [storesText, setStoresText] = useState(() => {
     try {
       return localStorage.getItem('nimbus_impersonate_stores') ?? '';
@@ -73,7 +75,7 @@ export function UserMenu() {
       role
         ? localStorage.setItem('nimbus_impersonate', role)
         : localStorage.removeItem('nimbus_impersonate');
-      role === 'store_manager' && stores
+      (role === 'store_manager' || role === 'store_staff') && stores
         ? localStorage.setItem('nimbus_impersonate_stores', stores)
         : localStorage.removeItem('nimbus_impersonate_stores');
     } catch {
@@ -150,7 +152,9 @@ export function UserMenu() {
                   key={key}
                   className={me!.role === key ? 'on' : ''}
                   onClick={() =>
-                    key === 'store_manager' ? setPickStores((v) => !v) : impersonate(key)
+                    key === 'store_manager' || key === 'store_staff'
+                      ? setPickStores((v) => (v === key ? null : key))
+                      : impersonate(key)
                   }
                 >
                   {label}
@@ -189,7 +193,7 @@ export function UserMenu() {
 
                     onClick={() =>
                       impersonate(
-                        'store_manager',
+                        pickStores,
                         storesText
                           .split(',')
                           .map((x) => x.trim())
@@ -198,7 +202,7 @@ export function UserMenu() {
                       )
                     }
                   >
-                    Act as Store Manager
+                    Act as {ROLE_LABEL[pickStores] ?? pickStores}
                   </Button>
                 </div>
               )}
@@ -206,6 +210,11 @@ export function UserMenu() {
                 <button onClick={() => impersonate(null)}>Stop impersonating</button>
               )}
             </div>
+          )}
+          {!signedOut && (
+            <Link href="/preferences" className="user-pop-link" onClick={() => setOpen(false)}>
+              My preferences
+            </Link>
           )}
           <Link href="/settings" className="user-pop-link" onClick={() => setOpen(false)}>
             Configuration

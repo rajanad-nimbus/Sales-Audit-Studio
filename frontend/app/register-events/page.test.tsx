@@ -103,7 +103,7 @@ describe('Register Events page: opening a row in place', () => {
     render(<RegisterEventsPage />);
     const row = await rowOf('Void');
     const link = within(row).getByRole('link');
-    expect(link).toHaveAttribute('href', '/audit-errors?code=VOID_NO_ORIG');
+    expect(link).toHaveAttribute('href', '/audit-errors/VOID_NO_ORIG');
     await userEvent.click(link);
     expect(calls('get', '/api/register-events/e1/context')).toHaveLength(0);
   });

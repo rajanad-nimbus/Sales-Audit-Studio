@@ -3,9 +3,15 @@
 from collections import defaultdict
 from decimal import Decimal
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import exists, select, tuple_
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.cases.models import Case, Exception as DBException
 from apps.controls.foundation.models import FoundationReference
+from apps.controls.rules.transaction_models import ConfiguredTransactionAuditRule
+from apps.controls.rules.transaction_logic import condition_matches, sql_condition
+from apps.store_days.models import StoreDay
+from apps.totals.calculation import store_location_traits
 from apps.transactions.models import (
     CanonicalTransaction,
     TransactionDiscount,
@@ -43,6 +49,156 @@ async def run_detail_rules(db, transactions, flag):
     await flag_unknown_items(db, audited, lines, flag)
     await flag_tax_mismatches(db, audited, lines, flag)
     await flag_returns_over_sold(db, audited, lines, flag)
+
+
+async def run_configured_transaction_rules(
+    db: AsyncSession,
+    transactions,
+    flag,
+    *,
+    business_date: str | None = None,
+    store_ids: set[str] | None = None,
+) -> None:
+    """Run approved transaction predicates and Store Day presence/absence rules."""
+    rules = list(
+        (
+            await db.execute(
+                select(ConfiguredTransactionAuditRule)
+                .where(
+                    ConfiguredTransactionAuditRule.enabled.is_(True),
+                    ConfiguredTransactionAuditRule.status == "Active",
+                )
+                .order_by(
+                    ConfiguredTransactionAuditRule.execution_order,
+                    ConfiguredTransactionAuditRule.name,
+                    ConfiguredTransactionAuditRule.id,
+                )
+            )
+        ).scalars()
+    )
+    if not rules:
+        return
+    by_day: dict[tuple[str, str], list] = defaultdict(list)
+    for transaction in transactions:
+        by_day[(transaction.store_id, transaction.business_date)].append(transaction)
+    if any(rule.evaluation_scope == "StoreDayAbsence" for rule in rules):
+        day_query = select(StoreDay.store_id, StoreDay.business_date).where(
+            StoreDay.status == "Open"
+        )
+        if business_date:
+            day_query = day_query.where(StoreDay.business_date == business_date)
+        if store_ids is not None:
+            day_query = day_query.where(StoreDay.store_id.in_(store_ids))
+        for store_id, day in (await db.execute(day_query)).all():
+            by_day.setdefault((store_id, day), [])
+    traits_by_store: dict[str, set[str]] = {}
+    for store_id, _business_date in by_day:
+        if any(rule.location_traits for rule in rules):
+            try:
+                traits_by_store[store_id] = await store_location_traits(db, store_id)
+            except ValueError:
+                traits_by_store[store_id] = set()
+
+    for (store_id, _business_date), day_transactions in by_day.items():
+        for rule in rules:
+            if rule.start_date and _business_date < rule.start_date:
+                continue
+            if rule.end_date and _business_date > rule.end_date:
+                continue
+            if rule.location_traits and not set(rule.location_traits).intersection(
+                traits_by_store.get(store_id, set())
+            ):
+                continue
+            if rule.evaluation_scope == "StoreDayAbsence":
+                predicates = [
+                    CanonicalTransaction.store_id == store_id,
+                    CanonicalTransaction.business_date == _business_date,
+                    CanonicalTransaction.source_lineage.in_(
+                        ("pos-map-v1", "shopify-map-v1")
+                    ),
+                ]
+                if rule.record_type:
+                    predicates.append(
+                        CanonicalTransaction.transaction_type == rule.record_type
+                    )
+                predicates.extend(sql_condition(condition) for condition in rule.conditions or [])
+                present = await db.scalar(
+                    select(exists(select(CanonicalTransaction.id).where(*predicates)))
+                )
+                if present:
+                    continue
+                already_open = await db.scalar(
+                    select(
+                        exists(
+                            select(DBException.id)
+                            .join(Case, DBException.case_id == Case.id)
+                            .where(
+                                Case.store_id == store_id,
+                                Case.business_date == _business_date,
+                                Case.status != "Closed",
+                                DBException.exception_type == rule.error_code,
+                                DBException.detection_rule_id == rule.id,
+                                DBException.status != "Closed",
+                            )
+                        )
+                    )
+                )
+                if not already_open:
+                    currency = next(
+                        (
+                            transaction.currency
+                            for transaction in day_transactions
+                            if transaction.currency
+                        ),
+                        None,
+                    )
+                    if currency is None:
+                        currency = await db.scalar(
+                            select(CanonicalTransaction.currency)
+                            .where(
+                                CanonicalTransaction.store_id == store_id,
+                                CanonicalTransaction.business_date == _business_date,
+                                CanonicalTransaction.source_lineage.in_(
+                                    ("pos-map-v1", "shopify-map-v1")
+                                ),
+                                CanonicalTransaction.currency.is_not(None),
+                            )
+                            .limit(1)
+                        )
+                    flag(
+                        rule.error_code,
+                        Decimal("0"),
+                        detection_rule_id=rule.id,
+                        detection_rule_name=rule.name,
+                        store_id=store_id,
+                        business_date=_business_date,
+                        currency=currency,
+                    )
+                if rule.stop_processing:
+                    break
+                continue
+            matched = []
+            for transaction in day_transactions:
+                if rule.record_type and transaction.transaction_type != rule.record_type:
+                    continue
+                condition_result = all(
+                    condition_matches(condition, transaction)
+                    for condition in (rule.conditions or [])
+                )
+                if (condition_result and rule.match_mode == "Match") or (
+                    not condition_result and rule.match_mode == "No Match"
+                ):
+                    matched.append(transaction)
+            for transaction in matched:
+                flag(
+                    rule.error_code,
+                    abs(transaction.signed_amount),
+                    transaction,
+                    detection_rule_id=rule.id,
+                    detection_rule_name=rule.name,
+                )
+            if matched and rule.stop_processing:
+                break
 
 
 async def flag_tender_rules(db, transactions, flag):

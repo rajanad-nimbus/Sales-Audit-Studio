@@ -1,6 +1,13 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ ...nav, back: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/audit-errors',
+  useSearchParams: () => new URLSearchParams(),
+}));
 import AuditErrorsPage from '@/app/audit-errors/page';
 import { ME, apiFailure, calls, renderAs } from '@/test/utils';
 import type { Routes } from '@/test/utils';
@@ -100,116 +107,29 @@ describe('Audit Errors: the top table', () => {
   });
 });
 
-describe('Audit Errors: the cases inside an opened error', () => {
-  it('loads nothing about cases until an error is opened', async () => {
+describe('Audit Errors: opening an error', () => {
+  beforeEach(() => {
+    nav.push.mockClear();
+    nav.replace.mockClear();
+  });
+
+  it('links each error to its own page instead of opening it in the table', async () => {
     await open();
-    await screen.findByText('UNMATCHED_SALE label');
+    const link = await screen.findByRole('link', { name: 'UNMATCHED_SALE label' });
+    expect(link).toHaveAttribute('href', '/audit-errors/UNMATCHED_SALE');
     expect(calls('get', CASES)).toHaveLength(0);
   });
 
-  it('opens on the open cases, a page of 25, and shows them in a nested table', async () => {
+  it('goes to the error page when its row is clicked', async () => {
     await open();
-    await userEvent.click(await screen.findByText('UNMATCHED_SALE label'));
-
-    expect(await screen.findByText('C-1')).toBeInTheDocument();
-    expect(screen.getByText('UNMATCHED_SALE means something')).toBeInTheDocument();
-    expect(caseParams()).toEqual({ limit: 25, status: 'open', store: undefined, page: 1 });
-    expect(calls('get', CASES)).toHaveLength(1);
+    await userEvent.click(await screen.findByText('2026-10-09'));
+    expect(nav.push).toHaveBeenCalledWith('/audit-errors/UNMATCHED_SALE');
+    expect(screen.queryByText('UNMATCHED_SALE means something')).not.toBeInTheDocument();
   });
 
-  it('opens an error that has no open cases on every case, not an empty open list', async () => {
-    await open({
-      'GET /api/audit-errors/TAX_MISMATCH/cases': casesPage([{ ...caseRow(7), status: 'Closed' }]),
-    });
-    await userEvent.click(await screen.findByRole('button', { name: 'All error types' }));
-    await userEvent.click(await screen.findByText('TAX_MISMATCH label'));
-
-    expect(await screen.findByText('C-7')).toBeInTheDocument();
-    expect(calls('get', '/api/audit-errors/TAX_MISMATCH/cases')[0][1]?.params).toMatchObject({
-      status: 'all',
-    });
-  });
-
-  it('switches between open, closed and all cases on the server', async () => {
-    await open();
-    await userEvent.click(await screen.findByText('UNMATCHED_SALE label'));
-    await screen.findByText('C-1');
-
-    await userEvent.click(screen.getByRole('button', { name: 'Closed' }));
-    await waitFor(() => expect(caseParams()).toMatchObject({ status: 'closed', page: 1 }));
-    await userEvent.click(screen.getByRole('button', { name: 'All' }));
-    await waitFor(() => expect(caseParams()).toMatchObject({ status: 'all' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    await waitFor(() => expect(caseParams()).toMatchObject({ status: 'open' }));
-  });
-
-  it('filters by store after a pause, and starts again from the first page', async () => {
-    await open({ [`GET ${CASES}`]: casesPage([caseRow(1)], true) });
-    await userEvent.click(await screen.findByText('UNMATCHED_SALE label'));
-    await screen.findByText('C-1');
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await waitFor(() => expect(caseParams()).toMatchObject({ page: 2 }));
-    const before = calls('get', CASES).length;
-
-    await userEvent.type(screen.getByLabelText('Filter cases by store'), 'S12');
-    await waitFor(() => expect(caseParams()).toMatchObject({ store: 'S12', page: 1 }));
-    expect(calls('get', CASES).length - before).toBeLessThanOrEqual(2); // three keystrokes, one search
-  });
-
-  it('pages through the cases with no total to count', async () => {
-    await open({
-      [`GET ${CASES}`]: (config) => {
-        const page = (config?.params as { page: number }).page;
-        return casesPage([caseRow(page * 10)], page < 3, page);
-      },
-    });
-    await userEvent.click(await screen.findByText('UNMATCHED_SALE label'));
-    await screen.findByText('C-10');
-    expect(screen.getByText('Page 1')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('C-20')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('C-30')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
-    await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
-    expect(await screen.findByText('C-20')).toBeInTheDocument();
-  });
-
-  it('shows no paging control when everything fits on one page', async () => {
-    await open();
-    await userEvent.click(await screen.findByText('UNMATCHED_SALE label'));
-    await screen.findByText('C-1');
-    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
-  });
-
-  it('says how to widen the list when the filters leave nothing', async () => {
-    await open({ [`GET ${CASES}`]: casesPage([]) });
-    await userEvent.click(await screen.findByText('UNMATCHED_SALE label'));
-    expect(await screen.findByText('No cases match these filters')).toBeInTheDocument();
-    expect(screen.getByText(/Try another status/)).toBeInTheDocument();
-  });
-
-  it('shows why the cases could not be loaded, without losing the error summary', async () => {
-    await open({ [`GET ${CASES}`]: apiFailure('boom', 500) });
-    await userEvent.click(await screen.findByText('UNMATCHED_SALE label'));
-    expect(await screen.findByText('Could not load the cases for this error.')).toBeInTheDocument();
-    expect(screen.getByText('UNMATCHED_SALE means something')).toBeInTheDocument();
-  });
-
-  it('closes an open error when clicked again', async () => {
-    await open();
-    const row = await screen.findByText('UNMATCHED_SALE label');
-    await userEvent.click(row);
-    await screen.findByText('C-1');
-    await userEvent.click(row);
-    expect(screen.queryByText('C-1')).not.toBeInTheDocument();
-  });
-
-  it('opens straight to an error from a link, listing every error type', async () => {
+  it('sends an older ?code= link to that error page', async () => {
     window.history.replaceState(null, '', '/audit-errors?code=UNMATCHED_SALE');
     await open();
-    expect(await screen.findByText('C-1')).toBeInTheDocument();
-    expect(screen.getByText('TAX_MISMATCH label')).toBeInTheDocument();
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/audit-errors/UNMATCHED_SALE'));
   });
 });

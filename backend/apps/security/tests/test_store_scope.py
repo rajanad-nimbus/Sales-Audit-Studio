@@ -371,6 +371,37 @@ def test_middleware_blocks_a_store_manager_from_other_stores_paths(monkeypatch):
     assert _call(monkeypatch, f, "/api/store-days/S2/2026-10-01")[:2] == (200, True)
 
 
+def test_store_sales_staff_sign_in_scoped_and_can_only_read_their_stores_days(monkeypatch):
+    u = _identity(monkeypatch, {"email": "s@x", "role": "store_staff", "stores": ["S1"]})
+    assert u["role"] == "store_staff" and u["store_scoped"] and u["stores"] == ["S1"]
+    assert _call(monkeypatch, u, "/api/store-days/S1/2026-10-01")[:2] == (200, True)
+    status, reached, _ = _call(monkeypatch, u, "/api/store-days/S2/2026-10-01")
+    assert status == 403 and not reached
+    # Writing is refused by the endpoint's own role check, not by the screen map.
+    from starlette.requests import Request
+
+    def endpoint_refuses(method, path, *roles):
+        request = Request({"type": "http", "method": method, "path": path, "headers": []})
+        with pytest.raises(HTTPException) as refused:
+            asyncio.run(auth.require_role(*roles)(request, u))
+        return refused.value.status_code == 403
+
+    assert endpoint_refuses("POST", "/api/store-days", "it", "analyst")
+    assert endpoint_refuses("POST", "/api/store-days/S1/2026-10-01/retotal", "finance", "it")
+    assert _call(monkeypatch, u, "/api/transactions")[0] == 403
+    assert _call(monkeypatch, u, "/api/cash")[0] == 403
+    assert _call(monkeypatch, u, "/api/cases")[0] == 403
+
+
+def test_an_admin_can_act_as_store_sales_staff_for_chosen_stores(monkeypatch):
+    u = _identity(
+        monkeypatch,
+        {"email": "a@x", "role": "admin"},
+        {"x-impersonate-role": "store_staff", "x-impersonate-stores": "S1,S2"},
+    )
+    assert u["role"] == "store_staff" and u["stores"] == ["S1", "S2"] and u["impersonating"]
+
+
 # ---- display name -------------------------------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "identity,expected",

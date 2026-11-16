@@ -24,7 +24,9 @@ def test_every_role_can_always_reach_its_chrome_and_nothing_extra():
     }
     assert all(s["allowed"] for s in access.screens_for("admin"))
     store = {s["key"] for s in access.screens_for("store_manager") if s["allowed"]}
-    assert store == {"store-days", "cash-office", "settings", "settings-access"}
+    assert store == {"store-days", "transactions", "cash-office", "settings", "settings-access"}
+    staff = {s["key"] for s in access.screens_for("store_staff") if s["allowed"]}
+    assert staff == {"store-days", "settings", "settings-access"}
 
 
 def test_api_is_closed_to_roles_without_the_screen():
@@ -266,3 +268,13 @@ def test_the_imports_screen_keeps_its_api_access_after_the_rename():
     assert access.api_allowed("it", "/api/ingest/profiles")[0]
     assert {s.path for s in access.SCREENS} >= {"/imports", "/exports"}
     assert "/pipeline" not in {s.path for s in access.SCREENS}
+
+
+def test_store_manager_reads_transactions_and_store_sales_staff_only_follow_store_days():
+    shared = ("finance", "it")
+    assert role_allowed("store_manager", shared, "GET", "/api/transactions")
+    assert not role_allowed("store_manager", shared, "POST", "/api/transactions")
+    assert role_allowed("store_staff", shared, "GET", "/api/store-days/S1/2026-10-01")
+    assert not role_allowed("store_staff", shared, "POST", "/api/store-days")
+    assert not role_allowed("store_staff", shared, "GET", "/api/transactions")
+    assert not role_allowed("store_staff", shared, "GET", "/api/cash")

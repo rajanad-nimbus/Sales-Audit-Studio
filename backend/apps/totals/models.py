@@ -46,6 +46,7 @@ class AuditTotalDefinition(Base):
     rollups: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     restrictions: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     combined_total_ids: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    combined_total_operators: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     combined_operator: Mapped[str | None] = mapped_column(String(1))
     location_traits: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     usages: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
@@ -76,3 +77,9 @@ class SalesAuditErrorDefinition(Base):
     tab: Mapped[str | None] = mapped_column(String(100))
     recommended_solution: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # When configured, only listed destinations are blocked by this error. An empty list
+    # explicitly means the error is informational for downstream systems.
+    export_impact_configured: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    export_block_destinations: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")

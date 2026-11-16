@@ -2,7 +2,7 @@
 
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from integrations.ontology import ontology
@@ -17,7 +17,7 @@ from apps.cases.models import (
     Exception as DBException,
 )
 from apps.corrections.effects import effective_amounts
-from apps.ingest.audit_rules import run_detail_rules
+from apps.ingest.audit_rules import run_configured_transaction_rules, run_detail_rules
 from apps.ingest.common import (
     LINEAGE,
     RECONCILIATION_LOCK_KEY,
@@ -29,6 +29,7 @@ from apps.ingest.models import ReconciliationPolicy
 from apps.ingest.register_events import run_register_event_rules
 from apps.ingest.sequence import run_sequence_rules
 from apps.ingest.shopify.day_controls import run_shopify_day_controls
+from apps.system.options import duplicate_missing_transaction_checks_enabled
 from apps.transactions import detail as transaction_detail
 from apps.transactions.models import (
     CanonicalTransaction,
@@ -84,35 +85,46 @@ async def reconcile(
     ).scalar_one_or_none()
     amount_tolerance = policy.amount_tolerance if policy else Decimal("0")
     tolerance_currency = policy.amount_tolerance_currency if policy else "USD"
+    integrity_checks_enabled = await duplicate_missing_transaction_checks_enabled(db)
     findings, matched = await match_processor_transactions(
         db,
         txns,
         amount_tolerance,
         tolerance_currency,
         policy.settlement_day_tolerance if policy else 0,
+        policy.duplicate_lookback_days if policy else 0,
+        integrity_checks_enabled,
     )
 
     def add(etype, store, bdate, amount, currency):
         findings.append((etype, store, bdate, amount, [], currency))
 
-    def flag(etype, amount, *group):
+    def flag(
+        etype,
+        amount,
+        *group,
+        detection_rule_id=None,
+        detection_rule_name=None,
+        store_id=None,
+        business_date=None,
+        currency=None,
+    ):
+        if group:
+            store_id = group[0].store_id
+            business_date = group[0].business_date
+            currency = group[0].currency
+        finding = (etype, store_id, business_date, amount, [t.id for t in group], currency)
         findings.append(
-            (
-                etype,
-                group[0].store_id,
-                group[0].business_date,
-                amount,
-                [t.id for t in group],
-                group[0].currency,
-            )
+            (*finding, detection_rule_id, detection_rule_name) if detection_rule_id else finding
         )
         for t in group:
             t.reconciliation_status, t.disposition = "Exception", "Awaiting"
 
     await reconcile_shopify(db, txns, flag)
-    await run_transaction_audit(db, txns, flag)
+    await run_transaction_audit(db, txns, flag, business_date=business_date, store_ids=store_ids)
     await run_register_event_rules(db, add, business_date, store_ids)
-    await run_sequence_rules(db, add, business_date, store_ids)
+    if integrity_checks_enabled:
+        await run_sequence_rules(db, add, business_date, store_ids)
     await run_controls(db, business_date, add, policy, store_ids=store_ids)
     await run_shopify_day_controls(db, business_date, add, policy, store_ids=store_ids)
     await run_settlement_controls(db, txns, add, amount_tolerance, tolerance_currency)
@@ -127,7 +139,13 @@ async def reconcile(
 
 
 async def match_processor_transactions(
-    db, transactions, amount_tolerance, tolerance_currency, settlement_day_tolerance
+    db,
+    transactions,
+    amount_tolerance,
+    tolerance_currency,
+    settlement_day_tolerance,
+    duplicate_lookback_days=0,
+    integrity_checks_enabled=True,
 ):
     """Match POS transactions to processor activity and mark unmatched findings."""
     amounts = await effective_amounts(db, transactions)
@@ -164,7 +182,28 @@ async def match_processor_transactions(
         for transaction in group:
             transaction.reconciliation_status, transaction.disposition = "Exception", "Awaiting"
 
-    duplicate_sales = flag_duplicate_sales(pos, amounts, flag)
+    duplicate_sales = (
+        flag_duplicate_sales(pos, amounts, flag) if integrity_checks_enabled else set()
+    )
+    if integrity_checks_enabled and duplicate_lookback_days:
+        historical_duplicates = await find_historical_duplicate_sales(
+            db, pos, amounts, duplicate_lookback_days
+        )
+        for transaction, prior in historical_duplicates:
+            if transaction.id in duplicate_sales:
+                continue
+            findings.append(
+                (
+                    "DUPLICATE_SALES",
+                    transaction.store_id,
+                    transaction.business_date,
+                    abs(amounts[transaction.id]),
+                    [transaction.id, prior.id],
+                    transaction.currency,
+                )
+            )
+            transaction.reconciliation_status, transaction.disposition = "Exception", "Awaiting"
+            duplicate_sales.add(transaction.id)
 
     for transaction in pos:
         if transaction.id in duplicate_sales:
@@ -205,6 +244,83 @@ def flag_duplicate_sales(pos_transactions, amounts, flag):
             duplicates.add(transaction.id)
             flag("DUPLICATE_SALES", abs(amounts[transaction.id]), transaction)
         seen.add(key)
+    return duplicates
+
+
+async def find_historical_duplicate_sales(db, pos_transactions, amounts, lookback_days):
+    """Find exact POS sale identities repeated on an earlier business date."""
+    current_sales = [
+        transaction
+        for transaction in pos_transactions
+        if transaction.transaction_type == "Sale" and transaction.payment_reference
+    ]
+    if not current_sales:
+        return []
+
+    current_dates = [date.fromisoformat(transaction.business_date) for transaction in current_sales]
+    earliest = min(current_dates)
+    latest = max(current_dates)
+    start_date = (earliest - timedelta(days=lookback_days)).isoformat()
+    end_date = latest.isoformat()
+    references = sorted({transaction.payment_reference for transaction in current_sales})
+    candidates = []
+    for offset in range(0, len(references), 500):
+        query = (
+            select(CanonicalTransaction)
+            .where(
+                CanonicalTransaction.source_lineage == LINEAGE["POS"],
+                CanonicalTransaction.transaction_type == "Sale",
+                CanonicalTransaction.payment_reference.in_(references[offset : offset + 500]),
+                CanonicalTransaction.business_date >= start_date,
+                CanonicalTransaction.business_date < end_date,
+            )
+            .order_by(CanonicalTransaction.business_date.desc(), CanonicalTransaction.id)
+            .limit(MAX_RECONCILIATION_TRANSACTIONS - len(candidates) + 1)
+        )
+        candidates.extend((await db.execute(query)).scalars().all())
+        if len(candidates) > MAX_RECONCILIATION_TRANSACTIONS:
+            raise ReconciliationCapacityError(
+                "Historical duplicate search exceeds the 50,000-transaction limit; "
+                "reduce the lookback window or narrow the reconciliation scope."
+            )
+
+    if not candidates:
+        return []
+    candidate_amounts = await effective_amounts(db, candidates)
+
+    indexed = defaultdict(list)
+    for candidate in candidates:
+        key = (
+            candidate.store_id,
+            candidate.register_id,
+            candidate.currency,
+            candidate_amounts[candidate.id],
+            candidate.payment_reference,
+        )
+        indexed[key].append(candidate)
+
+    duplicates = []
+    for transaction in current_sales:
+        current_date = date.fromisoformat(transaction.business_date)
+        key = (
+            transaction.store_id,
+            transaction.register_id,
+            transaction.currency,
+            amounts[transaction.id],
+            transaction.payment_reference,
+        )
+        prior = next(
+            (
+                candidate
+                for candidate in indexed.get(key, [])
+                if 0
+                < (current_date - date.fromisoformat(candidate.business_date)).days
+                <= lookback_days
+            ),
+            None,
+        )
+        if prior is not None:
+            duplicates.append((transaction, prior))
     return duplicates
 
 
@@ -277,10 +393,21 @@ def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
     """Group findings and persist their cases, exceptions, and audit events."""
     groups = defaultdict(list)
     for finding in findings:
-        groups[(finding[0], finding[1], finding[2], finding[5])].append(finding)
+        detection_rule_id = finding[6] if len(finding) > 6 else None
+        detection_rule_name = finding[7] if len(finding) > 7 else None
+        groups[
+            (finding[0], finding[1], finding[2], finding[5], detection_rule_id, detection_rule_name)
+        ].append(finding)
 
     counts, cases = defaultdict(int), 0
-    for (exception_type, store, business_date, currency), items in groups.items():
+    for (
+        exception_type,
+        store,
+        business_date,
+        currency,
+        detection_rule_id,
+        detection_rule_name,
+    ), items in groups.items():
         definition = ontology.get(exception_type)
         amount = sum((item[3] for item in items), Decimal("0"))
         exposure = Decimal("0") if definition["exposure"] == "zero" else amount
@@ -309,9 +436,10 @@ def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
                 case_id=case_id,
                 exception_type=exception_type,
                 exception_family=definition["family"],
-                source_system="Reconciliation",
-                detection_origin="Reconciliation",
-                detection_rule_id=f"RECON-{exception_type}",
+                source_system="Configured Rule" if detection_rule_id else "Reconciliation",
+                detection_origin="Configured Rule" if detection_rule_id else "Reconciliation",
+                detection_rule_id=detection_rule_id or f"RECON-{exception_type}",
+                detection_rule_name=detection_rule_name,
                 exception_amount=amount,
                 estimated_exposure=exposure,
                 severity="High" if amount > 1000 else "Medium",
@@ -326,9 +454,10 @@ def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
             "Case",
             case_id,
             f"Reconciliation raised {definition['label']} ({len(items)} item(s), {amount})",
-            actor="reconciliation-engine",
+            actor="transaction-audit-engine" if detection_rule_id else "reconciliation-engine",
             after={
-                "transaction_ids": [transaction_id for item in items for transaction_id in item[4]]
+                "transaction_ids": [transaction_id for item in items for transaction_id in item[4]],
+                "detection_rule_id": detection_rule_id,
             },
         )
         counts[exception_type] += len(items)
@@ -336,7 +465,9 @@ def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
     return dict(counts), cases
 
 
-async def run_transaction_audit(db, txns, flag):
+async def run_transaction_audit(
+    db, txns, flag, *, business_date: str | None = None, store_ids: set[str] | None = None
+):
     """Per-transaction audit errors from stored detail: out of balance, a manual discount with no reason, and the line rules."""
     pos = [
         t
@@ -366,6 +497,9 @@ async def run_transaction_audit(db, txns, flag):
             if not (d.description or "").strip():
                 flag("DISC_REASON_REQ", Decimal("0"), by_id[d.transaction_id])
     await run_detail_rules(db, [t for t in pos if t.reconciliation_status != "Exception"], flag)
+    await run_configured_transaction_rules(
+        db, pos, flag, business_date=business_date, store_ids=store_ids
+    )
 
 
 from apps.ingest.controls import (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, caseMoney, currencyBreakdown } from '@/lib/api';
+import { formatBusinessDate, formatDateTime, formatNumber } from '@/lib/preferences';
 import type { BatchStatus, CurrencyAmount } from '@/lib/api';
 import { useLive } from '@/lib/sync';
 import { changes, readSeen, rowMark, snapshot, writeSeen } from '@/lib/commandCenterSeen';
@@ -38,6 +39,7 @@ interface QueueCase {
   status: string;
   priority: string;
   exposure: string;
+  close_blocking_errors?: number;
   sla_state: 'breached' | 'at_risk' | 'ok' | 'none';
   assigned_to: string | null;
 }
@@ -188,6 +190,19 @@ interface Activity {
   }[];
 }
 
+interface Kpis {
+  window_days: number;
+  transactions: number;
+  exceptions: number;
+  flagged_transactions: number;
+  exception_rate: number | null;
+  accuracy: number | null;
+  close_target_days: number;
+  due_store_days: number;
+  closed_on_time: number;
+  timeliness: number | null;
+}
+
 interface Overview {
   generated_at: string;
   freshness: BatchFreshness | Failed | null;
@@ -200,6 +215,7 @@ interface Overview {
   feeds: Feeds | Failed | null;
   cash: Cash | Failed | null;
   activity: Activity | Failed | null;
+  kpis?: Kpis | Failed | null;
 }
 
 type Tone = 'ok' | 'warning' | 'error' | 'quiet';
@@ -235,19 +251,19 @@ const SLA: Record<string, { label: string; variant: BadgeVariant }> = {
   ok: { label: 'On track', variant: 'secondary' },
 };
 
-const num = (v: string | number) => Number(v).toLocaleString('en-US');
+const num = (v: string | number) => formatNumber(Number(v));
 const plural = (n: number, one: string, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
 /** "Nov 2" for a business date (YYYY-MM-DD), read as a calendar date, not a UTC instant. */
-const day = (iso: string) =>
-  new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const day = (iso: string) => formatBusinessDate(iso, { month: 'short', day: 'numeric' });
 /** Time today, or date and time for anything older. */
 const when = (iso: string | null) => {
   if (!iso) return 'never';
-  const d = new Date(iso);
-  const sameDay = d.toDateString() === new Date().toDateString();
+  const sameDay =
+    formatDateTime(iso, { year: 'numeric', month: '2-digit', day: '2-digit' }) ===
+    formatDateTime(new Date(), { year: 'numeric', month: '2-digit', day: '2-digit' });
   return sameDay
-    ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleString('en-US', {
+    ? formatDateTime(iso, { hour: 'numeric', minute: '2-digit' })
+    : formatDateTime(iso, {
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
@@ -398,22 +414,6 @@ function Tile({
   onClick?: () => void;
 }) {
   const hot = value > 0 && tone !== 'quiet';
-  const style: React.CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 'var(--space-xs)',
-    textAlign: 'left',
-    padding: 'var(--space-md)',
-    background: 'var(--bg-secondary)',
-    border: `1px solid ${
-      hot && tone === 'error'
-        ? 'color-mix(in oklab, var(--error) 40%, var(--border))'
-        : 'var(--border)'
-    }`,
-    borderRadius: 'var(--radius-lg)',
-    font: 'inherit',
-    color: 'inherit',
-  };
   const body = (
     <>
       <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>{label}</span>
@@ -452,16 +452,11 @@ function Tile({
     </>
   );
   return onClick ? (
-    <button
-      type="button"
-      className="clickable ds-tile-btn"
-      style={{ ...style, cursor: 'pointer' }}
-      onClick={onClick}
-    >
+    <button type="button" className="cc-summary-item" onClick={onClick}>
       {body}
     </button>
   ) : (
-    <div style={style}>{body}</div>
+    <div className="cc-summary-item">{body}</div>
   );
 }
 
@@ -899,17 +894,22 @@ function CloseStrip({ data }: { data: Close | Failed }) {
                   <Row key={r.reason} label={r.reason} value={plural(r.store_days, 'store day')} />
                 ))}
                 {data.blocked_examples.length > 0 && (
-                  <p
-                    className="page-sub"
+                  <ul
+                    className="summary-list"
+                    aria-label="Example store days blocked from closing"
                     style={{ margin: 'var(--space-sm) 0 0', fontSize: 'var(--text-xs)' }}
                   >
-                    For example{' '}
-                    {data.blocked_examples
-                      .slice(0, 3)
-                      .map((e) => `${e.store_id} (${e.reasons.join('; ')})`)
-                      .join(', ')}
-                    .
-                  </p>
+                    {data.blocked_examples.slice(0, 3).map((example) => (
+                      <li key={example.store_id}>
+                        <Link
+                          href={`/store-days/${encodeURIComponent(example.store_id)}/${encodeURIComponent(data.business_date)}`}
+                        >
+                          Review {example.store_id}
+                        </Link>
+                        <span className="page-sub"> · {example.reasons.join('; ')}</span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             )}
@@ -1068,6 +1068,41 @@ const grid = (min: number): React.CSSProperties => ({
   gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${min}px), 1fr))`,
   alignItems: 'start',
 });
+
+/** Ongoing monitoring: how accurate, how exception-prone and how timely the audit has been lately. */
+function KpiStrip({ data }: { data: Kpis | Failed }) {
+  if (failed(data)) return null;
+  const pct = (v: number | null) => (v === null ? '—' : `${v}%`);
+  const cards = [
+    {
+      title: 'Transaction accuracy',
+      value: pct(data.accuracy),
+      note: `${formatNumber(data.flagged_transactions)} of ${formatNumber(data.transactions)} transactions flagged`,
+    },
+    {
+      title: 'Exception rate',
+      value: data.exception_rate === null ? '—' : `${data.exception_rate} per 1,000`,
+      note: 'Exceptions raised per 1,000 transactions',
+    },
+    {
+      title: 'Timeliness',
+      value: pct(data.timeliness),
+      note: `${data.closed_on_time} of ${data.due_store_days} store days closed within ${data.close_target_days} days`,
+    },
+  ];
+  return (
+    <Group title={`Ongoing monitoring, last ${data.window_days} days`}>
+      <div style={grid(240)}>
+        {cards.map((k) => (
+          <Panel key={k.title} title={k.title}>
+            <b style={{ fontSize: 'var(--text-xl)', color: 'var(--fg)' }}>{k.value}</b>
+            <p className="page-sub">{k.note}</p>
+          </Panel>
+        ))}
+      </div>
+    </Group>
+  );
+}
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -1378,9 +1413,33 @@ export function CommandCenter() {
       key: 'store',
       header: 'Store, day',
       nowrap: true,
-      render: (r) => `${r.store_id}, ${day(r.business_date)}`,
+      render: (r) =>
+        canOpen('/store-days') ? (
+          <Link
+            href={`/store-days/${encodeURIComponent(r.store_id)}/${r.business_date}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {r.store_id}, {day(r.business_date)}
+          </Link>
+        ) : (
+          `${r.store_id}, ${day(r.business_date)}`
+        ),
     },
     { key: 'status', header: 'Status', render: (r) => <StatusBadge s={r.status} /> },
+    {
+      key: 'close-impact',
+      header: 'Close impact',
+      render: (r) =>
+        r.close_blocking_errors ? (
+          <Badge variant="error" size="sm">
+            {r.close_blocking_errors} blocking
+          </Badge>
+        ) : (
+          <Badge variant="secondary" size="sm">
+            None
+          </Badge>
+        ),
+    },
     {
       key: 'exposure',
       header: 'Exposure',
@@ -1421,7 +1480,7 @@ export function CommandCenter() {
   const rerunDate = fresh?.last_failed ? fresh.last_run?.business_date : undefined;
 
   return (
-    <div className="stack stack-lg">
+    <div className="stack stack-lg command-center">
       {/* The same header as every other page; the situation in one sentence is the subtitle. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
         <PageHeader
@@ -1437,8 +1496,7 @@ export function CommandCenter() {
                   style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}
                   title="Updates every minute and after any change you make"
                 >
-                  Updated{' '}
-                  {updatedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  Updated {formatDateTime(updatedAt, { hour: 'numeric', minute: '2-digit' })}
                 </span>
               )}
               {rerunDate && may.rerun && (
@@ -1505,7 +1563,7 @@ export function CommandCenter() {
 
       {c && (
         <div className="stack-sm" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ ...grid(150), alignItems: 'stretch' }}>
+          <div className="cc-summary-band" aria-label="Case priorities">
             <Tile
               label="Past SLA"
               value={c.sla_breached}
@@ -1584,9 +1642,9 @@ export function CommandCenter() {
       )}
 
       {data && (work || lines.length > 0) && (
-        <div className="cluster" style={{ alignItems: 'stretch', gap: 'var(--space-lg)' }}>
+        <div className="cc-workspace">
           {work && (
-            <div className="stack" style={{ flex: '2 1 560px', minWidth: 0 }}>
+            <div className="stack cc-work-queue">
               <Panel title="Work first" href="/actions" linkLabel="Open the Action Center" flush>
                 <DataTable
                   rows={work.queue}
@@ -1610,15 +1668,7 @@ export function CommandCenter() {
             </div>
           )}
           {(lines.length > 0 || data.activity) && (
-            <div
-              style={{
-                flex: '1 1 320px',
-                minWidth: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-md)',
-              }}
-            >
+            <div className="stack cc-operations">
               <StatusBoard lines={lines} />
               {data.activity && <ActivityFeed data={data.activity} />}
             </div>
@@ -1627,6 +1677,8 @@ export function CommandCenter() {
       )}
 
       {data?.close && <CloseStrip data={data.close} />}
+
+      {data?.kpis && <KpiStrip data={data.kpis} />}
 
       {work && c && (
         <Group title="Where work is piling up">

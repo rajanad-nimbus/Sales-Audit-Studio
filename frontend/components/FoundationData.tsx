@@ -1,7 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
+import { downloadBlob } from '@/lib/csv';
+import { formatDateTime } from '@/lib/preferences';
 import { useToast } from '@/components/Feedback';
 import { Alert, Badge, Button, Card, DataTable, Field, PageHeader, Tabs } from '@/components/ui';
 
@@ -29,6 +31,32 @@ type FoundationPage = {
   total: number;
   category_counts: Record<string, number>;
 };
+type ImportPreview = {
+  valid: boolean;
+  preview_token?: string;
+  run_id?: string;
+  errors: { row: number; message: string }[];
+  rows: { category: string; code: string; name: string; active: boolean; action: string }[];
+  counts: Record<string, number>;
+};
+type ImportRun = {
+  id: string;
+  process_name: string;
+  file_name: string;
+  categories: string[];
+  status: string;
+  rows_total: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  errors: { row: number; message: string }[];
+  error: string | null;
+  uploaded_by: string;
+  started_at: string;
+  finished_at: string | null;
+};
+type ImportRunPage = { items: ImportRun[]; total: number; offset: number; limit: number };
+const IMPORT_RUN_PAGE_SIZE = 30;
 
 /** Each tab shows one or more reference categories. Synced tabs are read-only: Shopify is the source. */
 const GROUPS = [
@@ -100,12 +128,31 @@ export function FoundationData() {
   const [page, setPage] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<string>(GROUPS[0].id);
   const [query, setQuery] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [synced, setSynced] = useState<SyncResult | null>(null);
   const [form, setForm] = useState({ category: '', code: '', name: '' });
+  const [importPreview, setImportPreview] = useState<{
+    fileName: string;
+    processName: string;
+    csvText: string;
+    result: ImportPreview;
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importRuns, setImportRuns] = useState<ImportRun[] | null>(null);
+  const [importRunTotal, setImportRunTotal] = useState(0);
+  const [importRunQuery, setImportRunQuery] = useState('');
+  const [importRunStatus, setImportRunStatus] = useState('');
+  const [importRunOffset, setImportRunOffset] = useState(0);
+  const [importRunsLoading, setImportRunsLoading] = useState(false);
+  const [importRunsExporting, setImportRunsExporting] = useState(false);
+  const [selectedImportRun, setSelectedImportRun] = useState<ImportRun | null>(null);
+  const [processName, setProcessName] = useState('');
+  const importFile = useRef<HTMLInputElement>(null);
+  const importRunsRequest = useRef(0);
 
   const group = GROUPS.find((g) => g.id === tab) ?? GROUPS[0];
   const category = form.category || group.cats[0];
@@ -113,6 +160,33 @@ export function FoundationData() {
     setPage(0);
     setRefresh((current) => current + 1);
   }, []);
+
+  const loadImportRuns = useCallback(async () => {
+    const requestId = ++importRunsRequest.current;
+    setImportRunsLoading(true);
+    try {
+      const { data } = await api.get<ImportRunPage>('/api/foundation/import/runs', {
+        params: {
+          q: importRunQuery.trim() || undefined,
+          status: importRunStatus || undefined,
+          offset: importRunOffset,
+          limit: IMPORT_RUN_PAGE_SIZE,
+        },
+      });
+      if (requestId !== importRunsRequest.current) return;
+      setImportRuns(data.items);
+      setImportRunTotal(data.total);
+    } catch {
+      if (requestId === importRunsRequest.current) setImportRuns(null);
+    } finally {
+      if (requestId === importRunsRequest.current) setImportRunsLoading(false);
+    }
+  }, [importRunOffset, importRunQuery, importRunStatus]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadImportRuns(), 180);
+    return () => window.clearTimeout(timer);
+  }, [loadImportRuns]);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,9 +203,7 @@ export function FoundationData() {
           },
         });
         if (cancelled) return;
-        setRefs((current) =>
-          page === 0 ? data.items : [...(current ?? []), ...data.items]
-        );
+        setRefs((current) => (page === 0 ? data.items : [...(current ?? []), ...data.items]));
         setTotal(data.total);
         setCategoryCounts(data.category_counts);
         setError(null);
@@ -155,6 +227,114 @@ export function FoundationData() {
     setQuery('');
     setPage(0);
     setForm({ category: '', code: '', name: '' });
+    setImportPreview(null);
+  };
+  const downloadTemplate = () => {
+    const content = 'category,code,name,active,attributes_json\r\n';
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `foundation-${group.id}-template.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  const downloadFilteredCsv = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ categories: group.cats.join(','), format: 'csv' });
+      if (query.trim()) params.set('q', query.trim());
+      const { data } = await api.get(`/api/foundation?${params}`, { responseType: 'blob' });
+      downloadBlob(`foundation-${group.id}.csv`, data);
+    } catch (e) {
+      setError(apiError(e, 'Could not download foundation data.'));
+    } finally {
+      setExporting(false);
+    }
+  };
+  const downloadImportRuns = async () => {
+    setImportRunsExporting(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (importRunQuery.trim()) params.set('q', importRunQuery.trim());
+      if (importRunStatus) params.set('status', importRunStatus);
+      const { data, headers } = await api.get(`/api/foundation/import/runs.csv?${params}`, {
+        responseType: 'blob',
+      });
+      downloadBlob('foundation-import-runs.csv', data);
+      if (headers?.['x-foundation-import-truncated'] === 'true') {
+        setError(
+          'The process history export reached its 50,000 row limit. Narrow the filters to export the remaining matches.'
+        );
+      }
+    } catch (e) {
+      setError(apiError(e, 'Could not export import process history.'));
+    } finally {
+      setImportRunsExporting(false);
+    }
+  };
+  const previewImport = async (file?: File) => {
+    if (!file) return;
+    setError(null);
+    setImporting(true);
+    try {
+      const csvText = await file.text();
+      const selectedProcessName = processName.trim() || file.name;
+      const { data } = await api.post<ImportPreview>('/api/foundation/import/preview', {
+        csv_text: csvText,
+        categories: [...group.cats],
+        file_name: file.name,
+        process_name: selectedProcessName,
+      });
+      setImportPreview({
+        fileName: file.name,
+        processName: selectedProcessName,
+        csvText,
+        result: data,
+      });
+      void loadImportRuns();
+    } catch (e) {
+      setError(apiError(e, 'Could not preview this CSV file.'));
+    } finally {
+      setImporting(false);
+      if (importFile.current) importFile.current.value = '';
+    }
+  };
+  const applyImport = async () => {
+    if (
+      !importPreview?.result.valid ||
+      !importPreview.result.preview_token ||
+      !importPreview.result.run_id
+    )
+      return;
+    setImporting(true);
+    setError(null);
+    try {
+      const { data } = await api.post('/api/foundation/import', {
+        csv_text: importPreview.csvText,
+        categories: [...group.cats],
+        preview_token: importPreview.result.preview_token,
+        run_id: importPreview.result.run_id,
+        file_name: importPreview.fileName,
+        process_name: importPreview.processName,
+      });
+      setImportPreview(null);
+      load();
+      void loadImportRuns();
+      toast(
+        `Imported reference data: ${data.created} created, ${data.updated} updated, ${data.unchanged} unchanged.`,
+        'success'
+      );
+    } catch (e) {
+      if ((e as { response?: { status?: number } })?.response?.status === 409) {
+        setImportPreview(null);
+        void loadImportRuns();
+      }
+      setError(apiError(e, 'Could not import this CSV file.'));
+    } finally {
+      setImporting(false);
+    }
   };
   const syncShopify = async () => {
     setSyncing(true);
@@ -218,6 +398,18 @@ export function FoundationData() {
       )}
       <Card title={group.label}>
         <p className="hint">{group.blurb}</p>
+        <div className="form-row">
+          <Button
+            variant="secondary"
+            disabled={!total || exporting}
+            onClick={() => void downloadFilteredCsv()}
+          >
+            {exporting ? 'Preparing CSV…' : 'Download all matching CSV'}
+          </Button>
+          <span className="hint">
+            {query.trim() ? `${total} records match this search.` : `${total} records in this tab.`}
+          </span>
+        </div>
         {group.synced ? (
           <div className="form-row">
             <Button variant="primary" onClick={syncShopify} disabled={syncing}>
@@ -265,6 +457,31 @@ export function FoundationData() {
             >
               Add
             </Button>
+            <Button variant="secondary" onClick={downloadTemplate}>
+              Download CSV template
+            </Button>
+            <Field label="Process name">
+              <input
+                value={processName}
+                maxLength={100}
+                onChange={(event) => setProcessName(event.target.value)}
+                placeholder="Defaults to the file name"
+              />
+            </Field>
+            <input
+              ref={importFile}
+              type="file"
+              accept=".csv,text/csv"
+              hidden
+              onChange={(event) => void previewImport(event.target.files?.[0])}
+            />
+            <Button
+              variant="secondary"
+              disabled={importing}
+              onClick={() => importFile.current?.click()}
+            >
+              {importing ? 'Reading CSV…' : 'Import CSV'}
+            </Button>
           </div>
         )}
         {countOf(group.cats) > 8 && (
@@ -307,7 +524,7 @@ export function FoundationData() {
               key: 'updated',
               header: 'Updated',
               nowrap: true,
-              render: (r) => new Date(r.updated_at).toLocaleDateString(),
+              render: (r) => formatDateTime(r.updated_at, { dateStyle: 'medium' }),
             },
           ]}
           rows={refs}
@@ -320,12 +537,265 @@ export function FoundationData() {
         {refs && refs.length < total && (
           <p className="hint">
             Showing {refs.length} of {total} matching record(s).
-            <Button variant="secondary" onClick={() => setPage((current) => current + 1)} disabled={loadingMore}>
+            <Button
+              variant="secondary"
+              onClick={() => setPage((current) => current + 1)}
+              disabled={loadingMore}
+            >
               {loadingMore ? 'Loading…' : 'Load more'}
             </Button>
           </p>
         )}
       </Card>
+      {importPreview && (
+        <Card title={`Import preview · ${importPreview.fileName}`}>
+          {importPreview.result.valid ? (
+            <>
+              <p className="hint">
+                Review the changes below. The import is applied as one operation; any validation or
+                database conflict leaves all records unchanged.
+              </p>
+              <div className="toolbar-count">
+                {importPreview.result.counts.create ?? 0} create ·{' '}
+                {importPreview.result.counts.update ?? 0} update ·{' '}
+                {importPreview.result.counts.unchanged ?? 0} unchanged
+              </div>
+              <div className="table-scroll" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Action</th>
+                      <th>Type</th>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importPreview.result.rows.map((row) => (
+                      <tr key={`${row.category}:${row.code}`}>
+                        <td>{row.action}</td>
+                        <td>{LABELS[row.category] ?? row.category}</td>
+                        <td>{row.code}</td>
+                        <td>{row.name}</td>
+                        <td>{row.active ? 'Active' : 'Inactive'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="row-actions" style={{ marginTop: '1rem' }}>
+                <Button disabled={importing} onClick={() => void applyImport()}>
+                  {importing ? 'Importing…' : 'Apply import'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={importing}
+                  onClick={() => setImportPreview(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <Alert tone="error">
+                The file has validation issues. Fix these rows and upload it again.
+              </Alert>
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Issue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importPreview.result.errors.map((item, index) => (
+                      <tr key={`${item.row}:${index}`}>
+                        <td>{item.row}</td>
+                        <td>{item.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Button variant="secondary" onClick={() => setImportPreview(null)}>
+                Close preview
+              </Button>
+            </>
+          )}
+        </Card>
+      )}
+      {importRuns !== null && (
+        <Card title="CSV import history">
+          <p className="hint">
+            Named processes retain their upload status and validation issues for Finance and IT.
+          </p>
+          <div className="form-row">
+            <Field label="Find process">
+              <input
+                value={importRunQuery}
+                maxLength={100}
+                placeholder="Process, file, uploader or process ID"
+                onChange={(event) => {
+                  setImportRunQuery(event.target.value);
+                  setImportRunOffset(0);
+                }}
+              />
+            </Field>
+            <Field label="Status">
+              <select
+                value={importRunStatus}
+                onChange={(event) => {
+                  setImportRunStatus(event.target.value);
+                  setImportRunOffset(0);
+                }}
+              >
+                <option value="">All statuses</option>
+                {['Previewed', 'Validation failed', 'Succeeded', 'Stale', 'Failed'].map(
+                  (status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  )
+                )}
+              </select>
+            </Field>
+            <Button
+              variant="secondary"
+              disabled={!importRunTotal || importRunsExporting}
+              onClick={() => void downloadImportRuns()}
+            >
+              {importRunsExporting ? 'Preparing CSV…' : 'Download all matching processes'}
+            </Button>
+            <span className="hint">
+              {importRunsLoading
+                ? 'Updating process history…'
+                : `${importRunTotal} process(es) match.`}
+            </span>
+          </div>
+          <DataTable
+            columns={[
+              { key: 'process', header: 'Process', primary: true, render: (r) => r.process_name },
+              { key: 'file', header: 'File', render: (r) => r.file_name },
+              {
+                key: 'categories',
+                header: 'Data types',
+                render: (r) => r.categories.map((value) => LABELS[value] ?? value).join(', '),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                render: (r) => (
+                  <Badge
+                    variant={
+                      r.status === 'Succeeded'
+                        ? 'success'
+                        : ['Failed', 'Validation failed'].includes(r.status)
+                          ? 'error'
+                          : r.status === 'Stale'
+                            ? 'warning'
+                            : 'secondary'
+                    }
+                    size="sm"
+                  >
+                    {r.status}
+                  </Badge>
+                ),
+              },
+              {
+                key: 'rows',
+                header: 'Rows',
+                numeric: true,
+                render: (r) =>
+                  r.status === 'Succeeded'
+                    ? `${r.created} created · ${r.updated} updated · ${r.unchanged} unchanged`
+                    : r.rows_total,
+              },
+              {
+                key: 'issue',
+                header: 'Issues',
+                render: (r) => (
+                  <div className="stack stack-xs">
+                    {r.error && <span>{r.error}</span>}
+                    {r.errors.length > 0 && (
+                      <Button variant="secondary" onClick={() => setSelectedImportRun(r)}>
+                        Review {r.errors.length} row issue{r.errors.length === 1 ? '' : 's'}
+                      </Button>
+                    )}
+                    {!r.error && r.errors.length === 0 && '—'}
+                  </div>
+                ),
+              },
+              {
+                key: 'started',
+                header: 'Started',
+                nowrap: true,
+                render: (r) => formatDateTime(r.started_at),
+              },
+              { key: 'by', header: 'Uploaded by', render: (r) => r.uploaded_by },
+            ]}
+            rows={importRunsLoading ? null : importRuns}
+            rowKey={(r) => r.id}
+            emptyTitle="No CSV imports yet"
+            emptyHint="No processes match these filters. Previewing a file creates a process record with its result and validation issues."
+          />
+          <div className="row-actions" style={{ marginTop: '1rem' }}>
+            <Button
+              variant="secondary"
+              disabled={importRunsLoading || importRunOffset === 0}
+              onClick={() =>
+                setImportRunOffset((current) => Math.max(0, current - IMPORT_RUN_PAGE_SIZE))
+              }
+            >
+              Previous
+            </Button>
+            <span className="hint">
+              {importRunTotal === 0
+                ? 'No matching processes'
+                : `Showing ${importRunOffset + 1}–${Math.min(importRunOffset + IMPORT_RUN_PAGE_SIZE, importRunTotal)} of ${importRunTotal}`}
+            </span>
+            <Button
+              variant="secondary"
+              disabled={
+                importRunsLoading || importRunOffset + IMPORT_RUN_PAGE_SIZE >= importRunTotal
+              }
+              onClick={() => setImportRunOffset((current) => current + IMPORT_RUN_PAGE_SIZE)}
+            >
+              Next
+            </Button>
+          </div>
+        </Card>
+      )}
+      {selectedImportRun && (
+        <Card title={`Validation issues · ${selectedImportRun.process_name}`}>
+          <p className="hint">
+            {selectedImportRun.file_name} · {selectedImportRun.errors.length} row issue(s)
+          </p>
+          <div className="table-scroll" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Row</th>
+                  <th>Issue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedImportRun.errors.map((issue, index) => (
+                  <tr key={`${issue.row}:${index}`}>
+                    <td>{issue.row}</td>
+                    <td>{issue.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Button variant="secondary" onClick={() => setSelectedImportRun(null)}>
+            Close issues
+          </Button>
+        </Card>
+      )}
     </div>
   );
 }

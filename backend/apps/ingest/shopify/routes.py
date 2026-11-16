@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.ingest import service as ingest
+from apps.ingest import auto_audit, service as ingest
 from apps.ingest import source_settings
 from apps.ingest.limits import MAX_DELIVERY_BYTES
 from apps.ingest.models import SourceRecord
@@ -56,6 +56,7 @@ class ShopifySyncResponse(BaseModel):
     quarantined: int
     canonical_created: int
     errors: list[str] = []
+    automatic_audit: dict | None = None
 
 
 @router.post("/sync")
@@ -63,6 +64,7 @@ async def sync_shopify(
     req: ShopifySyncRequest,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_role("it", "finance")),
+    request: Request = None,
 ) -> ShopifySyncResponse:
     """Fetch orders and refunds from Shopify and ingest them."""
     await source_settings.require_allowed(db, "Shopify", manual=True)
@@ -122,6 +124,9 @@ async def sync_shopify(
             detail="Ingestion failed because the database rejected the Shopify delivery",
         ) from e
 
+    automatic_audit = await auto_audit.reconcile_after_import(
+        db, "Shopify", feed.get("Shopify", []), request=request
+    )
     return ShopifySyncResponse(
         status="success",
         received=stats["received"],
@@ -129,6 +134,7 @@ async def sync_shopify(
         quarantined=stats["quarantined"],
         canonical_created=stats["canonical_created"],
         errors=errors,
+        automatic_audit=automatic_audit,
     )
 
 
@@ -264,7 +270,10 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             detail="Webhook processing failed because the database rejected the delivery",
         ) from e
 
-    return {"status": "received", "topic": topic, **stats}
+    automatic_audit = await auto_audit.reconcile_after_import(
+        db, "Shopify", [record], request=request
+    )
+    return {"status": "received", "topic": topic, **stats, "automatic_audit": automatic_audit}
 
 
 STALE_AFTER_HOURS = 26

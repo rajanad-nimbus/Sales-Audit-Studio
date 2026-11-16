@@ -1,5 +1,7 @@
 'use client';
 
+import { formatNumber } from '@/lib/preferences';
+import { downloadBlob } from '@/lib/csv';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ACRow, Case } from '@/lib/api';
 import { CaseTable, SortKey, SortState } from '@/components/CaseTable';
@@ -18,6 +20,21 @@ const SORT_PARAM: Record<SortKey, string> = {
   priority: 'priority',
   status: 'status',
 };
+const SORT_KEY = Object.fromEntries(
+  Object.entries(SORT_PARAM).map(([key, value]) => [value, key])
+) as Record<string, SortKey>;
+interface SavedCaseView {
+  name: string;
+  params: {
+    q?: string;
+    status?: string;
+    priority?: string;
+    sort?: string;
+    dir?: 'asc' | 'desc';
+    page?: string;
+    page_size?: string;
+  };
+}
 const toCase = (r: ACRow) =>
   ({
     id: r.id,
@@ -41,6 +58,8 @@ export default function CasesPage() {
   const [statuses, setStatuses] = useState<{ value: string; count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [status, setStatus] = useState('');
@@ -49,6 +68,10 @@ export default function CasesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [ready, setReady] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedCaseView[]>([]);
+  const [savedViewsError, setSavedViewsError] = useState(false);
+  const savedViewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const skipPageReset = useRef(false);
   const seq = useRef(0);
 
   // Restore filters from the URL once, then keep the URL in sync so views can be shared.
@@ -58,6 +81,15 @@ export default function CasesPage() {
     setDebouncedQ(p.get('q') ?? '');
     setStatus(p.get('status') ?? '');
     setPriority(p.get('priority') ?? '');
+    const sortKey = SORT_KEY[p.get('sort') ?? ''];
+    const dir = p.get('dir');
+    if (sortKey && (dir === 'asc' || dir === 'desc')) setSort({ key: sortKey, dir });
+    const requestedPage = Number(p.get('page'));
+    if (Number.isInteger(requestedPage) && requestedPage >= 1 && requestedPage <= 100_000)
+      setPage(requestedPage);
+    const requestedPageSize = Number(p.get('page_size'));
+    if ([25, 50, 100].includes(requestedPageSize)) setPageSize(requestedPageSize);
+    skipPageReset.current = true;
     setReady(true);
   }, []);
   useEffect(() => {
@@ -66,16 +98,113 @@ export default function CasesPage() {
     if (debouncedQ) p.set('q', debouncedQ);
     if (status) p.set('status', status);
     if (priority) p.set('priority', priority);
+    if (sort) {
+      p.set('sort', SORT_PARAM[sort.key]);
+      p.set('dir', sort.dir);
+    }
+    if (page > 1) p.set('page', String(page));
+    if (pageSize !== 50) p.set('page_size', String(pageSize));
     const s = p.toString();
     history.replaceState(null, '', s ? `?${s}` : window.location.pathname);
-  }, [ready, debouncedQ, status, priority]);
+  }, [ready, debouncedQ, status, priority, sort, page, pageSize]);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(t);
   }, [q]);
   useEffect(() => {
+    if (!ready) return;
+    if (skipPageReset.current) {
+      skipPageReset.current = false;
+      return;
+    }
     setPage(1);
-  }, [debouncedQ, status, priority, sort, pageSize]);
+  }, [ready, debouncedQ, status, priority, sort, pageSize]);
+
+  useEffect(() => {
+    let localViews: SavedCaseView[] = [];
+    try {
+      localViews = JSON.parse(localStorage.getItem('nimbus_cases_views') || '[]');
+    } catch {
+      /* ignore */
+    }
+    api
+      .get<{ views: SavedCaseView[] }>('/api/me/saved-views/cases')
+      .then(async ({ data }) => {
+        if (data.views.length === 0 && localViews.length > 0) {
+          setSavedViews(localViews);
+          await api.put('/api/me/saved-views/cases', { views: localViews });
+        } else {
+          setSavedViews(data.views);
+        }
+        setSavedViewsError(false);
+      })
+      .catch(() => {
+        setSavedViews(localViews);
+        setSavedViewsError(true);
+      });
+  }, []);
+
+  const persistSavedViews = (next: SavedCaseView[]) => {
+    setSavedViews(next);
+    try {
+      localStorage.setItem('nimbus_cases_views', JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+    savedViewSaveQueue.current = savedViewSaveQueue.current
+      .catch(() => undefined)
+      .then(() => api.put('/api/me/saved-views/cases', { views: next }))
+      .then(() => setSavedViewsError(false))
+      .catch(() => setSavedViewsError(true));
+  };
+
+  const applySavedView = (view: SavedCaseView) => {
+    const nextQ = view.params.q ?? '';
+    const nextStatus = view.params.status ?? '';
+    const nextPriority = view.params.priority ?? '';
+    const sortKey = SORT_KEY[view.params.sort ?? 'exposure'];
+    const nextSort = sortKey ? { key: sortKey, dir: view.params.dir ?? 'desc' } : null;
+    const nextPageSize = [25, 50, 100].includes(Number(view.params.page_size))
+      ? Number(view.params.page_size)
+      : 50;
+    skipPageReset.current =
+      debouncedQ !== nextQ ||
+      status !== nextStatus ||
+      priority !== nextPriority ||
+      sort?.key !== nextSort?.key ||
+      sort?.dir !== nextSort?.dir ||
+      pageSize !== nextPageSize;
+    setQ(nextQ);
+    setDebouncedQ(nextQ);
+    setStatus(nextStatus);
+    setPriority(nextPriority);
+    setSort(nextSort as SortState | null);
+    setPageSize(nextPageSize);
+    setPage(Number(view.params.page) || 1);
+  };
+
+  const saveCurrentView = () => {
+    const entered = window.prompt('Name this Cases view');
+    const name = entered?.trim();
+    if (!name) return;
+    if (name.length > 60) {
+      setError('Saved view names must be 60 characters or fewer.');
+      return;
+    }
+    const params: SavedCaseView['params'] = {
+      sort: sort ? SORT_PARAM[sort.key] : 'exposure',
+      dir: sort?.dir ?? 'desc',
+      page: String(page),
+      page_size: String(pageSize),
+    };
+    if (debouncedQ) params.q = debouncedQ;
+    if (status) params.status = status;
+    if (priority) params.priority = priority;
+    persistSavedViews([
+      ...savedViews.filter((view) => view.name.toLocaleLowerCase() !== name.toLocaleLowerCase()),
+      { name, params },
+    ]);
+  };
 
   const load = useCallback(async () => {
     if (!ready) return;
@@ -127,6 +256,31 @@ export default function CasesPage() {
       setError('Seed failed (data may already exist)');
     }
   };
+  const downloadFilteredCsv = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const params = new URLSearchParams({ snoozed: 'all', stage: '' });
+      if (debouncedQ) params.set('q', debouncedQ);
+      if (status) params.set('status', status);
+      if (priority) params.set('priority', priority);
+      params.set('sort', sort ? SORT_PARAM[sort.key] : 'exposure');
+      params.set('dir', sort?.dir ?? 'desc');
+      const { data } = await api.get(`/api/action-center/export.csv?${params}`, {
+        responseType: 'blob',
+      });
+      downloadBlob('cases.csv', data);
+    } catch (cause) {
+      const statusCode = (cause as { response?: { status?: number } })?.response?.status;
+      setExportError(
+        statusCode === 413
+          ? 'This export is limited to 50,000 matching cases. Narrow the filters and try again.'
+          : 'Could not download filtered cases.'
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
   const onSort = (k: SortKey) =>
     setSort((s) =>
       s?.key === k ? (s.dir === 'asc' ? { key: k, dir: 'desc' } : null) : { key: k, dir: 'asc' }
@@ -145,13 +299,29 @@ export default function CasesPage() {
             : 'Sorted by exposure, highest first. Click a column to sort.'
         }
         actions={
-          noData && (
-            <Button variant="primary" onClick={seed}>
-              Load demo data
-            </Button>
-          )
+          <>
+            {total > 0 && (
+              <Button
+                variant="secondary"
+                disabled={loading || exporting}
+                onClick={() => void downloadFilteredCsv()}
+              >
+                {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
+              </Button>
+            )}
+            {noData && (
+              <Button variant="primary" onClick={seed}>
+                Load demo data
+              </Button>
+            )}
+          </>
         }
       />
+      {exportError && (
+        <Alert tone="error" onDismiss={() => setExportError(null)}>
+          {exportError}
+        </Alert>
+      )}
       {error && (
         <Alert
           tone="error"
@@ -164,8 +334,29 @@ export default function CasesPage() {
           {error}
         </Alert>
       )}
+      {savedViewsError && (
+        <Alert tone="warning">
+          Saved views are available on this device, but could not sync to your account.
+        </Alert>
+      )}
+      <div className="ac-presets" aria-label="Saved Cases views">
+        {savedViews.map((view, index) => (
+          <span key={`${view.name}-${index}`} className="ac-chip saved">
+            <button onClick={() => applySavedView(view)}>{view.name}</button>
+            <button
+              aria-label={`Delete view ${view.name}`}
+              onClick={() => persistSavedViews(savedViews.filter((_, row) => row !== index))}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <button className="ac-chip add" onClick={saveCurrentView}>
+          + Save current view
+        </button>
+      </div>
       {!noData && ready && (!loading || filtered || total > 0) && (
-        <Toolbar count={`${total.toLocaleString()} ${filtered ? 'matching' : 'total'}`}>
+        <Toolbar count={`${formatNumber(total)} ${filtered ? 'matching' : 'total'}`}>
           <input
             className="grow"
             type="search"
@@ -175,10 +366,10 @@ export default function CasesPage() {
             onChange={(e) => setQ(e.target.value)}
           />
           <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All statuses ({allCount.toLocaleString()})</option>
+            <option value="">All statuses ({formatNumber(allCount)})</option>
             {statuses.map((s) => (
               <option key={s.value} value={s.value}>
-                {s.value} ({s.count.toLocaleString()})
+                {s.value} ({formatNumber(s.count)})
               </option>
             ))}
           </select>

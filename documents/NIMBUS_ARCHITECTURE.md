@@ -554,7 +554,7 @@ Supported recovery actions may include retrieve file, replay verified source rec
 
 For each connector specify owner, authority, direction, cadence, expected delay, authentication, schema version, pagination, rate limits, timeout, retry policy, idempotency behavior, control totals, completion indicators, and failure recovery.
 
-Full card numbers and security codes are not required. Use permitted tokens/masked identifiers. An unavailable integration limits the corresponding automation; it must not be replaced with invented evidence.
+Full card numbers, expiration dates, security codes and magnetic-stripe data are not required. Ingest redacts those fields before archiving source payloads; card numbers retain only the last four digits for traceability. Transaction payload previews and investigator source-record retrieval apply redaction as well. The source checksum is still computed from the original delivery for idempotency. An unavailable integration limits the corresponding automation; it must not be replaced with invented evidence.
 
 ### 10.5 First production integration scope
 

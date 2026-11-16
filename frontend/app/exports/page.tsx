@@ -6,7 +6,9 @@ import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
 import Link from 'next/link';
 import { useCanOpen } from '@/components/MeProvider';
-import { Alert, Button } from '@/components/ui';
+import { Alert, Button, PageNav, Toolbar } from '@/components/ui';
+import { formatDateTime, formatNumber } from '@/lib/preferences';
+import { downloadBlob } from '@/lib/csv';
 
 interface TrackRow {
   object_id: string;
@@ -55,6 +57,21 @@ const DATASETS = [
     label: 'Adjustments',
     note: 'Approved financial adjustments (journal lines for ERP/GL)',
   },
+  {
+    key: 'audited_totals',
+    label: 'Audited totals',
+    note: 'Current versioned totals from closed, reconciled store days',
+  },
+  {
+    key: 'audited_transactions',
+    label: 'Audited transactions',
+    note: 'Transaction and item details after transaction checks or Store Day closure',
+  },
+  {
+    key: 'transaction_corrections',
+    label: 'Transaction corrections',
+    note: 'Approved transaction corrections, with reviewer and rationale',
+  },
   { key: 'audit', label: 'Audit trail', note: 'Audit events since the last delivery, with hashes' },
 ];
 const tone = (s: string) =>
@@ -69,6 +86,18 @@ const tone = (s: string) =>
 export default function ExportsPage() {
   const [dests, setDests] = useState<ExportDest[]>([]);
   const [batches, setBatches] = useState<ExportBatchRow[]>([]);
+  const [batchDestination, setBatchDestination] = useState('');
+  const [batchDataset, setBatchDataset] = useState('');
+  const [batchStatus, setBatchStatus] = useState('');
+  const [batchStart, setBatchStart] = useState('');
+  const [batchEnd, setBatchEnd] = useState('');
+  const [batchSearchDraft, setBatchSearchDraft] = useState('');
+  const [batchQuery, setBatchQuery] = useState('');
+  const [batchPage, setBatchPage] = useState(1);
+  const [batchPageSize, setBatchPageSize] = useState(50);
+  const [batchHasMore, setBatchHasMore] = useState(false);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchExporting, setBatchExporting] = useState(false);
   const [destId, setDestId] = useState('');
   const [dataset, setDataset] = useState('resolutions');
   const [preview, setPreview] = useState<{
@@ -85,6 +114,7 @@ export default function ExportsPage() {
   const [trackQ, setTrackQ] = useState('');
   const [trackQd, setTrackQd] = useState('');
   const [trackPage, setTrackPage] = useState(1);
+  const [trackExporting, setTrackExporting] = useState(false);
   const [cancelFor, setCancelFor] = useState<string | null>(null);
   const [resolutionEvidence, setResolutionEvidence] = useState('');
   const [recoverFor, setRecoverFor] = useState<string | null>(null);
@@ -97,13 +127,9 @@ export default function ExportsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [d, b] = await Promise.all([
-        api.get('/api/exports/destinations'),
-        api.get('/api/exports/batches'),
-      ]);
-      setDests(d.data);
-      setBatches(b.data);
-      setDestId((cur) => cur || d.data.find((x: ExportDest) => x.enabled)?.id || '');
+      const { data: destinations } = await api.get('/api/exports/destinations');
+      setDests(destinations);
+      setDestId((cur) => cur || destinations.find((x: ExportDest) => x.enabled)?.id || '');
       setErr(null);
     } catch (e: any) {
       setErr(
@@ -116,6 +142,66 @@ export default function ExportsPage() {
   useEffect(() => {
     load();
   }, [load]);
+  const loadBatchHistory = useCallback(async () => {
+    setBatchLoading(true);
+    try {
+      const { data } = await api.get('/api/exports/batches/history', {
+        params: {
+          destination_id: batchDestination || undefined,
+          dataset: batchDataset || undefined,
+          status: batchStatus || undefined,
+          start: batchStart || undefined,
+          end: batchEnd || undefined,
+          q: batchQuery || undefined,
+          page: batchPage,
+          page_size: batchPageSize,
+        },
+      });
+      setBatches(data.items);
+      setBatchHasMore(data.has_more);
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail ?? 'Could not load export history.');
+    } finally {
+      setBatchLoading(false);
+    }
+  }, [
+    batchDestination,
+    batchDataset,
+    batchStatus,
+    batchStart,
+    batchEnd,
+    batchQuery,
+    batchPage,
+    batchPageSize,
+  ]);
+  useEffect(() => {
+    loadBatchHistory();
+  }, [loadBatchHistory]);
+  const downloadBatchHistory = async () => {
+    setBatchExporting(true);
+    setErr(null);
+    try {
+      const { data, headers } = await api.get('/api/exports/batches/history.csv', {
+        params: {
+          destination_id: batchDestination || undefined,
+          dataset: batchDataset || undefined,
+          status: batchStatus || undefined,
+          start: batchStart || undefined,
+          end: batchEnd || undefined,
+          q: batchQuery || undefined,
+        },
+        responseType: 'blob',
+      });
+      downloadBlob('export-history.csv', data);
+      if (headers?.['x-export-history-truncated'] === 'true') {
+        setErr('The CSV reached 50,000 batches. Narrow the filters to export the full history.');
+      }
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail ?? 'Could not export batch history.');
+    } finally {
+      setBatchExporting(false);
+    }
+  };
   const loadTrack = useCallback(async () => {
     if (!destId) {
       setTrack(null);
@@ -168,6 +254,7 @@ export default function ExportsPage() {
     setBusy(false);
     load();
     loadTrack();
+    loadBatchHistory();
   };
   const runExport = (dry: boolean) =>
     act(async () => {
@@ -194,6 +281,32 @@ export default function ExportsPage() {
     a.download = `${b.dataset}-${b.id.slice(0, 8)}`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+  const downloadTracking = async () => {
+    if (!destId) return;
+    setTrackExporting(true);
+    setErr(null);
+    try {
+      const { data, headers } = await api.get('/api/exports/tracking.csv', {
+        params: {
+          destination_id: destId,
+          dataset,
+          state: trackState,
+          q: trackQd,
+        },
+        responseType: 'blob',
+      });
+      downloadBlob(`export-tracking-${dataset}.csv`, data);
+      if (headers?.['x-tracking-truncated'] === 'true') {
+        setErr(
+          'The tracking CSV reached 50,000 rows. Narrow the state or search filter to export more precisely.'
+        );
+      }
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail ?? 'Could not download export tracking.');
+    } finally {
+      setTrackExporting(false);
+    }
   };
 
   const enabled = dests.filter((d) => d.enabled);
@@ -327,12 +440,12 @@ export default function ExportsPage() {
               </div>
             ) : (
               <>
-                <b>{preview.count.toLocaleString()} record(s) ready.</b>
+                <b>{formatNumber(preview.count)} record(s) ready.</b>
                 {preview.waiting && dataset !== 'audit' && (
                   <span className="hint">
                     {' '}
-                    Waiting overall: {preview.waiting.current.toLocaleString()} current ·{' '}
-                    {preview.waiting.backposted.toLocaleString()} back-posted
+                    Waiting overall: {formatNumber(preview.waiting.current)} current ·{' '}
+                    {formatNumber(preview.waiting.backposted)} back-posted
                     {preview.waiting.backposted > 0
                       ? ` (business dates ${preview.waiting.business_dates.join(', ')})`
                       : ''}
@@ -361,18 +474,23 @@ export default function ExportsPage() {
         ) : !track ? (
           <SkeletonRows rows={3} label="Loading export tracking" />
         ) : track.kind === 'stream' ? (
-          <div className="ac-tiles">
-            <div className="ac-tile">
-              <small>Exported through</small>
-              <b>#{track.summary.last_exported_seq.toLocaleString()}</b>
-              <em>of {track.summary.head_seq.toLocaleString()} audit events</em>
+          <>
+            <div className="ac-tiles">
+              <div className="ac-tile">
+                <small>Exported through</small>
+                <b>#{formatNumber(track.summary.last_exported_seq)}</b>
+                <em>of {formatNumber(track.summary.head_seq)} audit events</em>
+              </div>
+              <div className="ac-tile">
+                <small>Waiting</small>
+                <b>{formatNumber(track.summary.waiting_events)}</b>
+                <em>events not yet delivered</em>
+              </div>
             </div>
-            <div className="ac-tile">
-              <small>Waiting</small>
-              <b>{track.summary.waiting_events.toLocaleString()}</b>
-              <em>events not yet delivered</em>
-            </div>
-          </div>
+            <Button size="sm" onClick={() => void downloadTracking()} disabled={trackExporting}>
+              {trackExporting ? 'Preparing CSV…' : 'Download stream status CSV'}
+            </Button>
+          </>
         ) : (
           <>
             <div className="ac-tiles">
@@ -391,10 +509,10 @@ export default function ExportsPage() {
                   onClick={() => setTrackState(trackState === k ? '' : k)}
                 >
                   <small>{label}</small>
-                  <b>{(track.summary[k] ?? 0).toLocaleString()}</b>
+                  <b>{formatNumber(track.summary[k] ?? 0)}</b>
                   <em>
                     {k === 'waiting'
-                      ? `${(track.summary.waiting_backposts ?? 0).toLocaleString()} are back-posts`
+                      ? `${formatNumber(track.summary.waiting_backposts ?? 0)} are back-posts`
                       : hint}
                   </em>
                 </button>
@@ -420,7 +538,14 @@ export default function ExportsPage() {
                   Clear filters
                 </button>
               )}
-              <span className="toolbar-count">{track.total.toLocaleString()} record(s)</span>
+              <span className="toolbar-count">{formatNumber(track.total)} record(s)</span>
+              <Button
+                size="sm"
+                onClick={() => void downloadTracking()}
+                disabled={trackExporting || track.total === 0}
+              >
+                {trackExporting ? 'Preparing CSV…' : 'Download matching CSV'}
+              </Button>
             </div>
             {track.items.length === 0 ? (
               <p className="cc-empty">No records match.</p>
@@ -439,7 +564,21 @@ export default function ExportsPage() {
                   <tbody>
                     {track.items.map((r) => (
                       <tr key={r.object_id}>
-                        <td className="font-medium">{r.record_ref}</td>
+                        <td className="font-medium">
+                          {dataset === 'audited_transactions' ? (
+                            <Link href={`/transactions/${encodeURIComponent(r.object_id)}`}>
+                              {r.record_ref}
+                            </Link>
+                          ) : dataset === 'audited_totals' ? (
+                            <Link
+                              href={`/store-days/${encodeURIComponent(r.store_id)}/${encodeURIComponent(r.business_date)}`}
+                            >
+                              {r.record_ref}
+                            </Link>
+                          ) : (
+                            r.record_ref
+                          )}
+                        </td>
                         <td>{r.store_id}</td>
                         <td>{r.business_date}</td>
                         <td>
@@ -458,7 +597,7 @@ export default function ExportsPage() {
                         </td>
                         <td>
                           {r.state === 'delivered'
-                            ? `Batch ${r.batch_id?.slice(0, 8)}${r.batch_status === 'Acknowledged' ? ' · acknowledged' : ' · awaiting acknowledgment'}${r.delivered_at ? ` · ${new Date(r.delivered_at).toLocaleString()}` : ''}`
+                            ? `Batch ${r.batch_id?.slice(0, 8)}${r.batch_status === 'Acknowledged' ? ' · acknowledged' : ' · awaiting acknowledgment'}${r.delivered_at ? ` · ${formatDateTime(r.delivered_at)}` : ''}`
                             : r.state === 'in_batch'
                               ? `Batch ${r.batch_id?.slice(0, 8)} · ${r.reason}`
                               : r.state === 'waiting'
@@ -474,7 +613,7 @@ export default function ExportsPage() {
             {track.pages > 1 && (
               <div className="ac-pager">
                 <span>
-                  Page {track.page} of {track.pages.toLocaleString()}
+                  Page {track.page} of {formatNumber(track.pages)}
                 </span>
                 <span className="ac-spacer" />
                 <button
@@ -498,260 +637,370 @@ export default function ExportsPage() {
       </section>
 
       <section>
-        <h2 className="act-day">
-          Export history <span className="cc-count">{batches.length}</span>
-        </h2>
+        <h2 className="act-day">Export history</h2>
+        <Toolbar>
+          <select
+            aria-label="Export history destination"
+            value={batchDestination}
+            onChange={(event) => {
+              setBatchDestination(event.target.value);
+              setBatchPage(1);
+            }}
+          >
+            <option value="">All destinations</option>
+            {dests.map((destination) => (
+              <option key={destination.id} value={destination.id}>
+                {destination.name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Export history dataset"
+            value={batchDataset}
+            onChange={(event) => {
+              setBatchDataset(event.target.value);
+              setBatchPage(1);
+            }}
+          >
+            <option value="">All datasets</option>
+            {DATASETS.map((item) => (
+              <option key={item.key} value={item.key}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Export history status"
+            value={batchStatus}
+            onChange={(event) => {
+              setBatchStatus(event.target.value);
+              setBatchPage(1);
+            }}
+          >
+            <option value="">All statuses</option>
+            {['Pending', 'Sent', 'Acknowledged', 'Failed'].map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+          <input
+            type="date"
+            aria-label="Export created from"
+            value={batchStart}
+            max={batchEnd || undefined}
+            onChange={(event) => {
+              setBatchStart(event.target.value);
+              setBatchPage(1);
+            }}
+          />
+          <input
+            type="date"
+            aria-label="Export created to"
+            value={batchEnd}
+            min={batchStart || undefined}
+            onChange={(event) => {
+              setBatchEnd(event.target.value);
+              setBatchPage(1);
+            }}
+          />
+          <input
+            type="search"
+            aria-label="Search export reference, batch ID, or error"
+            placeholder="Batch ID, reference, or error"
+            value={batchSearchDraft}
+            onChange={(event) => setBatchSearchDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                setBatchQuery(batchSearchDraft.trim());
+                setBatchPage(1);
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={() => {
+              setBatchQuery(batchSearchDraft.trim());
+              setBatchPage(1);
+            }}
+          >
+            Search
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void downloadBatchHistory()}
+            disabled={batchExporting || batches.length === 0}
+          >
+            {batchExporting ? 'Preparing CSV…' : 'Download filtered CSV'}
+          </Button>
+        </Toolbar>
         {!loaded ? (
           <SkeletonRows rows={5} label="Loading exports" />
+        ) : batchLoading ? (
+          <SkeletonRows rows={5} label="Loading export history" />
         ) : batches.length === 0 ? (
           <div className="empty-state">
             <b>No exports yet</b>
             <p>
-              Preview a dataset above, then export it. Each delivery appears here with its status
-              and fingerprint.
+              Change the filters or preview a dataset above, then export it. Each delivery appears
+              here with its status and fingerprint.
             </p>
           </div>
         ) : (
-          <div className="table-container">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Destination</th>
-                  <th>Dataset</th>
-                  <th className="num">Records</th>
-                  <th>Status</th>
-                  <th>Reference</th>
-                  <th>Fingerprint</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {batches.map((b) => (
-                  <tr key={b.id}>
-                    <td className="text-sm nowrap">{new Date(b.created_at).toLocaleString()}</td>
-                    <td className="font-medium">{b.destination}</td>
-                    <td>{b.dataset}</td>
-                    <td className="num">
-                      {b.record_count.toLocaleString()}
-                      {b.backposted_count > 0 && (
-                        <small className="act-sub" style={{ display: 'block' }}>
-                          {b.backposted_count.toLocaleString()} back-posted
-                        </small>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`badge badge-sm ${tone(b.status)}`}>{b.status}</span>
-                      {b.error && (
-                        <small style={{ display: 'block', color: 'var(--error)' }}>{b.error}</small>
-                      )}
-                    </td>
-                    <td
-                      className="text-sm"
-                      style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}
-                    >
-                      {b.response_ref ?? '-'}
-                    </td>
-                    <td>
-                      <code title={b.payload_hash ?? ''}>
-                        {b.payload_hash?.slice(0, 10) ?? '-'}
-                      </code>
-                    </td>
-                    <td>
-                      <div className="action-buttons">
-                        <Button size="sm" onClick={() => download(b)}>
-                          Download
-                        </Button>
-                        {b.status === 'Pending' &&
-                          (recoverFor === b.id ? (
-                            <span className="confirm-inline">
-                              Verify the delivery worker has stopped, then check the downstream
-                              outcome.
-                              <input
-                                value={recoveryEvidence}
-                                onChange={(e) => setRecoveryEvidence(e.target.value)}
-                                placeholder="Evidence worker stopped"
-                                aria-label="Evidence worker stopped"
-                              />
-                              <label>
+          <>
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Destination</th>
+                    <th>Dataset</th>
+                    <th className="num">Records</th>
+                    <th>Status</th>
+                    <th>Reference</th>
+                    <th>Fingerprint</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {batches.map((b) => (
+                    <tr key={b.id}>
+                      <td className="text-sm nowrap">{formatDateTime(b.created_at)}</td>
+                      <td className="font-medium">{b.destination}</td>
+                      <td>{b.dataset}</td>
+                      <td className="num">
+                        {formatNumber(b.record_count)}
+                        {b.backposted_count > 0 && (
+                          <small className="act-sub" style={{ display: 'block' }}>
+                            {formatNumber(b.backposted_count)} back-posted
+                          </small>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge badge-sm ${tone(b.status)}`}>{b.status}</span>
+                        {b.error && (
+                          <small style={{ display: 'block', color: 'var(--error)' }}>
+                            {b.error}
+                          </small>
+                        )}
+                      </td>
+                      <td
+                        className="text-sm"
+                        style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                      >
+                        {b.response_ref ?? '-'}
+                      </td>
+                      <td>
+                        <code title={b.payload_hash ?? ''}>
+                          {b.payload_hash?.slice(0, 10) ?? '-'}
+                        </code>
+                      </td>
+                      <td>
+                        <div className="action-buttons">
+                          <Button size="sm" onClick={() => download(b)}>
+                            Download
+                          </Button>
+                          {b.status === 'Pending' &&
+                            (recoverFor === b.id ? (
+                              <span className="confirm-inline">
+                                Verify the delivery worker has stopped, then check the downstream
+                                outcome.
                                 <input
-                                  type="checkbox"
-                                  checked={workerStopped}
-                                  onChange={(e) => setWorkerStopped(e.target.checked)}
-                                />{' '}
-                                Worker stopped
-                              </label>
+                                  value={recoveryEvidence}
+                                  onChange={(e) => setRecoveryEvidence(e.target.value)}
+                                  placeholder="Evidence worker stopped"
+                                  aria-label="Evidence worker stopped"
+                                />
+                                <label>
+                                  <input
+                                    type="checkbox"
+                                    checked={workerStopped}
+                                    onChange={(e) => setWorkerStopped(e.target.checked)}
+                                  />{' '}
+                                  Worker stopped
+                                </label>
+                                <button
+                                  className="btn-small btn-danger"
+                                  disabled={busy || !workerStopped || !recoveryEvidence.trim()}
+                                  onClick={() =>
+                                    act(async () => {
+                                      await api.post(`/api/exports/batches/${b.id}/recover`, {
+                                        worker_stopped: workerStopped,
+                                        evidence: recoveryEvidence,
+                                      });
+                                      setRecoverFor(null);
+                                      toast(
+                                        'Attempt recovered. Reconcile the downstream outcome.',
+                                        'success'
+                                      );
+                                    })
+                                  }
+                                >
+                                  Recover interrupted attempt
+                                </button>
+                                <button
+                                  className="btn-small btn-secondary"
+                                  onClick={() => setRecoverFor(null)}
+                                >
+                                  Keep
+                                </button>
+                              </span>
+                            ) : (
                               <button
-                                className="btn-small btn-danger"
-                                disabled={busy || !workerStopped || !recoveryEvidence.trim()}
-                                onClick={() =>
-                                  act(async () => {
-                                    await api.post(`/api/exports/batches/${b.id}/recover`, {
-                                      worker_stopped: workerStopped,
-                                      evidence: recoveryEvidence,
-                                    });
-                                    setRecoverFor(null);
-                                    toast(
-                                      'Attempt recovered. Reconcile the downstream outcome.',
-                                      'success'
-                                    );
-                                  })
-                                }
+                                className="btn-small btn-secondary"
+                                disabled={busy}
+                                onClick={() => {
+                                  setRecoveryEvidence('');
+                                  setWorkerStopped(false);
+                                  setRecoverFor(b.id);
+                                }}
                               >
                                 Recover interrupted attempt
                               </button>
-                              <button
-                                className="btn-small btn-secondary"
-                                onClick={() => setRecoverFor(null)}
-                              >
-                                Keep
-                              </button>
-                            </span>
-                          ) : (
-                            <button
-                              className="btn-small btn-secondary"
-                              disabled={busy}
-                              onClick={() => {
-                                setRecoveryEvidence('');
-                                setWorkerStopped(false);
-                                setRecoverFor(b.id);
-                              }}
-                            >
-                              Recover interrupted attempt
-                            </button>
-                          ))}
-                        {b.status === 'Failed' && (
-                          <button
-                            className="btn-small btn-primary"
-                            disabled={busy}
-                            onClick={() =>
-                              act(async () => {
-                                await api.post(`/api/exports/batches/${b.id}/retry`);
-                                toast('Retry sent.', 'success');
-                              })
-                            }
-                          >
-                            Retry
-                          </button>
-                        )}
-                        {b.status === 'Failed' &&
-                          (cancelFor === b.id ? (
-                            <span className="confirm-inline">
-                              Confirm the downstream outcome before resolving this batch.
-                              <input
-                                value={resolutionEvidence}
-                                onChange={(e) => setResolutionEvidence(e.target.value)}
-                                placeholder="Evidence checked with receiver"
-                                aria-label="Evidence of downstream outcome"
-                              />
-                              <button
-                                className="btn-small btn-danger"
-                                disabled={busy || !resolutionEvidence.trim()}
-                                onClick={() =>
-                                  act(async () => {
-                                    const { data } = await api.post(
-                                      `/api/exports/batches/${b.id}/reconcile`,
-                                      { outcome: 'not_received', evidence: resolutionEvidence }
-                                    );
-                                    setCancelFor(null);
-                                    setResolutionEvidence('');
-                                    toast(
-                                      `Batch cancelled. ${data.released} record(s) released.`,
-                                      'success'
-                                    );
-                                  })
-                                }
-                              >
-                                Not received: release
-                              </button>
-                              <button
-                                className="btn-small btn-primary"
-                                disabled={busy || !resolutionEvidence.trim()}
-                                onClick={() =>
-                                  act(async () => {
-                                    await api.post(`/api/exports/batches/${b.id}/reconcile`, {
-                                      outcome: 'received',
-                                      evidence: resolutionEvidence,
-                                    });
-                                    setCancelFor(null);
-                                    setResolutionEvidence('');
-                                    toast('Batch marked received.', 'success');
-                                  })
-                                }
-                              >
-                                Received: mark delivered
-                              </button>
-                              <button
-                                className="btn-small btn-secondary"
-                                onClick={() => setCancelFor(null)}
-                              >
-                                Keep
-                              </button>
-                            </span>
-                          ) : (
-                            <button
-                              className="btn-small btn-secondary"
-                              disabled={busy}
-                              onClick={() => {
-                                setResolutionEvidence('');
-                                setCancelFor(b.id);
-                              }}
-                            >
-                              Reconcile outcome
-                            </button>
-                          ))}
-                        {b.status === 'Sent' &&
-                          (ackFor === b.id ? (
-                            <span className="confirm-inline">
-                              <input
-                                value={ackRef}
-                                onChange={(e) => setAckRef(e.target.value)}
-                                placeholder="Downstream reference (optional)"
-                                aria-label="Downstream reference"
-                                autoFocus
-                              />
-                              <button
-                                className="btn-small btn-primary"
-                                disabled={busy}
-                                onClick={() =>
-                                  act(async () => {
-                                    await api.post(`/api/exports/batches/${b.id}/ack`, {
-                                      reference: ackRef,
-                                    });
-                                    setAckFor(null);
-                                    setAckRef('');
-                                    toast('Marked acknowledged.', 'success');
-                                  })
-                                }
-                              >
-                                Confirm
-                              </button>
-                              <button
-                                className="btn-small btn-secondary"
-                                onClick={() => setAckFor(null)}
-                              >
-                                Cancel
-                              </button>
-                            </span>
-                          ) : (
+                            ))}
+                          {b.status === 'Failed' && (
                             <button
                               className="btn-small btn-primary"
                               disabled={busy}
-                              onClick={() => {
-                                setAckFor(b.id);
-                                setAckRef('');
-                              }}
+                              onClick={() =>
+                                act(async () => {
+                                  await api.post(`/api/exports/batches/${b.id}/retry`);
+                                  toast('Retry sent.', 'success');
+                                })
+                              }
                             >
-                              Mark acknowledged
+                              Retry
                             </button>
-                          ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                          )}
+                          {b.status === 'Failed' &&
+                            (cancelFor === b.id ? (
+                              <span className="confirm-inline">
+                                Confirm the downstream outcome before resolving this batch.
+                                <input
+                                  value={resolutionEvidence}
+                                  onChange={(e) => setResolutionEvidence(e.target.value)}
+                                  placeholder="Evidence checked with receiver"
+                                  aria-label="Evidence of downstream outcome"
+                                />
+                                <button
+                                  className="btn-small btn-danger"
+                                  disabled={busy || !resolutionEvidence.trim()}
+                                  onClick={() =>
+                                    act(async () => {
+                                      const { data } = await api.post(
+                                        `/api/exports/batches/${b.id}/reconcile`,
+                                        { outcome: 'not_received', evidence: resolutionEvidence }
+                                      );
+                                      setCancelFor(null);
+                                      setResolutionEvidence('');
+                                      toast(
+                                        `Batch cancelled. ${data.released} record(s) released.`,
+                                        'success'
+                                      );
+                                    })
+                                  }
+                                >
+                                  Not received: release
+                                </button>
+                                <button
+                                  className="btn-small btn-primary"
+                                  disabled={busy || !resolutionEvidence.trim()}
+                                  onClick={() =>
+                                    act(async () => {
+                                      await api.post(`/api/exports/batches/${b.id}/reconcile`, {
+                                        outcome: 'received',
+                                        evidence: resolutionEvidence,
+                                      });
+                                      setCancelFor(null);
+                                      setResolutionEvidence('');
+                                      toast('Batch marked received.', 'success');
+                                    })
+                                  }
+                                >
+                                  Received: mark delivered
+                                </button>
+                                <button
+                                  className="btn-small btn-secondary"
+                                  onClick={() => setCancelFor(null)}
+                                >
+                                  Keep
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                className="btn-small btn-secondary"
+                                disabled={busy}
+                                onClick={() => {
+                                  setResolutionEvidence('');
+                                  setCancelFor(b.id);
+                                }}
+                              >
+                                Reconcile outcome
+                              </button>
+                            ))}
+                          {b.status === 'Sent' &&
+                            (ackFor === b.id ? (
+                              <span className="confirm-inline">
+                                <input
+                                  value={ackRef}
+                                  onChange={(e) => setAckRef(e.target.value)}
+                                  placeholder="Downstream reference (optional)"
+                                  aria-label="Downstream reference"
+                                  autoFocus
+                                />
+                                <button
+                                  className="btn-small btn-primary"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    act(async () => {
+                                      await api.post(`/api/exports/batches/${b.id}/ack`, {
+                                        reference: ackRef,
+                                      });
+                                      setAckFor(null);
+                                      setAckRef('');
+                                      toast('Marked acknowledged.', 'success');
+                                    })
+                                  }
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  className="btn-small btn-secondary"
+                                  onClick={() => setAckFor(null)}
+                                >
+                                  Cancel
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                className="btn-small btn-primary"
+                                disabled={busy}
+                                onClick={() => {
+                                  setAckFor(b.id);
+                                  setAckRef('');
+                                }}
+                              >
+                                Mark acknowledged
+                              </button>
+                            ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PageNav
+              page={batchPage}
+              hasMore={batchHasMore}
+              pageSize={batchPageSize}
+              onPageSize={(size) => {
+                setBatchPageSize(size);
+                setBatchPage(1);
+              }}
+              onPage={setBatchPage}
+            />
+          </>
         )}
       </section>
 

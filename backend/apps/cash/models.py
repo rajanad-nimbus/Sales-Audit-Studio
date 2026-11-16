@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from model_base import Base, utcnow
-from sqlalchemy import DateTime, Index, Numeric, String
+from sqlalchemy import CheckConstraint, DateTime, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -52,3 +52,34 @@ class CashDeposit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (Index("ix_cash_deposits_store_date", "store_id", "business_date"),)
+
+
+class ACHAdjustment(Base):
+    """Audited next-day ACH movement adjustment for a bank or store."""
+
+    __tablename__ = "ach_adjustments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    record_type: Mapped[str] = mapped_column(String(10), index=True)
+    store_id: Mapped[str | None] = mapped_column(String(50), index=True)
+    bank_id: Mapped[str] = mapped_column(String(50), index=True)
+    account_reference: Mapped[str | None] = mapped_column(String(100))
+    business_date: Mapped[str] = mapped_column(String(10), index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    adjustment_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
+    note: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(12), default="Active", index=True)
+    created_by: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reversed_by: Mapped[str | None] = mapped_column(String(255))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_ach_adjustments_bank_day", "bank_id", "business_date"),
+        Index("ix_ach_adjustments_store_day", "store_id", "business_date"),
+        CheckConstraint("record_type IN ('Bank', 'Store')", name="ck_ach_adjustment_type"),
+        CheckConstraint("status IN ('Active', 'Reversed')", name="ck_ach_adjustment_status"),
+        CheckConstraint(
+            "(record_type = 'Bank' AND store_id IS NULL) OR (record_type = 'Store' AND store_id IS NOT NULL)",
+            name="ck_ach_adjustment_scope",
+        ),
+    )

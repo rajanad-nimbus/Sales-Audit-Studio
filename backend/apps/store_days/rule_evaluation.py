@@ -14,7 +14,7 @@ from apps.cases.identifiers import generate_case_number
 from apps.cases.models import Case
 from apps.cases.models import Exception as DBException
 from apps.controls.rules.models import ConfiguredAuditRule
-from apps.totals.calculation import TotalKey
+from apps.totals.calculation import TotalKey, store_location_traits
 from apps.totals.models import AuditTotalDefinition
 
 
@@ -23,7 +23,8 @@ class RuleEvaluation:
     """Rules selected and validated before a totals version is persisted."""
 
     rules: list[ConfiguredAuditRule]
-    observations: dict[str, Decimal]
+    observations: dict[str, list[tuple[str | None, Decimal]]]
+    errors: dict[str, HTTPException]
 
 
 def add_configured_totals(
@@ -46,19 +47,23 @@ async def prepare_rule_evaluation(
     calculated: Mapping[TotalKey, Decimal],
     definitions: Sequence[AuditTotalDefinition],
     currency: str,
+    business_date: str,
+    store_id: str,
 ) -> RuleEvaluation:
-    """Select relevant rules once, validate their targets, and capture store totals."""
-    totals_by_name: dict[str, dict[str, Decimal]] = {}
-    for (name, level, _dimension), amount in calculated.items():
+    """Select relevant rules once, validate targets, and capture balancing observations."""
+    totals_by_name: dict[str, dict[tuple[str, str | None], Decimal]] = {}
+    for (name, level, dimension), amount in calculated.items():
         level_totals = totals_by_name.setdefault(name, {})
-        level_totals[level] = level_totals.get(level, Decimal("0")) + amount
+        key = (level, dimension)
+        level_totals[key] = level_totals.get(key, Decimal("0")) + amount
 
     definitions_by_total = {f"Configured: {item.name}": item for item in definitions}
     for total_name, definition in definitions_by_total.items():
-        totals_by_name.setdefault(total_name, {}).setdefault(definition.level, Decimal("0"))
+        if definition.level == "Store":
+            totals_by_name.setdefault(total_name, {}).setdefault(("Store", None), Decimal("0"))
     applicable_totals = set(totals_by_name)
     if not applicable_totals:
-        return RuleEvaluation(rules=[], observations={})
+        return RuleEvaluation(rules=[], observations={}, errors={})
 
     rules = list(
         (
@@ -66,35 +71,66 @@ async def prepare_rule_evaluation(
                 select(ConfiguredAuditRule)
                 .where(
                     ConfiguredAuditRule.enabled.is_(True),
+                    ConfiguredAuditRule.status == "Active",
                     ConfiguredAuditRule.total_name.in_(applicable_totals),
+                    (ConfiguredAuditRule.start_date.is_(None))
+                    | (ConfiguredAuditRule.start_date <= business_date),
+                    (ConfiguredAuditRule.end_date.is_(None))
+                    | (ConfiguredAuditRule.end_date >= business_date),
                 )
-                .order_by(ConfiguredAuditRule.id)
+                .order_by(
+                    ConfiguredAuditRule.execution_order,
+                    ConfiguredAuditRule.name,
+                    ConfiguredAuditRule.id,
+                )
             )
         ).scalars()
     )
+    if any(rule.location_traits for rule in rules):
+        store_traits = await store_location_traits(db, store_id)
+        rules = [
+            rule
+            for rule in rules
+            if not rule.location_traits or set(rule.location_traits).intersection(store_traits)
+        ]
 
-    observations: dict[str, Decimal] = {}
+    observations: dict[str, list[tuple[str | None, Decimal]]] = {}
+    errors: dict[str, HTTPException] = {}
     for rule in rules:
         if not rule_applies_to_currency(rule, currency):
             continue
         available_levels = totals_by_name.get(rule.total_name)
         if available_levels is None:
             continue
-        observed = available_levels.get("Store")
-        if observed is None:
-            raise HTTPException(
+        balance_level = rule.balance_level or "Store"
+        definition = definitions_by_total.get(rule.total_name)
+        valid_levels = (
+            {definition.level}
+            if definition is not None
+            else {"Store", "Register"}
+            if rule.total_name == "POS Net"
+            else {"Store"}
+        )
+        if balance_level not in valid_levels:
+            errors[rule.id] = HTTPException(
                 status_code=422,
-                detail=f"Rule {rule.name} requires a Store-level total",
+                detail=f"Rule {rule.name} targets {balance_level}, but {rule.total_name} is not available at that level",
             )
+            continue
+        level_observations = [
+            (dimension, amount)
+            for (level, dimension), amount in available_levels.items()
+            if level == balance_level
+        ]
         if rule.threshold_currency is None:
-            definition = definitions_by_total.get(rule.total_name)
             if definition is None or definition.aggregation != "Count":
-                raise HTTPException(
+                errors[rule.id] = HTTPException(
                     status_code=422,
                     detail=f"Currency-free rule {rule.name} requires a Count total",
                 )
-        observations[rule.id] = observed
-    return RuleEvaluation(rules=rules, observations=observations)
+                continue
+        observations[rule.id] = level_observations
+    return RuleEvaluation(rules=rules, observations=observations, errors=errors)
 
 
 async def evaluate_configured_rules(
@@ -106,9 +142,37 @@ async def evaluate_configured_rules(
 ) -> None:
     """Create cases for prevalidated rules whose store totals exceed their thresholds."""
     for rule in evaluation.rules:
-        observed = evaluation.observations.get(rule.id)
-        if observed is not None and abs(observed) > rule.threshold:
-            await create_rule_breach(db, rule, observed, store_id, business_date, currency)
+        if error := evaluation.errors.get(rule.id):
+            raise error
+        observed = evaluation.observations.get(rule.id, [])
+        breaches = [
+            (dimension, amount)
+            for dimension, amount in observed
+            if rule_breaches(amount, rule.threshold, rule.comparison)
+        ]
+        if breaches:
+            await create_rule_breach(db, rule, breaches, store_id, business_date, currency)
+            if rule.stop_processing:
+                break
+
+
+def rule_breaches(observed: Decimal, threshold: Decimal, comparison: str) -> bool:
+    """Evaluate the configured signed or absolute comparison deterministically."""
+    if comparison == "ABS_GT":
+        return abs(observed) > threshold
+    if comparison == "GT":
+        return observed > threshold
+    if comparison == "GTE":
+        return observed >= threshold
+    if comparison == "LT":
+        return observed < threshold
+    if comparison == "LTE":
+        return observed <= threshold
+    if comparison == "EQ":
+        return observed == threshold
+    if comparison == "NE":
+        return observed != threshold
+    raise ValueError(f"Unsupported audit-rule comparison: {comparison}")
 
 
 def rule_applies_to_currency(rule: ConfiguredAuditRule, currency: str) -> bool:
@@ -119,20 +183,22 @@ def rule_applies_to_currency(rule: ConfiguredAuditRule, currency: str) -> bool:
 async def create_rule_breach(
     db: AsyncSession,
     rule: ConfiguredAuditRule,
-    observed: Decimal,
+    breaches: list[tuple[str | None, Decimal]],
     store_id: str,
     business_date: str,
     currency: str,
 ) -> None:
     """Persist one configured-rule exception unless an open breach already exists."""
-    case_type = f"Rule breach: {rule.name}"
+    case_type = f"Rule breach: {rule.name}"[:50]
     existing = (
         (
             await db.execute(
-                select(Case.id).where(
+                select(Case.id)
+                .join(DBException, DBException.case_id == Case.id)
+                .where(
                     Case.store_id == store_id,
                     Case.business_date == business_date,
-                    Case.case_type == case_type,
+                    DBException.detection_rule_id == rule.id,
                     Case.status.not_in(("Closed",)),
                 )
             )
@@ -144,7 +210,7 @@ async def create_rule_breach(
         return
 
     case_id = str(uuid.uuid4())
-    amount = abs(observed)
+    amount = sum((abs(observed) for _, observed in breaches), Decimal("0"))
     exposure = amount if rule.threshold_currency is not None else Decimal("0")
     priority = (
         "Critical"
@@ -172,22 +238,27 @@ async def create_rule_breach(
         )
     )
     await db.flush()
-    db.add(
-        DBException(
-            id=str(uuid.uuid4()),
-            case_id=case_id,
-            exception_type="CONFIGURED_RULE_VARIANCE",
-            exception_family="Configured Control",
-            source_system="Configured Rule",
-            detection_origin="Configured Rule",
-            detection_rule_id=rule.id,
-            exception_amount=amount,
-            estimated_exposure=exposure,
-            severity=rule.severity,
-            confidence="High",
-            close_impact="Yes" if exposure else "No",
+    for dimension, observed in breaches:
+        exception_amount = abs(observed)
+        db.add(
+            DBException(
+                id=str(uuid.uuid4()),
+                case_id=case_id,
+                exception_type="CONFIGURED_RULE_VARIANCE",
+                exception_family="Configured Control",
+                source_system="Configured Rule",
+                detection_origin="Configured Rule",
+                detection_rule_id=rule.id,
+                detection_rule_name=rule.name,
+                balance_level=rule.balance_level or "Store",
+                balance_dimension=dimension,
+                exception_amount=exception_amount,
+                estimated_exposure=exception_amount if rule.threshold_currency else Decimal("0"),
+                severity=rule.severity,
+                confidence="High",
+                close_impact="Yes" if rule.threshold_currency else "No",
+            )
         )
-    )
     await db.flush()
     audit(
         db,
@@ -195,6 +266,7 @@ async def create_rule_breach(
         case_id,
         "ConfiguredAuditRule",
         rule.id,
-        f"{rule.name} observed {observed} over threshold {rule.threshold}",
+        f"{rule.name} breached at {len(breaches)} {rule.balance_level or 'Store'} balance(s); "
+        f"{rule.comparison} threshold {rule.threshold}",
         actor="total-engine",
     )

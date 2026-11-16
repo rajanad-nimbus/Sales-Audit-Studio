@@ -18,3 +18,14 @@ class Connector(Base):
     mode: Mapped[str] = mapped_column(String(50), default="Not Configured")
     last_error: Mapped[str | None] = mapped_column(Text)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SystemOption(Base):
+    """Audited retailer-wide setting for operational behavior."""
+
+    __tablename__ = "system_options"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255))
+    updated_by: Mapped[str | None] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -7,7 +7,9 @@ fail-closed: a scoped user with no assigned stores can reach none. Everyone else
 import re
 
 from fastapi import HTTPException
-from sqlalchemy import false
+from sqlalchemy import false, or_, select
+
+from apps.controls.foundation.models import StoreLocationTrait
 
 STORE_PATH = re.compile(
     r"^/api/store-days/([^/]+)/[^/]+"
@@ -23,9 +25,37 @@ def allowed_stores(user: dict) -> list[str] | None:
     return (user.get("stores") or []) if scoped(user) else None
 
 
+def assigned_location_traits(user: dict) -> list[str]:
+    return user.get("store_location_traits") or []
+
+
+def store_predicate(user: dict, column):
+    """SQL predicate for explicit stores plus live Foundation location-trait membership."""
+    stores = allowed_stores(user)
+    if stores is None:
+        return None
+    conditions = [column.in_(stores)] if stores else []
+    traits = assigned_location_traits(user)
+    if traits:
+        conditions.append(
+            column.in_(
+                select(StoreLocationTrait.store_id).where(
+                    StoreLocationTrait.location_trait.in_(traits)
+                )
+            )
+        )
+    return or_(*conditions) if conditions else false()
+
+
 def store_allowed(user: dict, store_id: str | None) -> bool:
     stores = allowed_stores(user)
-    return stores is None or (store_id is not None and store_id in stores)
+    return stores is None or (
+        store_id is not None
+        and (
+            store_id in stores
+            or store_id in (user.get("store_scope_store_ids") or [])
+        )
+    )
 
 
 def require_store(user: dict, store_id: str | None) -> None:
@@ -35,10 +65,10 @@ def require_store(user: dict, store_id: str | None) -> None:
 
 def restrict(query, user: dict, column):
     """Limit a query to the user's stores."""
-    stores = allowed_stores(user)
-    if stores is None:
+    predicate = store_predicate(user, column)
+    if predicate is None:
         return query
-    return query.where(column.in_(stores)) if stores else query.where(false())
+    return query.where(predicate)
 
 
 def path_store(path: str) -> str | None:

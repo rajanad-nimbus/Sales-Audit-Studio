@@ -1,17 +1,19 @@
 """Downstream export: destinations, incremental idempotent batches, signed delivery, acknowledgment tracking."""
 
 import hashlib
+import logging
 import os
 import re
 import uuid
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import httpx
 from database import get_db
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
-from sqlalchemy import insert, select, update
+from sqlalchemy import insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,8 +103,11 @@ from apps.exports.settings import SINK_SECRET, sink_secret, test_sink_enabled
 from apps.exports.tracking import tracking_page as tracking_page
 from apps.exports.tracking_routes import router as tracking_router
 from apps.exports.tracking_routes import tracking as tracking
+from apps.csv_export import csv_table
+from apps.ingest.manifests import validate_business_date
 from apps.request_body import read_limited_body
 from apps.security.authentication import require_role
+from apps.system.options import export_unit_of_work
 
 router = APIRouter(prefix="/api/exports")
 router.include_router(destinations_router)
@@ -110,6 +115,7 @@ router.include_router(resolution_router)
 router.include_router(tracking_router)
 EXPORT_DIR = Path(os.getenv("NIMBUS_EXPORT_DIR", "/app/exports"))
 MAX_SINK_BODY_BYTES = 25 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 async def deliver(
@@ -242,6 +248,116 @@ async def run_export(
     return await finish_delivery(db, b, dest.name, retrying=False)
 
 
+async def auto_export_valid_transactions(
+    db: AsyncSession,
+    request: Request | None = None,
+    store_ids: list[str] | set[str] | None = None,
+) -> list[dict]:
+    """Deliver validated transaction batches after reconciliation commits in Transaction mode."""
+    if await export_unit_of_work(db) != "Transaction":
+        return []
+    destinations = (
+        (
+            await db.execute(
+                select(ExportDestination)
+                .where(ExportDestination.enabled.is_(True))
+                .order_by(ExportDestination.name, ExportDestination.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    destination_refs = [(destination.id, destination.name) for destination in destinations]
+    summaries = []
+    for destination_id, destination_name in destination_refs:
+        destination = (
+            await db.execute(
+                select(ExportDestination)
+                .where(
+                    ExportDestination.id == destination_id,
+                    ExportDestination.enabled.is_(True),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if destination is None:
+            continue
+        records_sent = 0
+        batches = 0
+        failed_batches = 0
+        try:
+            while True:
+                records, items, r_from, r_to = await build(
+                    db,
+                    destination,
+                    "audited_transactions",
+                    lock_cases=True,
+                    store_ids=store_ids,
+                )
+                if not records:
+                    break
+                body = RunIn(
+                    destination_id=destination.id,
+                    dataset="audited_transactions",
+                    scope="all",
+                )
+                batch = await reserve_export_batch(
+                    db,
+                    body,
+                    destination,
+                    "export-service",
+                    records,
+                    items,
+                    r_from,
+                    r_to,
+                )
+                client = getattr(request.app.state, "export_http_client", None) if request else None
+                if client is None:
+                    await deliver(destination, batch)
+                else:
+                    await deliver(destination, batch, client)
+                result = await finish_delivery(db, batch, destination.name, retrying=False)
+                batches += 1
+                records_sent += len(records)
+                failed_batches += result["status"] == "Failed"
+                if len(records) < MAX_BATCH:
+                    break
+        except Exception as exc:
+            await db.rollback()
+            logger.exception(
+                "Automatic transaction export failed for destination %s", destination_id
+            )
+            audit(
+                db,
+                "AUTO_EXPORT_PREPARATION_FAILED",
+                None,
+                "ExportDestination",
+                destination_id,
+                f"Automatic transaction export could not prepare a batch ({type(exc).__name__})",
+                actor="export-service",
+            )
+            await db.commit()
+            summaries.append(
+                {
+                    "destination": destination_name,
+                    "batches": batches,
+                    "records": records_sent,
+                    "failed_batches": failed_batches,
+                    "preparation_error": type(exc).__name__,
+                }
+            )
+            continue
+        summaries.append(
+            {
+                "destination": destination_name,
+                "batches": batches,
+                "records": records_sent,
+                "failed_batches": failed_batches,
+            }
+        )
+    return summaries
+
+
 async def validate_export_request(body: RunIn, db: AsyncSession) -> ExportDestination:
     """Validate dataset, scope, and destination before preparing an export."""
     if body.dataset not in DATASETS:
@@ -299,6 +415,151 @@ async def batches(
         )
     ).all()
     return [batch_view(b, n) for b, n in rows]
+
+
+def batch_history_filters(
+    destination_id: str | None,
+    dataset: str | None,
+    status: str | None,
+    query: str | None,
+    start: str | None,
+    end: str | None,
+) -> list:
+    filters = []
+    if destination_id:
+        filters.append(ExportBatch.destination_id == destination_id)
+    if dataset:
+        filters.append(ExportBatch.dataset == dataset)
+    if status:
+        filters.append(ExportBatch.status == status)
+    if query:
+        filters.append(
+            or_(
+                ExportBatch.id.icontains(query, autoescape=True),
+                ExportBatch.response_ref.icontains(query, autoescape=True),
+                ExportBatch.error.icontains(query, autoescape=True),
+            )
+        )
+    for value, lower_bound in ((start, True), (end, False)):
+        if not value:
+            continue
+        try:
+            validate_business_date(value)
+            day = date.fromisoformat(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        boundary = datetime.combine(day, time.min, tzinfo=UTC)
+        filters.append(
+            ExportBatch.created_at >= boundary
+            if lower_bound
+            else ExportBatch.created_at < boundary + timedelta(days=1)
+        )
+    if start and end and start > end:
+        raise HTTPException(status_code=422, detail="start must be on or before end")
+    return filters
+
+
+async def batch_history_page(db, filters: list, offset: int, limit: int):
+    rows = (
+        await db.execute(
+            select(ExportBatch, ExportDestination.name)
+            .join(ExportDestination, ExportDestination.id == ExportBatch.destination_id)
+            .where(*filters)
+            .order_by(ExportBatch.created_at.desc(), ExportBatch.id.desc())
+            .offset(offset)
+            .limit(limit + 1)
+        )
+    ).all()
+    has_more = len(rows) > limit
+    return [batch_view(batch, destination) for batch, destination in rows[:limit]], has_more
+
+
+@router.get("/batches/history")
+async def batch_history(
+    destination_id: str | None = Query(None, min_length=1, max_length=36),
+    dataset: str | None = Query(None, min_length=1, max_length=30),
+    status: str | None = Query(None, pattern="^(Pending|Sent|Acknowledged|Failed)$"),
+    q: str | None = Query(None, min_length=1, max_length=120),
+    start: str | None = Query(None, min_length=10, max_length=10),
+    end: str | None = Query(None, min_length=10, max_length=10),
+    page: int = Query(1, ge=1, le=100_000),
+    page_size: int = Query(50, ge=10, le=200),
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("finance", "it", "auditor")),
+):
+    if dataset and dataset not in DATASETS:
+        raise HTTPException(status_code=400, detail="Unknown dataset")
+    items, has_more = await batch_history_page(
+        db,
+        batch_history_filters(destination_id, dataset, status, q, start, end),
+        (page - 1) * page_size,
+        page_size,
+    )
+    return {"items": items, "page": page, "page_size": page_size, "has_more": has_more}
+
+
+@router.get("/batches/history.csv")
+async def export_batch_history(
+    destination_id: str | None = Query(None, min_length=1, max_length=36),
+    dataset: str | None = Query(None, min_length=1, max_length=30),
+    status: str | None = Query(None, pattern="^(Pending|Sent|Acknowledged|Failed)$"),
+    q: str | None = Query(None, min_length=1, max_length=120),
+    start: str | None = Query(None, min_length=10, max_length=10),
+    end: str | None = Query(None, min_length=10, max_length=10),
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("finance", "it", "auditor")),
+):
+    if dataset and dataset not in DATASETS:
+        raise HTTPException(status_code=400, detail="Unknown dataset")
+    filters = batch_history_filters(destination_id, dataset, status, q, start, end)
+    exported, offset, has_more = [], 0, True
+    chunk_size, max_rows = 1000, 50_000
+    while has_more and len(exported) < max_rows:
+        items, has_more = await batch_history_page(db, filters, offset, chunk_size)
+        exported.extend(items)
+        offset += chunk_size
+        if not items:
+            break
+    truncated = has_more and len(exported) >= max_rows
+    rows = [
+        [
+            item["created_at"],
+            item["destination"],
+            item["dataset"],
+            item["record_count"],
+            item["status"],
+            item["response_ref"] or "",
+            item["payload_hash"] or "",
+            item["error"] or "",
+            item["retries"],
+            item["backposted_count"],
+            item["created_by"],
+        ]
+        for item in exported[:max_rows]
+    ]
+    return Response(
+        csv_table(
+            [
+                "Created at",
+                "Destination",
+                "Dataset",
+                "Records",
+                "Status",
+                "Receiver reference",
+                "Payload hash",
+                "Error",
+                "Retries",
+                "Back-posted records",
+                "Created by",
+            ],
+            rows,
+        ),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=export-history.csv",
+            "X-Export-History-Truncated": "true" if truncated else "false",
+        },
+    )
 
 
 @router.get("/batches/{batch_id}/payload")

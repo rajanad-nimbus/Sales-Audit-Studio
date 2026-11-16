@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { formatNumber } from '@/lib/preferences';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import { AgentModeNotice, useAgentMode } from '@/components/AgentMode';
@@ -109,7 +110,7 @@ export function AgentsConfig() {
           <MetricTile label="Failed runs" value={cfg.agent_runs.failed} />
           <MetricTile
             label="Tokens used"
-            value={(cfg.agent_runs.input_tokens + cfg.agent_runs.output_tokens).toLocaleString()}
+            value={formatNumber(cfg.agent_runs.input_tokens + cfg.agent_runs.output_tokens)}
           />
           <MetricTile label="Autonomy" value="Off" />
         </MetricGrid>

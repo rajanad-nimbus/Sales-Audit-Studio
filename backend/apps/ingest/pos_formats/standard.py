@@ -154,6 +154,9 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
             "description": x.get("description"),
             "quantity": str(abs(Decimal(x["quantity"]))),
             "unit_price": x["unit_price"],
+            "original_unit_price": x.get("original_unit_price"),
+            "price_override_reason": x.get("price_override_reason"),
+            "source_attributes": x.get("source_attributes"),
             "gross_amount": str(abs(line_total(x))),
             "tax_code": x.get("tax_code"),
             "tax_rate": x.get("tax_rate", "0"),
@@ -163,7 +166,13 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
         for x in tx["lines"]
     ]
     tenders = [
-        {"tender_type": t["tender_type"], "amount": t["amount"], "reference": t.get("reference")}
+        {
+            "tender_type": t["tender_type"],
+            "amount": t["amount"],
+            "reference": t.get("reference"),
+            "authorization": t.get("authorization"),
+            "source_attributes": t.get("source_attributes"),
+        }
         for t in settle_tenders(tx["tenders"], 1 if kind == SALE else -1)
     ]
     return {
@@ -175,8 +184,11 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
         "register_id": tx["register_id"] or None,
         "transaction_number": tx.get("transaction_number") or None,
         "cashier_id": tx["cashier_id"] or None,
+        "salesperson_id": tx.get("salesperson_id") or None,
         "currency": currency,
         "payment_reference": tx["source_record_id"],
+        "user_references": (tx.get("details") or {}).get("user_references"),
+        "customer_attributes": (tx.get("details") or {}).get("customer_attributes"),
         "tender_type": tenders[0]["tender_type"] if tenders else None,
         "lines": lines,
         "discounts": [
@@ -248,6 +260,8 @@ def ingest_records(log: StandardLog, currency: str = "USD") -> tuple[list[dict],
     for tx in log.transactions:
         records = [r] if (r := ingest_record(tx, currency)) else exchange_records(tx, currency)
         if records:
+            for record in records:
+                record["business_date"] = log.business_date
             mapped.extend(records)
         else:
             left_over.append(tx)

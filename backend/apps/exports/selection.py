@@ -1,9 +1,10 @@
 """Select eligible export records and build their immutable data representation."""
 
+import hashlib
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import String, cast, func, or_, select, tuple_
+from sqlalchemy import String, and_, cast, false, func, literal, not_, or_, select, true, tuple_
 from sqlalchemy.orm import aliased
 
 from apps.audit.models import AuditEvent
@@ -13,8 +14,24 @@ from apps.cases.models import (
     Recommendation,
     ValidationObligation,
 )
-from apps.exports.eligibility import completed_case_evidence, verified_adjustment_evidence
+from apps.corrections.models import TransactionAdjustment
+from apps.exports.eligibility import (
+    completed_case_evidence,
+    store_day_export_invalid,
+    transaction_export_invalid,
+    verified_adjustment_evidence,
+)
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem
+from apps.store_days.models import AuditTotal, StoreDay
+from apps.system.options import export_unit_of_work
+from apps.totals.models import AuditTotalDefinition
+from apps.transactions.models import (
+    CanonicalTransaction,
+    TransactionDiscount,
+    TransactionLine,
+    TransactionTax,
+    TransactionTender,
+)
 
 MAX_BATCH = 5000
 SQLITE_BIND_BATCH_SIZE = 300
@@ -213,6 +230,7 @@ async def build(
     scope: str = "all",
     *,
     lock_cases: bool = False,
+    store_ids: list[str] | set[str] | None = None,
 ) -> tuple[list[dict], list[tuple[str, str, dict[str, Any]]], int | None, int | None]:
     """Build export records and item reservations for a bounded batch."""
     if dataset == "audit":
@@ -253,6 +271,443 @@ async def build(
             for event in rows
         ]
         return records, [], (rows[0].seq if rows else None), (rows[-1].seq if rows else None)
+
+    if dataset == "transaction_corrections":
+        reserved = (
+            select(ExportItem.id)
+            .where(
+                ExportItem.destination_id == destination.id,
+                ExportItem.dataset == dataset,
+                ExportItem.object_id == TransactionAdjustment.id,
+                ExportItem.object_version == "v1",
+            )
+            .exists()
+        )
+        previously_exported = (
+            select(ExportItem.id)
+            .where(
+                ExportItem.destination_id == destination.id,
+                ExportItem.dataset == dataset,
+                ExportItem.state == "Delivered",
+                ExportItem.store_id == CanonicalTransaction.store_id,
+                ExportItem.business_date == CanonicalTransaction.business_date,
+            )
+            .exists()
+        )
+        query = (
+            select(
+                TransactionAdjustment, CanonicalTransaction, previously_exported.label("backpost")
+            )
+            .join(
+                CanonicalTransaction,
+                CanonicalTransaction.id == TransactionAdjustment.transaction_id,
+            )
+            .where(
+                TransactionAdjustment.status == "Approved",
+                not_(reserved),
+            )
+        )
+        if store_ids is not None:
+            query = query.where(
+                CanonicalTransaction.store_id.in_(store_ids) if store_ids else false()
+            )
+        if scope == "backposts":
+            query = query.where(previously_exported)
+        elif scope == "current":
+            query = query.where(not_(previously_exported))
+        rows = (
+            await db.execute(
+                query.order_by(
+                    CanonicalTransaction.business_date,
+                    CanonicalTransaction.store_id,
+                    TransactionAdjustment.reviewed_at,
+                    TransactionAdjustment.id,
+                ).limit(MAX_BATCH)
+            )
+        ).all()
+        records, items = [], []
+        for adjustment, transaction, is_backpost in rows:
+            record_ref = f"{transaction.transaction_number or transaction.id}:{adjustment.id[:8]}"
+            records.append(
+                {
+                    "adjustment_id": adjustment.id,
+                    "transaction_id": transaction.id,
+                    "transaction_number": transaction.transaction_number,
+                    "store_id": transaction.store_id,
+                    "business_date": transaction.business_date,
+                    "transaction_type": transaction.transaction_type,
+                    "original_amount": str(transaction.signed_amount),
+                    "currency": transaction.currency,
+                    "adjustment_type": adjustment.adjustment_type,
+                    "proposed_values": adjustment.proposed_values,
+                    "rationale": adjustment.rationale,
+                    "proposed_by": adjustment.proposed_by,
+                    "approved_by": adjustment.reviewed_by,
+                    "approved_at": adjustment.reviewed_at.isoformat()
+                    if adjustment.reviewed_at
+                    else None,
+                    "backpost": is_backpost,
+                }
+            )
+            items.append(
+                (
+                    adjustment.id,
+                    "v1",
+                    {
+                        "record_ref": record_ref,
+                        "store_id": transaction.store_id,
+                        "business_date": transaction.business_date,
+                        "backpost": is_backpost,
+                    },
+                )
+            )
+        return records, items, None, None
+
+    if dataset == "audited_totals":
+        configured_usages = (
+            await db.execute(
+                select(AuditTotalDefinition.id, AuditTotalDefinition.usages).where(
+                    AuditTotalDefinition.usages.is_not(None)
+                )
+            )
+        ).all()
+        restricted_definitions = []
+        allowed_definitions = []
+        for definition_id, usages in configured_usages:
+            if usages is None or usages == []:
+                continue
+            restricted_definitions.append(definition_id)
+            if not isinstance(usages, list):
+                continue
+            if any(
+                isinstance(usage, dict) and usage.get("destination_id") == destination.id
+                for usage in usages
+            ):
+                allowed_definitions.append(definition_id)
+
+        def chunks(values: list[str]):
+            return [values[offset : offset + 400] for offset in range(0, len(values), 400)]
+
+        usage_conditions = []
+        if restricted_definitions:
+            usage_conditions.append(AuditTotal.definition_id.is_(None))
+            usage_conditions.append(
+                and_(
+                    *[
+                        not_(AuditTotal.definition_id.in_(part))
+                        for part in chunks(restricted_definitions)
+                    ]
+                )
+            )
+            usage_conditions.extend(
+                AuditTotal.definition_id.in_(part) for part in chunks(allowed_definitions)
+            )
+        usage_filter = or_(*usage_conditions) if usage_conditions else true()
+        version = "v" + cast(StoreDay.audit_version, String)
+        reserved = (
+            select(ExportItem.id)
+            .where(
+                ExportItem.destination_id == destination.id,
+                ExportItem.dataset == dataset,
+                ExportItem.object_id == AuditTotal.id,
+                ExportItem.object_version == version,
+            )
+            .exists()
+        )
+        previously_exported = (
+            select(ExportItem.id)
+            .join(ExportBatch, ExportBatch.id == ExportItem.batch_id)
+            .where(
+                ExportItem.destination_id == destination.id,
+                ExportItem.dataset == dataset,
+                ExportItem.state == "Delivered",
+                ExportBatch.status.in_(("Sent", "Acknowledged")),
+                ExportItem.store_id == StoreDay.store_id,
+                ExportItem.business_date == StoreDay.business_date,
+            )
+            .exists()
+        )
+        day_query = (
+            select(StoreDay, AuditTotal, previously_exported.label("is_backpost"))
+            .join(
+                AuditTotal,
+                (AuditTotal.store_day_id == StoreDay.id)
+                & (AuditTotal.audit_version == StoreDay.audit_version),
+            )
+            .where(
+                StoreDay.status == "Closed",
+                StoreDay.totals_stale.is_(False),
+                not_(reserved),
+                usage_filter,
+            )
+        )
+        day_query = day_query.where(
+            not_(
+                store_day_export_invalid(
+                    db, destination.name, StoreDay.store_id, StoreDay.business_date
+                )
+            )
+        )
+        if scope == "backposts":
+            day_query = day_query.where(previously_exported)
+        elif scope == "current":
+            day_query = day_query.where(not_(previously_exported))
+        if lock_cases:
+            day_query = day_query.with_for_update(of=StoreDay, skip_locked=True)
+        rows = (
+            await db.execute(
+                day_query.order_by(StoreDay.business_date, StoreDay.store_id, AuditTotal.id).limit(
+                    MAX_BATCH
+                )
+            )
+        ).all()
+        records, items = [], []
+        for day, total, is_backpost in rows:
+            version = f"v{day.audit_version}"
+            record = {
+                "store_id": day.store_id,
+                "business_date": day.business_date,
+                "audit_version": day.audit_version,
+                "total_name": total.total_name,
+                "level": total.level,
+                "dimension": total.dimension_key,
+                "rollup_key": total.rollup_key,
+                "calculated_amount": str(total.calculated_amount),
+                "declared_amount": str(total.declared_amount)
+                if total.declared_amount is not None
+                else None,
+                "variance_amount": str(total.variance_amount)
+                if total.variance_amount is not None
+                else None,
+                "currency": total.currency,
+                "backpost": is_backpost,
+                "backpost_reason": "A newer totals version or late addition for an exported store day"
+                if is_backpost
+                else None,
+            }
+            records.append(record)
+            items.append(
+                (
+                    total.id,
+                    version,
+                    {
+                        "record_ref": f"{day.store_id}/{day.business_date}/{total.total_name}/{total.dimension_key or 'store'}/{hashlib.sha256(total.rollup_key.encode()).hexdigest()[:12] if total.rollup_key else 'all'}",
+                        "store_id": day.store_id,
+                        "business_date": day.business_date,
+                        "backpost": is_backpost,
+                    },
+                )
+            )
+        return records, items, None, None
+
+    if dataset == "audited_transactions":
+        unit_of_work = await export_unit_of_work(db)
+        reserved = (
+            select(ExportItem.id)
+            .where(
+                ExportItem.destination_id == destination.id,
+                ExportItem.dataset == dataset,
+                ExportItem.object_id == CanonicalTransaction.id,
+                ExportItem.object_version == "v1",
+            )
+            .exists()
+        )
+        previously_exported = (
+            select(ExportItem.id)
+            .join(ExportBatch, ExportBatch.id == ExportItem.batch_id)
+            .where(
+                ExportItem.destination_id == destination.id,
+                ExportItem.dataset == dataset,
+                ExportItem.state == "Delivered",
+                ExportBatch.status.in_(("Sent", "Acknowledged")),
+                ExportItem.store_id == CanonicalTransaction.store_id,
+                ExportItem.business_date == CanonicalTransaction.business_date,
+            )
+            .exists()
+        )
+        transaction_query = select(
+            CanonicalTransaction,
+            literal(None) if unit_of_work == "Transaction" else StoreDay,
+            previously_exported.label("is_backpost"),
+        ).where(not_(reserved))
+        if unit_of_work == "Transaction":
+            transaction_query = transaction_query.where(
+                not_(transaction_export_invalid(db, destination.name, CanonicalTransaction)),
+            )
+        else:
+            transaction_query = transaction_query.join(
+                StoreDay,
+                (StoreDay.store_id == CanonicalTransaction.store_id)
+                & (StoreDay.business_date == CanonicalTransaction.business_date),
+            ).where(
+                StoreDay.status == "Closed",
+                StoreDay.totals_stale.is_(False),
+                not_(
+                    store_day_export_invalid(
+                        db,
+                        destination.name,
+                        CanonicalTransaction.store_id,
+                        CanonicalTransaction.business_date,
+                    )
+                ),
+            )
+        if store_ids is not None:
+            transaction_query = transaction_query.where(
+                CanonicalTransaction.store_id.in_(store_ids) if store_ids else false()
+            )
+        if scope == "backposts":
+            transaction_query = transaction_query.where(previously_exported)
+        elif scope == "current":
+            transaction_query = transaction_query.where(not_(previously_exported))
+        if lock_cases:
+            transaction_query = transaction_query.with_for_update(
+                of=CanonicalTransaction if unit_of_work == "Transaction" else StoreDay,
+                skip_locked=True,
+            )
+        selected = (
+            await db.execute(
+                transaction_query.order_by(
+                    CanonicalTransaction.business_date,
+                    CanonicalTransaction.store_id,
+                    CanonicalTransaction.id,
+                ).limit(MAX_BATCH)
+            )
+        ).all()
+        transactions = [row[0] for row in selected]
+        day_by_transaction = {row[0].id: (row[1], row[2]) for row in selected}
+        ids = [transaction.id for transaction in transactions]
+        lines: dict[str, list] = {transaction_id: [] for transaction_id in ids}
+        taxes: dict[str, list] = {transaction_id: [] for transaction_id in ids}
+        discounts: dict[str, list] = {transaction_id: [] for transaction_id in ids}
+        tenders: dict[str, list] = {transaction_id: [] for transaction_id in ids}
+        for offset in range(0, len(ids), SQLITE_BIND_BATCH_SIZE):
+            id_batch = ids[offset : offset + SQLITE_BIND_BATCH_SIZE]
+            for row in (
+                await db.execute(
+                    select(TransactionLine)
+                    .where(TransactionLine.transaction_id.in_(id_batch))
+                    .order_by(TransactionLine.transaction_id, TransactionLine.line_no)
+                )
+            ).scalars():
+                lines[row.transaction_id].append(
+                    {
+                        "line_no": row.line_no,
+                        "item_code": row.item_code,
+                        "description": row.description,
+                        "quantity": str(row.quantity),
+                        "unit_price": str(row.unit_price),
+                        "original_unit_price": (
+                            str(row.original_unit_price)
+                            if row.original_unit_price is not None
+                            else None
+                        ),
+                        "price_override_reason": row.price_override_reason,
+                        "source_attributes": row.source_attributes,
+                        "gross_amount": str(row.gross_amount),
+                        "tax_code": row.tax_code,
+                        "tax_rate": str(row.tax_rate),
+                        "tax_amount": str(row.tax_amount),
+                        "return_reason": row.return_reason,
+                    }
+                )
+            for row in (
+                await db.execute(
+                    select(TransactionTax)
+                    .where(TransactionTax.transaction_id.in_(id_batch))
+                    .order_by(TransactionTax.transaction_id, TransactionTax.tax_code)
+                )
+            ).scalars():
+                taxes[row.transaction_id].append(
+                    {
+                        "code": row.tax_code,
+                        "name": row.tax_name,
+                        "rate": str(row.rate),
+                        "taxable_amount": str(row.taxable_amount),
+                        "tax_amount": str(row.tax_amount),
+                    }
+                )
+            for row in (
+                await db.execute(
+                    select(TransactionDiscount)
+                    .where(TransactionDiscount.transaction_id.in_(id_batch))
+                    .order_by(TransactionDiscount.transaction_id, TransactionDiscount.id)
+                )
+            ).scalars():
+                discounts[row.transaction_id].append(
+                    {
+                        "line_no": row.line_no,
+                        "kind": row.kind,
+                        "code": row.code,
+                        "description": row.description,
+                        "amount": str(row.amount),
+                    }
+                )
+            for row in (
+                await db.execute(
+                    select(TransactionTender)
+                    .where(TransactionTender.transaction_id.in_(id_batch))
+                    .order_by(TransactionTender.transaction_id, TransactionTender.id)
+                )
+            ).scalars():
+                tenders[row.transaction_id].append(
+                    {
+                        "type": row.tender_type,
+                        "amount": str(row.amount),
+                        "reference": row.reference,
+                        "authorization": row.authorization,
+                        "source_attributes": row.source_attributes,
+                    }
+                )
+        records, items = [], []
+        for transaction in transactions:
+            _, is_backpost = day_by_transaction[transaction.id]
+            records.append(
+                {
+                    "transaction_id": transaction.id,
+                    "transaction_number": transaction.transaction_number,
+                    "business_date": transaction.business_date,
+                    "event_timestamp": transaction.event_timestamp.isoformat(),
+                    "store_id": transaction.store_id,
+                    "register_id": transaction.register_id,
+                    "cashier_id": transaction.cashier_id,
+                    "salesperson_id": transaction.salesperson_id,
+                    "transaction_type": transaction.transaction_type,
+                    "transaction_subtype": transaction.transaction_subtype,
+                    "amount": str(transaction.signed_amount),
+                    "currency": transaction.currency,
+                    "quantity": transaction.quantity,
+                    "channel_id": transaction.channel_id,
+                    "customer_id": transaction.customer_id,
+                    "user_references": transaction.user_references,
+                    "tender_type": transaction.tender_type,
+                    "reconciliation_status": transaction.reconciliation_status,
+                    "detail_status": transaction.detail_status,
+                    "disposition": transaction.disposition,
+                    "original_reference": transaction.original_reference,
+                    "return_reason": transaction.return_reason,
+                    "items": lines[transaction.id],
+                    "taxes": taxes[transaction.id],
+                    "discounts": discounts[transaction.id],
+                    "tenders": tenders[transaction.id],
+                    "backpost": is_backpost,
+                    "backpost_reason": "Late addition to a business day already exported"
+                    if is_backpost
+                    else None,
+                }
+            )
+            items.append(
+                (
+                    transaction.id,
+                    "v1",
+                    {
+                        "record_ref": transaction.transaction_number or transaction.id,
+                        "store_id": transaction.store_id,
+                        "business_date": transaction.business_date,
+                        "backpost": is_backpost,
+                    },
+                )
+            )
+        return records, items, None, None
 
     reserved = (
         select(ExportItem.id)

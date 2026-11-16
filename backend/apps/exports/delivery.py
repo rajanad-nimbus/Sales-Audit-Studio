@@ -59,7 +59,15 @@ def render(
             fieldnames = list(records[0].keys())
             return csv_table(
                 fieldnames,
-                ([record.get(fieldname, "") for fieldname in fieldnames] for record in records),
+                (
+                    [
+                        json.dumps(record[fieldname], separators=(",", ":"), default=str)
+                        if isinstance(record.get(fieldname), (dict, list))
+                        else record.get(fieldname, "")
+                        for fieldname in fieldnames
+                    ]
+                    for record in records
+                ),
             ).encode()
         return b""
     envelope = {

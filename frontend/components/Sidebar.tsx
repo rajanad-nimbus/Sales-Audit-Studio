@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useLive } from '@/lib/sync';
-import { navSections } from '@/lib/nav';
+import { MENU_ONLY, navSections } from '@/lib/nav';
 import { Logo } from '@/components/Logo';
 import { useMe } from './UserMenu';
 
@@ -13,6 +13,7 @@ const icons: Record<string, React.ReactNode> = {
   home: <path d="M3 11.5 12 4l9 7.5M5 10v10h14V10" />,
   cases: <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z" />,
   transactions: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+  ledger: <path d="M4 5h16v14H4zM8 9h3m2 0h3M8 13h3m2 0h3M8 17h3m2 0h3" />,
   registerEvents: <path d="M7 4h10v16H7zM10 8h4m-4 4h4m-4 4h2" />,
   reports: <path d="M6 3h9l3 3v15H6zM9 11h6m-6 4h6M9 7h3" />,
   auditErrors: <path d="M12 4 3 20h18L12 4Zm0 6v5m0 3h.01" />,
@@ -58,10 +59,12 @@ export function Sidebar() {
   const [pending, setPending] = useState(0);
   const { me } = useMe();
   // The server decides which screens this role may open (GET /api/me). Until it answers, show none.
-  const sections = useMemo(() => navSections(me?.screens ?? []), [me]);
+  const sections = useMemo(() => navSections(me?.screens ?? [], MENU_ONLY), [me]);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [filter, setFilter] = useState('');
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [closedSections, setClosedSections] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -81,6 +84,19 @@ export function Sidebar() {
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    searchInput.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileOpen(false);
+        document.querySelector<HTMLButtonElement>('[aria-label="Toggle menu"]')?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
 
   // The hamburger in the top bar toggles the menu: collapse on desktop, drawer on small screens.
   useEffect(() => {
@@ -117,6 +133,16 @@ export function Sidebar() {
       {mobileOpen && <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />}
 
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' open' : ''}`}>
+        <button
+          className="nav-icon-btn sidebar-close"
+          aria-label="Close menu"
+          onClick={() => {
+            setMobileOpen(false);
+            document.querySelector<HTMLButtonElement>('[aria-label="Toggle menu"]')?.focus();
+          }}
+        >
+          <span aria-hidden="true">×</span>
+        </button>
         <Link href="/" className="sidebar-brand" title="Sales Audit Studio">
           <div className="brand-mark">
             <Logo size={22} />
@@ -141,36 +167,93 @@ export function Sidebar() {
             <path d="m20 20-3.500-3.500" />
           </svg>
           <input
+            ref={searchInput}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Quick search menus..."
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && filter) {
+                e.stopPropagation();
+                setFilter('');
+              }
+            }}
+            placeholder="Find a page…"
             aria-label="Quick search menus"
           />
+          {filter && (
+            <button
+              className="nav-search-clear"
+              aria-label="Clear menu search"
+              onClick={() => {
+                setFilter('');
+                searchInput.current?.focus();
+              }}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
         </div>
 
         <nav className="sidebar-nav" aria-label="Main">
           {shown.map((s) => (
             <div key={s.title} className="nav-section">
-              <div className="nav-section-title">{s.title}</div>
-              {s.items.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={item.label}
-                  className={`menu-link${isActive(item.href) ? ' active' : ''}`}
+              <button
+                className="nav-section-title nav-section-toggle"
+                aria-expanded={!!q || !closedSections.includes(s.title)}
+                aria-controls={`nav-group-${s.title.replace(/\s+/g, '-')}`}
+                onClick={() =>
+                  setClosedSections((current) =>
+                    current.includes(s.title)
+                      ? current.filter((title) => title !== s.title)
+                      : [...current, s.title]
+                  )
+                }
+              >
+                {s.title}
+                <svg
+                  className="nav-section-chevron"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
                 >
-                  <Icon name={item.icon} />
-                  <span className="menu-label">{item.label}</span>
-                  {item.badge && pending > 0 && (
-                    <span className="menu-badge">
-                      {pending > 999 ? `${Math.floor(pending / 1000)}k` : pending}
-                    </span>
-                  )}
-                </Link>
-              ))}
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              <div
+                className="nav-section-items"
+                id={`nav-group-${s.title.replace(/\s+/g, '-')}`}
+                hidden={!q && closedSections.includes(s.title)}
+              >
+                {s.items.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={item.label}
+                    aria-current={isActive(item.href) ? 'page' : undefined}
+                    className={`menu-link${isActive(item.href) ? ' active' : ''}`}
+                  >
+                    <Icon name={item.icon} />
+                    <span className="menu-label">{item.label}</span>
+                    {item.badge && pending > 0 && (
+                      <span className="menu-badge">
+                        {pending > 999 ? `${Math.floor(pending / 1000)}k` : pending}
+                      </span>
+                    )}
+                  </Link>
+                ))}
+              </div>
             </div>
           ))}
-          {shown.length === 0 && <p className="cc-empty">No menu matches.</p>}
+          {q && (
+            <p className="nav-search-status" role="status">
+              {shown.length === 0
+                ? `No pages match “${filter.trim()}”. Try another name.`
+                : `${shown.reduce((count, section) => count + section.items.length, 0)} matching pages`}
+            </p>
+          )}
         </nav>
 
         <div className="sidebar-footer">

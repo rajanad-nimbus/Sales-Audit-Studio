@@ -1,8 +1,26 @@
 import type { BadgeVariant } from '@/components/ui';
 
 export interface Readiness {
-  ingest: { state: string; transactions: number; detail: string };
-  audit: { state: string; open_cases: number; unexplained_variances: number; detail: string };
+  ingest: {
+    state: string;
+    transactions: number;
+    detail: string;
+    day_close?: { state: string; events: number; markers: number; required?: boolean };
+  };
+  audit: {
+    state: string;
+    resa_status?: string;
+    overall_status?: string;
+    open_cases: number;
+    unexplained_variances: number;
+    missing_transactions?: number;
+    detail: string;
+    signed_off?: boolean;
+    signed_version?: number | null;
+    signed_by?: string | null;
+    signed_at?: string | null;
+    signoff_rationale?: string | null;
+  };
   export: { state: string; records: number; pending: number; acknowledged: number };
   ready_to_close: boolean;
 }
@@ -18,6 +36,7 @@ export interface StoreDay {
 export interface Explanation {
   id: string;
   audit_version: number;
+  rollup_key?: string | null;
   variance_amount: string;
   outcome: string;
   reason: string;
@@ -40,6 +59,7 @@ export interface Total {
   name: string;
   level: string;
   dimension: string | null;
+  rollup_key?: string | null;
   calculated_amount: string;
   declared_amount: string | null;
   variance_amount: string | null;
@@ -55,6 +75,17 @@ export interface Total {
   };
   explanation?: Explanation | null;
   data_quality?: string;
+}
+
+export function formatRollupKey(key?: string | null): string {
+  if (!key) return '';
+  try {
+    return (JSON.parse(key) as [string, string, unknown][])
+      .map(([realm, field, value]) => `${realm}.${field}: ${value ?? '—'}`)
+      .join(' · ');
+  } catch {
+    return key;
+  }
 }
 export interface DayCase {
   id: string;
@@ -108,8 +139,8 @@ export const dayKey = (d: { store_id: string; business_date: string }) =>
   `${d.store_id}|${d.business_date}`;
 
 /** Readiness states that are done; anything else needs attention. */
-const GOOD = new Set(['Complete', 'Clean', 'Final', 'Exported']);
-const NEUTRAL = new Set(['Not exported', 'In progress', 'Not totaled']);
+const GOOD = new Set(['Complete', 'Clean', 'Final', 'Exported', 'Audited', 'Sales Audit Complete']);
+const NEUTRAL = new Set(['Not exported', 'In progress', 'Not totaled', 'Totaled']);
 export const readinessVariant = (state: string): BadgeVariant =>
   GOOD.has(state)
     ? 'success'
@@ -150,6 +181,7 @@ export interface StoreDayBrief {
       name: string;
       level: string;
       dimension: string | null;
+      rollup_key?: string | null;
       variance: string;
       currency: string;
       outcome: string | null;

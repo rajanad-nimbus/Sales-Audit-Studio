@@ -8,13 +8,13 @@
 :root {
   --bg: oklch(0.99 0.005 255);
   --bg-secondary: #ffffff;
-  --bg-tertiary: oklch(0.96 0.02 255);
+  --bg-tertiary: oklch(0.97 0.006 255);
   --fg: oklch(0.235 0.015 65);
   --fg-secondary: oklch(0.48 0.05 255);
   --fg-tertiary: oklch(0.62 0.04 255);
-  --border: oklch(0.88 0.03 255);
-  --border-light: oklch(0.93 0.02 255);
-  --sidebar: oklch(0.97 0.015 255);
+  --border: oklch(0.9 0.009 255);
+  --border-light: oklch(0.94 0.006 255);
+  --sidebar: oklch(0.98 0.006 255);
   --sidebar-accent: oklch(0.93 0.03 255);
   --navy: #0f2347;
   --primary: #17336b;
@@ -46,6 +46,9 @@
   --navy-active: #0f2454;
   --scrim: rgba(0, 0, 0, 0.45);
   --focus-ring: color-mix(in oklab, var(--primary) 45%, transparent);
+
+  --font-root: 15px;
+  --content-max: 1440px;
 
   /* type */
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;

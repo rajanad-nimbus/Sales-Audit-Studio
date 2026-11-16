@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.models import Case
 from apps.corrections.models import TransactionAdjustment
+from apps.ingest import reconciliation
 from apps.security import scope
 from apps.security.authentication import require_role
 from apps.store_days import variances
@@ -223,6 +224,8 @@ async def explain_variance(
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         raise HTTPException(status_code=409, detail="Reopen the store day to explain a variance")
+    await reconciliation.lock_reconciliation(db)
+    day = await get_day(db, store_id, business_date, lock=True)
     total = await db.get(AuditTotal, body.total_id)
     if total is None or total.store_day_id != day.id or total.audit_version != day.audit_version:
         raise HTTPException(
@@ -234,6 +237,11 @@ async def explain_variance(
         raise HTTPException(
             status_code=422, detail=f"This variance needs no explanation ({needed or 'none'})"
         )
+    if day.audit_signed_version == day.audit_version:
+        day.audit_signed_version = None
+        day.audit_signed_by = None
+        day.audit_signed_at = None
+        day.audit_signoff_rationale = None
     if needed == variances.NEEDS_CASE and not (body.case_id or body.correction_id):
         raise HTTPException(
             status_code=422,
@@ -268,6 +276,7 @@ async def explain_variance(
         total_name=total.total_name,
         level=total.level,
         dimension_key=total.dimension_key,
+        rollup_key=total.rollup_key,
         variance_amount=total.variance_amount,
         outcome=needed,
         reason=body.reason,
@@ -287,6 +296,7 @@ async def explain_variance(
         after={
             "total": total.total_name,
             "dimension": total.dimension_key,
+            "rollup_key": total.rollup_key,
             "variance_amount": str(total.variance_amount),
             "outcome": needed,
             "case_id": body.case_id,

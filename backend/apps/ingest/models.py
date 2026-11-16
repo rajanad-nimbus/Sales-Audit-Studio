@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     LargeBinary,
@@ -57,6 +58,7 @@ class SourceSetting(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     in_daily_batch: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     manual_sync: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    require_day_close: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Scheduled sync for sources Nimbus pulls itself: "daily" or "weekly" at sync_time (HH:MM) in sync_timezone,
     # on sync_weekday (0 = Monday) when weekly. None means not scheduled.
     sync_frequency: Mapped[str | None] = mapped_column(String(8))
@@ -100,6 +102,7 @@ class ReconciliationPolicy(Base):
         String(3), default="USD", server_default="USD"
     )
     settlement_day_tolerance: Mapped[int] = mapped_column(Integer, default=0)
+    duplicate_lookback_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     gap_min_count: Mapped[int] = mapped_column(
         Integer, default=10, server_default="10"
     )  # a missing-transaction gap is "big" from this many...
@@ -197,6 +200,7 @@ class RegisterEvent(Base):
     original_transaction_number: Mapped[str | None] = mapped_column(String(30))
     original_register_id: Mapped[str | None] = mapped_column(String(50))
     reason_code: Mapped[str | None] = mapped_column(String(30))
+    details: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
     amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     audited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
@@ -206,4 +210,29 @@ class RegisterEvent(Base):
     __table_args__ = (
         Index("ix_register_events_store_date_type", "store_id", "business_date", "event_type"),
         Index("ix_register_events_unaudited", "audited", "business_date"),
+    )
+
+
+class RegisterEventAdjustment(Base):
+    """Proposed, reviewed correction to mutable register-event metadata."""
+
+    __tablename__ = "register_event_adjustments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    event_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("register_events.id"), index=True
+    )
+    proposed_values: Mapped[dict] = mapped_column(JSON)
+    rationale: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="Proposed", index=True)
+    proposed_by: Mapped[str] = mapped_column(String(255))
+    reviewed_by: Mapped[str | None] = mapped_column(String(255))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('Proposed', 'Approved', 'Rejected')",
+            name="ck_register_event_adjustments_status",
+        ),
+        Index("ix_register_event_adjustments_event_created", "event_id", "created_at", "id"),
     )

@@ -1,36 +1,29 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { useTheme } from '@/lib/ThemeContext';
 import { BusinessDate } from '@/components/BusinessDate';
+import { CommandPalette } from '@/components/CommandPalette';
+import { HelpCenter } from '@/components/HelpCenter';
 import { NotificationBell } from '@/components/Notifications';
 import { UserMenu } from '@/components/UserMenu';
+import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 
 export function TopBar() {
-  const router = useRouter();
   const { theme, setTheme } = useTheme();
-  const [q, setQ] = useState('');
-  const box = useRef<HTMLInputElement>(null);
 
+  // Keep the server and initial hydration render identical. Read the browser
+  // preference after mounting, and track changes while system mode is selected.
+  const [systemDark, setSystemDark] = useState(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        box.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => setSystemDark(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
   }, []);
 
-  const effectiveTheme =
-    theme === 'system'
-      ? typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light'
-      : theme;
-  const isDark = effectiveTheme === 'dark';
+  const isDark = theme === 'dark' || (theme === 'system' && systemDark);
   const toggleTheme = () => setTheme(isDark ? 'light' : 'dark');
 
   return (
@@ -53,34 +46,8 @@ export function TopBar() {
             <path d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <form
-          className="top-search"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (q.trim()) router.push(`/actions?q=${encodeURIComponent(q.trim())}`);
-          }}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3.500-3.500" />
-          </svg>
-          <input
-            ref={box}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search cases, stores, exception types..."
-            aria-label="Search"
-          />
-          <kbd>⌘K</kbd>
-        </form>
+        <WorkspaceSwitcher />
+        <CommandPalette />
         <div className="navbar-actions">
           <BusinessDate />
           <button
@@ -108,6 +75,7 @@ export function TopBar() {
               />
             </svg>
           </button>
+          <HelpCenter />
           <NotificationBell />
           <UserMenu />
         </div>

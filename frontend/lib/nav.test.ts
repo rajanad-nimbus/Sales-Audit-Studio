@@ -114,3 +114,17 @@ describe('iconFor', () => {
     expect(iconFor('/something-new')).toBe('controls');
   });
 });
+
+describe('narrowing the menu to a few screens', () => {
+  it('keeps only the listed screens the role may open, in their groups', () => {
+    const sections = navSections(SERVER, ['/store-days', '/imports']);
+    expect(titles(sections)).toEqual(['Store Day Audit', 'Integrations']);
+    expect(labels(sections, 'Store Day Audit')).toEqual(['Store Days & Totals']);
+    expect(labels(sections, 'Integrations')).toEqual(['Imports']);
+  });
+
+  it('never shows a listed screen the role may not open', () => {
+    const denied = SERVER.map((s) => (s.path === '/imports' ? { ...s, allowed: false } : s));
+    expect(titles(navSections(denied, ['/store-days', '/imports']))).toEqual(['Store Day Audit']);
+  });
+});
