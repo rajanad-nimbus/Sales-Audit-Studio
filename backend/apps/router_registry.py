@@ -12,7 +12,9 @@ from apps.cash.ach_routes import router as ach_router
 from apps.cash.routes import router as cash_router
 from apps.command_center.routes import router as command_center_router
 from apps.controls.foundation.routes import router as foundation_router
+from apps.controls.foundation.tender_packages import router as tender_package_router
 from apps.controls.foundation.tenders import router as tender_router
+from apps.controls.rules.packages import router as rule_package_router
 from apps.controls.rules.routes import router as rules_router
 from apps.controls.rules.transaction_routes import router as transaction_rules_router
 from apps.corrections.routes import router as corrections_router
@@ -34,6 +36,7 @@ from apps.store_days.periods import router as period_router
 from apps.store_days.routes import router as store_day_router
 from apps.store_days.sequence_gap_routes import router as sequence_gap_router
 from apps.store_days.total_history import router as total_history_router
+from apps.store_days.tolerance_packages import router as tolerance_package_router
 from apps.store_days.variance_routes import explanation_router, tolerance_router
 from apps.system.routes import router as system_router
 from apps.totals.misc_summary import router as misc_totals_router
@@ -61,8 +64,10 @@ ROUTERS = (
     closure_router,
     explanation_router,
     period_router,
+    tolerance_package_router,
     tolerance_router,
     foundation_router,
+    tender_package_router,
     tender_router,
     cash_router,
     ach_router,
@@ -79,6 +84,7 @@ ROUTERS = (
     gl_router,
     totals_router,
     misc_totals_router,
+    rule_package_router,
     rules_router,
     transaction_rules_router,
     operations_router,

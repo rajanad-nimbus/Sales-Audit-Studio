@@ -19,6 +19,7 @@ import {
 } from '@/components/ui';
 import type { Column } from '@/components/ui';
 import { SettingsSection } from '@/components/settings/SettingsSection';
+import { AuditRulePackages } from '@/components/settings/AuditRulePackages';
 import { TransactionRules } from '@/components/settings/TransactionRules';
 import { TotalDefinitions, type TotalRevision } from '@/components/settings/TotalDefinitions';
 import { ErrorDefinitionPackages } from '@/components/settings/ErrorDefinitionPackages';
@@ -800,6 +801,7 @@ export default function ControlsPage() {
                 </span>,
               ])}
             />
+            <AuditRulePackages onApplied={load} />
           </Card>
           {previewRule && (
             <Card title={`Test worksheet · ${previewRule.name}`}>

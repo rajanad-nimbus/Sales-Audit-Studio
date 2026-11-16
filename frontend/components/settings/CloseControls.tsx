@@ -5,6 +5,7 @@ import { useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import { Alert, Badge, Button, Card, DataTable, Field } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
+import { VarianceTolerancePackages } from './VarianceTolerancePackages';
 import { formatDateTime } from '@/lib/preferences';
 
 interface ToleranceRule {
@@ -347,6 +348,7 @@ function Tolerances({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
       )}
+      <VarianceTolerancePackages onApplied={load} />
     </Card>
   );
 }

@@ -5,6 +5,7 @@ import { useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
 import { Alert, Badge, Button, Card, DataTable, Field } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
+import { TenderTypePackages } from './TenderTypePackages';
 
 interface Tender {
   id: string;
@@ -236,6 +237,7 @@ export function TenderTypes() {
           </div>
         </div>
       )}
+      <TenderTypePackages onApplied={load} />
     </Card>
   );
 }
