@@ -549,7 +549,7 @@ export default function StoreDaysPage() {
         </MetricGrid>
       )}
 
-      <Card>
+      <Card className="card-open">
         <Tabs
           value={tab}
           onChange={(id) => {

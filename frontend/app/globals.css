@@ -5677,3 +5677,190 @@ button.cc-summary-item:focus-visible {
     padding-left: var(--space-md);
   }
 }
+
+/* ===== Refinement pass: one ink, one control height, denser navigation, tinted status ===== */
+/* Appended last so it settles the earlier passes. Tokens only, no page-specific rules. */
+html,
+body {
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
+}
+::selection {
+  background: color-mix(in oklab, var(--primary) 22%, transparent);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--fg-tertiary) 45%, transparent) transparent;
+}
+.data-table .num,
+.metric-value,
+.stat-value,
+.num,
+.pager {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Controls share one height, so a toolbar reads as a single row. */
+.main-content
+  input:not(
+    [type='checkbox'],
+    [type='radio'],
+    [type='range'],
+    [type='file'],
+    [type='color'],
+    [type='hidden']
+  ),
+.main-content select {
+  height: var(--control-h);
+  padding-block: 0;
+  font-size: var(--text-md);
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
+}
+.main-content textarea {
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--fg-tertiary);
+  opacity: 1;
+}
+input:hover:not(:disabled, :focus),
+select:hover:not(:disabled, :focus),
+textarea:hover:not(:disabled, :focus) {
+  border-color: color-mix(in oklab, var(--fg-tertiary) 55%, var(--border));
+}
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+input[type='checkbox']:focus,
+input[type='radio']:focus,
+input[type='range']:focus {
+  box-shadow: none;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+.btn-secondary:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--fg-tertiary) 55%, var(--border));
+}
+
+/* Navigation: quiet group labels, compact rows, the active page stays solid navy. */
+.nav-section-toggle {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--fg-tertiary);
+}
+.nav-section + .nav-section {
+  margin-top: var(--space-sm);
+}
+.menu-link {
+  min-height: 2.25rem;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 1px;
+  border-radius: var(--radius-md);
+  transition:
+    background-color var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+.menu-link .nav-tile {
+  opacity: 0.8;
+}
+.menu-link:hover .nav-tile,
+.menu-link.active .nav-tile {
+  opacity: 1;
+}
+.menu-link.active {
+  box-shadow: none;
+}
+.nav-search input {
+  height: var(--control-h);
+  padding-block: 0;
+  border-radius: var(--radius-md);
+}
+
+/* Status messages carry their tone as a tint and keep the copy in ink, so they stay readable. */
+.alert {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  color: var(--fg);
+}
+.alert-error {
+  background: color-mix(in oklab, var(--error) 7%, var(--bg-secondary));
+  border-color: color-mix(in oklab, var(--error) 30%, var(--bg-secondary));
+  color: color-mix(in oklab, var(--error) 70%, var(--fg));
+}
+.alert-warning {
+  background: color-mix(in oklab, var(--warning) 8%, var(--bg-secondary));
+  border-color: color-mix(in oklab, var(--warning) 32%, var(--bg-secondary));
+  color: color-mix(in oklab, var(--warning) 65%, var(--fg));
+}
+.alert-success {
+  background: color-mix(in oklab, var(--success) 7%, var(--bg-secondary));
+  border-color: color-mix(in oklab, var(--success) 30%, var(--bg-secondary));
+  color: color-mix(in oklab, var(--success) 70%, var(--fg));
+}
+.alert-info {
+  background: color-mix(in oklab, var(--primary-light) 45%, var(--bg-secondary));
+  border-color: color-mix(in oklab, var(--primary) 22%, var(--bg-secondary));
+}
+.alert .btn-secondary:not(.alert-close) {
+  background: var(--bg-secondary);
+  color: var(--fg);
+}
+
+/* Tables: a calm header band and no box inside a box when a table is empty. */
+.main-content .data-table th {
+  background: var(--bg-tertiary);
+  color: var(--fg-secondary);
+}
+.data-table td .empty-state,
+.data-table-surface .empty-state {
+  border: 0;
+}
+.data-table tbody tr {
+  transition: background-color var(--duration-fast) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* A card that only groups: tabs, filters and a table sit on the canvas, and the table keeps the one border. */
+.card.card-open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.card.card-open > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+/* "Save current view" is an action, so it reads as a quiet button, not a placeholder outline. */
+.ac-chip.add {
+  border-style: solid;
+  font-weight: var(--weight-medium);
+}
+.ac-chip.add:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--fg-tertiary) 55%, var(--border));
+}

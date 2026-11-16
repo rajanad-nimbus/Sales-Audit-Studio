@@ -21,8 +21,9 @@ Use an open canvas with bounded content width; avoid wrapping the whole page in 
 2. Colors come from tokens. Brand/interactive = `--primary`, `--primary-text`, `--primary-light`, `--navy`. Status = `--success`, `--warning`, `--error`, `--info`, used for meaning only, never decoration.
 3. Text on a navy or primary fill is `--on-primary`.
 4. Spacing uses `--space-*`; radius `--radius-sm|md|lg|pill`; type `--text-*`; shadows `--shadow-*`; layers `--z-*`.
-5. Every token that changes between themes is defined in both dark blocks of `tokens.css` (media query and `[data-theme='dark']`). Keep them in sync.
-6. Check any new screen in light and dark.
+5. Text inputs and selects in the workspace share one height, `--control-h`, so toolbars align; do not set heights per page. Alerts show their tone as a tinted surface with ink-coloured copy.
+6. Every token that changes between themes is defined in both dark blocks of `tokens.css` (media query and `[data-theme='dark']`). Keep them in sync.
+7. Check any new screen in light and dark.
 
 ## Enforcement
 

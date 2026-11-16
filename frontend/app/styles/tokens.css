@@ -9,9 +9,9 @@
   --bg: oklch(0.99 0.005 255);
   --bg-secondary: #ffffff;
   --bg-tertiary: oklch(0.97 0.006 255);
-  --fg: oklch(0.235 0.015 65);
-  --fg-secondary: oklch(0.48 0.05 255);
-  --fg-tertiary: oklch(0.62 0.04 255);
+  --fg: oklch(0.21 0.03 258);
+  --fg-secondary: oklch(0.45 0.035 258);
+  --fg-tertiary: oklch(0.56 0.03 258);
   --border: oklch(0.9 0.009 255);
   --border-light: oklch(0.94 0.006 255);
   --sidebar: oklch(0.98 0.006 255);
@@ -30,9 +30,9 @@
   --sb-active: rgba(255, 255, 255, 0.14);
   --sb-line: rgba(255, 255, 255, 0.1);
   --sb-mark: #8fb4ff;
-  --success: #059669;
-  --warning: #d97706;
-  --error: oklch(0.577 0.245 27.325);
+  --success: #047857;
+  --warning: #a16207;
+  --error: oklch(0.52 0.2 27);
   --info: #2f5fb3;
   --radius: 0.65rem;
   --space-xs: 0.25rem;
@@ -74,17 +74,17 @@
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-pill: 999px;
-  --control-h: 2.25rem;
+  --control-h: 2.4rem;
 
   /* elevation */
-  --shadow-sm: 0 1px 2px rgba(15, 35, 71, 0.06);
-  --shadow-md: 0 4px 12px rgba(15, 35, 71, 0.1);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 1px 2px rgba(15, 35, 71, 0.05);
+  --shadow-md: 0 1px 2px rgba(15, 35, 71, 0.05), 0 6px 16px -4px rgba(15, 35, 71, 0.12);
+  --shadow-lg: 0 2px 6px rgba(15, 35, 71, 0.06), 0 20px 48px -12px rgba(15, 35, 71, 0.28);
 
   /* motion and layering */
   --duration-fast: 0.15s;
   --duration-base: 0.2s;
-  --ease: ease;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
   --z-sticky: 10;
   --z-sidebar: 20;
   --z-popover: 40;
