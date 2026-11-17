@@ -8,9 +8,7 @@ STANDARD_TOTALS = [
     {
         "name": "OVRSHT_S",
         "description": "Store-level over/short",
-        "category": "Over/Short",
-        "over_short_group": "Accountable For",
-        "over_short_operator": "+",
+        "category": "Miscellaneous",  # migration 0125: the client totals define the Over/Short sides
         "aggregation": "Sum",
         "source_system": "POS",
         "transaction_types": ["Sale", "Return"],
