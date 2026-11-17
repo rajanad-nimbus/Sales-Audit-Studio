@@ -228,7 +228,9 @@ class TotalDefinitionBody(BaseModel):
                 raise ValueError("Data realms must be unique")
             if self.realms and not referenced_realms.issubset(self.realms):
                 missing = sorted(referenced_realms - set(self.realms))
-                raise ValueError(f"Select each realm used by a parameter, restriction, or roll-up: {', '.join(missing)}")
+                raise ValueError(
+                    f"Select each realm used by a parameter, restriction, or roll-up: {', '.join(missing)}"
+                )
             selected_realms = set(self.realms) or referenced_realms
             if "Transaction" not in selected_realms:
                 raise ValueError("The Transaction realm is required as the base realm")
@@ -263,7 +265,7 @@ class TotalDefinitionBody(BaseModel):
         metadata = {
             "transaction_types": self.transaction_types,
             "realms": self.realms,
-            "joins": self.joins,
+            "joins": [join.model_dump() for join in self.joins],
             "parameters": [parameter.model_dump() for parameter in self.parameters],
             "rollups": [rollup.model_dump() for rollup in self.rollups],
             "usages": [usage.model_dump() for usage in self.usages],
