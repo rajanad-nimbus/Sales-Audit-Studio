@@ -102,8 +102,11 @@ function AutomaticClose({ canConfigure }: { canConfigure: boolean }) {
         Store days open and total on their own as data arrives. When this is on, a store day whose
         data matches its source control total, with no open errors, unexplained variances or
         transaction number gaps, is also signed off and closed without anyone touching it. Days that
-        fail a check stay open for review. When off, every day waits for auditor sign-off and
-        Finance approval.
+        fail a check stay open for review. A short or over total counts as an unexplained variance
+        until Finance explains it or raises a case, or it falls within a tolerance rule, and an
+        earlier open day holds back every later day from closing. Closing a day, automatically or
+        by Finance approval, opens the next day for that store. When off, every day waits for
+        auditor sign-off and Finance approval.
       </p>
       {error && (
         <Alert tone="error" onDismiss={() => setError(null)}>

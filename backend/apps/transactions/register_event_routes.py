@@ -296,9 +296,9 @@ async def facets(
     def restricted(query):
         return scope.restrict(query, user, RegisterEvent.store_id)
 
-    stores = (
-        (await db.execute(restricted(select(RegisterEvent.store_id).distinct()))).scalars().all()
-    )
+    from apps.security.routes import known_store_codes  # lazy: security.routes imports transactions
+
+    stores = await known_store_codes(db, user)  # same store list as every other dropdown
     types = (
         (await db.execute(restricted(select(RegisterEvent.event_type).distinct()))).scalars().all()
     )

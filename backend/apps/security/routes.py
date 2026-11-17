@@ -1577,8 +1577,6 @@ class RoleAssignmentInput(BaseModel):
         "analyst",
         "sales_audit_manager",
         "auditor",
-        "store_manager",
-        "store_staff",
     ]
     reason: str = Field(min_length=10, max_length=2000)
 
@@ -1782,8 +1780,6 @@ async def list_role_assignments(
         "analyst",
         "sales_audit_manager",
         "auditor",
-        "store_manager",
-        "store_staff",
     ]
     | None = None,
     inactive_days: int | None = Query(default=None, ge=1, le=3650),

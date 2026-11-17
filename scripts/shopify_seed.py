@@ -288,7 +288,7 @@ def tender_amounts(spec, total):
 
 
 def order_payload(spec, total, tax_lines, location_id, locations):
-    stamp = (now() - timedelta(days=spec["days_ago"])).isoformat(timespec="seconds")
+    stamp = (now() - timedelta(days=int(os.environ.get("SHOPIFY_SEED_DAYS_AGO", spec["days_ago"])))).isoformat(timespec="seconds")
     order = {
         "line_items": spec["items"], "financial_status": "pending", "send_receipt": False,
         "send_fulfillment_receipt": False, "inventory_behaviour": "bypass",
@@ -326,7 +326,7 @@ def order_payload(spec, total, tax_lines, location_id, locations):
 
 def refund_order(order, spec, refund, locations):
     """Refund by line items (Shopify computes tax) or by a plain amount."""
-    when = (now() - timedelta(days=refund.get("days_ago", 0))).isoformat(timespec="seconds")
+    when = (now() - timedelta(days=int(os.environ.get("SHOPIFY_SEED_DAYS_AGO", refund.get("days_ago", 0))))).isoformat(timespec="seconds")
     sale = next(t for t in call("GET", f"/orders/{order['id']}/transactions.json")["transactions"]
                 if t["kind"] in ("sale", "capture")
                 and (not refund.get("gateway") or t["gateway"] == refund["gateway"]))

@@ -460,7 +460,7 @@ export function RoleAssignments() {
             )}
             <p className="hint">
               CSV headers: assignment_identifier, role, reason. Use an identity ID from the
-              directory, a role key such as finance or store_staff, and a reason of at least 10
+              directory, a role key such as finance or analyst, and a reason of at least 10
               characters. Studio administrators cannot receive an assigned business role.
             </p>
             <div className="cluster">

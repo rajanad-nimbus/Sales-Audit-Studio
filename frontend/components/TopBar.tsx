@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useTheme } from '@/lib/ThemeContext';
-import { BusinessDate } from '@/components/BusinessDate';
 import { CommandPalette } from '@/components/CommandPalette';
 import { HelpCenter } from '@/components/HelpCenter';
 import { NotificationBell } from '@/components/Notifications';
 import { UserMenu } from '@/components/UserMenu';
-import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 
 export function TopBar() {
   const { theme, setTheme } = useTheme();
@@ -46,10 +44,8 @@ export function TopBar() {
             <path d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <WorkspaceSwitcher />
         <CommandPalette />
         <div className="navbar-actions">
-          <BusinessDate />
           <button
             className="nav-icon-btn"
             onClick={toggleTheme}

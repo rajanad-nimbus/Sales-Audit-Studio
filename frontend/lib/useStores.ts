@@ -9,12 +9,12 @@ let cached: string[] | null = null;
 export function useStores(): string[] {
   const [stores, setStores] = useState<string[]>(cached ?? []);
   useEffect(() => {
-    if (cached) return;
+    if (cached?.length) return;
     let live = true;
     api
       .get('/api/stores')
       .then((r) => {
-        cached = r.data;
+        cached = r.data.length ? r.data : null; // never keep an empty list, or stores synced later stay hidden
         if (live) setStores(r.data);
       })
       .catch(() => {});

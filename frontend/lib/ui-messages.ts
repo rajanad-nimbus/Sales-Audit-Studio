@@ -127,7 +127,7 @@ const navigation = {
     'Store Sales Staff': 'Équipe de vente magasin', Administrator: 'Administrateur', Viewer: 'Lecteur',
     Impersonate: 'Usurper l’identité', 'Which stores?': 'Quels magasins ?',
     'No stores yet.': 'Aucun magasin.', 'Stop impersonating': 'Arrêter l’usurpation',
-    'My preferences': 'Mes préférences', Sign in: 'Se connecter', 'Sign out': 'Se déconnecter',
+    'My preferences': 'Mes préférences', 'Sign in': 'Se connecter', 'Sign out': 'Se déconnecter',
     'Signing out…': 'Déconnexion…', Choose: 'Choisir', 'Act as': 'Agir en tant que',
     'Unknown user': 'Utilisateur inconnu',
     'No pages match': 'Aucune page ne correspond', 'matching pages': 'pages correspondantes',

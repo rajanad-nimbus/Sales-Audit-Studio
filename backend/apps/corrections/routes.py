@@ -167,19 +167,9 @@ async def search_transactions(
 async def transaction_facets(
     db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))
 ):
-    stores = (
-        (
-            await db.execute(
-                scope.restrict(
-                    select(CanonicalTransaction.store_id), user, CanonicalTransaction.store_id
-                )
-                .distinct()
-                .order_by(CanonicalTransaction.store_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    from apps.security.routes import known_store_codes  # lazy: security.routes imports transactions
+
+    stores = await known_store_codes(db, user)  # same store list as every other dropdown
     tenders = (
         (
             await db.execute(

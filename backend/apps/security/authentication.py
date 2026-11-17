@@ -13,8 +13,6 @@ IMPERSONABLE = {
     "analyst",
     "sales_audit_manager",
     "auditor",
-    "store_manager",
-    "store_staff",
 }
 # The business roles an administrator can give a verified person. Ontology Studio expresses only a coarse role
 # (admin, user, editor, viewer), so these are assigned here, keyed to Studio's stable identity. Administrators
@@ -25,11 +23,9 @@ ASSIGNABLE_ROLES = (
     "analyst",
     "sales_audit_manager",
     "auditor",
-    "store_manager",
-    "store_staff",
 )
 # Store managers, store staff, and Sales Auditors see only their assigned stores.
-STORE_ROLES = ("store_manager", "store_staff", "analyst")
+STORE_ROLES = ("analyst",)
 # store_manager is limited to these areas, and within them to the stores assigned to the person in Ontology Studio.
 STORE_MANAGER_CASH_PREFIXES = ("/api/cash", "/api/cash-controls")
 # A store manager also reads the store's own transactions, to review them before they are audited.
@@ -69,7 +65,7 @@ def stores_from_identity(identity: dict, claim: str | None = None) -> list[str]:
 def _role_map() -> dict[str, str]:
     raw = os.getenv(
         "NIMBUS_ONTOLOGY_ROLE_MAP",
-        "admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,sales_audit_manager:sales_audit_manager,auditor:auditor,store_manager:store_manager,store_staff:store_staff",
+        "admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,sales_audit_manager:sales_audit_manager,auditor:auditor",
     )
     return dict(item.split(":", 1) for item in raw.split(",") if ":" in item)
 

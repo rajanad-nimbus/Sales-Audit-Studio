@@ -11,17 +11,15 @@ import { uiNavigationLabel } from '@/lib/ui-messages';
 const PERSONAS = [
   ['analyst', 'Sales Auditor'],
   ['finance', 'Finance Approver'],
-  ['store_manager', 'Store Manager'],
-  ['store_staff', 'Store Sales Staff'],
   ['it', 'IT Support Admin'],
+  ['sales_audit_manager', 'Sales Audit Manager'],
   ['auditor', 'Internal Audit'],
 ] as const;
 const ROLE_LABEL: Record<string, string> = {
   analyst: 'Sales Auditor',
   finance: 'Finance Approver',
-  store_manager: 'Store Manager',
-  store_staff: 'Store Sales Staff',
   it: 'IT Support Admin',
+  sales_audit_manager: 'Sales Audit Manager',
   auditor: 'Internal Audit',
   admin: 'Administrator',
 };
@@ -86,7 +84,7 @@ export function UserMenu() {
       role
         ? localStorage.setItem('nimbus_impersonate', role)
         : localStorage.removeItem('nimbus_impersonate');
-      (role === 'analyst' || role === 'store_manager' || role === 'store_staff') && stores
+      role === 'analyst' && stores
         ? localStorage.setItem('nimbus_impersonate_stores', stores)
         : localStorage.removeItem('nimbus_impersonate_stores');
     } catch {
@@ -163,7 +161,7 @@ export function UserMenu() {
                   key={key}
                   className={me!.role === key ? 'on' : ''}
                   onClick={() =>
-                    key === 'analyst' || key === 'store_manager' || key === 'store_staff'
+                    key === 'analyst'
                       ? setPickStores((v) => (v === key ? null : key))
                       : impersonate(key)
                   }

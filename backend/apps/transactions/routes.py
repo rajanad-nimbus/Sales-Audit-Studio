@@ -420,6 +420,9 @@ async def facets(
     facets_by_name = {name: [] for name in facet_columns}
     for name, value in sorted(facet_rows):
         facets_by_name[name].append(value)
+    from apps.security.routes import known_store_codes  # lazy: security.routes imports transactions
+
+    facets_by_name["stores"] = await known_store_codes(db, _)  # same store list as every other dropdown
     date_query = scope.restrict(
         select(
             func.min(CanonicalTransaction.business_date),
