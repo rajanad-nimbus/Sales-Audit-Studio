@@ -30,6 +30,7 @@ class CanonicalTransaction(Base):
     customer_identification_type: Mapped[str | None] = mapped_column(String(50))
     customer_attributes: Mapped[dict | None] = mapped_column(JSON)
     user_references: Mapped[dict | None] = mapped_column(JSON)
+    paid_out_details: Mapped[dict | None] = mapped_column(JSON)
     register_id: Mapped[str | None] = mapped_column(String(50))
     cashier_id: Mapped[str | None] = mapped_column(String(100))
     salesperson_id: Mapped[str | None] = mapped_column(String(100))

@@ -130,7 +130,7 @@ async def original_is_on_file(db, event: RegisterEvent) -> bool:
 async def run_register_event_rules(
     db, add, business_date: str | None = None, store_ids: set[str] | None = None
 ):
-    """Audit events not yet audited: post-void with no original, paid-in/out with no reason, excess no-sales."""
+    """Audit register activity: reversals without originals, paid-in/out without reasons, excess no-sales."""
     query = select(RegisterEvent).where(RegisterEvent.audited.is_(False))
     if business_date:
         query = query.where(RegisterEvent.business_date == business_date)
@@ -150,13 +150,11 @@ async def run_register_event_rules(
     flagged_days: set[tuple] = set()
     for event in events:
         code = None
-        if event.event_type == standard.POST_VOID and event.original_transaction_number:
-            if not await original_is_on_file(db, event):
+        if event.event_type == standard.POST_VOID:
+            if event.original_transaction_number and not await original_is_on_file(db, event):
                 code = "VOID_NO_ORIG"
         elif event.event_type in (standard.PAID_IN, standard.PAID_OUT) and not event.reason_code:
             code = "PAIDOUT_REASON_REQ"
-        elif event.event_type == standard.POST_VOID:
-            code = "VOID_NO_ORIG"
         if code:
             event.audit_code = code
             add(

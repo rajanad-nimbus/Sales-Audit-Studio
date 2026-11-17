@@ -651,7 +651,16 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
                     onChange={(e) => setProfileSource(e.target.value)}
                     disabled={!!editingProfileId}
                   >
-                    {['POS', 'POSControl', 'Processor', 'Bank', 'ERP', 'Shopify'].map((source) => (
+                    {[
+                      'POS',
+                      'OMS',
+                      'POSControl',
+                      'OMSControl',
+                      'Processor',
+                      'Bank',
+                      'ERP',
+                      'Shopify',
+                    ].map((source) => (
                       <option key={source}>{source}</option>
                     ))}
                   </select>
@@ -1003,15 +1012,16 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
           </Card>
           <Card title="Duplicate and missing transaction checks">
             <p className="hint">
-              Create audit findings for duplicate POS sales and gaps in register transaction
-              numbers. This does not change duplicate-delivery protection or Shopify duplicate
-              checks.
+              Audit same-source duplicate Sales from POS and OMS, plus gaps in POS register
+              transaction numbers. OMS sequence gaps are not checked until the retailer’s numbering
+              rules are configured. This does not change duplicate-delivery protection or Shopify
+              duplicate checks.
             </p>
             {duplicateMissingChecks ? (
               <div className="form-row">
                 <Field
                   label="Check duplicate sales and missing numbers"
-                  hint="When disabled, reconciliation skips these two checks. Existing findings remain open."
+                  hint="When disabled, reconciliation creates no new findings for these checks; existing findings remain open. Live POS number gaps still appear in Store Day review."
                 >
                   <input
                     type="checkbox"

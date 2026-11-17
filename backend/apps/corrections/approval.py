@@ -21,6 +21,7 @@ from apps.corrections.reconciliation import (
 from apps.exports.models import ExportItem
 from apps.ingest.common import LINEAGE, SIGN
 from apps.ingest.models import RegisterEvent, SourceRecord
+from apps.ingest.sequence import find_gaps
 from apps.security import scope
 from apps.security.sensitive_data import mask_pan_value, redact_sensitive_fields
 from apps.store_days.freshness import invalidate_totals, lock_store_day
@@ -39,6 +40,7 @@ from apps.transactions.models import (
     TransactionTender,
 )
 from apps.transactions.references import normalize_user_references
+from apps.transactions.views import paid_out_details as resolve_paid_out_details
 
 
 @dataclass
@@ -105,6 +107,24 @@ async def prepare_approval(
         register_id = context.values.get("register_id")
         transaction_number = context.values.get("transaction_number")
         if register_id and transaction_number:
+            source = context.missing_transaction[4] if context.missing_transaction else None
+            if source == "POS":
+                current_gaps = await find_gaps(
+                    db,
+                    context.business_date,
+                    store_id=context.store_id,
+                )
+                try:
+                    normalized_number = int(transaction_number)
+                except (TypeError, ValueError):
+                    normalized_number = None
+                if normalized_number not in current_gaps.get(
+                    (context.store_id, context.business_date), {}
+                ).get(register_id, []):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This POS transaction number is no longer a missing sequence gap",
+                    )
             existing_transaction = (
                 await db.execute(
                     select(CanonicalTransaction.id)
@@ -347,6 +367,21 @@ async def prepare_approval(
                     detail="Customer attributes changed after the correction was proposed; propose it again",
                 )
             values["before_value"] = before_value
+            adjustment.proposed_values = values
+        elif adjustment.adjustment_type == "PaidOutDetail":
+            values = context.values
+            field = values["field"]
+            source = (
+                await db.get(SourceRecord, context.transaction.source_record_id)
+                if context.transaction.source_record_id
+                else None
+            )
+            current = resolve_paid_out_details(context.transaction, source).get(field)
+            if current != values.get("before_value"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Paid-out details changed after the correction was proposed; propose it again",
+                )
             adjustment.proposed_values = values
         elif adjustment.adjustment_type == "UserReference":
             values = context.values
@@ -655,6 +690,24 @@ async def apply_approval_effects(
         else:
             references.pop(field, None)
         context.transaction.user_references = references or None
+    elif adjustment.adjustment_type == "PaidOutDetail":
+        if context.transaction is None:
+            raise HTTPException(
+                status_code=409, detail="The corrected transaction is no longer available"
+            )
+        source = (
+            await db.get(SourceRecord, context.transaction.source_record_id)
+            if context.transaction.source_record_id
+            else None
+        )
+        details = resolve_paid_out_details(context.transaction, source)
+        field = context.values["field"]
+        value = context.values["value"]
+        if value:
+            details[field] = value
+        else:
+            details.pop(field, None)
+        context.transaction.paid_out_details = details
     elif adjustment.adjustment_type in {"Tender", "Reference"}:
         if context.transaction is None:
             raise HTTPException(

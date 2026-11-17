@@ -15,7 +15,13 @@ export interface RetiredVoucher {
   retention_run_id: string;
 }
 
-export function RetiredVouchers({ rows }: { rows: RetiredVoucher[] | null }) {
+export function RetiredVouchers({
+  rows,
+  detachTitle = 'Retired vouchers',
+}: {
+  rows: RetiredVoucher[] | null;
+  detachTitle?: string;
+}) {
   return (
     <>
       <p className="hint">
@@ -26,23 +32,53 @@ export function RetiredVouchers({ rows }: { rows: RetiredVoucher[] | null }) {
         rows={rows}
         rowKey={(row) => row.voucher_number}
         emptyTitle="No retired vouchers"
+        csvFileName="retired-vouchers-visible.csv"
+        detachTitle={detachTitle}
         columns={[
-          { key: 'number', header: 'Voucher', primary: true, render: (row) => row.voucher_number },
-          { key: 'store', header: 'Issued at', render: (row) => row.issued_store_id },
-          { key: 'tender', header: 'Tender', render: (row) => row.tender_type },
+          {
+            key: 'number',
+            header: 'Voucher',
+            primary: true,
+            render: (row) => row.voucher_number,
+            csvValue: (row) => row.voucher_number,
+          },
+          {
+            key: 'store',
+            header: 'Issued at',
+            render: (row) => row.issued_store_id,
+            csvValue: (row) => row.issued_store_id,
+          },
+          {
+            key: 'tender',
+            header: 'Tender',
+            render: (row) => row.tender_type,
+            csvValue: (row) => row.tender_type,
+          },
           {
             key: 'amount',
             header: 'Amount',
             numeric: true,
             render: (row) => money(row.amount, row.currency),
+            csvValue: (row) => `${row.currency} ${row.amount}`,
           },
           {
             key: 'status',
             header: 'Final status',
             render: (row) => `${row.final_status} · ${formatBusinessDate(row.finalized_on)}`,
+            csvValue: (row) => `${row.final_status} · ${row.finalized_on}`,
           },
-          { key: 'retired', header: 'Retired', render: (row) => formatDateTime(row.retired_at) },
-          { key: 'run', header: 'Archive run', render: (row) => row.retention_run_id },
+          {
+            key: 'retired',
+            header: 'Retired',
+            render: (row) => formatDateTime(row.retired_at),
+            csvValue: (row) => row.retired_at,
+          },
+          {
+            key: 'run',
+            header: 'Archive run',
+            render: (row) => row.retention_run_id,
+            csvValue: (row) => row.retention_run_id,
+          },
         ]}
       />
     </>

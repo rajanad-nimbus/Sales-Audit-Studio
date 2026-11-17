@@ -1,10 +1,10 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { downloadBlob } from '@/lib/csv';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { useMe } from '@/components/MeProvider';
-import { Alert, Button, DataTable } from '@/components/ui';
+import { Alert, Button, DataTable, PageNav } from '@/components/ui';
 import { StoreSelect } from '@/components/StoreSelect';
 import { LookupSelect } from '@/components/LookupSelect';
 import { OverShortReport } from '@/components/OverShortReport';
@@ -34,6 +34,11 @@ type Deposit = {
   variance_amount: string | null;
   status: string;
 };
+const validDate = (value: string | null) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : '';
+};
 export default function CashOfficePage() {
   const { me } = useMe();
   const [rows, setRows] = useState<Cash[]>([]),
@@ -42,8 +47,16 @@ export default function CashOfficePage() {
     [depositTotal, setDepositTotal] = useState(0),
     [notice, setNotice] = useState<string | null>(null);
   const [historyStore, setHistoryStore] = useState('');
-  const [historyDate, setHistoryDate] = useState('');
+  const [historyStart, setHistoryStart] = useState('');
+  const [historyEnd, setHistoryEnd] = useState('');
+  const [controlsPage, setControlsPage] = useState(1);
+  const [depositsPage, setDepositsPage] = useState(1);
+  const [historyReady, setHistoryReady] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [controlLoadError, setControlLoadError] = useState<string | null>(null);
+  const [depositLoadError, setDepositLoadError] = useState<string | null>(null);
+  const historyRequestId = useRef(0);
+  const retryRequestIds = useRef({ controls: 0, deposits: 0 });
   const [exporting, setExporting] = useState<'controls' | 'deposits' | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [store, setStore] = useState(''),
@@ -58,64 +71,118 @@ export default function CashOfficePage() {
     [depositAmount, setDepositAmount] = useState('0'),
     [bankAccount, setBankAccount] = useState('');
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setHistoryStore(params.get('cash_store') ?? '');
+    const legacyDate = validDate(params.get('cash_date'));
+    const restoredStart = validDate(params.get('cash_start')) || legacyDate;
+    const restoredEnd = validDate(params.get('cash_end')) || legacyDate;
+    setHistoryStart(restoredStart && restoredEnd && restoredStart > restoredEnd ? restoredEnd : restoredStart);
+    setHistoryEnd(restoredStart && restoredEnd && restoredStart > restoredEnd ? restoredStart : restoredEnd);
+    const controls = Number(params.get('cash_controls_page'));
+    const deposits = Number(params.get('cash_deposits_page'));
+    if (Number.isInteger(controls) && controls > 0 && controls <= 100_000) setControlsPage(controls);
+    if (Number.isInteger(deposits) && deposits > 0 && deposits <= 100_000) setDepositsPage(deposits);
+    setHistoryReady(true);
+  }, []);
+  useEffect(() => {
+    if (!historyReady) return;
+    const url = new URL(window.location.href);
+    const values: Record<string, string> = {
+      cash_store: historyStore,
+      cash_start: historyStart,
+      cash_end: historyEnd,
+      cash_controls_page: String(controlsPage),
+      cash_deposits_page: String(depositsPage),
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (value && value !== '1') url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    }
+    url.searchParams.delete('cash_date');
+    window.history.replaceState(null, '', url);
+  }, [historyReady, historyStore, historyStart, historyEnd, controlsPage, depositsPage]);
+  useEffect(() => {
+    if (!historyReady) return;
     if (me?.store_scoped && me.stores?.length === 1 && !store) setStore(me.stores[0]);
-  }, [me]);
+  }, [me, historyReady]);
   const load = useCallback(async () => {
+    const requestId = ++historyRequestId.current;
     setHistoryLoading(true);
+    setRows([]);
+    setDeposits([]);
+    setControlTotal(0);
+    setDepositTotal(0);
+    setNotice(null);
+    setControlLoadError(null);
+    setDepositLoadError(null);
     try {
       const filters = {
         store_id: historyStore || undefined,
-        business_date: historyDate || undefined,
+        start_date: historyStart || undefined,
+        end_date: historyEnd || undefined,
       };
-      const [a, b] = await Promise.all([
-        api.get('/api/cash-controls', { params: { ...filters, skip: 0, limit: 100 } }),
+      const [controlsResult, depositsResult] = await Promise.allSettled([
+        api.get('/api/cash-controls', { params: { ...filters, skip: (controlsPage - 1) * 100, limit: 100 } }),
         api.get('/api/cash-controls/deposits', {
-          params: { ...filters, skip: 0, limit: 100 },
+          params: { ...filters, skip: (depositsPage - 1) * 100, limit: 100 },
         }),
       ]);
-      setRows(a.data);
-      setDeposits(b.data);
-      setControlTotal(Number(a.headers['x-total-count'] ?? a.data.length));
-      setDepositTotal(Number(b.headers['x-total-count'] ?? b.data.length));
+      if (requestId !== historyRequestId.current) return;
+      if (controlsResult.status === 'fulfilled') {
+        setRows(controlsResult.value.data);
+        setControlTotal(Number(controlsResult.value.headers['x-total-count'] ?? controlsResult.value.data.length));
+      } else {
+        setControlLoadError('Unable to load cash controls. Try again or check your access.');
+      }
+      if (depositsResult.status === 'fulfilled') {
+        setDeposits(depositsResult.value.data);
+        setDepositTotal(Number(depositsResult.value.headers['x-total-count'] ?? depositsResult.value.data.length));
+      } else {
+        setDepositLoadError('Unable to load banked deposits. Try again or check your access.');
+      }
     } catch {
-      setNotice('Unable to load cash controls. Sign in with a Finance or IT role.');
+      if (requestId !== historyRequestId.current) return;
+      setControlLoadError('Unable to load cash controls. Try again or check your access.');
+      setDepositLoadError('Unable to load banked deposits. Try again or check your access.');
     } finally {
-      setHistoryLoading(false);
+      if (requestId === historyRequestId.current) setHistoryLoading(false);
     }
-  }, [historyStore, historyDate]);
-  const loadMoreControls = async () => {
+  }, [historyStore, historyStart, historyEnd, controlsPage, depositsPage]);
+  const retryHistory = async (kind: 'controls' | 'deposits') => {
+    const requestId = historyRequestId.current;
+    const retryId = ++retryRequestIds.current[kind];
+    const path = kind === 'controls' ? '/api/cash-controls' : '/api/cash-controls/deposits';
+    const page = kind === 'controls' ? controlsPage : depositsPage;
     try {
-      const { data } = await api.get('/api/cash-controls', {
+      const { data, headers } = await api.get(path, {
         params: {
           store_id: historyStore || undefined,
-          business_date: historyDate || undefined,
-          skip: rows.length,
+          start_date: historyStart || undefined,
+          end_date: historyEnd || undefined,
+          skip: (page - 1) * 100,
           limit: 100,
         },
       });
-      setRows((current) => [...current, ...data]);
+      if (requestId !== historyRequestId.current || retryId !== retryRequestIds.current[kind]) return;
+      if (kind === 'controls') {
+        setRows(data);
+        setControlTotal(Number(headers['x-total-count'] ?? data.length));
+        setControlLoadError(null);
+      } else {
+        setDeposits(data);
+        setDepositTotal(Number(headers['x-total-count'] ?? data.length));
+        setDepositLoadError(null);
+      }
     } catch {
-      setNotice('Unable to load more cash controls.');
-    }
-  };
-  const loadMoreDeposits = async () => {
-    try {
-      const { data } = await api.get('/api/cash-controls/deposits', {
-        params: {
-          store_id: historyStore || undefined,
-          business_date: historyDate || undefined,
-          skip: deposits.length,
-          limit: 100,
-        },
-      });
-      setDeposits((current) => [...current, ...data]);
-    } catch {
-      setNotice('Unable to load more deposits.');
+      if (requestId !== historyRequestId.current || retryId !== retryRequestIds.current[kind]) return;
+      if (kind === 'controls') setControlLoadError('Unable to load cash controls. Try again or check your access.');
+      else setDepositLoadError('Unable to load banked deposits. Try again or check your access.');
     }
   };
   useEffect(() => {
+    if (!historyReady) return;
     load();
-  }, [load]);
+  }, [load, historyReady]);
   const exportHistory = async (kind: 'controls' | 'deposits') => {
     setExporting(kind);
     setExportError(null);
@@ -124,7 +191,8 @@ export default function CashOfficePage() {
       const { data } = await api.get(path, {
         params: {
           store_id: historyStore || undefined,
-          business_date: historyDate || undefined,
+          start_date: historyStart || undefined,
+          end_date: historyEnd || undefined,
           format: 'csv',
         },
         responseType: 'blob',
@@ -139,6 +207,27 @@ export default function CashOfficePage() {
       );
     } finally {
       setExporting(null);
+    }
+  };
+  const copyHistoryLink = async () => {
+    try {
+      const url = new URL(window.location.href);
+      const values: Record<string, string> = {
+        cash_store: historyStore,
+        cash_start: historyStart,
+        cash_end: historyEnd,
+        cash_controls_page: String(controlsPage),
+        cash_deposits_page: String(depositsPage),
+      };
+      for (const [key, value] of Object.entries(values)) {
+        if (value && value !== '1') url.searchParams.set(key, value);
+        else url.searchParams.delete(key);
+      }
+      url.searchParams.delete('cash_date');
+      await navigator.clipboard.writeText(url.toString());
+      setNotice('Cash history link copied.');
+    } catch {
+      setNotice('Could not copy the link. You can copy it from the address bar.');
     }
   };
   const submit = async () => {
@@ -253,14 +342,41 @@ export default function CashOfficePage() {
       </div>
       <div className="cc-card">
         <h3>History filters</h3>
-        <p className="page-sub">Apply the same store and business date to both cash histories.</p>
+        <p className="page-sub">Apply the same store and business date range to both cash histories.</p>
+        <Button variant="secondary" size="sm" onClick={() => void copyHistoryLink()}>
+          Copy history link
+        </Button>
         <div className="profile-form">
-          <StoreSelect value={historyStore} onChange={setHistoryStore} emptyLabel="All stores" />
+          <StoreSelect
+            value={historyStore}
+            onChange={(value) => {
+              setHistoryStore(value);
+              setControlsPage(1);
+              setDepositsPage(1);
+            }}
+            emptyLabel="All stores"
+          />
           <input
             type="date"
-            value={historyDate}
-            aria-label="Filter cash history by business date"
-            onChange={(event) => setHistoryDate(event.target.value)}
+            value={historyStart}
+            max={historyEnd || undefined}
+            aria-label="Cash history from business date"
+            onChange={(event) => {
+              setHistoryStart(event.target.value);
+              setControlsPage(1);
+              setDepositsPage(1);
+            }}
+          />
+          <input
+            type="date"
+            value={historyEnd}
+            min={historyStart || undefined}
+            aria-label="Cash history to business date"
+            onChange={(event) => {
+              setHistoryEnd(event.target.value);
+              setControlsPage(1);
+              setDepositsPage(1);
+            }}
           />
         </div>
         {exportError && <Alert tone="error">{exportError}</Alert>}
@@ -276,6 +392,11 @@ export default function CashOfficePage() {
             {exporting === 'controls' ? 'Preparing…' : 'Download matching CSV'}
           </Button>
         </div>
+        {controlLoadError && (
+          <Alert tone="error" action={<Button size="sm" onClick={() => void retryHistory('controls')}>Retry</Button>}>
+            {controlLoadError}
+          </Alert>
+        )}
         <Data
           headers={[
             'Store / date',
@@ -296,20 +417,17 @@ export default function CashOfficePage() {
             r.status,
           ])}
           csvFileName="cash-controls-visible.csv"
-          detachTitle="Cash controls · Visible rows"
+          detachTitle={`Cash controls · ${historyStore || 'all stores'} · ${historyStart || 'any date'} to ${historyEnd || 'latest'} · page ${controlsPage}`}
         />
         <p className="page-sub">
-          Showing {rows.length} of {controlTotal} cash controls.
+          Showing {rows.length ? (controlsPage - 1) * 100 + 1 : 0}–{(controlsPage - 1) * 100 + rows.length} of {controlTotal} cash controls.
         </p>
-        {rows.length < controlTotal && (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={historyLoading}
-            onClick={loadMoreControls}
-          >
-            Load more
-          </Button>
+        {controlTotal > 100 && (
+          <PageNav
+            page={controlsPage}
+            hasMore={controlsPage * 100 < controlTotal}
+            onPage={setControlsPage}
+          />
         )}
       </div>
       <OverShortReport />
@@ -325,6 +443,11 @@ export default function CashOfficePage() {
             {exporting === 'deposits' ? 'Preparing…' : 'Download matching CSV'}
           </Button>
         </div>
+        {depositLoadError && (
+          <Alert tone="error" action={<Button size="sm" onClick={() => void retryHistory('deposits')}>Retry</Button>}>
+            {depositLoadError}
+          </Alert>
+        )}
         <Data
           headers={[
             'Store / date',
@@ -343,20 +466,17 @@ export default function CashOfficePage() {
             d.status,
           ])}
           csvFileName="cash-deposits-visible.csv"
-          detachTitle="Banked deposits · Visible rows"
+          detachTitle={`Banked deposits · ${historyStore || 'all stores'} · ${historyStart || 'any date'} to ${historyEnd || 'latest'} · page ${depositsPage}`}
         />
         <p className="page-sub">
-          Showing {deposits.length} of {depositTotal} deposits.
+          Showing {deposits.length ? (depositsPage - 1) * 100 + 1 : 0}–{(depositsPage - 1) * 100 + deposits.length} of {depositTotal} deposits.
         </p>
-        {deposits.length < depositTotal && (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={historyLoading}
-            onClick={loadMoreDeposits}
-          >
-            Load more
-          </Button>
+        {depositTotal > 100 && (
+          <PageNav
+            page={depositsPage}
+            hasMore={depositsPage * 100 < depositTotal}
+            onPage={setDepositsPage}
+          />
         )}
       </div>
     </div>

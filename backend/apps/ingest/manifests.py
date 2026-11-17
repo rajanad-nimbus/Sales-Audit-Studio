@@ -1,4 +1,4 @@
-"""Queries for archived POS control manifests."""
+"""Queries for archived POS and OMS control manifests."""
 
 from datetime import UTC, date, datetime, time, timedelta
 

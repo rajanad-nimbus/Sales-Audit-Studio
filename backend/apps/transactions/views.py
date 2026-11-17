@@ -1,5 +1,6 @@
 """Stable response projections shared by transaction endpoints."""
 
+import json
 import re
 
 from apps.ingest.models import SourceRecord
@@ -54,6 +55,7 @@ def row_view(
             "customer_id": mask_customer_id(tx.customer_id),
             "customer_identification_type": tx.customer_identification_type,
             "user_references": tx.user_references,
+            "paid_out_details": paid_out_details(tx, source),
             "register_id": tx.register_id,
             "cashier_id": tx.cashier_id,
             "salesperson_id": tx.salesperson_id,
@@ -67,3 +69,25 @@ def row_view(
             "reconciliation_status": tx.reconciliation_status,
         }
     )
+
+
+def paid_out_details(tx: CanonicalTransaction, source: SourceRecord | None) -> dict:
+    """Return approved canonical details, falling back to the immutable source for older records."""
+    if tx.paid_out_details is not None:
+        return redact_sensitive_fields(tx.paid_out_details)
+    if source is None or not source.payload:
+        return {}
+    try:
+        payload = json.loads(source.payload)
+    except (TypeError, ValueError):
+        return {}
+    details = payload.get("details") if isinstance(payload, dict) else None
+    if not isinstance(details, dict):
+        return {}
+    allowed = {
+        "vendor_number",
+        "vendor_invoice_number",
+        "proof_of_delivery_number",
+        "payment_reference_number",
+    }
+    return redact_sensitive_fields({key: value for key, value in details.items() if key in allowed})

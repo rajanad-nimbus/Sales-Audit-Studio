@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.ingest.common import VALID_TYPES
 from apps.ingest.models import SourceSetting
 
-SOURCES = ("POS", "POSControl", "Processor", "Bank", "ERP", "Shopify")
+SOURCES = ("POS", "OMS", "POSControl", "OMSControl", "Processor", "Bank", "ERP", "Shopify")
 PULLED = {"Shopify"}  # sources Nimbus fetches itself; the rest are delivered to it
 
 
@@ -53,7 +53,9 @@ def effective(source: str, row: SourceSetting | None) -> dict:
     if row is not None:
         return {
             "enabled": row.enabled,
-            "in_daily_batch": row.in_daily_batch,
+            "in_daily_batch": (
+                row.in_daily_batch if source not in {"OMS", "OMSControl"} else False
+            ),
             "manual_sync": row.manual_sync,
             "require_day_close": row.require_day_close,
             "sync_frequency": row.sync_frequency,
@@ -66,7 +68,12 @@ def effective(source: str, row: SourceSetting | None) -> dict:
         }
     return {
         "enabled": True,
-        "in_daily_batch": source != "Shopify" or shopify_configured(),
+        # OMS transaction/control feeds can be uploaded, but no generic pull connector
+        # exists. Keep them out of scheduled runs until a retailer adapter is configured.
+        "in_daily_batch": (
+            source not in {"Shopify", "OMS", "OMSControl"}
+            or (source == "Shopify" and shopify_configured())
+        ),
         "manual_sync": True,
         "require_day_close": False,
         "sync_frequency": None,

@@ -51,6 +51,7 @@ interface SummaryFilters {
   dateFrom: string;
   dateTo: string;
   search: string;
+  itemType?: string;
 }
 
 const quantity = (value: string) => formatNumber(Number(value), { maximumFractionDigits: 3 });
@@ -79,6 +80,8 @@ const columns = (filters: SummaryFilters): Column<ItemRow>[] => [
       if (filters.store) params.set('store_id', filters.store);
       if (filters.dateFrom) params.set('date_from', filters.dateFrom);
       if (filters.dateTo) params.set('date_to', filters.dateTo);
+      params.set('currency', row.currency);
+      if (filters.itemType) params.set('item_type', filters.itemType);
       return (
         <Link href={`/transactions?${params.toString()}`}>
           {formatNumber(row.transaction_count)}
@@ -146,26 +149,25 @@ export default function ItemSummaryPage() {
       dateFrom: query?.get('date_from') ?? '',
       dateTo: query?.get('date_to') ?? '',
       search: query?.get('q') ?? '',
+      itemType: query?.get('item_type') ?? '',
     };
   });
   const [store, setStore] = useState(initialQuery.store);
   const [dateFrom, setDateFrom] = useState(initialQuery.dateFrom);
   const [dateTo, setDateTo] = useState(initialQuery.dateTo);
-  const [search, setSearch] = useState('');
-  const [applied, setApplied] = useState<SummaryFilters>({
-    store: '',
-    dateFrom: '',
-    dateTo: '',
-    search: '',
-  });
+  const [search, setSearch] = useState(initialQuery.search);
+  const [itemType, setItemType] = useState(initialQuery.itemType);
+  const [applied, setApplied] = useState<SummaryFilters>(initialQuery);
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const autoLoaded = useRef(false);
+  const requestId = useRef(0);
 
   async function load(nextPage = 1, filters = applied) {
+    const currentRequest = ++requestId.current;
     setBusy(true);
     setError('');
     try {
@@ -174,32 +176,37 @@ export default function ItemSummaryPage() {
           store_id: filters.store || undefined,
           date_from: filters.dateFrom || undefined,
           date_to: filters.dateTo || undefined,
+          item_type: filters.itemType || undefined,
           q: filters.search || undefined,
           page: nextPage,
           page_size: 50,
         },
       });
+      if (currentRequest !== requestId.current) return;
       setResult(data);
       setPage(nextPage);
       setApplied(filters);
     } catch (e: unknown) {
+      if (currentRequest !== requestId.current) return;
       const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
       setError(detail || 'Item summary could not be loaded.');
     } finally {
-      setBusy(false);
+      if (currentRequest === requestId.current) setBusy(false);
     }
   }
 
   useEffect(() => {
-    if (!initialQuery.store || !initialQuery.dateFrom || !initialQuery.dateTo || autoLoaded.current)
-      return;
+    if (
+      autoLoaded.current ||
+      !Object.values(initialQuery).some(Boolean)
+    ) return;
     autoLoaded.current = true;
     void load(1, initialQuery);
   }, [initialQuery, load]);
 
   function apply(event: React.FormEvent) {
     event.preventDefault();
-    applyFilters({ store, dateFrom, dateTo, search: search.trim() });
+    applyFilters({ store, dateFrom, dateTo, search: search.trim(), itemType });
   }
 
   function applyFilters(filters: SummaryFilters) {
@@ -207,11 +214,13 @@ export default function ItemSummaryPage() {
     setDateFrom(filters.dateFrom);
     setDateTo(filters.dateTo);
     setSearch(filters.search);
-    setApplied(filters);
+    setItemType(filters.itemType ?? '');
+    setResult(null);
     const params = new URLSearchParams();
     if (filters.store) params.set('store_id', filters.store);
     if (filters.dateFrom) params.set('date_from', filters.dateFrom);
     if (filters.dateTo) params.set('date_to', filters.dateTo);
+    if (filters.itemType) params.set('item_type', filters.itemType);
     if (filters.search) params.set('q', filters.search);
     window.history.replaceState(
       null,
@@ -230,6 +239,7 @@ export default function ItemSummaryPage() {
           store_id: applied.store || undefined,
           date_from: applied.dateFrom || undefined,
           date_to: applied.dateTo || undefined,
+          item_type: applied.itemType || undefined,
           q: applied.search || undefined,
           format: 'csv',
         },
@@ -275,6 +285,15 @@ export default function ItemSummaryPage() {
             <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
           </label>
           <label className="field">
+            <span>Item type</span>
+            <input
+              value={itemType}
+              maxLength={50}
+              onChange={(event) => setItemType(event.target.value)}
+              placeholder="For example: ITEM"
+            />
+          </label>
+          <label className="field">
             <span>Item or description</span>
             <input
               value={search}
@@ -291,7 +310,7 @@ export default function ItemSummaryPage() {
       <SummarySavedViews
         scope="item_summary"
         label="Item Summary"
-        filters={{ store, dateFrom, dateTo, search }}
+        filters={{ store, dateFrom, dateTo, search, itemType }}
         onApply={applyFilters}
       />
       {error && <Alert tone="error">{error}</Alert>}

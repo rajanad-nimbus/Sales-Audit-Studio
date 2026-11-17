@@ -1,11 +1,13 @@
 'use client';
 import { useCallback, useState } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useLive } from '@/lib/sync';
 import { Alert, Badge, Button, Card, DataTable, PageHeader } from '@/components/ui';
 import type { BadgeVariant } from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
 import { formatDateTime } from '@/lib/preferences';
+import { useCanOpen } from '@/components/MeProvider';
 
 interface Feed {
   source_system: string;
@@ -31,6 +33,7 @@ const when = (iso: string | null) => (iso ? formatDateTime(iso) : 'Never');
 
 /** When each source last sent data, how much came in, and what was set aside and why. */
 export function DataFeeds() {
+  const canOpen = useCanOpen();
   const [data, setData] = useState<Feeds | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,7 +63,20 @@ export function DataFeeds() {
         rowKey={(f) => f.source_system}
         emptyTitle="No feeds"
         columns={[
-          { key: 's', header: 'Source', primary: true, render: (f) => f.source_system },
+          {
+            key: 's',
+            header: 'Source',
+            primary: true,
+            csvValue: (f) => f.source_system,
+            render: (f) =>
+              canOpen('/imports') ? (
+                <Link href={`/imports?source_system=${encodeURIComponent(f.source_system)}#feeds`}>
+                  {f.source_system}
+                </Link>
+              ) : (
+                f.source_system
+              ),
+          },
           {
             key: 'state',
             header: 'State',
@@ -100,7 +116,18 @@ export function DataFeeds() {
             key: 't',
             header: 'Set aside, total',
             numeric: true,
-            render: (f) => f.quarantined_total,
+            csvValue: (f) => f.quarantined_total,
+            render: (f) =>
+              canOpen('/imports') ? (
+                <Link
+                  href={`/imports?source_system=${encodeURIComponent(f.source_system)}&view=quarantine#quarantine`}
+                  aria-label={`Review ${f.quarantined_total} quarantined ${f.source_system} records`}
+                >
+                  {f.quarantined_total}
+                </Link>
+              ) : (
+                f.quarantined_total
+              ),
           },
         ]}
       />
@@ -111,9 +138,44 @@ export function DataFeeds() {
             rowKey={(r) => `${r.source_system}|${r.reason}`}
             emptyTitle="Nothing set aside"
             columns={[
-              { key: 's', header: 'Source', primary: true, render: (r) => r.source_system },
-              { key: 'w', header: 'Reason', render: (r) => r.reason },
-              { key: 'n', header: 'Records', numeric: true, render: (r) => r.records },
+              {
+                key: 's',
+                header: 'Source',
+                primary: true,
+                csvValue: (r) => r.source_system,
+                render: (r) =>
+                  canOpen('/imports') ? (
+                    <Link
+                      href={`/imports?source_system=${encodeURIComponent(r.source_system)}&view=quarantine#quarantine`}
+                    >
+                      {r.source_system}
+                    </Link>
+                  ) : (
+                    r.source_system
+                  ),
+              },
+              {
+                key: 'w',
+                header: 'Reason',
+                csvValue: (r) => r.reason,
+                render: (r) =>
+                  canOpen('/imports') ? (
+                    <Link
+                      href={`/imports?source_system=${encodeURIComponent(r.source_system)}&view=quarantine&q=${encodeURIComponent(r.reason.slice(0, 200))}#quarantine`}
+                    >
+                      {r.reason}
+                    </Link>
+                  ) : (
+                    r.reason
+                  ),
+              },
+              {
+                key: 'n',
+                header: 'Records',
+                numeric: true,
+                csvValue: (r) => r.records,
+                render: (r) => r.records,
+              },
             ]}
           />
         </Card>

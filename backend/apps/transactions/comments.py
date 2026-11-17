@@ -80,6 +80,7 @@ async def list_comments(
 @router.get("/{transaction_id}/errors")
 async def transaction_errors(
     transaction_id: str,
+    offset: Annotated[int, Query(ge=0, le=100000)] = 0,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
 ):
@@ -98,7 +99,8 @@ async def transaction_errors(
                 linked,
                 Case.store_id == transaction.store_id,
             )
-            .order_by(Case.created_at.desc(), Case.id, ExceptionRow.id)
+            .order_by(ExceptionRow.created_at.desc(), ExceptionRow.id)
+            .offset(offset)
             .limit(101)
         )
     ).all()
@@ -113,6 +115,11 @@ async def transaction_errors(
                 "case_number": case.case_number,
                 "case_status": case.status,
                 "business_date": case.business_date,
+                "family": error.exception_family,
+                "detection_origin": error.detection_origin,
+                "confidence": error.confidence,
+                "close_impact": error.close_impact,
+                "amount": str(error.exception_amount),
             }
             for case, error in rows[:100]
         ],

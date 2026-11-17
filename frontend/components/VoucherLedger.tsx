@@ -415,31 +415,45 @@ export function VoucherLedger() {
         )}
       </Toolbar>
       {status === 'Retired' ? (
-        <RetiredVouchers rows={retiredRows} />
+        <RetiredVouchers
+          rows={retiredRows}
+          detachTitle={`Retired vouchers${issuingStoreId ? ` · Store ${issuingStoreId}` : ''}`}
+        />
       ) : (
         <DataTable
           rows={rows}
           rowKey={(v) => v.voucher_number}
           emptyTitle="No vouchers"
+          csvFileName="vouchers-visible.csv"
+          detachTitle={`Vouchers · ${status || 'all statuses'}${issuingStoreId ? ` · Store ${issuingStoreId}` : ''}`}
           columns={[
-            { key: 'n', header: 'Voucher', primary: true, render: (v) => v.voucher_number },
-            { key: 't', header: 'Tender', render: (v) => v.tender_type },
+            {
+              key: 'n',
+              header: 'Voucher',
+              primary: true,
+              render: (v) => v.voucher_number,
+              csvValue: (v) => v.voucher_number,
+            },
+            { key: 't', header: 'Tender', render: (v) => v.tender_type, csvValue: (v) => v.tender_type },
             {
               key: 's',
               header: 'Issued at',
               render: (v) => `${v.issued_store_id} · ${formatDate(v.issued_on)}`,
+              csvValue: (v) => `${v.issued_store_id} · ${v.issued_on}`,
             },
             {
               key: 'a',
               header: 'Amount',
               numeric: true,
               render: (v) => money(v.amount, v.currency),
+              csvValue: (v) => `${v.currency} ${v.amount}`,
             },
             {
               key: 'e',
               header: 'Expires',
               nowrap: true,
               render: (v) => (v.expires_on ? formatDate(v.expires_on) : 'Never'),
+              csvValue: (v) => v.expires_on ?? 'Never',
             },
             {
               key: 'eligible',
@@ -458,6 +472,10 @@ export function VoucherLedger() {
                 ) : (
                   'No date configured'
                 ),
+              csvValue: (v) =>
+                ['Redeemed', 'Escheated'].includes(v.status)
+                  ? ''
+                  : `${v.eligible_on ?? 'No date configured'} · ${v.eligibility_basis}${v.escheat_eligible ? ' · Eligible' : ''}`,
             },
             {
               key: 'st',
@@ -482,6 +500,8 @@ export function VoucherLedger() {
                   )}
                 </>
               ),
+              csvValue: (v) =>
+                `${v.status}${v.redeemed_store_id ? ` · ${v.redeemed_store_id} · ${v.redeemed_on ?? ''}` : ''}${v.redeemed_transaction_id ? ` · ${v.redeemed_transaction_id}` : ''}`,
             },
             {
               key: 'routing',
@@ -492,6 +512,7 @@ export function VoucherLedger() {
                 ) : (
                   <VoucherRouting decision={v.routing} explain={v.status === 'Escheated'} />
                 ),
+              csvValue: (v) => (v.status === 'Redeemed' ? '' : JSON.stringify(v.routing ?? {})),
             },
             ...(canEditLocations
               ? [
@@ -499,6 +520,7 @@ export function VoucherLedger() {
                     key: 'locations',
                     header: '',
                     stopRowClick: true,
+                    csvSkip: true,
                     render: (v: Voucher) =>
                       ['Issued', 'Expired'].includes(v.status) ? (
                         <Button
@@ -522,6 +544,7 @@ export function VoucherLedger() {
                     key: 'redeem',
                     header: '',
                     stopRowClick: true,
+                    csvSkip: true,
                     render: (v: Voucher) =>
                       v.status === 'Issued' ? (
                         <Button

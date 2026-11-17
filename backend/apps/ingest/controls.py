@@ -19,33 +19,40 @@ from apps.transactions.models import CanonicalTransaction
 
 
 async def run_controls(db, business_date, add, policy=None, *, store_ids: set[str] | None = None):
-    """Completeness and balancing: compare POS control manifests with ingested POS transactions."""
-    batch = []
-    async for m in iter_manifests(db, business_date, ("Archived",)):
-        d = json.loads(m.payload)
-        store, bd = d["store_id"], str(d["business_date"])[:10]
-        if store_ids is not None and store not in store_ids:
-            continue
-        if business_date and bd != business_date:
-            continue
-        batch.append(
-            (
-                m,
-                store,
-                bd,
-                d.get("currency", "USD"),
-                int(d["declared_count"]),
-                Decimal(str(d["declared_total"])),
+    """Compare POS and OMS control manifests to transactions from the same source."""
+    for control_source, transaction_source in (("POSControl", "POS"), ("OMSControl", "OMS")):
+        batch = []
+        async for m in iter_manifests(db, business_date, ("Archived",), control_source):
+            d = json.loads(m.payload)
+            store, bd = d["store_id"], str(d["business_date"])[:10]
+            if store_ids is not None and store not in store_ids:
+                continue
+            if business_date and bd != business_date:
+                continue
+            batch.append(
+                (
+                    m,
+                    store,
+                    bd,
+                    d.get("currency", "USD"),
+                    int(d["declared_count"]),
+                    Decimal(str(d["declared_total"])),
+                )
             )
-        )
-        if len(batch) == COMPOSITE_SCOPE_BATCH_SIZE:
-            await reconcile_control_manifest_batch(db, batch, add, policy)
-            batch.clear()
-    if batch:
-        await reconcile_control_manifest_batch(db, batch, add, policy)
+            if len(batch) == COMPOSITE_SCOPE_BATCH_SIZE:
+                await reconcile_control_manifest_batch(
+                    db, batch, add, policy, transaction_source=transaction_source
+                )
+                batch.clear()
+        if batch:
+            await reconcile_control_manifest_batch(
+                db, batch, add, policy, transaction_source=transaction_source
+            )
 
 
-async def reconcile_control_manifest_batch(db, manifests, add, policy=None):
+async def reconcile_control_manifest_batch(
+    db, manifests, add, policy=None, *, transaction_source="POS"
+):
     """Compare a bounded group of control manifests using grouped counts and paged corrected totals."""
     scopes = sorted(
         {
@@ -72,7 +79,7 @@ async def reconcile_control_manifest_batch(db, manifests, add, policy=None):
                     func.count(),
                 )
                 .where(
-                    CanonicalTransaction.source_lineage == LINEAGE["POS"],
+                    CanonicalTransaction.source_lineage == LINEAGE[transaction_source],
                     scope_filter,
                 )
                 .group_by(
@@ -87,7 +94,7 @@ async def reconcile_control_manifest_batch(db, manifests, add, policy=None):
         )
 
         transaction_query = select(CanonicalTransaction).where(
-            CanonicalTransaction.source_lineage == LINEAGE["POS"],
+            CanonicalTransaction.source_lineage == LINEAGE[transaction_source],
             scope_filter,
         )
         await accumulate_reconciliation_amounts(

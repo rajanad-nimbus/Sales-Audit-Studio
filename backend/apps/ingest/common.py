@@ -6,14 +6,19 @@ REQUIRED = ["source_record_id", "event_time", "record_type", "amount", "store_id
 SIGN = {"Sale": 1, "Capture": 1, "Return": -1, "Refund": -1, "Deposit": 1, "Posting": 1, "Order": 1}
 VALID_TYPES = {
     "POS": {"Sale", "Return"},
+    # OMS records use the same canonical sale/return shape as POS, but retain
+    # their own lineage so equal transaction numbers from the two systems stay distinct.
+    "OMS": {"Sale", "Return"},
     "Processor": {"Capture", "Refund"},
     "Bank": {"Deposit"},
     "ERP": {"Posting"},
     "Shopify": {"Order", "Refund", "DayTotal"},
     "POSControl": set(),
+    "OMSControl": set(),
 }
 LINEAGE = {
     "POS": "pos-map-v1",
+    "OMS": "oms-map-v1",
     "Processor": "processor-map-v1",
     "Bank": "bank-map-v1",
     "ERP": "erp-map-v1",

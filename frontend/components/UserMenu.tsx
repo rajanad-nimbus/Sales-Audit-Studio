@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { useMe } from './MeProvider';
 import { Button } from '@/components/ui';
 import { useStores } from '@/lib/useStores';
+import { uiNavigationLabel } from '@/lib/ui-messages';
 
 const PERSONAS = [
   ['analyst', 'Sales Auditor'],
@@ -29,6 +30,7 @@ export { useMe } from './MeProvider';
 
 export function UserMenu() {
   const { me } = useMe();
+  const tr = uiNavigationLabel;
   const [open, setOpen] = useState(false);
   const [pickStores, setPickStores] = useState<string | null>(null);
   const [storesText, setStoresText] = useState(() => {
@@ -55,15 +57,19 @@ export function UserMenu() {
 
   const signedOut = me === null;
   const name =
-    me === undefined ? '…' : signedOut ? 'Signed out' : me!.name || me!.user || 'Unknown user';
+    me === undefined
+      ? '…'
+      : signedOut
+        ? tr('Signed out')
+        : me!.name || me!.user || tr('Unknown user');
   const sub =
     me === undefined
       ? ''
       : signedOut
         ? 'Ontology Studio sign-in required'
         : me!.impersonating
-          ? `Acting as ${ROLE_LABEL[me!.role]}`
-          : (ROLE_LABEL[me!.role] ?? me!.role) +
+          ? `${tr('Acting as')} ${tr(ROLE_LABEL[me!.role])}`
+          : tr(ROLE_LABEL[me!.role] ?? me!.role) +
             (me!.store_scoped
               ? me!.stores?.length || me!.store_location_traits?.length
                 ? ` · ${[
@@ -145,7 +151,7 @@ export function UserMenu() {
               <small>
                 {signedOut
                   ? 'Sign in through Ontology Studio'
-                  : `${me!.user ?? ''}${me!.user ? ' · ' : ''}${ROLE_LABEL[me!.role] ?? me!.role}`}
+                  : `${me!.user ?? ''}${me!.user ? ' · ' : ''}${tr(ROLE_LABEL[me!.role] ?? me!.role)}`}
               </small>
             </div>
           </div>
@@ -162,14 +168,14 @@ export function UserMenu() {
                       : impersonate(key)
                   }
                 >
-                  {label}
+              {tr(label)}
                 </button>
               ))}
               {pickStores && (
                 <div className="user-pop-form">
-                  <label>Which stores?</label>
+                  <label>{tr('Which stores?')}</label>
                   <div className="imp-stores" role="group" aria-label="Stores">
-                    {knownStores.length === 0 && <small className="hint">No stores yet.</small>}
+                    {knownStores.length === 0 && <small className="hint">{tr('No stores yet.')}</small>}
                     {knownStores.map((s) => (
                       <label key={s} className="imp-store">
                         <input
@@ -207,30 +213,30 @@ export function UserMenu() {
                       )
                     }
                   >
-                    Act as {ROLE_LABEL[pickStores] ?? pickStores}
+                    {tr('Act as')} {tr(ROLE_LABEL[pickStores] ?? pickStores)}
                   </Button>
                 </div>
               )}
               {me!.impersonating && (
-                <button onClick={() => impersonate(null)}>Stop impersonating</button>
+                <button onClick={() => impersonate(null)}>{tr('Stop impersonating')}</button>
               )}
             </div>
           )}
           {!signedOut && (
             <Link href="/preferences" className="user-pop-link" onClick={() => setOpen(false)}>
-              My preferences
+              {tr('My preferences')}
             </Link>
           )}
           <Link href="/settings" className="user-pop-link" onClick={() => setOpen(false)}>
-            Admin
+            {tr('Admin')}
           </Link>
           {signedOut ? (
             <Link href="/login" className="user-pop-link" onClick={() => setOpen(false)}>
-              Sign in
+              {tr('Sign in')}
             </Link>
           ) : (
             <button className="user-pop-out" onClick={signOut} disabled={signingOut}>
-              {signingOut ? 'Signing out…' : 'Sign out'}
+              {signingOut ? tr('Signing out…') : tr('Sign out')}
             </button>
           )}
         </div>

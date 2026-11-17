@@ -23,6 +23,7 @@ from apps.corrections.validation import (
     validate_missing_transaction,
 )
 from apps.csv_export import csv_row
+from apps.ingest.models import SourceRecord
 from apps.search import contains_literal
 from apps.security import scope
 from apps.security.authentication import require_role
@@ -40,7 +41,10 @@ from apps.transactions.models import (
     TransactionTax,
     TransactionTender,
 )
-from apps.transactions.views import mask_customer_id
+from apps.transactions.views import (
+    mask_customer_id,
+    paid_out_details as resolve_paid_out_details,
+)
 
 router = APIRouter(prefix="/api/transaction-adjustments", tags=["Transaction corrections"])
 CORRECTION_CSV_MAX_ROWS = 50_000
@@ -57,6 +61,7 @@ ALLOWED = {
     "Employee",
     "CustomerAttribute",
     "UserReference",
+    "PaidOutDetail",
     "MissingTransaction",
 }
 
@@ -596,6 +601,17 @@ async def propose_adjustment(
             before_value = current_attributes.get(stored_values["attribute_type"])
             if before_value == stored_values["value"]:
                 raise HTTPException(status_code=422, detail="The customer attribute is unchanged")
+            stored_values["before_value"] = before_value
+        elif body.adjustment_type == "PaidOutDetail":
+            field = stored_values["field"]
+            source = (
+                await db.get(SourceRecord, transaction.source_record_id)
+                if transaction.source_record_id
+                else None
+            )
+            before_value = resolve_paid_out_details(transaction, source).get(field)
+            if before_value == stored_values["value"]:
+                raise HTTPException(status_code=422, detail="The paid-out detail is unchanged")
             stored_values["before_value"] = before_value
         elif body.adjustment_type == "TaxDetail":
             tax_line = (

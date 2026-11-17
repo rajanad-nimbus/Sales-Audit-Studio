@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StoreSelect } from '@/components/StoreSelect';
 import { Alert, Button, Card, DataTable, Pager, PageHeader } from '@/components/ui';
 import type { Column } from '@/components/ui';
@@ -36,6 +36,42 @@ interface Result {
   page: number;
   page_size: number;
   pages: number;
+}
+interface HistoryFilters {
+  store: string;
+  dateFrom: string;
+  dateTo: string;
+  name: string;
+  level: string;
+  dimension: string;
+  minVersion: string;
+}
+
+const emptyFilters: HistoryFilters = {
+  store: '',
+  dateFrom: '',
+  dateTo: '',
+  name: '',
+  level: '',
+  dimension: '',
+  minVersion: '',
+};
+
+function writeHistoryUrl(filters: HistoryFilters, page: number) {
+  const params = new URLSearchParams();
+  const values: [string, string][] = [
+    ['store_id', filters.store],
+    ['date_from', filters.dateFrom],
+    ['date_to', filters.dateTo],
+    ['total_name', filters.name],
+    ['level', filters.level],
+    ['dimension', filters.dimension],
+    ['min_version', filters.minVersion],
+  ];
+  for (const [key, value] of values) if (value) params.set(key, value);
+  if (page > 1) params.set('page', String(page));
+  const query = params.toString();
+  history.replaceState(null, '', query ? `${location.pathname}?${query}` : location.pathname);
 }
 
 const columns: Column<TotalHistoryRow>[] = [
@@ -130,23 +166,19 @@ export default function TotalHistoryPage() {
   const [level, setLevel] = useState('');
   const [dimension, setDimension] = useState('');
   const [minVersion, setMinVersion] = useState('');
-  const [applied, setApplied] = useState({
-    store: '',
-    dateFrom: '',
-    dateTo: '',
-    name: '',
-    level: '',
-    dimension: '',
-    minVersion: '',
-  });
+  const [applied, setApplied] = useState<HistoryFilters>(emptyFilters);
   const [result, setResult] = useState<Result | null>(null);
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [linkNotice, setLinkNotice] = useState('');
+  const requestId = useRef(0);
 
-  async function load(nextPage = 1, filters = applied) {
+  const load = useCallback(async (nextPage = 1, filters: HistoryFilters = emptyFilters) => {
+    const currentRequest = ++requestId.current;
     setBusy(true);
     setError('');
     try {
@@ -163,23 +195,67 @@ export default function TotalHistoryPage() {
           page_size: 50,
         },
       });
+      if (currentRequest !== requestId.current) return;
       setResult(data);
-      setPage(nextPage);
+      setPage(data.page);
+      writeHistoryUrl(filters, data.page);
     } catch (err) {
+      if (currentRequest !== requestId.current) return;
       setError(
         (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
           'Could not load the total audit trail.'
       );
     } finally {
-      setBusy(false);
+      if (currentRequest === requestId.current) setBusy(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const filters: HistoryFilters = {
+      store: params.get('store_id') ?? '',
+      dateFrom: params.get('date_from') ?? '',
+      dateTo: params.get('date_to') ?? '',
+      name: params.get('total_name') ?? '',
+      level: params.get('level') ?? '',
+      dimension: params.get('dimension') ?? '',
+      minVersion: params.get('min_version') ?? '',
+    };
+    const requestedPage = Number(params.get('page'));
+    const initialPage = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+    setStore(filters.store);
+    setDateFrom(filters.dateFrom);
+    setDateTo(filters.dateTo);
+    setName(filters.name);
+    setLevel(filters.level);
+    setDimension(filters.dimension);
+    setMinVersion(filters.minVersion);
+    setApplied(filters);
+    setPage(initialPage);
+    void load(initialPage, filters);
+    return () => {
+      requestId.current += 1;
+    };
+  }, [load]);
 
   function apply(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const filters = { store, dateFrom, dateTo, name, level, dimension, minVersion };
     setApplied(filters);
+    setResult(null);
+    writeHistoryUrl(filters, 1);
     void load(1, filters);
+  }
+
+  async function copyHistoryLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      setLinkNotice('');
+      window.setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      setLinkNotice('Could not copy the link. You can copy it from the address bar.');
+    }
   }
 
   async function exportHistory() {
@@ -211,6 +287,18 @@ export default function TotalHistoryPage() {
     }
   }
 
+  const detachTitle = [
+    'Total Audit Trail',
+    applied.store ? `Store ${applied.store}` : 'All stores',
+    applied.dateFrom || applied.dateTo
+      ? `${applied.dateFrom || 'any date'} → ${applied.dateTo || 'latest'}`
+      : '',
+    applied.name || 'All totals',
+    applied.level || 'All levels',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <main className="page-container">
       <PageHeader
@@ -218,22 +306,27 @@ export default function TotalHistoryPage() {
         subtitle="Search calculated total revisions across store days and compare each version with its predecessor."
         actions={
           result && (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy || exportBusy || result.total > 50_000}
-              title={
-                result.total > 50_000
-                  ? 'Narrow the search to export up to 50,000 matching revisions.'
-                  : 'Export every row matching the applied search filters.'
-              }
-              onClick={() => void exportHistory()}
-            >
-              {exportBusy ? 'Preparing CSV…' : 'Export matching CSV'}
-            </Button>
+            <div className="row-actions">
+              <Button size="sm" variant="secondary" onClick={() => void copyHistoryLink()}>
+                {linkCopied ? 'Link copied' : 'Copy report link'}
+              </Button>
+              <Button
+                size="sm"
+                disabled={busy || exportBusy || result.total > 50_000}
+                title={
+                  result.total > 50_000
+                    ? 'Narrow the search to export up to 50,000 matching revisions.'
+                    : 'Export every row matching the applied search filters.'
+                }
+                onClick={() => void exportHistory()}
+              >
+                {exportBusy ? 'Preparing CSV…' : 'Export matching CSV'}
+              </Button>
+            </div>
           )
         }
       />
+      {linkNotice && <Alert tone="warning">{linkNotice}</Alert>}
       <Card>
         <form onSubmit={apply} className="toolbar" style={{ alignItems: 'end', flexWrap: 'wrap' }}>
           <StoreSelect value={store} onChange={setStore} emptyLabel="All stores" />
@@ -305,7 +398,7 @@ export default function TotalHistoryPage() {
             columns={columns}
             rows={busy ? null : result.items}
             csvFileName="total-history-visible.csv"
-            detachTitle="Total Audit Trail · Visible revisions"
+            detachTitle={detachTitle}
             rowKey={(row) =>
               `${row.store_id}:${row.business_date}:${row.total_name}:${row.level}:${row.dimension ?? ''}:${row.version}`
             }
@@ -318,7 +411,7 @@ export default function TotalHistoryPage() {
                 total={result.total}
                 pageSize={50}
                 pageSizes={[50]}
-                onPage={(next) => void load(next)}
+                onPage={(next) => void load(next, applied)}
                 onPageSize={() => {}}
               />
             }

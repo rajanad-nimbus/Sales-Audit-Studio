@@ -34,6 +34,7 @@ import {
   outcomeVariant,
   qualityVariant,
   readinessVariant,
+  storeDayBlockerAction,
 } from '@/lib/storeDays';
 import type {
   Closure,
@@ -57,6 +58,18 @@ type DetailTab =
   | 'missing';
 
 interface DayIoLog {
+  controls: {
+    source_system: string;
+    source_record_id: string;
+    delivery_id: string;
+    status: string;
+    received_at: string;
+    record_count: number | null;
+    amount: string | number | null;
+    currency: string;
+    refund_count: number | null;
+    refund_amount: string | number | null;
+  }[];
   imports: {
     source_system: string;
     delivery_id: string;
@@ -112,6 +125,11 @@ interface DayAuditError {
   case_id: string;
   case_number: string;
   case_status: string;
+  override_reason: string | null;
+  override_requested_by: string | null;
+  override_requested_at: string | null;
+  override_approved_by: string | null;
+  override_approved_at: string | null;
 }
 interface DayAuditErrorPage {
   items: DayAuditError[];
@@ -202,11 +220,13 @@ export default function StoreDayDetailPage({
   const [cases, setCases] = useState<DayCase[]>([]);
   const [closures, setClosures] = useState<Closure[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [ioLog, setIoLog] = useState<DayIoLog>({ imports: [], exports: [] });
+  const [ioLog, setIoLog] = useState<DayIoLog>({ controls: [], imports: [], exports: [] });
+  const [ioLoading, setIoLoading] = useState(false);
   const [ioError, setIoError] = useState('');
   const [gapReasons, setGapReasons] = useState<Record<string, string>>({});
   const [gapBusy, setGapBusy] = useState('');
   const gapLoadSequence = useRef(0);
+  const ioLoadSequence = useRef(0);
   const [overrides, setOverrides] = useState<EvidenceOverride[]>([]);
   const [rationale, setRationale] = useState('');
   const [reviewRationale, setReviewRationale] = useState('');
@@ -235,6 +255,9 @@ export default function StoreDayDetailPage({
   const [reopens, setReopens] = useState<Reopen[]>([]);
   const [reopenBlockedBy, setReopenBlockedBy] = useState<string[]>([]);
   const [gaps, setGaps] = useState<SequenceGapRegister[]>([]);
+  const [gapsLoading, setGapsLoading] = useState(false);
+  const [gapsError, setGapsError] = useState('');
+  const detailLoadSequence = useRef(0);
   const [gapPagination, setGapPagination] = useState<SequenceGapPagination>({
     page: 1,
     page_size: 100,
@@ -257,6 +280,10 @@ export default function StoreDayDetailPage({
   const loadSequenceGaps = useCallback(
     async (page = 1, pageSize = 100) => {
       const sequence = ++gapLoadSequence.current;
+      setGapsLoading(true);
+      setGapsError('');
+      setGaps([]);
+      setGapPagination({ page, page_size: pageSize, total: 0, pages: 1 });
       try {
         const { data } = await api.get<{
           registers: SequenceGapRegister[];
@@ -267,19 +294,58 @@ export default function StoreDayDetailPage({
         if (sequence !== gapLoadSequence.current) return;
         setGaps(data.registers);
         setGapPagination(data.pagination);
-      } catch {
+      } catch (e) {
         if (sequence !== gapLoadSequence.current) return;
         setGaps([]);
-        setGapPagination({ page: 1, page_size: pageSize, total: 0, pages: 1 });
+        setGapPagination({ page, page_size: pageSize, total: 0, pages: 1 });
+        setGapsError(apiError(e, 'Could not load missing transaction numbers.'));
+      } finally {
+        if (sequence === gapLoadSequence.current) setGapsLoading(false);
       }
     },
     [storeId, date]
   );
 
+  const loadIoLog = useCallback(async () => {
+    const detailSequence = detailLoadSequence.current;
+    const requestSequence = ++ioLoadSequence.current;
+    setIoLoading(true);
+    setIoError('');
+    setIoLog({ controls: [], imports: [], exports: [] });
+    try {
+      const { data } = await api.get<DayIoLog>(
+        `${dayApi({ store_id: storeId, business_date: date })}/io-log`
+      );
+      if (
+        detailSequence !== detailLoadSequence.current ||
+        requestSequence !== ioLoadSequence.current
+      ) {
+        return;
+      }
+      setIoLog(data);
+    } catch (e) {
+      if (
+        detailSequence !== detailLoadSequence.current ||
+        requestSequence !== ioLoadSequence.current
+      ) {
+        return;
+      }
+      setIoError(apiError(e, 'Could not load this Store Day’s import/export log.'));
+    } finally {
+      if (
+        detailSequence === detailLoadSequence.current &&
+        requestSequence === ioLoadSequence.current
+      ) {
+        setIoLoading(false);
+      }
+    }
+  }, [storeId, date]);
+
   const loadDayErrors = useCallback(async () => {
     const sequence = ++dayErrorsSequence.current;
     setDayErrorsLoading(true);
     setDayErrorsError('');
+    setDayErrors(null);
     try {
       const { data } = await api.get<DayAuditErrorPage>(
         `${dayApi({ store_id: storeId, business_date: date })}/errors`,
@@ -313,7 +379,31 @@ export default function StoreDayDetailPage({
 
   const load = useCallback(
     async (v?: number, historyFilters?: { q?: string; eventType?: string }) => {
+      const sequence = ++detailLoadSequence.current;
       const ref = { store_id: storeId, business_date: date };
+      setLoading(true);
+      setError(null);
+      setDay(null);
+      setTotals([]);
+      setPrevTotals(null);
+      setVersions([]);
+      setVersion(null);
+      setBlockers([]);
+      setCases([]);
+      setClosures([]);
+      setHistory([]);
+      setHistoryPagination({ total: 0, page: 1, pages: 1 });
+      setHistoryEventTypes([]);
+      setIoLog({ controls: [], imports: [], exports: [] });
+      setIoLoading(false);
+      setIoError('');
+      ioLoadSequence.current += 1;
+      setOverrides([]);
+      setReadiness(null);
+      setAuditSignoff(null);
+      setQuality(null);
+      setReopens([]);
+      setReopenBlockedBy([]);
       try {
         const { data } = await api.get(dayApi(ref), {
           params: {
@@ -324,6 +414,7 @@ export default function StoreDayDetailPage({
             history_event_type: historyFilters?.eventType || undefined,
           },
         });
+        if (sequence !== detailLoadSequence.current) return;
         setDay(data.store_day);
         setTotals(data.totals);
         setVersions(data.versions);
@@ -336,15 +427,7 @@ export default function StoreDayDetailPage({
           data.history_pagination ?? { total: data.history.length, page: 1, pages: 1 }
         );
         setHistoryEventTypes(data.history_event_types ?? []);
-        api
-          .get<DayIoLog>(`${dayApi(ref)}/io-log`)
-          .then(({ data: log }) => {
-            setIoLog(log);
-            setIoError('');
-          })
-          .catch((e) => {
-            setIoError(apiError(e, 'Could not load this Store Day’s import/export log.'));
-          });
+        void loadIoLog();
         setOverrides(data.evidence_overrides ?? []);
         setReadiness(data.readiness ?? null);
         setAuditSignoff(data.readiness?.audit ?? null);
@@ -363,18 +446,21 @@ export default function StoreDayDetailPage({
         if (earlier > 0) {
           try {
             const prev = await api.get(dayApi(ref), { params: { version: earlier } });
-            setPrevTotals({ version: earlier, rows: prev.data.totals });
+            if (sequence === detailLoadSequence.current) {
+              setPrevTotals({ version: earlier, rows: prev.data.totals });
+            }
           } catch {
             /* the comparison is a nicety; the totals themselves loaded */
           }
         }
       } catch (e) {
+        if (sequence !== detailLoadSequence.current) return;
         setError(apiError(e, 'Could not open this Store Day.'));
       } finally {
-        setLoading(false);
+        if (sequence === detailLoadSequence.current) setLoading(false);
       }
     },
-    [storeId, date, loadSequenceGaps]
+    [storeId, date, loadIoLog, loadSequenceGaps]
   );
   useEffect(() => {
     load();
@@ -725,17 +811,32 @@ export default function StoreDayDetailPage({
       header: 'Review',
       stopRowClick: true,
       csvSkip: true,
-      render: (t) =>
-        t.name === 'POS to GL Variance' && ['finance', 'it', 'admin'].includes(me?.role ?? '') ? (
-          <Link
-            href={`/ledger?store_id=${encodeURIComponent(storeId)}&business_date=${encodeURIComponent(date)}`}
-            title={viewingOld ? 'Journal preview uses current transaction data' : undefined}
-          >
-            {viewingOld ? 'Current journal' : 'View journal'}
-          </Link>
-        ) : (
-          '—'
-        ),
+      render: (t) => {
+        const params = new URLSearchParams({
+          store_id: storeId,
+          date_from: date,
+          date_to: date,
+          total_name: t.name,
+          level: t.level,
+        });
+        if (t.dimension) params.set('dimension', t.dimension);
+        return (
+          <>
+            <Link href={`/total-history?${params.toString()}`}>Total history</Link>
+            {t.name === 'POS to GL Variance' &&
+              ['finance', 'it', 'admin'].includes(me?.role ?? '') && (
+                <small style={{ display: 'block' }}>
+                  <Link
+                    href={`/ledger?store_id=${encodeURIComponent(storeId)}&business_date=${encodeURIComponent(date)}`}
+                    title={viewingOld ? 'Journal preview uses current transaction data' : undefined}
+                  >
+                    {viewingOld ? 'Current journal' : 'View journal'}
+                  </Link>
+                </small>
+              )}
+          </>
+        );
+      },
     },
     {
       key: 'outcome',
@@ -873,28 +974,17 @@ export default function StoreDayDetailPage({
             <b>Closure blockers ({blockers.length})</b>
             <ul className="summary-list">
               {blockers.map((reason, index) => {
-                const lower = reason.toLowerCase();
-                const action = lower.includes('case')
-                  ? { text: 'Review cases', tab: 'cases' as DetailTab }
-                  : lower.includes('transaction number gap')
-                    ? { text: 'Review missing transactions', tab: 'missing' as DetailTab }
-                    : lower.includes('variance') ||
-                        lower.includes('reconciliation totals') ||
-                        lower.includes('stale')
-                      ? { text: 'Review totals', tab: 'totals' as DetailTab }
-                      : lower.includes('sign-off')
-                        ? { text: 'Review audit sign-off', tab: 'closure' as DetailTab }
-                        : { text: 'Review closure', tab: 'closure' as DetailTab };
+                const action = storeDayBlockerAction(reason);
                 return (
                   <li key={`${reason}-${index}`}>
                     {reason}{' '}
                     <button
                       type="button"
                       className="link-button"
-                      aria-label={`${action.text}: ${reason}`}
+                      aria-label={`${action.label}: ${reason}`}
                       onClick={() => selectTab(action.tab)}
                     >
-                      {action.text}
+                      {action.label}
                     </button>
                   </li>
                 );
@@ -1113,6 +1203,21 @@ export default function StoreDayDetailPage({
                         'Overall store-day audit lifecycle',
                       ],
                       ['Data', readiness.ingest.state, readiness.ingest.detail],
+                      ...(readiness.ingest.day_close
+                        ? [
+                            [
+                              'Store-level POS close',
+                              readiness.ingest.day_close.state,
+                              readiness.ingest.day_close.markers
+                                ? `${readiness.ingest.day_close.markers} store-level close marker(s) received`
+                                : readiness.ingest.day_close.required
+                                  ? 'The required POS Day Close marker has not been received'
+                                  : readiness.ingest.day_close.events
+                                    ? 'Register events arrived without the store-level Day Close marker'
+                                    : 'No POS register events or store-level Day Close marker received',
+                            ] as const,
+                          ]
+                        : []),
                       [
                         'Audit',
                         readiness.audit.resa_status ?? readiness.audit.state,
@@ -1128,24 +1233,26 @@ export default function StoreDayDetailPage({
                     ] as const
                   ).map(([label, state, note]) => {
                     const action =
-                      label === 'Data'
-                        ? { text: 'View import log', run: () => selectTab('io') }
-                        : label === 'Audit'
-                          ? (readiness.audit.missing_transactions ?? 0) > 0
-                            ? {
-                                text: 'Review missing transactions',
-                                run: () => selectTab('missing'),
-                              }
-                            : readiness.audit.open_cases > 0
-                              ? { text: 'Review cases', run: () => selectTab('cases') }
-                              : readiness.audit.unexplained_variances > 0
-                                ? { text: 'Review totals', run: () => selectTab('totals') }
-                                : !readiness.audit.signed_off
-                                  ? { text: 'Review sign-off', run: () => selectTab('closure') }
-                                  : null
-                          : label === 'Export'
-                            ? { text: 'View delivery log', run: () => selectTab('io') }
-                            : null;
+                      label === 'Store-level POS close'
+                        ? { text: 'Review POS events', run: () => selectTab('analysis') }
+                        : label === 'Data'
+                          ? { text: 'View import log', run: () => selectTab('io') }
+                          : label === 'Audit'
+                            ? (readiness.audit.missing_transactions ?? 0) > 0
+                              ? {
+                                  text: 'Review missing transactions',
+                                  run: () => selectTab('missing'),
+                                }
+                              : readiness.audit.open_cases > 0
+                                ? { text: 'Review cases', run: () => selectTab('cases') }
+                                : readiness.audit.unexplained_variances > 0
+                                  ? { text: 'Review totals', run: () => selectTab('totals') }
+                                  : !readiness.audit.signed_off
+                                    ? { text: 'Review sign-off', run: () => selectTab('closure') }
+                                    : null
+                            : label === 'Export'
+                              ? { text: 'View delivery log', run: () => selectTab('io') }
+                              : null;
                     return (
                       <div key={label} className="sd-ready-item">
                         <dt>{label}</dt>
@@ -1236,6 +1343,14 @@ export default function StoreDayDetailPage({
                   and business date are carried into each view.
                 </p>
                 <div className="sd-analysis-links">
+                  <Link
+                    href={`/transactions?store_id=${encodeURIComponent(storeId)}&date_from=${encodeURIComponent(date)}&date_to=${encodeURIComponent(date)}`}
+                  >
+                    <strong>Transactions</strong>
+                    <span>
+                      Browse every transaction for this store day with full filters and detail links
+                    </span>
+                  </Link>
                   <Link
                     href={`/register-summary?store_id=${encodeURIComponent(storeId)}&business_date=${encodeURIComponent(date)}&source=store-day`}
                   >
@@ -1688,6 +1803,9 @@ export default function StoreDayDetailPage({
                     type="search"
                     value={dayErrorsQuery}
                     onChange={(event) => {
+                      setDayErrors(null);
+                      setDayErrorsLoading(true);
+                      setDayErrorsError('');
                       setDayErrorsQuery(event.target.value);
                       setDayErrorsPage(1);
                     }}
@@ -1698,6 +1816,9 @@ export default function StoreDayDetailPage({
                     aria-label="Filter Store Day audit errors"
                     value={dayErrorsView}
                     onChange={(event) => {
+                      setDayErrors(null);
+                      setDayErrorsLoading(true);
+                      setDayErrorsError('');
                       setDayErrorsView(event.target.value as 'open' | 'all');
                       setDayErrorsPage(1);
                     }}
@@ -1714,7 +1835,22 @@ export default function StoreDayDetailPage({
                     {dayErrorsExporting ? 'Preparing CSV…' : 'Export matching CSV'}
                   </Button>
                 </Toolbar>
-                {dayErrorsError && <Alert tone="error">{dayErrorsError}</Alert>}
+                {dayErrorsError && (
+                  <Alert
+                    tone="error"
+                    action={
+                      <Button
+                        size="sm"
+                        className="alert-close"
+                        onClick={() => void loadDayErrors()}
+                      >
+                        Retry
+                      </Button>
+                    }
+                  >
+                    {dayErrorsError}
+                  </Alert>
+                )}
                 <DataTable
                   columns={[
                     {
@@ -1742,6 +1878,13 @@ export default function StoreDayDetailPage({
                       render: (item: DayAuditError) => (
                         <>
                           <CaseLink id={item.case_id}>{item.case_number}</CaseLink>
+                          {' · '}
+                          <Link
+                            href={`/cases/${encodeURIComponent(item.case_id)}#records`}
+                            aria-label={`Review source transactions for case ${item.case_number}`}
+                          >
+                            Review records
+                          </Link>
                           <small className="act-sub" style={{ display: 'block' }}>
                             {item.case_status}
                           </small>
@@ -1807,6 +1950,44 @@ export default function StoreDayDetailPage({
                       ),
                     },
                     {
+                      key: 'override-review',
+                      header: 'Override review',
+                      csvValue: (item: DayAuditError) =>
+                        item.override_requested_by
+                          ? [
+                              item.override_approved_by
+                                ? `Approved by ${item.override_approved_by} at ${item.override_approved_at ?? ''}`
+                                : `Awaiting Finance · requested by ${item.override_requested_by} at ${item.override_requested_at ?? ''}`,
+                              item.override_reason,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')
+                          : '',
+                      render: (item: DayAuditError) =>
+                        item.override_requested_by ? (
+                          <>
+                            <Badge
+                              variant={item.override_approved_by ? 'success' : 'warning'}
+                              size="sm"
+                            >
+                              {item.override_approved_by ? 'Approved' : 'Awaiting Finance'}
+                            </Badge>
+                            <small className="act-sub" style={{ display: 'block' }}>
+                              {item.override_approved_by
+                                ? `Approved by ${item.override_approved_by}`
+                                : `Requested by ${item.override_requested_by}`}
+                            </small>
+                            {item.override_reason && (
+                              <small className="act-sub" style={{ display: 'block' }}>
+                                {item.override_reason}
+                              </small>
+                            )}
+                          </>
+                        ) : (
+                          '—'
+                        ),
+                    },
+                    {
                       key: 'created',
                       header: 'Raised',
                       nowrap: true,
@@ -1829,7 +2010,12 @@ export default function StoreDayDetailPage({
                         total={dayErrors.total}
                         pageSize={dayErrors.page_size}
                         pageSizes={[50]}
-                        onPage={setDayErrorsPage}
+                        onPage={(page) => {
+                          setDayErrors(null);
+                          setDayErrorsLoading(true);
+                          setDayErrorsError('');
+                          setDayErrorsPage(page);
+                        }}
                         onPageSize={() => {}}
                       />
                     )
@@ -1924,7 +2110,110 @@ export default function StoreDayDetailPage({
 
             {tab === 'io' && (
               <div className="sd-pane">
-                {ioError && <Alert tone="error">{ioError}</Alert>}
+                {ioError && (
+                  <Alert tone="error">
+                    <div className="sd-inline-alert">
+                      <span>{ioError}</span>
+                      <Button size="sm" variant="secondary" onClick={() => void loadIoLog()}>
+                        Retry
+                      </Button>
+                    </div>
+                  </Alert>
+                )}
+                <section>
+                  <h3>Source control totals</h3>
+                  <p className="hint">
+                    POS and OMS declarations are checked against their own transactions. Shopify
+                    shows its reported order total and any refund figures supplied with the day
+                    total.
+                  </p>
+                  <DataTable
+                    columns={[
+                      {
+                        key: 'source',
+                        header: 'Source',
+                        primary: true,
+                        csvValue: (row) => row.source_system,
+                        render: (row) => row.source_system,
+                      },
+                      {
+                        key: 'record',
+                        header: 'Control record',
+                        csvValue: (row) => row.source_record_id,
+                        render: (row) => row.source_record_id,
+                      },
+                      {
+                        key: 'count',
+                        header: 'Declared transactions',
+                        numeric: true,
+                        csvValue: (row) => row.record_count ?? '',
+                        render: (row) =>
+                          row.record_count == null ? '—' : formatNumber(row.record_count),
+                      },
+                      {
+                        key: 'amount',
+                        header: 'Declared amount',
+                        numeric: true,
+                        csvValue: (row) => row.amount ?? '',
+                        render: (row) =>
+                          row.amount == null
+                            ? '—'
+                            : `${row.currency} ${formatNumber(Number(row.amount))}`,
+                      },
+                      {
+                        key: 'refunds',
+                        header: 'Declared refunds',
+                        csvValue: (row) =>
+                          row.refund_count == null
+                            ? ''
+                            : `${row.refund_count} · ${row.refund_amount ?? ''}`,
+                        render: (row) => {
+                          if (row.refund_count == null) return '—';
+                          const amount = `${row.currency} ${formatNumber(Number(row.refund_amount ?? 0))}`;
+                          return `${formatNumber(row.refund_count)} · ${amount}`;
+                        },
+                      },
+                      {
+                        key: 'status',
+                        header: 'Reconciliation',
+                        csvValue: (row) =>
+                          row.status === 'Processed'
+                            ? 'Reconciled'
+                            : row.status === 'Archived'
+                              ? 'Awaiting audit'
+                              : row.status,
+                        render: (row) => (
+                          <Badge
+                            variant={
+                              row.status === 'Processed'
+                                ? 'success'
+                                : row.status === 'Archived'
+                                  ? 'warning'
+                                  : 'secondary'
+                            }
+                          >
+                            {row.status === 'Processed'
+                              ? 'Reconciled'
+                              : row.status === 'Archived'
+                                ? 'Awaiting audit'
+                                : row.status}
+                          </Badge>
+                        ),
+                      },
+                      {
+                        key: 'received',
+                        header: 'Received',
+                        csvValue: (row) => row.received_at,
+                        render: (row) => formatDateTime(row.received_at),
+                      },
+                    ]}
+                    rows={ioLoading ? null : ioLog.controls}
+                    rowKey={(row) => `${row.source_system}:${row.source_record_id}`}
+                    emptyTitle="No source control totals for this day"
+                    csvFileName={`${storeId}-${date}-source-controls.csv`}
+                    detachTitle={`${storeId} ${date} · Source control totals`}
+                  />
+                </section>
                 <section>
                   <h3>Import log</h3>
                   <p className="hint">
@@ -1981,7 +2270,7 @@ export default function StoreDayDetailPage({
                         render: (row) => formatNumber(row.delivery_quarantined),
                       },
                     ]}
-                    rows={ioLog.imports}
+                    rows={ioLoading ? null : ioLog.imports}
                     rowKey={(row) => `${row.source_system}:${row.delivery_id}`}
                     emptyTitle="No imported transactions linked to this day"
                     csvFileName={`${storeId}-${date}-import-log.csv`}
@@ -2077,7 +2366,7 @@ export default function StoreDayDetailPage({
                         render: (row) => formatNumber(row.retries),
                       },
                     ]}
-                    rows={ioLog.exports}
+                    rows={ioLoading ? null : ioLog.exports}
                     rowKey={(row) => row.batch_id}
                     emptyTitle="No exports for this store day"
                     csvFileName={`${storeId}-${date}-export-log.csv`}
@@ -2094,18 +2383,43 @@ export default function StoreDayDetailPage({
                   generated by mistake. Add details through a governed correction, or dismiss a
                   false gap with an audit reason.
                 </p>
-                <Toolbar count={`${gaps.length} register group(s) loaded`}>
+                <Toolbar
+                  count={
+                    gapsLoading
+                      ? 'Loading transaction numbers…'
+                      : `${gaps.length} register group(s) loaded`
+                  }
+                >
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={gaps.length === 0}
+                    disabled={gapsLoading || !!gapsError || gaps.length === 0}
                     title="Download the missing and dismissed transaction numbers currently loaded."
                     onClick={exportLoadedSequenceGaps}
                   >
                     Export loaded gaps CSV
                   </Button>
                 </Toolbar>
-                {gaps.length === 0 ? (
+                {gapsError ? (
+                  <Alert
+                    tone="error"
+                    action={
+                      <Button
+                        size="sm"
+                        className="alert-close"
+                        onClick={() =>
+                          void loadSequenceGaps(gapPagination.page, gapPagination.page_size)
+                        }
+                      >
+                        Retry
+                      </Button>
+                    }
+                  >
+                    {gapsError}
+                  </Alert>
+                ) : gapsLoading ? (
+                  <p className="hint">Loading missing transaction numbers…</p>
+                ) : gaps.length === 0 ? (
                   <p className="cc-empty">No missing transaction numbers were found.</p>
                 ) : (
                   gaps.map((register) => (

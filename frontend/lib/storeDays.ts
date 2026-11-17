@@ -138,6 +138,39 @@ export const dayApi = (d: { store_id: string; business_date: string }) =>
 export const dayKey = (d: { store_id: string; business_date: string }) =>
   `${d.store_id}|${d.business_date}`;
 
+export type StoreDayReviewTab =
+  | 'analysis'
+  | 'closure'
+  | 'cases'
+  | 'errors'
+  | 'io'
+  | 'missing'
+  | 'totals';
+
+/** Route a plain-language Store Day blocker to the section that can resolve it. */
+export function storeDayBlockerAction(reason: string): {
+  label: string;
+  tab: StoreDayReviewTab;
+} {
+  const lower = reason.toLowerCase();
+  if (lower.includes('case')) return { label: 'Review cases', tab: 'cases' };
+  if (lower.includes('transaction number gap')) {
+    return { label: 'Review missing transactions', tab: 'missing' };
+  }
+  if (lower.includes('variance') || lower.includes('total') || lower.includes('stale')) {
+    return { label: 'Review totals', tab: 'totals' };
+  }
+  if (lower.includes('error') || lower.includes('exception')) {
+    return { label: 'Review audit errors', tab: 'errors' };
+  }
+  if (lower.includes('data') || lower.includes('feed') || lower.includes('day close')) {
+    return { label: 'Review data', tab: 'analysis' };
+  }
+  if (lower.includes('sign-off')) return { label: 'Review sign-off', tab: 'closure' };
+  if (lower.includes('export')) return { label: 'Review exports', tab: 'io' };
+  return { label: 'Review closure', tab: 'closure' };
+}
+
 /** Readiness states that are done; anything else needs attention. */
 const GOOD = new Set(['Complete', 'Clean', 'Final', 'Exported', 'Audited', 'Sales Audit Complete']);
 const NEUTRAL = new Set(['Not exported', 'In progress', 'Not totaled', 'Totaled']);

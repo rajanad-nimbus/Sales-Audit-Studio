@@ -62,6 +62,7 @@ interface Attention {
 }
 type ListTab = 'days' | 'late' | 'stuck';
 const DATA_STATUSES = ['Complete', 'Incomplete', 'Not reconciled', 'No control total', 'No data'];
+const OVERALL_STATUSES = ['Sales Audit in Progress', 'Sales Audit Complete'];
 const AUDIT_STATUSES = [
   'Re-Totalling/Auditing Required',
   'Store Errors Pending',
@@ -122,6 +123,7 @@ export default function StoreDaysPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [dataStatus, setDataStatus] = useState('');
   const [auditStatus, setAuditStatus] = useState('');
+  const [overallStatus, setOverallStatus] = useState('');
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [filtersReady, setFiltersReady] = useState(false);
@@ -169,8 +171,12 @@ export default function StoreDaysPage() {
     setStatusFilter((params.get('status') ?? '').slice(0, 32));
     const requestedDataStatus = params.get('data_status') ?? '';
     const requestedAuditStatus = params.get('audit_status') ?? '';
+    const requestedOverallStatus = params.get('overall_status') ?? '';
     setDataStatus(DATA_STATUSES.includes(requestedDataStatus) ? requestedDataStatus : '');
     setAuditStatus(AUDIT_STATUSES.includes(requestedAuditStatus) ? requestedAuditStatus : '');
+    setOverallStatus(
+      OVERALL_STATUSES.includes(requestedOverallStatus) ? requestedOverallStatus : ''
+    );
     const requestedTab = params.get('tab');
     if (requestedTab === 'days' || requestedTab === 'late' || requestedTab === 'stuck')
       setTab(requestedTab);
@@ -229,6 +235,7 @@ export default function StoreDaysPage() {
       'status',
       'data_status',
       'audit_status',
+      'overall_status',
       'tab',
       'page_size',
       'page',
@@ -245,6 +252,7 @@ export default function StoreDaysPage() {
     if (statusFilter) params.set('status', statusFilter);
     if (dataStatus) params.set('data_status', dataStatus);
     if (auditStatus) params.set('audit_status', auditStatus);
+    if (overallStatus) params.set('overall_status', overallStatus);
     if (tab !== 'days') params.set('tab', tab);
     if (pageSize !== 50) params.set('page_size', String(pageSize));
     if (page > 1) params.set('page', String(page));
@@ -267,6 +275,7 @@ export default function StoreDaysPage() {
     statusFilter,
     dataStatus,
     auditStatus,
+    overallStatus,
     tab,
     pageSize,
     page,
@@ -328,6 +337,7 @@ export default function StoreDaysPage() {
             status: statusFilter || undefined,
             data_status: dataStatus || undefined,
             audit_status: auditStatus || undefined,
+            overall_status: overallStatus || undefined,
             limit: pageSize,
             page,
           },
@@ -337,6 +347,7 @@ export default function StoreDaysPage() {
             ...scope,
             data_status: dataStatus || undefined,
             audit_status: auditStatus || undefined,
+            overall_status: overallStatus || undefined,
           },
         }),
       ]);
@@ -366,6 +377,7 @@ export default function StoreDaysPage() {
     statusFilter,
     dataStatus,
     auditStatus,
+    overallStatus,
     pageSize,
     page,
   ]);
@@ -386,6 +398,7 @@ export default function StoreDaysPage() {
           status: statusFilter || undefined,
           data_status: dataStatus || undefined,
           audit_status: auditStatus || undefined,
+          overall_status: overallStatus || undefined,
           format: 'csv',
         },
         responseType: 'blob',
@@ -429,6 +442,7 @@ export default function StoreDaysPage() {
     if (statusFilter) params.status = statusFilter;
     if (dataStatus) params.data_status = dataStatus;
     if (auditStatus) params.audit_status = auditStatus;
+    if (overallStatus) params.overall_status = overallStatus;
     if (pageSize !== 50) params.page_size = String(pageSize);
     if (page > 1) params.page = String(page);
     if (tab === 'late' || lateDate !== yesterday) params.late_date = lateDate;
@@ -447,8 +461,12 @@ export default function StoreDaysPage() {
     setStatusFilter(params.status ?? '');
     const nextDataStatus = params.data_status ?? '';
     const nextAuditStatus = params.audit_status ?? '';
+    const nextOverallStatus = params.overall_status ?? '';
     setDataStatus(DATA_STATUSES.includes(nextDataStatus) ? nextDataStatus : '');
     setAuditStatus(AUDIT_STATUSES.includes(nextAuditStatus) ? nextAuditStatus : '');
+    setOverallStatus(
+      OVERALL_STATUSES.includes(nextOverallStatus) ? nextOverallStatus : ''
+    );
     setTab(['days', 'late', 'stuck'].includes(params.tab) ? (params.tab as ListTab) : 'days');
     setPageSize(
       [25, 50, 100, 200].includes(Number(params.page_size)) ? Number(params.page_size) : 50
@@ -522,6 +540,17 @@ export default function StoreDaysPage() {
   };
 
   const statuses = summary ? Object.keys(summary.by_status).sort() : [];
+  const storeDaysDetachTitle = [
+    'Store Days',
+    storeFilter && `Store ${storeFilter}`,
+    dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : dateFrom ? `From ${dateFrom}` : '',
+    statusFilter,
+    dataStatus && `Data: ${dataStatus}`,
+    auditStatus && `Audit: ${auditStatus}`,
+    overallStatus && `Overall: ${overallStatus}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const onThisPage = useMemo(
     () => ({
       ready: days.filter((d) => d.readiness?.ready_to_close).length,
@@ -770,6 +799,7 @@ export default function StoreDaysPage() {
               rowKey={(r: LateStore) => r.store_id}
               failed={!!attentionError}
               csvFileName="store-days-late-visible.csv"
+              detachTitle={`Store Days · Late · ${lateDate}`}
               emptyTitle="Every active store's data is complete for this date"
               footer={
                 attention &&
@@ -856,6 +886,7 @@ export default function StoreDaysPage() {
               rowKey={dayKey}
               failed={!!attentionError}
               csvFileName="store-days-stuck-visible.csv"
+              detachTitle={`Store Days · Stuck · ${stuckAfter === 1 ? 'all open' : `open over ${stuckAfter} days`}`}
               onRowClick={(d: StuckDay) =>
                 setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))
               }
@@ -913,6 +944,18 @@ export default function StoreDaysPage() {
                 {DATA_STATUSES.map((value) => (
                   <option key={value} value={value}>
                     Data: {value}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Overall audit status"
+                value={overallStatus}
+                onChange={(e) => refilter(() => setOverallStatus(e.target.value))}
+              >
+                <option value="">All overall statuses</option>
+                {OVERALL_STATUSES.map((value) => (
+                  <option key={value} value={value}>
+                    Overall: {value}
                   </option>
                 ))}
               </select>
@@ -1010,6 +1053,7 @@ export default function StoreDaysPage() {
             failed={loadFailed}
             rowKey={dayKey}
             csvFileName="store-days-visible.csv"
+            detachTitle={storeDaysDetachTitle}
             onRowClick={(d) => setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))}
             expandedKey={expanded}
             renderDetail={(d) => (

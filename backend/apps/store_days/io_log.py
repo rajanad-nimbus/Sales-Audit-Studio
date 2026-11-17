@@ -1,12 +1,16 @@
 """Store-day view of source imports and downstream export batches."""
 
+import json
+from datetime import UTC, date, datetime, time, timedelta
+
 from database import get_db
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, select, tuple_
+from sqlalchemy import and_, case, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.exports.models import ExportBatch, ExportDestination, ExportItem
 from apps.ingest.models import SourceRecord
+from apps.ingest.shopify.day_totals import RECORD_PREFIX as SHOPIFY_CONTROL_PREFIX
 from apps.security import scope
 from apps.security.authentication import require_role
 from apps.store_days.service import get_day
@@ -22,9 +26,74 @@ async def store_day_io_log(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
 ):
-    """Show deliveries contributing transactions and export batches containing day records."""
+    """Show source controls, deliveries contributing transactions, and downstream exports."""
     scope.require_store(user, store_id)
     day = await get_day(db, store_id, business_date)
+
+    control_day = date.fromisoformat(business_date)
+    control_start = datetime.combine(control_day, time.min, tzinfo=UTC)
+    control_filters = [
+        or_(
+            SourceRecord.source_system.in_(("POSControl", "OMSControl")),
+            and_(
+                SourceRecord.source_system == "Shopify",
+                SourceRecord.source_record_id.like(f"{SHOPIFY_CONTROL_PREFIX}-%"),
+            ),
+        ),
+        SourceRecord.status.in_(("Archived", "Processed", "Superseded")),
+        SourceRecord.source_event_time >= control_start,
+    ]
+    if control_day != date.max:
+        control_filters.append(SourceRecord.source_event_time < control_start + timedelta(days=1))
+    control_records = (
+        await db.execute(
+            select(
+                SourceRecord.source_system,
+                SourceRecord.source_record_id,
+                SourceRecord.delivery_id,
+                SourceRecord.status,
+                SourceRecord.received_at,
+                SourceRecord.payload,
+            )
+            .where(*control_filters)
+            .order_by(SourceRecord.received_at.desc(), SourceRecord.id)
+        )
+    ).all()
+    controls = []
+    control_sources = {"POSControl": "POS", "OMSControl": "OMS", "Shopify": "Shopify"}
+    for (
+        source_system,
+        source_record_id,
+        delivery_id,
+        status,
+        received_at,
+        raw_payload,
+    ) in control_records:
+        try:
+            payload = json.loads(raw_payload)
+        except (TypeError, ValueError):
+            continue
+        if (
+            payload.get("store_id") != store_id
+            or str(payload.get("business_date", ""))[:10] != business_date
+        ):
+            continue
+        if source_system == "Shopify" and payload.get("record_type") != "DayTotal":
+            continue
+        controls.append(
+            {
+                "source_system": control_sources[source_system],
+                "source_record_id": source_record_id,
+                "delivery_id": delivery_id,
+                "status": status,
+                "received_at": received_at,
+                "record_count": payload.get("order_count", payload.get("declared_count")),
+                "amount": payload.get("order_total", payload.get("declared_total")),
+                "currency": payload.get("currency", "USD"),
+                "refund_count": payload.get("refund_count"),
+                "refund_amount": payload.get("refund_total"),
+            }
+        )
 
     imports = (
         await db.execute(
@@ -120,6 +189,7 @@ async def store_day_io_log(
         "store_day_id": day.id,
         "store_id": store_id,
         "business_date": business_date,
+        "controls": controls,
         "imports": [
             {
                 "source_system": row.source_system,

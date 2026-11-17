@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { MENU_ONLY, navSections } from '@/lib/nav';
 import { screenFor, useMe } from '@/components/MeProvider';
+import { uiNavigationLabel } from '@/lib/ui-messages';
 
 export function WorkspaceSwitcher() {
   const pathname = usePathname();
@@ -37,7 +38,7 @@ export function WorkspaceSwitcher() {
         }
       }}
     >
-      <summary aria-label="Switch workspace" title="Switch workspace">
+      <summary aria-label={uiNavigationLabel('Switch workspace')} title={uiNavigationLabel('Switch workspace')}>
         <span className="workspace-switcher-mark" aria-hidden="true">
           <svg viewBox="0 0 20 20" fill="currentColor">
             <rect x="2" y="2" width="6" height="6" rx="1" />
@@ -47,18 +48,18 @@ export function WorkspaceSwitcher() {
           </svg>
         </span>
         <span className="workspace-switcher-label">
-          <small>Workspace</small>
+          <small>{uiNavigationLabel('Workspace')}</small>
           <b>
-            {activeSection?.title ??
-              (activeScreen?.group === 'Configuration' ? 'Admin' : 'Choose')}
+            {uiNavigationLabel(activeSection?.title ??
+              (activeScreen?.group === 'Configuration' ? 'Admin' : 'Choose'))}
           </b>
         </span>
         <span className="workspace-switcher-chevron" aria-hidden="true">
           ⌄
         </span>
       </summary>
-      <div className="workspace-switcher-menu" aria-label="Available workspaces">
-        <p>Switch workspace</p>
+      <div className="workspace-switcher-menu" aria-label={uiNavigationLabel('Available workspaces')}>
+        <p>{uiNavigationLabel('Switch workspace')}</p>
         {sections.map((section) => {
           const first = section.items[0];
           const active = section.title === activeSection?.title;
@@ -71,12 +72,12 @@ export function WorkspaceSwitcher() {
                 if (details.current) details.current.open = false;
               }}
             >
-              <span className="workspace-switcher-item-title">{section.title}</span>
+              <span className="workspace-switcher-item-title">{uiNavigationLabel(section.title)}</span>
               <span className="workspace-switcher-item-meta">
-                {section.items.length} {section.items.length === 1 ? 'screen' : 'screens'} ·{' '}
-                {first.label}
+                {section.items.length} {uiNavigationLabel(section.items.length === 1 ? 'screen' : 'screens')} ·{' '}
+                {uiNavigationLabel(first.label)}
               </span>
-              {active && <span className="workspace-switcher-current">Current</span>}
+              {active && <span className="workspace-switcher-current">{uiNavigationLabel('Current')}</span>}
             </Link>
           );
         })}

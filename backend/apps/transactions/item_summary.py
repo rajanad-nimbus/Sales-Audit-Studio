@@ -37,6 +37,7 @@ async def item_summary(
     store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
     date_from: Annotated[str | None, Query(max_length=10)] = None,
     date_to: Annotated[str | None, Query(max_length=10)] = None,
+    item_type: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
     q: Annotated[str | None, Query(max_length=120)] = None,
     format: Literal["json", "csv"] = "json",
     page: Annotated[int, Query(ge=1, le=100000)] = 1,
@@ -55,6 +56,8 @@ async def item_summary(
         filters.append(CanonicalTransaction.business_date >= date_from)
     if date_to:
         filters.append(CanonicalTransaction.business_date <= date_to)
+    if item_type:
+        filters.append(TransactionLine.source_attributes["item_type"].as_string() == item_type)
     if q and q.strip():
         filters.append(
             contains_literal(TransactionLine.item_code, q)

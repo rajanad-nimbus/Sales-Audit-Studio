@@ -9,6 +9,7 @@ export type SummaryFilters = {
   dateFrom: string;
   dateTo: string;
   search: string;
+  itemType?: string;
   businessDate?: string;
   groupBy?: 'register' | 'cashier';
 };
@@ -22,6 +23,7 @@ type SavedSummaryView = {
     business_date?: string;
     group_by?: 'register' | 'cashier';
     q?: string;
+    item_type?: string;
   };
 };
 
@@ -95,6 +97,7 @@ export function SummarySavedViews({ scope, label, filters, onApply, saveDisabled
     if (filters.businessDate) params.business_date = filters.businessDate;
     if (filters.groupBy) params.group_by = filters.groupBy;
     if (filters.search) params.q = filters.search;
+    if (filters.itemType) params.item_type = filters.itemType;
     persist([
       ...views.filter((view) => view.name.toLocaleLowerCase() !== name.toLocaleLowerCase()),
       { name, params },
@@ -119,6 +122,7 @@ export function SummarySavedViews({ scope, label, filters, onApply, saveDisabled
                   dateFrom: view.params.date_from ?? '',
                   dateTo: view.params.date_to ?? '',
                   search: view.params.q ?? '',
+                  itemType: view.params.item_type ?? '',
                   businessDate: view.params.business_date ?? '',
                   groupBy: view.params.group_by ?? 'register',
                 })

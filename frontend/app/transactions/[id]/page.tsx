@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, money } from '@/lib/api';
@@ -152,6 +152,7 @@ interface Detail extends Linked {
   quantity: number | null;
   source_lineage: string;
   disposition: string;
+  paid_out_details: Record<string, string>;
   source_record_id: string | null;
   source: null | {
     source_system: string;
@@ -244,11 +245,22 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const router = useRouter();
   const { me } = useMe();
   const [d, setD] = useState<Detail | null>(null);
+  const [additionalCases, setAdditionalCases] = useState<Detail['cases']>([]);
+  const [relatedCasesHasMore, setRelatedCasesHasMore] = useState(false);
+  const [relatedCasesLoading, setRelatedCasesLoading] = useState(false);
+  const [relatedCasesError, setRelatedCasesError] = useState('');
+  const relatedCasesRequestId = useRef(0);
+  const [additionalErrors, setAdditionalErrors] = useState<Detail['errors']>([]);
+  const [transactionErrorsHasMore, setTransactionErrorsHasMore] = useState(false);
+  const [transactionErrorsLoading, setTransactionErrorsLoading] = useState(false);
+  const [transactionErrorsError, setTransactionErrorsError] = useState('');
+  const transactionErrorsRequestId = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<ChangeHistory | null>(null);
   const [voucherEvidence, setVoucherEvidence] = useState<VoucherEvidence | null>(null);
   const [refreshingAudit, setRefreshingAudit] = useState(false);
   const [refreshAuditMessage, setRefreshAuditMessage] = useState('');
+  const [auditRefreshVersion, setAuditRefreshVersion] = useState(0);
   const [detailExporting, setDetailExporting] = useState<string | null>(null);
   const [detailExportError, setDetailExportError] = useState<string | null>(null);
   useEffect(() => {
@@ -277,15 +289,82 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     };
   }, [id, me?.role]);
   useEffect(() => {
+    relatedCasesRequestId.current += 1;
+    transactionErrorsRequestId.current += 1;
+    let active = true;
     setD(null);
+    setAdditionalCases([]);
+    setRelatedCasesHasMore(false);
+    setRelatedCasesLoading(false);
+    setRelatedCasesError('');
+    setAdditionalErrors([]);
+    setTransactionErrorsHasMore(false);
+    setTransactionErrorsLoading(false);
+    setTransactionErrorsError('');
     api
       .get(`/api/transactions/${id}`)
       .then((r) => {
+        if (!active) return;
         setD(r.data);
+        setRelatedCasesHasMore(r.data.cases_truncated);
+        setTransactionErrorsHasMore(r.data.errors_truncated);
         setError(null);
       })
-      .catch(() => setError('Transaction not found'));
+      .catch(() => {
+        if (active) setError('Transaction not found');
+      });
+    return () => {
+      active = false;
+      relatedCasesRequestId.current += 1;
+      transactionErrorsRequestId.current += 1;
+    };
   }, [id]);
+
+  const loadMoreRelatedCases = async () => {
+    if (!d || relatedCasesLoading) return;
+    const requestId = ++relatedCasesRequestId.current;
+    setRelatedCasesLoading(true);
+    setRelatedCasesError('');
+    try {
+      const offset = d.cases.length + additionalCases.length;
+      const { data } = await api.get<{
+        items: Detail['cases'];
+        has_more: boolean;
+      }>(`/api/transactions/${encodeURIComponent(id)}/related-cases`, { params: { offset } });
+      if (requestId !== relatedCasesRequestId.current) return;
+      setAdditionalCases((current) => [...current, ...data.items]);
+      setRelatedCasesHasMore(data.has_more);
+    } catch {
+      if (requestId === relatedCasesRequestId.current) {
+        setRelatedCasesError('Could not load more related cases.');
+      }
+    } finally {
+      if (requestId === relatedCasesRequestId.current) setRelatedCasesLoading(false);
+    }
+  };
+
+  const loadMoreTransactionErrors = async () => {
+    if (!d || transactionErrorsLoading) return;
+    const requestId = ++transactionErrorsRequestId.current;
+    setTransactionErrorsLoading(true);
+    setTransactionErrorsError('');
+    try {
+      const offset = d.errors.length + additionalErrors.length;
+      const { data } = await api.get<{
+        items: Detail['errors'];
+        has_more: boolean;
+      }>(`/api/transactions/${encodeURIComponent(id)}/errors`, { params: { offset } });
+      if (requestId !== transactionErrorsRequestId.current) return;
+      setAdditionalErrors((current) => [...current, ...data.items]);
+      setTransactionErrorsHasMore(data.has_more);
+    } catch {
+      if (requestId === transactionErrorsRequestId.current) {
+        setTransactionErrorsError('Could not load more transaction audit errors.');
+      }
+    } finally {
+      if (requestId === transactionErrorsRequestId.current) setTransactionErrorsLoading(false);
+    }
+  };
 
   if (error)
     return (
@@ -296,6 +375,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
       </div>
     );
   if (!d) return <SkeletonRows rows={8} label="Loading transaction" />;
+  const relatedCases = [...d.cases, ...additionalCases];
+  const transactionErrors = [...d.errors, ...additionalErrors];
   const eventCalendarDate = d.event_timestamp.slice(0, 10);
   const assignedToDifferentBusinessDay = eventCalendarDate !== d.business_date;
   const fields: [string, React.ReactNode][] = [
@@ -303,6 +384,11 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
       'Business date',
       <span className="cluster" key="business-date">
         {d.business_date}
+        <Link
+          href={`/store-days/${encodeURIComponent(d.store_id)}/${encodeURIComponent(d.business_date)}`}
+        >
+          Open Store Day
+        </Link>
         {assignedToDifferentBusinessDay && (
           <span title={`Event timestamp date: ${eventCalendarDate}`}>
             <Badge size="sm" variant="info">
@@ -370,6 +456,40 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         )}
       </span>,
     ],
+    [
+      'Paid-out references',
+      <span className="stack stack-xs" key="paid-out-references">
+        {Object.entries(d.paid_out_details ?? {}).map(([field, value]) => {
+          const label =
+            {
+              vendor_number: 'Vendor',
+              vendor_invoice_number: 'Vendor invoice',
+              proof_of_delivery_number: 'Proof of delivery',
+              payment_reference_number: 'Payment reference',
+            }[field] ?? field;
+          return (
+            <span key={field}>
+              {label}: {value}{' '}
+              {['finance', 'it'].includes(me?.role ?? '') && (
+                <Link
+                  href={`/corrections/new?kind=PaidOutDetail&transaction_id=${encodeURIComponent(d.id)}`}
+                >
+                  Correct
+                </Link>
+              )}
+            </span>
+          );
+        })}
+        {Object.keys(d.paid_out_details ?? {}).length === 0 && <span>—</span>}
+        {['finance', 'it'].includes(me?.role ?? '') && (
+          <Link
+            href={`/corrections/new?kind=PaidOutDetail&transaction_id=${encodeURIComponent(d.id)}`}
+          >
+            Add paid-out detail
+          </Link>
+        )}
+      </span>,
+    ],
     ['Salesperson', d.salesperson_id ?? '—'],
     [
       'Retailer references',
@@ -424,12 +544,17 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     if (!d) return;
     setRefreshingAudit(true);
     setRefreshAuditMessage('');
+    transactionErrorsRequestId.current += 1;
+    setTransactionErrorsLoading(false);
     try {
-      const { data } = await api.post('/api/reconcile', null, {
+      const { data } = await api.post('/api/reconcile/refresh-errors', null, {
         params: { business_date: d.business_date, store_id: d.store_id },
       });
-      const result = await api.get<Detail>(`/api/transactions/${id}`);
-      setD(result.data);
+      const { data: transaction } = await api.get<Detail>(`/api/transactions/${id}`);
+      setD(transaction);
+      setAdditionalErrors([]);
+      setTransactionErrorsHasMore(transaction.errors_truncated);
+      setAuditRefreshVersion((version) => version + 1);
       setRefreshAuditMessage(
         `Audit refreshed for ${data.transactions_examined} transaction(s); ${data.cases_created} case(s) created.`
       );
@@ -463,13 +588,23 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           <p>
             {d.transaction_type} · {d.source_system} · Store {d.store_id} · {d.business_date}
           </p>
+          <nav className="toolbar" aria-label="Transaction review sections">
+            <a href="#transaction-audit-trail">Audit trail</a>
+            <a href="#transaction-comments">Comments and linked errors</a>
+          </nav>
         </div>
         <div className="case-hero-side">
           <span className={`badge badge-md ${tone(d.reconciliation_status)}`}>
             {d.reconciliation_status}
           </span>
           {canRefreshAudit && (
-            <Button size="sm" variant="secondary" disabled={refreshingAudit} onClick={refreshAudit}>
+            <Button
+              size="sm"
+              variant="secondary"
+              title="Re-runs reconciliation for unmatched transactions in this store and business date. It does not trigger exports."
+              disabled={refreshingAudit}
+              onClick={refreshAudit}
+            >
               {refreshingAudit ? 'Refreshing…' : 'Refresh audit errors'}
             </Button>
           )}
@@ -1152,7 +1287,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           <Card className="case-section">
             <div className="section-heading">
               <h2>Audit errors</h2>
-              {d.errors.length > 0 && (
+              {transactionErrors.length > 0 && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1171,7 +1306,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                         'Case',
                         'Case status',
                       ],
-                      d.errors.map((item) => [
+                      transactionErrors.map((item) => [
                         item.code,
                         item.family,
                         item.severity,
@@ -1190,20 +1325,22 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 </Button>
               )}
             </div>
-            {d.errors_truncated && (
-              <p className="hint">Showing the latest 100 transaction-linked audit errors.</p>
+            {transactionErrorsHasMore && (
+              <p className="hint">
+                Showing {transactionErrors.length} transaction-linked audit errors so far.
+              </p>
             )}
-            {d.errors.length > 0 && (
+            {transactionErrors.length > 0 && (
               <p className="hint">
                 These errors belong to cases raised from this transaction; a case may include other
                 transactions too.
               </p>
             )}
-            {d.errors.length === 0 ? (
+            {transactionErrors.length === 0 ? (
               <p className="cc-empty">No audit errors were raised from this transaction.</p>
             ) : (
               <ul className="summary-list">
-                {d.errors.map((error) => (
+                {transactionErrors.map((error) => (
                   <li key={error.id}>
                     <Link href={`/audit-errors/${encodeURIComponent(error.code)}`}>
                       <b>{error.code}</b>
@@ -1218,11 +1355,22 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 ))}
               </ul>
             )}
+            {transactionErrorsError && <p role="alert">{transactionErrorsError}</p>}
+            {transactionErrorsHasMore && (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={transactionErrorsLoading}
+                onClick={() => void loadMoreTransactionErrors()}
+              >
+                {transactionErrorsLoading ? 'Loading…' : 'Load more transaction errors'}
+              </Button>
+            )}
           </Card>
           <Card className="case-section">
             <div className="section-heading">
               <h2>Related cases</h2>
-              {d.cases.length > 0 && (
+              {relatedCases.length > 0 && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1230,7 +1378,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                     downloadCsv(
                       `transaction-${id}-related-cases-loaded.csv`,
                       ['Case', 'Type', 'Status', 'Relationship'],
-                      d.cases.map((item) => [
+                      relatedCases.map((item) => [
                         item.case_number,
                         item.case_type,
                         item.status,
@@ -1243,17 +1391,17 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 </Button>
               )}
             </div>
-            {d.cases_truncated && (
+            {relatedCasesHasMore && (
               <p className="hint">
-                Showing up to 200 matches, with cases raised from this transaction first. Additional
-                matches are not shown.
+                Showing {relatedCases.length} matches so far, with cases raised from this transaction
+                first.
               </p>
             )}
-            {d.cases.length === 0 ? (
+            {relatedCases.length === 0 ? (
               <p className="cc-empty">No case has been raised for this store and day.</p>
             ) : (
               <ul className="summary-list">
-                {d.cases.map((c) => (
+                {relatedCases.map((c) => (
                   <li key={c.id}>
                     <CaseLink id={c.id}>{c.case_number}</CaseLink> · {c.case_type}{' '}
                     <StatusBadge s={c.status} />
@@ -1265,6 +1413,17 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   </li>
                 ))}
               </ul>
+            )}
+            {relatedCasesError && <p role="alert">{relatedCasesError}</p>}
+            {relatedCasesHasMore && (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={relatedCasesLoading}
+                onClick={() => void loadMoreRelatedCases()}
+              >
+                {relatedCasesLoading ? 'Loading…' : 'Load more related cases'}
+              </Button>
             )}
           </Card>
           <Card className="case-section">
@@ -1481,8 +1640,12 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           </>
         )}
       </Card>
-      <TransactionAuditTrail transactionId={id} />
-      <TransactionComments transactionId={id} />
+      <div id="transaction-audit-trail">
+        <TransactionAuditTrail transactionId={id} />
+      </div>
+      <div id="transaction-comments">
+        <TransactionComments transactionId={id} refreshToken={auditRefreshVersion} />
+      </div>
     </div>
   );
 }

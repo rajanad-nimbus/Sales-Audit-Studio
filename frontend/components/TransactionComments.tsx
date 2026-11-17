@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/preferences';
 import { apiError } from '@/lib/storeDays';
@@ -9,45 +9,78 @@ import { Card } from '@/components/ui';
 
 type Comment = { id: string; text: string; actor: string; created_at: string };
 type Page = { items: Comment[]; has_more: boolean };
+type TransactionErrorPage = { items: TransactionError[]; has_more: boolean };
 type TransactionError = {
   id: string;
   code: string;
+  family: string;
+  detection_origin: string;
   severity: string;
+  confidence: string;
   status: string;
+  close_impact: string;
+  amount: string;
   case_id: string;
   case_number: string;
   case_status: string;
   business_date: string;
 };
 
-export default function TransactionComments({ transactionId }: { transactionId: string }) {
+export default function TransactionComments({
+  transactionId,
+  refreshToken = 0,
+}: {
+  transactionId: string;
+  refreshToken?: number;
+}) {
   const { me } = useMe();
   const [items, setItems] = useState<Comment[]>([]);
   const [errors, setErrors] = useState<TransactionError[]>([]);
   const [errorHistoryMessage, setErrorHistoryMessage] = useState('');
+  const [errorsHasMore, setErrorsHasMore] = useState(false);
+  const [errorsLoading, setErrorsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const requestId = useRef(0);
+  const errorsRequestId = useRef(0);
+  const currentTransactionId = useRef(transactionId);
+  currentTransactionId.current = transactionId;
   const path = `/api/transactions/${encodeURIComponent(transactionId)}/comments`;
+  const errorsPath = `/api/transactions/${encodeURIComponent(transactionId)}/errors`;
+  const loadErrors = useCallback(
+    async (offset: number) => {
+      const currentRequest = ++errorsRequestId.current;
+      setErrorsLoading(true);
+      try {
+        const { data } = await api.get<TransactionErrorPage>(errorsPath, { params: { offset } });
+        if (currentRequest !== errorsRequestId.current) return;
+        setErrors((previous) => (offset ? [...previous, ...data.items] : data.items));
+        setErrorsHasMore(data.has_more);
+        setErrorHistoryMessage('');
+      } catch (e) {
+        if (currentRequest === errorsRequestId.current) {
+          setErrorHistoryMessage(apiError(e, 'Could not load associated audit errors.'));
+        }
+      } finally {
+        if (currentRequest === errorsRequestId.current) setErrorsLoading(false);
+      }
+    },
+    [errorsPath]
+  );
   const load = useCallback(
     async (offset: number) => {
+      const currentRequest = ++requestId.current;
       setLoading(true);
       const commentsRequest = api.get<Page>(path, { params: { offset } });
-      const errorsRequest = offset
-        ? null
-        : api.get<{ items: TransactionError[] }>(path.replace(/\/comments$/, '/errors'));
-      const [commentsResult, errorsResult] = await Promise.all([
-        commentsRequest.then(
-          (value) => ({ status: 'fulfilled' as const, value }),
-          (reason) => ({ status: 'rejected' as const, reason })
-        ),
-        errorsRequest?.then(
-          (value) => ({ status: 'fulfilled' as const, value }),
-          (reason) => ({ status: 'rejected' as const, reason })
-        ),
-      ]);
+      const commentsResult = await commentsRequest.then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (reason) => ({ status: 'rejected' as const, reason })
+      );
+
+      if (currentRequest !== requestId.current) return;
 
       if (commentsResult.status === 'fulfilled') {
         const { data } = commentsResult.value;
@@ -57,24 +90,25 @@ export default function TransactionComments({ transactionId }: { transactionId: 
       } else {
         setError(apiError(commentsResult.reason, 'Could not load transaction comments.'));
       }
-      if (errorsResult) {
-        if (errorsResult.status === 'fulfilled') {
-          setErrors(errorsResult.value.data.items);
-          setErrorHistoryMessage('');
-        } else {
-          setErrorHistoryMessage(
-            apiError(errorsResult.reason, 'Could not load associated audit errors.')
-          );
-        }
-      }
       setLoading(false);
     },
     [path]
   );
   useEffect(() => {
     setItems([]);
+    setErrors([]);
+    setErrorsHasMore(false);
+    setError('');
+    setErrorHistoryMessage('');
+    setHasMore(false);
+    setText('');
     void load(0);
-  }, [load]);
+    void loadErrors(0);
+    return () => {
+      requestId.current += 1;
+      errorsRequestId.current += 1;
+    };
+  }, [load, loadErrors, refreshToken]);
   const canWrite = me && ['admin', 'finance', 'analyst'].includes(me.role);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -82,10 +116,13 @@ export default function TransactionComments({ transactionId }: { transactionId: 
     setBusy(true);
     try {
       await api.post(path, { text });
+      if (currentTransactionId.current !== transactionId) return;
       setText('');
       await load(0);
     } catch (e) {
-      setError(apiError(e, 'Could not add the comment.'));
+      if (currentTransactionId.current === transactionId) {
+        setError(apiError(e, 'Could not add the comment.'));
+      }
     } finally {
       setBusy(false);
     }
@@ -112,7 +149,7 @@ export default function TransactionComments({ transactionId }: { transactionId: 
       <section aria-labelledby="transaction-errors-title">
         <h3 id="transaction-errors-title">Associated audit errors</h3>
         {errorHistoryMessage && <p role="status">{errorHistoryMessage}</p>}
-        {!errors.length && !errorHistoryMessage && <p>No linked audit errors.</p>}
+        {!errors.length && !errorsLoading && !errorHistoryMessage && <p>No linked audit errors.</p>}
         {errors.length > 0 && (
           <ul>
             {errors.map((item) => (
@@ -128,6 +165,16 @@ export default function TransactionComments({ transactionId }: { transactionId: 
               </li>
             ))}
           </ul>
+        )}
+        {errorsLoading && <p role="status">Loading associated errors…</p>}
+        {errorsHasMore && (
+          <button
+            type="button"
+            disabled={errorsLoading}
+            onClick={() => void loadErrors(errors.length)}
+          >
+            Load more associated errors
+          </button>
         )}
       </section>
       {loading && <p role="status">Loading comments…</p>}

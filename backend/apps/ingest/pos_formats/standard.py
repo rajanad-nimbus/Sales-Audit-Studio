@@ -13,6 +13,7 @@ VOID, POST_VOID = "void", "post_void"
 NO_SALE, PAID_IN, PAID_OUT, PULL, LOAN = "no_sale", "paid_in", "paid_out", "pull", "loan"
 OPEN, CLOSE, TOTAL, DAY_CLOSE = "open", "close", "total", "day_close"
 CONDITION, METER, TERM, REFUND = "condition", "meter", "term", "refund"
+TANK_DIP, PUMP_TEST = "tank_dip", "pump_test"
 
 MERCHANDISE_TYPES = {SALE, RETURN, EXCHANGE}
 CASH_MOVEMENT_TYPES = {PAID_IN, PAID_OUT, PULL, LOAN}
@@ -29,6 +30,20 @@ TENDER_TYPES = {
     "SCRED": "StoreCredit",
     "MORDER": "Other",
 }
+
+
+def line_source_attributes(line: dict):
+    """Retain the standard item type alongside any vendor-specific line attributes."""
+    attributes = line.get("source_attributes")
+    item_type = line.get("item_type")
+    if item_type in (None, ""):
+        return attributes
+    if attributes is None:
+        return {"item_type": item_type}
+    if isinstance(attributes, dict):
+        return {**attributes, "item_type": item_type}
+    # Keep malformed attributes intact so canonical detail validation reports the right error.
+    return attributes
 
 
 @dataclass
@@ -156,7 +171,7 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
             "unit_price": x["unit_price"],
             "original_unit_price": x.get("original_unit_price"),
             "price_override_reason": x.get("price_override_reason"),
-            "source_attributes": x.get("source_attributes"),
+            "source_attributes": line_source_attributes(x),
             "gross_amount": str(abs(line_total(x))),
             "tax_code": x.get("tax_code"),
             "tax_rate": x.get("tax_rate", "0"),
@@ -187,6 +202,17 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
         "salesperson_id": tx.get("salesperson_id") or None,
         "currency": currency,
         "payment_reference": tx["source_record_id"],
+        "details": {
+            key: value
+            for key, value in (tx.get("details") or {}).items()
+            if key
+            in {
+                "vendor_number",
+                "vendor_invoice_number",
+                "proof_of_delivery_number",
+                "payment_reference_number",
+            }
+        },
         "user_references": (tx.get("details") or {}).get("user_references"),
         "customer_attributes": (tx.get("details") or {}).get("customer_attributes"),
         "tender_type": tenders[0]["tender_type"] if tenders else None,
@@ -271,3 +297,8 @@ def ingest_records(log: StandardLog, currency: str = "USD") -> tuple[list[dict],
 def register_events(log: StandardLog) -> list[dict]:
     """Till and drawer activity with no sale behind it: voids, no-sales, paid-in/out, pulls, loans, opens and closes."""
     return [tx for tx in log.transactions if tx["type"] not in MERCHANDISE_TYPES]
+
+
+def unmapped_merchandise(transactions: list[dict]) -> list[dict]:
+    """Merchandise transactions that could not become canonical sale or return records."""
+    return [tx for tx in transactions if tx["type"] in MERCHANDISE_TYPES]

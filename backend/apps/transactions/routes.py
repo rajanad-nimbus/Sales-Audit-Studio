@@ -83,6 +83,9 @@ def conditions(
     cashier_id=None,
     salesperson_id=None,
     item_code=None,
+    item_type=None,
+    tender_entry_type=None,
+    currency=None,
 ) -> list:
     c = []
     if store_id:
@@ -103,7 +106,17 @@ def conditions(
         c.append(CanonicalTransaction.cashier_id == cashier_id)
     if salesperson_id:
         c.append(CanonicalTransaction.salesperson_id == salesperson_id)
-    if item_code:
+    if item_code and item_type:
+        c.append(
+            select(TransactionLine.transaction_id)
+            .where(
+                TransactionLine.transaction_id == CanonicalTransaction.id,
+                TransactionLine.item_code == item_code,
+                TransactionLine.source_attributes["item_type"].as_string() == item_type,
+            )
+            .exists()
+        )
+    elif item_code:
         c.append(
             select(TransactionLine.transaction_id)
             .where(
@@ -112,6 +125,26 @@ def conditions(
             )
             .exists()
         )
+    elif item_type:
+        c.append(
+            select(TransactionLine.transaction_id)
+            .where(
+                TransactionLine.transaction_id == CanonicalTransaction.id,
+                TransactionLine.source_attributes["item_type"].as_string() == item_type,
+            )
+            .exists()
+        )
+    if tender_entry_type:
+        c.append(
+            select(TransactionTender.id)
+            .where(
+                TransactionTender.transaction_id == CanonicalTransaction.id,
+                TransactionTender.tender_type == tender_entry_type,
+            )
+            .exists()
+        )
+    if currency:
+        c.append(CanonicalTransaction.currency == currency)
     if date_from:
         c.append(CanonicalTransaction.business_date >= date_from)
     if date_to:
@@ -127,6 +160,15 @@ def conditions(
                 contains_literal(CanonicalTransaction.cashier_id, q),
                 contains_literal(CanonicalTransaction.salesperson_id, q),
                 contains_literal(SourceRecord.source_record_id, q),
+                *[
+                    contains_literal(CanonicalTransaction.paid_out_details[field].as_string(), q)
+                    for field in (
+                        "vendor_number",
+                        "vendor_invoice_number",
+                        "proof_of_delivery_number",
+                        "payment_reference_number",
+                    )
+                ],
                 select(TransactionTender.id)
                 .where(
                     TransactionTender.transaction_id == CanonicalTransaction.id,
@@ -172,6 +214,9 @@ async def list_transactions(
     cashier_id: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     salesperson_id: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     item_code: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    item_type: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    tender_entry_type: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    currency: Annotated[str | None, Query(min_length=1, max_length=3)] = None,
     format: Literal["json", "csv"] = "json",
     sort: Literal[
         "business_date", "event_timestamp", "amount", "store", "type", "status", "tender", "source"
@@ -203,6 +248,9 @@ async def list_transactions(
         cashier_id=cashier_id,
         salesperson_id=salesperson_id,
         item_code=item_code,
+        item_type=item_type,
+        tender_entry_type=tender_entry_type,
+        currency=currency,
     )
     # Status tiles intentionally ignore the selected status, while the result count
     # and net amount honor it. Compute both views in one grouped database pass.
@@ -221,6 +269,9 @@ async def list_transactions(
         cashier_id=cashier_id,
         salesperson_id=salesperson_id,
         item_code=item_code,
+        item_type=item_type,
+        tender_entry_type=tender_entry_type,
+        currency=currency,
     )
     selected_status = CanonicalTransaction.reconciliation_status == status if status else None
     selected_count = (

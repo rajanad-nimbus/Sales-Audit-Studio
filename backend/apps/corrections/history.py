@@ -27,6 +27,7 @@ FIELDS = {
     "Employee": ("Employee details", ("cashier_id", "salesperson_id")),
     "CustomerAttribute": ("Customer attribute", ("value",)),
     "UserReference": ("Retailer reference", ("value",)),
+    "PaidOutDetail": ("Paid-out detail", ("value",)),
 }
 MONEY_FIELDS = {"Amount", "Tax"}
 ORDER_FALLBACK = datetime.min
@@ -246,6 +247,26 @@ def build_history(initial: dict[str, object], adjustments: Iterable[TransactionA
                     state[reference_field] = after
                 else:
                     state.pop(reference_field, None)
+            continue
+        if adjustment.adjustment_type == "PaidOutDetail":
+            field_name = values.get("field")
+            state = running.setdefault("paid_out_details", {})
+            before = values.get("before_value", state.get(field_name))
+            after = values.get("value")
+            changes.append(
+                {
+                    **entry,
+                    "field": f"Paid-out {field_name.replace('_', ' ')}",
+                    "before": before,
+                    "after": after or None,
+                    "change": None,
+                }
+            )
+            if entry["applied"] and field_name:
+                if after:
+                    state[field_name] = after
+                else:
+                    state.pop(field_name, None)
             continue
         if adjustment.adjustment_type == "CustomerAttribute":
             attribute_type = values.get("attribute_type")

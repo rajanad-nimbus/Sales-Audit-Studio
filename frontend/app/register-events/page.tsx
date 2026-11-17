@@ -84,6 +84,8 @@ const TYPE_LABELS: Record<string, string> = {
   day_close: 'Day close',
   condition: 'Condition',
   meter: 'Meter',
+  pump_test: 'Pump test',
+  tank_dip: 'Tank dip',
   term: 'Term',
   refund: 'Refund',
 };
@@ -327,6 +329,15 @@ export default function RegisterEventsPage() {
     );
   const types = data ? Object.entries(data.by_type).sort((a, b) => b[1] - a[1]) : [];
   const typeTotal = types.reduce((n, [, c]) => n + c, 0);
+  const detachTitle = [
+    'Register Events',
+    f.store_id && `Store ${f.store_id}`,
+    f.event_type && typeLabel(f.event_type),
+    f.date_from && f.date_to ? `${f.date_from} to ${f.date_to}` : f.date_from || f.date_to,
+    f.flagged && 'Flagged only',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <div className="page-container">
@@ -468,6 +479,7 @@ export default function RegisterEventsPage() {
         <DataTable
           columns={COLUMNS}
           csvFileName="register-events-visible.csv"
+          detachTitle={detachTitle}
           rows={data.items}
           rowKey={(r) => r.id}
           onRowClick={(r) => {

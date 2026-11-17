@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useLive } from '@/lib/sync';
+import { uiNavigationLabel, uiSidebarSearchStatus } from '@/lib/ui-messages';
 import { MENU_ONLY, navSections } from '@/lib/nav';
 import { Logo } from '@/components/Logo';
 import { useMe } from './UserMenu';
@@ -135,7 +136,13 @@ export function Sidebar() {
   const shown = sections
     .map((s) => ({
       ...s,
-      items: s.items.filter((i) => !q || i.label.toLowerCase().includes(q)),
+      items: s.items.filter(
+        (i) =>
+          !q ||
+          i.label.toLocaleLowerCase().includes(q) ||
+          uiNavigationLabel(i.label).toLocaleLowerCase().includes(q) ||
+          uiNavigationLabel(s.title).toLocaleLowerCase().includes(q)
+      ),
     }))
     .filter((s) => s.items.length);
 
@@ -146,7 +153,7 @@ export function Sidebar() {
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' open' : ''}`}>
         <button
           className="nav-icon-btn sidebar-close"
-          aria-label="Close menu"
+          aria-label={uiNavigationLabel('Close menu')}
           onClick={() => {
             setMobileOpen(false);
             document.querySelector<HTMLButtonElement>('[aria-label="Toggle menu"]')?.focus();
@@ -187,13 +194,13 @@ export function Sidebar() {
                 setFilter('');
               }
             }}
-            placeholder="Find a page…"
-            aria-label="Quick search menus"
+            placeholder={uiNavigationLabel('Find a page…')}
+            aria-label={uiNavigationLabel('Quick search menus')}
           />
           {filter && (
             <button
               className="nav-search-clear"
-              aria-label="Clear menu search"
+              aria-label={uiNavigationLabel('Clear menu search')}
               onClick={() => {
                 setFilter('');
                 searchInput.current?.focus();
@@ -204,7 +211,7 @@ export function Sidebar() {
           )}
         </div>
 
-        <nav className="sidebar-nav" aria-label="Main">
+        <nav className="sidebar-nav" aria-label={uiNavigationLabel('Main')}>
           {shown.map((s) => (
             <div key={s.title} className="nav-section">
               <button
@@ -219,7 +226,7 @@ export function Sidebar() {
                   )
                 }
               >
-                {s.title}
+                {uiNavigationLabel(s.title)}
                 <svg
                   className="nav-section-chevron"
                   width="12"
@@ -242,12 +249,12 @@ export function Sidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
-                    title={item.label}
+                    title={uiNavigationLabel(item.label)}
                     aria-current={isActive(item.href) ? 'page' : undefined}
                     className={`menu-link${isActive(item.href) ? ' active' : ''}`}
                   >
                     <Icon name={item.icon} />
-                    <span className="menu-label">{item.label}</span>
+                    <span className="menu-label">{uiNavigationLabel(item.label)}</span>
                     {item.badge && pending > 0 && (
                       <span className="menu-badge">
                         {pending > 999 ? `${Math.floor(pending / 1000)}k` : pending}
@@ -260,9 +267,10 @@ export function Sidebar() {
           ))}
           {q && (
             <p className="nav-search-status" role="status">
-              {shown.length === 0
-                ? `No pages match “${filter.trim()}”. Try another name.`
-                : `${shown.reduce((count, section) => count + section.items.length, 0)} matching pages`}
+              {uiSidebarSearchStatus(
+                shown.reduce((count, section) => count + section.items.length, 0),
+                filter.trim()
+              )}
             </p>
           )}
         </nav>

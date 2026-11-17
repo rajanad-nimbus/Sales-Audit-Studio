@@ -419,6 +419,7 @@ export default function CasesPage() {
         <CaseTable
           cases={rows}
           failed={loadFailed}
+          detachTitle={`Cases · ${status || 'all statuses'} · ${priority || 'all priorities'}`}
           sort={sort ?? undefined}
           onSort={onSort}
           footer={

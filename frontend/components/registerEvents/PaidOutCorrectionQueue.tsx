@@ -283,6 +283,7 @@ export function PaidOutCorrectionQueue() {
         rows={result?.items ?? null}
         rowKey={(row: PaidOutCorrection) => row.id}
         csvFileName={`paid-out-corrections-${status.toLowerCase()}.csv`}
+        detachTitle={`Paid-out detail review · ${status === 'Proposed' ? 'awaiting review' : status.toLowerCase()}${query ? ` · search: ${query}` : ''}`}
         emptyTitle={count('All') === 0 ? 'No paid-out corrections yet' : 'No corrections match'}
         emptyHint="Corrections proposed from a paid-out event appear here for review."
       />

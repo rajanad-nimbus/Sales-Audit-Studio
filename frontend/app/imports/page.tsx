@@ -162,6 +162,8 @@ interface UploadPreview {
   business_dates: string[];
   errors: string[];
   warnings: string[];
+  blockers: string[];
+  summary: string | null;
 }
 interface CsvPreviewResponse {
   source_system: string;
@@ -181,15 +183,19 @@ interface RtlogPreviewResponse {
   ingestable_records: number;
   valid_records: number;
   quarantined_records: number;
+  register_events: number;
   not_mapped: number;
   validation_errors: { record: number; reason: string }[];
   validation_errors_truncated: boolean;
+  ingest_blockers: string[];
 }
 type SourceSwitch = 'enabled' | 'in_daily_batch' | 'manual_sync' | 'require_day_close';
 type Tab = 'sources' | 'upload' | 'runs' | 'feeds' | 'quarantine' | 'demo';
 const SOURCE_NOTES: Record<string, string> = {
   POS: 'Till sales and returns',
+  OMS: 'Order-management sales and returns · manual/profile upload; no pull connector yet',
   POSControl: 'Register control totals',
+  OMSControl: 'Order-management control totals · manual/profile upload; no pull connector yet',
   Processor: 'Card captures and refunds',
   Bank: 'Bank deposits',
   ERP: 'General-ledger postings',
@@ -244,6 +250,7 @@ export default function ImportsPage() {
   const [runHistoryError, setRunHistoryError] = useState('');
   const [runHistoryNotice, setRunHistoryNotice] = useState('');
   const batchRunRequest = useRef(0);
+  const runHistoryRequest = useRef(0);
   const runDetailRef = useRef<HTMLDivElement>(null);
   const [quarantineRows, setQuarantineRows] = useState<QuarantineRecord[]>([]);
   const [quarantineSource, setQuarantineSource] = useState('');
@@ -304,7 +311,7 @@ export default function ImportsPage() {
 
   const selectedUploadProfile = uploadProfiles.find((profile) => profile.id === uploadProfileId);
   const uploadCanonicalColumns =
-    uploadSource === 'POSControl'
+    uploadSource === 'POSControl' || uploadSource === 'OMSControl'
       ? (ingestContract?.pos_control_columns ?? [])
       : (ingestContract?.transaction_columns ?? []);
   const uploadTemplateColumns =
@@ -344,7 +351,7 @@ export default function ImportsPage() {
       setError(null);
     } catch {
       setError(
-        'Could not load import status. Check that the backend is running and your role is Finance or IT.'
+        'Could not load import status. Check the backend connection and your access to Imports.'
       );
     } finally {
       setLoaded(true);
@@ -372,6 +379,7 @@ export default function ImportsPage() {
     load();
   }, [load]);
   const loadRunHistory = useCallback(async () => {
+    const requestId = ++runHistoryRequest.current;
     setRunHistoryLoading(true);
     setRunHistoryError('');
     try {
@@ -384,12 +392,16 @@ export default function ImportsPage() {
           page_size: runPageSize,
         },
       });
-      setRuns(data.items);
-      setRunHasMore(data.has_more);
+      if (requestId === runHistoryRequest.current) {
+        setRuns(data.items);
+        setRunHasMore(data.has_more);
+      }
     } catch (e) {
-      setRunHistoryError(apiError(e, 'Could not load batch run history.'));
+      if (requestId === runHistoryRequest.current) {
+        setRunHistoryError(apiError(e, 'Could not load batch run history.'));
+      }
     } finally {
-      setRunHistoryLoading(false);
+      if (requestId === runHistoryRequest.current) setRunHistoryLoading(false);
     }
   }, [runStart, runEnd, runStatus, runPage, runPageSize]);
   const openBatchRun = (run: Run) => {
@@ -622,6 +634,24 @@ export default function ImportsPage() {
     };
   }, [canManage, tab]);
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const source = params.get('source_system')?.trim() ?? '';
+    const requestedView = params.get('view');
+    if (source) {
+      setDeliverySource(source);
+      setQuarantineSource(source);
+    }
+    if (requestedView === 'quarantine') {
+      const query = (params.get('q') ?? '').slice(0, 200);
+      setQuarantineSearchDraft(query);
+      setQuarantineQuery(query);
+      setTab('quarantine');
+      return;
+    }
+    if (source) {
+      setTab('feeds');
+      return;
+    }
     const h = window.location.hash.slice(1) as Tab;
     if (['sources', 'upload', 'runs', 'feeds', 'quarantine', 'demo'].includes(h)) setTab(h);
   }, []);
@@ -693,22 +723,19 @@ export default function ImportsPage() {
           });
           setUploadPreview({
             format: 'rtlog',
-            records_received: data.ingestable_records,
+            records_received: data.transactions,
             valid: data.valid_records,
             quarantined: data.quarantined_records,
             stores: data.store_id ? [data.store_id] : [],
             business_dates: data.business_date ? [data.business_date] : [],
+            summary: `${n(data.ingestable_records)} sale/return records · ${n(data.register_events)} register events`,
             errors: data.validation_errors
               .map((item) => `Mapped record ${item.record}: ${item.reason}`)
               .concat(data.validation_errors_truncated ? ['More validation errors omitted.'] : []),
-            warnings: [
-              ...data.problems,
-              ...(data.not_mapped
-                ? [
-                    `${data.not_mapped} RTLOG transactions have no usable item lines and will not create sale records.`,
-                  ]
-                : []),
-            ],
+            warnings: data.quarantined_records
+              ? [`${n(data.quarantined_records)} mapped sale/return record(s) will be quarantined.`]
+              : [],
+            blockers: data.ingest_blockers,
           });
         } else {
           const { data } = await api.post<CsvPreviewResponse>('/api/ingest/csv/preview', {
@@ -728,6 +755,8 @@ export default function ImportsPage() {
               .map((item) => `Row ${item.row}: ${item.reason}`)
               .concat(data.errors_truncated ? ['More validation errors omitted.'] : []),
             warnings: [],
+            blockers: [],
+            summary: null,
           });
         }
         toast('File preview is ready. Review it before ingesting.', 'success');
@@ -869,13 +898,17 @@ export default function ImportsPage() {
     health = {
       tone: 'warning',
       title: 'No data loaded yet',
-      body: 'Run the nightly batch to load the demo feed and raise cases.',
+      body: canManage
+        ? 'Run the nightly batch to load configured feeds and raise cases.'
+        : 'Ask IT to run the nightly batch after the configured feeds arrive.',
     };
   else if (bstatus.last_failed)
     health = {
       tone: 'error',
       title: 'The last batch failed',
-      body: 'Open Batch runs to see the error, then run the batch again.',
+      body: canManage
+        ? 'Open Batch runs to see the error, then run the batch again.'
+        : 'Open Batch runs to review the failure details, then ask IT to retry the batch.',
     };
   else if (bstatus.freshness === 'stale')
     health = {
@@ -896,7 +929,7 @@ export default function ImportsPage() {
     ['runs', 'Batch runs', null, false],
     ['feeds', 'Source feeds', feedHealth.length, overdue > 0],
     ['quarantine', 'Quarantine', quarantineCount, quarantineCount > 0],
-    ['demo', 'Demo tools', null, false],
+    ...(canManage ? ([['demo', 'Demo tools', null, false]] as [Tab, string, number | null, boolean][]) : []),
   ];
 
   return (
@@ -909,9 +942,11 @@ export default function ImportsPage() {
             <Button onClick={load} disabled={!!busy}>
               Refresh
             </Button>
-            <Button variant="primary" disabled={!!busy} onClick={runBatch}>
-              {busy === 'batch' ? 'Running batch…' : 'Run nightly batch'}
-            </Button>
+            {canManage && (
+              <Button variant="primary" disabled={!!busy} onClick={runBatch}>
+                {busy === 'batch' ? 'Running batch…' : 'Run nightly batch'}
+              </Button>
+            )}
           </>
         }
       />
@@ -1047,7 +1082,12 @@ export default function ImportsPage() {
                           role="switch"
                           aria-label={`${header} for ${s.source_system}`}
                           checked={s[field]}
-                          disabled={!canManage || (field !== 'enabled' && !s.enabled)}
+                          disabled={
+                            !canManage ||
+                            (field !== 'enabled' && !s.enabled) ||
+                            (['OMS', 'OMSControl'].includes(s.source_system) &&
+                              field === 'in_daily_batch')
+                          }
                           onChange={(e) => setSwitch(s, field, e.target.checked)}
                         />
                       ),
@@ -1262,10 +1302,12 @@ export default function ImportsPage() {
                       <Card title="Review before ingesting">
                         <p className="hint">
                           {uploadPreview.format === 'rtlog' ? 'RTLOG' : 'CSV'} preview for{' '}
-                          <strong>{uploadSource}</strong>: {n(uploadPreview.records_received)}{' '}
-                          records; {n(uploadPreview.valid)} valid and {n(uploadPreview.quarantined)}{' '}
-                          expected to be quarantined.
+                          <strong>{uploadSource}</strong>:{' '}
+                          {uploadPreview.format === 'rtlog'
+                            ? `${n(uploadPreview.records_received)} transactions in file; ${n(uploadPreview.valid)} mapped records valid and ${n(uploadPreview.quarantined)} expected to be quarantined.`
+                            : `${n(uploadPreview.records_received)} records; ${n(uploadPreview.valid)} valid and ${n(uploadPreview.quarantined)} expected to be quarantined.`}
                         </p>
+                        {uploadPreview.summary && <p className="hint">{uploadPreview.summary}</p>}
                         {uploadPreview.stores.length > 0 && (
                           <p className="hint">Stores: {uploadPreview.stores.join(', ')}</p>
                         )}
@@ -1276,6 +1318,13 @@ export default function ImportsPage() {
                         )}
                         {uploadPreview.errors.length > 0 && (
                           <Alert tone="warning">{uploadPreview.errors.join(' · ')}</Alert>
+                        )}
+                        {uploadPreview.blockers.length > 0 && (
+                          <Alert tone="error">
+                            RTLOG cannot be ingested yet: {uploadPreview.blockers.join(' · ')}
+                            {' '}Resolve the file or mapping issues and preview again; ask IT to map
+                            unsupported RTLOG types.
+                          </Alert>
                         )}
                         {uploadPreview.warnings.length > 0 && (
                           <Alert tone="warning">
@@ -1290,6 +1339,7 @@ export default function ImportsPage() {
                       disabled={
                         uploadBusy ||
                         !uploadFile ||
+                        !!uploadPreview?.blockers.length ||
                         !sources.find((source) => source.source_system === uploadSource)?.enabled ||
                         !sources.find((source) => source.source_system === uploadSource)
                           ?.manual_sync
@@ -1300,7 +1350,11 @@ export default function ImportsPage() {
                           ? 'Ingesting…'
                           : 'Preparing preview…'
                         : uploadPreview
-                          ? 'Confirm and ingest'
+                          ? uploadPreview.blockers.length > 0
+                            ? 'Fix RTLOG before ingesting'
+                            : uploadPreview.format === 'rtlog' && uploadPreview.quarantined > 0
+                              ? 'Ingest valid records'
+                              : 'Confirm and ingest'
                           : 'Review file'}
                     </Button>
                   </form>
@@ -1492,7 +1546,11 @@ export default function ImportsPage() {
               {runHistoryNotice && <Alert tone="warning">{runHistoryNotice}</Alert>}
               {!runHistoryLoading && runs.length === 0 ? (
                 <EmptyState title="No batch runs yet">
-                  <p>Change the filters or use “Run nightly batch” to create a new run.</p>
+                  <p>
+                    {canManage
+                      ? 'Change the filters or run the nightly batch to create a new run.'
+                      : 'Change the filters or ask IT to start a batch run.'}
+                  </p>
                 </EmptyState>
               ) : (
                 <DataTable
@@ -1687,8 +1745,15 @@ export default function ImportsPage() {
               <section className="cc-card">
                 <h3>Feed freshness</h3>
                 <p className="hint" style={{ marginBottom: '.6rem' }}>
-                  Each source feed is expected on a schedule. Edit schedules and mappings under{' '}
-                  <Link href="/settings#integrations">Settings → Integrations</Link>.
+                  Each source feed is expected on a schedule.{' '}
+                  {canManage ? (
+                    <>
+                      Edit schedules and mappings under{' '}
+                      <Link href="/settings#integrations">Settings → Integrations</Link>.
+                    </>
+                  ) : (
+                    'Ask IT to edit schedules and mappings under Settings → Integrations.'
+                  )}
                 </p>
                 {feedHealth.length === 0 ? (
                   <p className="cc-empty">No source-feed profiles are configured.</p>
@@ -2059,7 +2124,10 @@ export default function ImportsPage() {
             </section>
           )}
 
-          {tab === 'demo' && (
+          {tab === 'demo' && !canManage && (
+            <Alert tone="warning">Demo tools are available only to IT operators.</Alert>
+          )}
+          {tab === 'demo' && canManage && (
             <div className="case-panel">
               <Alert tone="warning">
                 Demo tools create or delete sample data. They are for testing and do not run in

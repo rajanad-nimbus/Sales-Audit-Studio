@@ -252,6 +252,11 @@ export function ReportView({ report }: { report: ReportPage }) {
   const amountByMonth = new Map(selectedTrendRows.map((row) => [row.month, Number(row.amount)]));
   const monthValues = months.map((month) => ({ month, amount: amountByMonth.get(month) ?? 0 }));
   const trendMaximum = Math.max(...monthValues.map((item) => Math.abs(item.amount)), 0);
+  const detachTitle = [
+    report.title,
+    storeId ? `Store ${storeId}` : 'All assigned stores',
+    `${start || ytdStart || 'any date'} → ${end || 'latest'}`,
+  ].join(' · ');
 
   return (
     <div className="page-container">
@@ -431,6 +436,7 @@ export function ReportView({ report }: { report: ReportPage }) {
         rows={data ? data.rows : null}
         rowKey={(r) => r.join('|')}
         csvFileName={`${report.name}-visible.csv`}
+        detachTitle={detachTitle}
         emptyTitle="Nothing to report for this range"
         emptyHint={page > 1 ? 'There are no more rows. Go back a page.' : 'Try a wider date range.'}
         footer={data && <PageNav page={data.page} hasMore={data.has_more} onPage={setPage} />}

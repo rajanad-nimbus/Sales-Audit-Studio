@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ExportBatchRow, ExportDest } from '@/lib/api';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { useDataChanged } from '@/lib/sync';
@@ -97,6 +97,8 @@ export default function ExportsPage() {
   const [batchPageSize, setBatchPageSize] = useState(50);
   const [batchHasMore, setBatchHasMore] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const batchRequestId = useRef(0);
   const [batchExporting, setBatchExporting] = useState(false);
   const [destId, setDestId] = useState('');
   const [dataset, setDataset] = useState('resolutions');
@@ -110,6 +112,9 @@ export default function ExportsPage() {
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [track, setTrack] = useState<Track | null>(null);
+  const [trackLoading, setTrackLoading] = useState(false);
+  const [trackError, setTrackError] = useState<string | null>(null);
+  const trackRequestId = useRef(0);
   const [trackState, setTrackState] = useState('');
   const [trackQ, setTrackQ] = useState('');
   const [trackQd, setTrackQd] = useState('');
@@ -143,7 +148,10 @@ export default function ExportsPage() {
     load();
   }, [load]);
   const loadBatchHistory = useCallback(async () => {
+    const requestId = ++batchRequestId.current;
     setBatchLoading(true);
+    setBatches([]);
+    setBatchError(null);
     try {
       const { data } = await api.get('/api/exports/batches/history', {
         params: {
@@ -157,12 +165,15 @@ export default function ExportsPage() {
           page_size: batchPageSize,
         },
       });
+      if (requestId !== batchRequestId.current) return;
       setBatches(data.items);
       setBatchHasMore(data.has_more);
     } catch (e: any) {
-      setErr(e?.response?.data?.detail ?? 'Could not load export history.');
+      if (requestId === batchRequestId.current) {
+        setBatchError(e?.response?.data?.detail ?? 'Could not load export history.');
+      }
     } finally {
-      setBatchLoading(false);
+      if (requestId === batchRequestId.current) setBatchLoading(false);
     }
   }, [
     batchDestination,
@@ -203,10 +214,16 @@ export default function ExportsPage() {
     }
   };
   const loadTrack = useCallback(async () => {
+    const requestId = ++trackRequestId.current;
     if (!destId) {
       setTrack(null);
+      setTrackError(null);
+      setTrackLoading(false);
       return;
     }
+    setTrack(null);
+    setTrackError(null);
+    setTrackLoading(true);
     try {
       const { data } = await api.get('/api/exports/tracking', {
         params: {
@@ -218,9 +235,14 @@ export default function ExportsPage() {
           page_size: 25,
         },
       });
+      if (requestId !== trackRequestId.current) return;
       setTrack(data);
-    } catch {
-      setTrack(null);
+    } catch (e: any) {
+      if (requestId === trackRequestId.current) {
+        setTrackError(e?.response?.data?.detail ?? 'Could not load export tracking.');
+      }
+    } finally {
+      if (requestId === trackRequestId.current) setTrackLoading(false);
     }
   }, [destId, dataset, trackState, trackQd, trackPage]);
   useEffect(() => {
@@ -471,7 +493,18 @@ export default function ExportsPage() {
           <p className="cc-empty">
             Choose an enabled destination above to see what has and has not been sent to it.
           </p>
-        ) : !track ? (
+        ) : trackError ? (
+          <Alert
+            tone="error"
+            action={
+              <Button size="sm" onClick={() => void loadTrack()}>
+                Retry
+              </Button>
+            }
+          >
+            {trackError}
+          </Alert>
+        ) : trackLoading || !track ? (
           <SkeletonRows rows={3} label="Loading export tracking" />
         ) : track.kind === 'stream' ? (
           <>
@@ -638,6 +671,18 @@ export default function ExportsPage() {
 
       <section>
         <h2 className="act-day">Export history</h2>
+        {batchError && (
+          <Alert
+            tone="error"
+            action={
+              <Button size="sm" onClick={() => void loadBatchHistory()}>
+                Retry history
+              </Button>
+            }
+          >
+            {batchError}
+          </Alert>
+        )}
         <Toolbar>
           <select
             aria-label="Export history destination"

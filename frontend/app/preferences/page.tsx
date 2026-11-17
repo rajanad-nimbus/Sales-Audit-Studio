@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { applyUserPreferences, DEFAULT_PREFERENCES, type UserPreferences } from '@/lib/preferences';
 import { useTheme } from '@/lib/ThemeContext';
 import { Alert, Button, Card, Field, PageHeader } from '@/components/ui';
+import { uiMessage } from '@/lib/ui-messages';
 
 const LOCALES = [
   ['en-US', 'English (United States)'],
@@ -41,6 +42,7 @@ export default function PreferencesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const t = (key: Parameters<typeof uiMessage>[0]) => uiMessage(key, preferences.locale);
   useEffect(() => {
     api
       .get<UserPreferences>('/api/me/preferences')
@@ -50,7 +52,7 @@ export default function PreferencesPage() {
         applyUserPreferences(data);
         setTheme(data.theme);
       })
-      .catch(() => setError('Your preferences could not be loaded.'))
+      .catch(() => setError(uiMessage('loadError')))
       .finally(() => setLoading(false));
   }, [setTheme]);
   const changed = useMemo(() => {
@@ -71,7 +73,7 @@ export default function PreferencesPage() {
     } catch (e) {
       setError(
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-          'Your preferences could not be saved.'
+          uiMessage('saveError', preferences.locale)
       );
     } finally {
       setSaving(false);
@@ -85,14 +87,14 @@ export default function PreferencesPage() {
   return (
     <div className="page-container preferences-page">
       <PageHeader
-        title="My Preferences"
-        subtitle="Regional display and accessibility settings for your account."
+        title={t('preferences')}
+        subtitle={t('preferencesSubtitle')}
       />
       {error && <Alert tone="error">{error}</Alert>}
-      {saved && <Alert tone="success">Preferences saved to your account.</Alert>}
-      <Card title="Regional display">
+      {saved && <Alert tone="success">{t('saved')}</Alert>}
+      <Card title={t('regionalDisplay')}>
         <div className="preferences-grid">
-          <Field label="Number and date locale">
+          <Field label={t('locale')}>
             <select
               value={preferences.locale}
               onChange={(event) => patch('locale', event.target.value)}
@@ -105,7 +107,7 @@ export default function PreferencesPage() {
               ))}
             </select>
           </Field>
-          <Field label="Time zone">
+          <Field label={t('timeZone')}>
             <select
               value={preferences.time_zone}
               onChange={(event) => patch('time_zone', event.target.value)}
@@ -135,20 +137,20 @@ export default function PreferencesPage() {
           }).format(new Date('2026-11-09T12:30:00Z'))}
         </p>
       </Card>
-      <Card title="Appearance and accessibility">
+      <Card title={t('appearance')}>
         <div className="preferences-grid">
-          <Field label="Theme">
+          <Field label={t('theme')}>
             <select
               value={preferences.theme}
               onChange={(event) => patch('theme', event.target.value as UserPreferences['theme'])}
               disabled={loading}
             >
-              <option value="system">Use device setting</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
+              <option value="system">{t('device')}</option>
+              <option value="light">{t('light')}</option>
+              <option value="dark">{t('dark')}</option>
             </select>
           </Field>
-          <Field label="Information density">
+          <Field label={t('density')}>
             <select
               value={preferences.density}
               onChange={(event) =>
@@ -156,11 +158,11 @@ export default function PreferencesPage() {
               }
               disabled={loading}
             >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
+              <option value="comfortable">{t('comfortable')}</option>
+              <option value="compact">{t('compact')}</option>
             </select>
           </Field>
-          <Field label="Contrast">
+          <Field label={t('contrast')}>
             <select
               value={preferences.contrast}
               onChange={(event) =>
@@ -168,30 +170,30 @@ export default function PreferencesPage() {
               }
               disabled={loading}
             >
-              <option value="standard">Standard</option>
-              <option value="high">High contrast</option>
+              <option value="standard">{t('standard')}</option>
+              <option value="high">{t('highContrast')}</option>
             </select>
           </Field>
-          <Field label="Motion">
+          <Field label={t('motion')}>
             <select
               value={preferences.motion}
               onChange={(event) => patch('motion', event.target.value as UserPreferences['motion'])}
               disabled={loading}
             >
-              <option value="system">Follow device setting</option>
-              <option value="reduce">Reduce animation</option>
+              <option value="system">{t('systemMotion')}</option>
+              <option value="reduce">{t('reduceMotion')}</option>
             </select>
           </Field>
         </div>
       </Card>
       <div className="toolbar preferences-save">
-        <span className="hint">Preferences follow your signed-in account across devices.</span>
+        <span className="hint">{t('accountSync')}</span>
         <Button
           variant="primary"
           onClick={() => void save()}
           disabled={loading || saving || !changed}
         >
-          {saving ? 'Saving…' : 'Save preferences'}
+          {saving ? t('saving') : t('save')}
         </Button>
       </div>
     </div>

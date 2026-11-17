@@ -64,12 +64,15 @@ interface F {
   source_system: string;
   transaction_type: string;
   tender_type: string;
+  tender_entry_type: string;
+  currency: string;
   status: string;
   detail_status: string;
   register_id: string;
   cashier_id: string;
   salesperson_id: string;
   item_code: string;
+  item_type: string;
   date_from: string;
   date_to: string;
 }
@@ -96,12 +99,15 @@ const EMPTY: F = {
   source_system: '',
   transaction_type: '',
   tender_type: '',
+  tender_entry_type: '',
+  currency: '',
   status: '',
   detail_status: '',
   register_id: '',
   cashier_id: '',
   salesperson_id: '',
   item_code: '',
+  item_type: '',
   date_from: '',
   date_to: '',
 };
@@ -109,11 +115,14 @@ const ADVANCED_FILTERS: (keyof F)[] = [
   'source_system',
   'transaction_type',
   'tender_type',
+  'tender_entry_type',
+  'currency',
   'detail_status',
   'register_id',
   'cashier_id',
   'salesperson_id',
   'item_code',
+  'item_type',
 ];
 
 export const statusTone = (s: string) =>
@@ -316,12 +325,15 @@ export default function TransactionsPage() {
     f.source_system,
     f.transaction_type,
     f.tender_type,
+    f.tender_entry_type,
+    f.currency,
     f.status,
     f.detail_status,
     f.register_id,
     f.cashier_id,
     f.salesperson_id,
     f.item_code,
+    f.item_type,
     f.date_from,
     f.date_to,
     sort,
@@ -423,6 +435,16 @@ export default function TransactionsPage() {
     }
   };
   const filtered = (Object.keys(f) as (keyof F)[]).some((k) => (k === 'q' ? qd : f[k]));
+  const detachTitle = [
+    'Transactions',
+    f.store_id && `Store ${f.store_id}`,
+    f.date_from && f.date_to ? `${f.date_from} to ${f.date_to}` : f.date_from || f.date_to,
+    f.status,
+    f.source_system,
+    f.transaction_type,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const advancedCount = ADVANCED_FILTERS.filter((key) => !!f[key]).length;
   const toggleSort = (k: string) =>
     setSort((s) =>
@@ -501,7 +523,7 @@ export default function TransactionsPage() {
               type="search"
               value={f.q}
               onChange={(e) => set({ q: e.target.value })}
-              placeholder="Search transaction, cashier, salesperson, tender reference or authorization"
+              placeholder="Search transaction, cashier, vendor, invoice, or payment reference"
               aria-label="Search transactions"
             />
           </Field>
@@ -608,6 +630,30 @@ export default function TransactionsPage() {
               ))}
             </select>
           </Field>
+          <Field label="Tender entry type">
+            <input
+              value={f.tender_entry_type}
+              maxLength={50}
+              onChange={(e) => set({ tender_entry_type: e.target.value })}
+              placeholder="Exact split-tender type"
+            />
+          </Field>
+          <Field label="Currency">
+            <input
+              value={f.currency}
+              maxLength={3}
+              onChange={(e) => set({ currency: e.target.value.toUpperCase() })}
+              placeholder="USD"
+            />
+          </Field>
+          <Field label="Item type">
+            <input
+              value={f.item_type}
+              maxLength={50}
+              onChange={(e) => set({ item_type: e.target.value })}
+              placeholder="Exact item type"
+            />
+          </Field>
           <Field label="Line detail">
             <select
               aria-label="Line detail"
@@ -705,6 +751,7 @@ export default function TransactionsPage() {
         <DataTable
           columns={COLUMNS}
           csvFileName="transactions-visible.csv"
+          detachTitle={detachTitle}
           rows={data.items}
           rowKey={(r) => r.id}
           onRowClick={(r) => setExpanded((open) => (open === r.id ? null : r.id))}

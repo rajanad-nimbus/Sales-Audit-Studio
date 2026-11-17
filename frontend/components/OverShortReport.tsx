@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
 import { downloadBlob } from '@/lib/csv';
@@ -42,6 +43,29 @@ const label = (r: Row, group: Group) =>
       ? r.store_id
       : `${r.store_id} · ${(group === 'register' ? r.register_id : r.cashier_id) ?? 'None'}`;
 
+const validDate = (value: string | null) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : '';
+};
+
+const cashHistoryHref = (
+  row: Row,
+  group: Group,
+  storeFilter: string,
+  start: string,
+  end: string
+) => {
+  const params = new URLSearchParams();
+  const store = group === 'store' ? row.store_id : row.store_id || storeFilter;
+  const from = group === 'date' ? row.business_date : start;
+  const to = group === 'date' ? row.business_date : end;
+  if (store) params.set('cash_store', store);
+  if (from) params.set('cash_start', from);
+  if (to) params.set('cash_end', to);
+  return `/cash-office?${params.toString()}`;
+};
+
 /** Cash over and short, with short and over kept apart so one till cannot hide another. */
 export function OverShortReport() {
   const toast = useToast();
@@ -54,6 +78,63 @@ export function OverShortReport() {
   const [exporting, setExporting] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [failed, setFailed] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const initialGroup = params.get('over_short_group');
+    const initialPage = Number(params.get('over_short_page'));
+    const initialPageSize = Number(params.get('over_short_page_size'));
+    if (initialGroup === 'store' || initialGroup === 'register' || initialGroup === 'cashier' || initialGroup === 'date') setGroup(initialGroup);
+    const initialStart = validDate(params.get('over_short_start'));
+    const initialEnd = validDate(params.get('over_short_end'));
+    setStart(initialStart && initialEnd && initialStart > initialEnd ? initialEnd : initialStart);
+    setEnd(initialStart && initialEnd && initialStart > initialEnd ? initialStart : initialEnd);
+    setStoreId(params.get('over_short_store') ?? '');
+    if (Number.isInteger(initialPage) && initialPage > 0 && initialPage <= 100_000) setPage(initialPage);
+    if ([25, 50, 100, 200].includes(initialPageSize)) setPageSize(initialPageSize);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const values: Record<string, string> = {
+      over_short_group: group,
+      over_short_page: String(page),
+      over_short_page_size: String(pageSize),
+      over_short_start: start,
+      over_short_end: end,
+      over_short_store: storeId,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (value) url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    }
+    window.history.replaceState(null, '', url);
+  }, [group, page, pageSize, start, end, storeId]);
+
+  const copyReportLink = async () => {
+    try {
+      const url = new URL(window.location.href);
+      const values: Record<string, string> = {
+        over_short_group: group,
+        over_short_page: String(page),
+        over_short_page_size: String(pageSize),
+        over_short_start: start,
+        over_short_end: end,
+        over_short_store: storeId,
+      };
+      for (const [key, value] of Object.entries(values)) {
+        if (value) url.searchParams.set(key, value);
+        else url.searchParams.delete(key);
+      }
+      await navigator.clipboard.writeText(url.toString());
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      toast('Could not copy the report link. You can copy it from the address bar.', 'error');
+    }
+  };
 
   useEffect(() => {
     setReport(null);
@@ -115,6 +196,9 @@ export function OverShortReport() {
         <MetricTile label="Over" value={report ? money(report.totals.over) : '—'} />
       </MetricGrid>
       <Toolbar count={report?.has_more ? 'More matching groups' : undefined}>
+        <Button variant="secondary" onClick={() => void copyReportLink()}>
+          {linkCopied ? 'Link copied' : 'Copy report link'}
+        </Button>
         <Segmented
           value={group}
           onChange={(v) => {
@@ -169,7 +253,12 @@ export function OverShortReport() {
         rowKey={(r) => `${r.store_id}|${r.register_id}|${r.cashier_id}|${r.business_date}`}
         emptyTitle="No cash declarations in this range"
         columns={[
-          { key: 'who', header: 'Group', primary: true, render: (r) => label(r, group) },
+          {
+            key: 'who',
+            header: 'Group',
+            primary: true,
+            render: (r) => <Link href={cashHistoryHref(r, group, storeId, start, end)}>{label(r, group)}</Link>,
+          },
           { key: 'n', header: 'Declarations', numeric: true, render: (r) => r.declarations },
           { key: 'oob', header: 'Out of balance', numeric: true, render: (r) => r.out_of_balance },
           { key: 'short', header: 'Short', numeric: true, render: (r) => money(r.short) },

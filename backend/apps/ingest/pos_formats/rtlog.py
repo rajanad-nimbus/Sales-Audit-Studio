@@ -161,8 +161,10 @@ TYPES = {
     "DCLOSE": standard.DAY_CLOSE,
     "COND": standard.CONDITION,
     "METER": standard.METER,
+    "PUMPT": standard.PUMP_TEST,
     "TERM": standard.TERM,
     "REFUND": standard.REFUND,
+    "TANKDP": standard.TANK_DIP,
 }
 
 

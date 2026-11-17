@@ -72,6 +72,8 @@ def deposit_view(row: CashDeposit):
 async def list_controls(
     store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
     business_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    start_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    end_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
     response: Response = None,
@@ -82,9 +84,7 @@ async def list_controls(
     filters = []
     if store_id:
         filters.append(CashControl.store_id == store_id)
-    if business_date:
-        _validate_date_filter(business_date)
-        filters.append(CashControl.business_date == business_date)
+    _append_business_date_filters(filters, CashControl, business_date, start_date, end_date)
     query = scope.restrict(select(CashControl).where(*filters), user, CashControl.store_id)
     total_query = scope.restrict(
         select(func.count()).select_from(CashControl).where(*filters), user, CashControl.store_id
@@ -359,6 +359,8 @@ async def declare_cash(
 async def list_deposits(
     store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
     business_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    start_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    end_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
     response: Response = None,
@@ -369,9 +371,7 @@ async def list_deposits(
     filters = []
     if store_id:
         filters.append(CashDeposit.store_id == store_id)
-    if business_date:
-        _validate_date_filter(business_date)
-        filters.append(CashDeposit.business_date == business_date)
+    _append_business_date_filters(filters, CashDeposit, business_date, start_date, end_date)
     query = scope.restrict(select(CashDeposit).where(*filters), user, CashDeposit.store_id)
     total_query = scope.restrict(
         select(func.count()).select_from(CashDeposit).where(*filters), user, CashDeposit.store_id
@@ -433,8 +433,28 @@ def _validate_date_filter(value: str) -> None:
             raise ValueError
     except ValueError as exc:
         raise HTTPException(
-            status_code=422, detail="business_date must be a valid YYYY-MM-DD date"
+            status_code=422, detail="Cash history dates must be valid YYYY-MM-DD values"
         ) from exc
+
+
+def _append_business_date_filters(
+    filters: list,
+    model: type[CashControl] | type[CashDeposit],
+    business_date: str | None,
+    start_date: str | None,
+    end_date: str | None,
+) -> None:
+    for value in (business_date, start_date, end_date):
+        if value:
+            _validate_date_filter(value)
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be on or before end_date")
+    if business_date:
+        filters.append(model.business_date == business_date)
+    if start_date:
+        filters.append(model.business_date >= start_date)
+    if end_date:
+        filters.append(model.business_date <= end_date)
 
 
 def _set_page_headers(response: Response, total: int, skip: int, returned: int) -> None:

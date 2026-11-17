@@ -2,6 +2,7 @@
 
 import { formatNumber } from '@/lib/preferences';
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { StoreSelect } from '@/components/StoreSelect';
 import { Alert, Button, Card, DataTable, PageHeader, Pager } from '@/components/ui';
@@ -25,7 +26,7 @@ interface Result {
   pages: number;
 }
 
-const columns: Column<TenderRow>[] = [
+const columns = (filters: SummaryFilters): Column<TenderRow>[] => [
   {
     key: 'tender',
     header: 'Tender type',
@@ -44,7 +45,20 @@ const columns: Column<TenderRow>[] = [
     header: 'Transactions',
     numeric: true,
     csvValue: (row) => row.transaction_count,
-    render: (row) => formatNumber(row.transaction_count),
+    render: (row) => {
+      const params = new URLSearchParams({
+        tender_entry_type: row.tender_type,
+        currency: row.currency,
+      });
+      if (filters.store) params.set('store_id', filters.store);
+      if (filters.dateFrom) params.set('date_from', filters.dateFrom);
+      if (filters.dateTo) params.set('date_to', filters.dateTo);
+      return (
+        <Link href={`/transactions?${params.toString()}`}>
+          {formatNumber(row.transaction_count)}
+        </Link>
+      );
+    },
   },
   {
     key: 'tenders',
@@ -90,7 +104,7 @@ export default function TenderSummaryPage() {
   const [store, setStore] = useState(initialQuery.store);
   const [dateFrom, setDateFrom] = useState(initialQuery.dateFrom);
   const [dateTo, setDateTo] = useState(initialQuery.dateTo);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialQuery.search);
   const [applied, setApplied] = useState({ store: '', dateFrom: '', dateTo: '', search: '' });
   const [result, setResult] = useState<Result | null>(null);
   const [page, setPage] = useState(1);
@@ -98,8 +112,10 @@ export default function TenderSummaryPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const autoLoaded = useRef(false);
+  const requestId = useRef(0);
 
   async function load(nextPage = 1, filters = applied) {
+    const currentRequest = ++requestId.current;
     setBusy(true);
     setError('');
     try {
@@ -113,22 +129,21 @@ export default function TenderSummaryPage() {
           page_size: 50,
         },
       });
+      if (currentRequest !== requestId.current) return;
       setResult(data);
       setPage(nextPage);
       setApplied(filters);
-      setApplied(filters);
     } catch (e: unknown) {
+      if (currentRequest !== requestId.current) return;
       const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
       setError(detail || 'Tender summary could not be loaded.');
-      setResult(null);
     } finally {
-      setBusy(false);
+      if (currentRequest === requestId.current) setBusy(false);
     }
   }
 
   useEffect(() => {
-    if (!initialQuery.store || !initialQuery.dateFrom || !initialQuery.dateTo || autoLoaded.current)
-      return;
+    if (autoLoaded.current || !Object.values(initialQuery).some(Boolean)) return;
     autoLoaded.current = true;
     void load(1, initialQuery);
   }, [initialQuery, load]);
@@ -143,7 +158,7 @@ export default function TenderSummaryPage() {
     setDateFrom(filters.dateFrom);
     setDateTo(filters.dateTo);
     setSearch(filters.search);
-    setApplied(filters);
+    setResult(null);
     const params = new URLSearchParams();
     if (filters.store) params.set('store_id', filters.store);
     if (filters.dateFrom) params.set('date_from', filters.dateFrom);
@@ -235,7 +250,7 @@ export default function TenderSummaryPage() {
       {result && (
         <Card>
           <DataTable
-            columns={columns}
+            columns={columns(applied)}
             rows={busy ? null : result.items}
             csvFileName="tender-summary-visible.csv"
             detachTitle={

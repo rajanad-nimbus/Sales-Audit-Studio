@@ -11,6 +11,7 @@ import {
   formatRollupKey,
   outcomeVariant,
   readinessVariant,
+  storeDayBlockerAction,
 } from '@/lib/storeDays';
 import type { StoreDayBrief as Brief } from '@/lib/storeDays';
 
@@ -43,6 +44,17 @@ export function StoreDayBrief({
   if (!brief) return <p className="hint">Loading…</p>;
 
   const { readiness, blockers, variances, cases } = brief;
+  const reviewHref = (tab: 'analysis' | 'closure' | 'cases' | 'errors' | 'io' | 'missing' | 'totals') =>
+    `${dayPath({ store_id: storeId, business_date: businessDate })}?tab=${tab}`;
+  const auditReviewTab = () => {
+    if (readiness.audit.open_cases > 0) return 'cases' as const;
+    if ((readiness.audit.missing_transactions ?? 0) > 0) return 'missing' as const;
+    if (readiness.audit.unexplained_variances > 0) return 'totals' as const;
+    if (readiness.audit.state === 'Not totaled' || readiness.audit.state === 'Out of date') {
+      return 'totals' as const;
+    }
+    return readiness.audit.state === 'Clean' ? 'closure' as const : 'errors' as const;
+  };
   const parts = [
     [
       'Sales audit',
@@ -90,22 +102,47 @@ export function StoreDayBrief({
               <Badge variant={readinessVariant(state)} size="sm">
                 {state}
               </Badge>{' '}
-              <span className="hint">{note}</span>
+              <span className="hint">{note}</span>{' '}
+              <Link
+                href={reviewHref(
+                  label === 'Data' || label === 'Store-level POS close'
+                    ? 'analysis'
+                    : label === 'Audit'
+                      ? auditReviewTab()
+                      : label === 'Export'
+                        ? 'io'
+                        : 'closure'
+                )}
+              >
+                Review
+              </Link>
             </dd>
           </div>
         ))}
       </dl>
       {blockers.length > 0 ? (
-        <p>
-          <b>Holding it back:</b> {blockers.join(' · ')}
-        </p>
+        <div>
+          <b>Holding it back:</b>
+          <ul>
+            {blockers.map((reason, index) => {
+              const action = storeDayBlockerAction(reason);
+              return (
+                <li key={`${reason}-${index}`}>
+                  {reason}{' '}
+                  <Link href={reviewHref(action.tab)}>{action.label}</Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       ) : (
         <p className="hint">Nothing is holding this day back.</p>
       )}
       {brief.registers_with_gaps > 0 && (
         <p>
           Transaction numbers are missing from {brief.registers_with_gaps} register
-          {brief.registers_with_gaps === 1 ? '' : 's'}.
+          {brief.registers_with_gaps === 1 ? '' : 's'}.{' '}
+          <Link href={reviewHref('missing')}>Review missing transactions</Link>
         </p>
       )}
       {variances.unexplained > 0 && (
@@ -122,7 +159,8 @@ export function StoreDayBrief({
                 {money(v.variance, v.currency)}{' '}
                 <Badge variant={outcomeVariant(v.outcome, false)} size="sm">
                   {v.outcome}
-                </Badge>
+                </Badge>{' '}
+                <Link href={reviewHref('totals')}>Review totals</Link>
               </li>
             ))}
           </ul>

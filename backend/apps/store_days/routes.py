@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from itertools import islice
 from typing import Annotated, Literal
@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from integrations.ontology.nimbus import audit
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select, union
+from sqlalchemy import and_, case, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.audit.models import AuditEvent
@@ -22,7 +22,8 @@ from apps.controls.foundation.models import FoundationReference
 from apps.csv_export import csv_row
 from apps.ingest import reconciliation
 from apps.ingest.manifests import iter_manifests, validate_business_date
-from apps.ingest.models import RegisterEvent
+from apps.ingest.models import RegisterEvent, SourceRecord
+from apps.ingest.shopify.day_totals import RECORD_PREFIX as SHOPIFY_DAY_TOTAL_PREFIX
 from apps.ingest.sequence import find_gaps
 from apps.search import contains_literal
 from apps.security import scope
@@ -163,6 +164,39 @@ async def delete_empty_store_day(
         count = await db.scalar(select(func.count()).select_from(model).where(*conditions))
         if count:
             blockers.append(f"{count} {label}")
+
+    day_start = datetime.combine(date.fromisoformat(business_date), time.min, tzinfo=UTC)
+    source_control_rows = await db.execute(
+        select(SourceRecord.source_system, SourceRecord.payload).where(
+            or_(
+                SourceRecord.source_system.in_(("POSControl", "OMSControl")),
+                and_(
+                    SourceRecord.source_system == "Shopify",
+                    SourceRecord.source_record_id.like(f"{SHOPIFY_DAY_TOTAL_PREFIX}-%"),
+                ),
+            ),
+            SourceRecord.status.in_(("Archived", "Processed", "Superseded")),
+            SourceRecord.source_event_time >= day_start,
+            SourceRecord.source_event_time < day_start + timedelta(days=1),
+        )
+    )
+    source_controls = 0
+    for source, payload in source_control_rows:
+        try:
+            record = json.loads(payload)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        if (
+            record.get("store_id") != store_id
+            or str(record.get("business_date", ""))[:10] != business_date
+        ):
+            continue
+        if source in {"POSControl", "OMSControl"} or record.get("record_type") == "DayTotal":
+            source_controls += 1
+    if source_controls:
+        blockers.append(f"{source_controls} source control record(s)")
 
     dependent_checks = (
         ("calculated totals", AuditTotal),
@@ -313,13 +347,20 @@ MAX_READINESS_FILTER_SCAN = 100_000
 READINESS_FILTER_CHUNK = 250
 
 
-def readiness_matches(view: dict, data_status: str | None, audit_status: str | None) -> bool:
+def readiness_matches(
+    view: dict,
+    data_status: str | None,
+    audit_status: str | None,
+    overall_status: str | None,
+) -> bool:
     return (data_status is None or view["ingest"]["state"] == data_status) and (
         audit_status is None or view["audit"]["resa_status"] == audit_status
-    )
+    ) and (overall_status is None or view["audit"]["overall_status"] == overall_status)
 
 
-async def iter_readiness_filtered_days(db: AsyncSession, base, data_status, audit_status):
+async def iter_readiness_filtered_days(
+    db: AsyncSession, base, data_status, audit_status, overall_status
+):
     """Yield matching days in list order; only used when a derived readiness filter is active."""
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     if total > MAX_READINESS_FILTER_SCAN:
@@ -340,7 +381,7 @@ async def iter_readiness_filtered_days(db: AsyncSession, base, data_status, audi
         views = await readiness(db, days)
         for day in days:
             view = views[day.id]
-            if readiness_matches(view, data_status, audit_status):
+            if readiness_matches(view, data_status, audit_status, overall_status):
                 yield day, view
 
 
@@ -396,6 +437,9 @@ async def list_store_days(
         | None,
         Query(),
     ] = None,
+    overall_status: Annotated[
+        Literal["Sales Audit in Progress", "Sales Audit Complete"] | None, Query()
+    ] = None,
     date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     q: Annotated[str | None, Query(max_length=50)] = None,
@@ -410,13 +454,15 @@ async def list_store_days(
     """
     filters = day_filters(store_id, status, date_from, date_to, q)
     base = scope.restrict(select(StoreDay).where(*filters), user, StoreDay.store_id)
-    readiness_filter = data_status is not None or audit_status is not None
+    readiness_filter = (
+        data_status is not None or audit_status is not None or overall_status is not None
+    )
     if format == "csv":
         total = (
             sum(
                 1
                 async for _day, _view in iter_readiness_filtered_days(
-                    db, base, data_status, audit_status
+                    db, base, data_status, audit_status, overall_status
                 )
             )
             if readiness_filter
@@ -460,7 +506,7 @@ async def list_store_days(
             yield csv_row(columns)
             if readiness_filter:
                 async for day, view in iter_readiness_filtered_days(
-                    db, base, data_status, audit_status
+                    db, base, data_status, audit_status, overall_status
                 ):
                     yield readiness_csv_row(day, view)
                 return
@@ -485,7 +531,9 @@ async def list_store_days(
     if readiness_filter:
         start = (page - 1) * limit
         found = []
-        async for day, view in iter_readiness_filtered_days(db, base, data_status, audit_status):
+        async for day, view in iter_readiness_filtered_days(
+            db, base, data_status, audit_status, overall_status
+        ):
             if len(found) < start:
                 continue
             found.append((day, view))
@@ -530,17 +578,20 @@ async def store_day_summary(
         | None,
         Query(),
     ] = None,
+    overall_status: Annotated[
+        Literal["Sales Audit in Progress", "Sales Audit Complete"] | None, Query()
+    ] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
 ):
     """Exact counts for the same filters as the list: by lifecycle status, and totals out of date."""
     base = day_filters(store_id, None, date_from, date_to, q)
-    if data_status is not None or audit_status is not None:
+    if data_status is not None or audit_status is not None or overall_status is not None:
         query = scope.restrict(select(StoreDay).where(*base), user, StoreDay.store_id)
         by_status: dict[str, int] = {}
         total = stale = unsigned = 0
         async for day, _view in iter_readiness_filtered_days(
-            db, query, data_status, audit_status
+            db, query, data_status, audit_status, overall_status
         ):
             total += 1
             by_status[day.status] = by_status.get(day.status, 0) + 1
@@ -1414,6 +1465,15 @@ async def store_day_errors(
             "case_id": case.id,
             "case_number": case.case_number,
             "case_status": case.status,
+            "override_reason": exception.override_reason,
+            "override_requested_by": exception.override_requested_by,
+            "override_requested_at": exception.override_requested_at.isoformat()
+            if exception.override_requested_at
+            else None,
+            "override_approved_by": exception.override_approved_by,
+            "override_approved_at": exception.override_approved_at.isoformat()
+            if exception.override_approved_at
+            else None,
         }
 
     ordered = query.order_by(ExceptionRow.created_at.desc(), ExceptionRow.id)
@@ -1446,6 +1506,11 @@ async def store_day_errors(
                 "created_at",
                 "case_number",
                 "case_status",
+                "override_reason",
+                "override_requested_by",
+                "override_requested_at",
+                "override_approved_by",
+                "override_approved_at",
             )
             yield csv_row(columns)
             result = await db.stream(ordered.execution_options(yield_per=1000))
@@ -1471,6 +1536,11 @@ async def store_day_errors(
                             item["created_at"],
                             item["case_number"],
                             item["case_status"],
+                            item["override_reason"],
+                            item["override_requested_by"],
+                            item["override_requested_at"],
+                            item["override_approved_by"],
+                            item["override_approved_at"],
                         )
                     )
             finally:

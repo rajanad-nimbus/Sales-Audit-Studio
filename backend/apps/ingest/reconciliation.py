@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from integrations.ontology import ontology
 from integrations.ontology.nimbus import audit, sla_due
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text, tuple_
 
 from apps.cases.identifiers import generate_case_number
 from apps.cases.models import (
@@ -153,6 +153,12 @@ async def match_processor_transactions(
         (t for t in transactions if t.source_lineage == LINEAGE["POS"]),
         key=lambda t: t.event_timestamp,
     )
+    pos_and_oms_sales = [
+        t
+        for t in transactions
+        if t.source_lineage in (LINEAGE["POS"], LINEAGE["OMS"])
+        and t.transaction_type == "Sale"
+    ]
     processors = [t for t in transactions if t.source_lineage == LINEAGE["Processor"]]
     tenders = await load_tenders(db, pos)
     processor_index = defaultdict(list)
@@ -183,11 +189,18 @@ async def match_processor_transactions(
             transaction.reconciliation_status, transaction.disposition = "Exception", "Awaiting"
 
     duplicate_sales = (
-        flag_duplicate_sales(pos, amounts, flag) if integrity_checks_enabled else set()
+        flag_duplicate_sales(pos_and_oms_sales, amounts, flag) if integrity_checks_enabled else set()
     )
+    if integrity_checks_enabled:
+        prior_same_day_keys = await find_same_day_duplicate_keys(db, pos_and_oms_sales)
+        for transaction in pos_and_oms_sales:
+            key = duplicate_transaction_key(transaction)
+            if key is not None and key in prior_same_day_keys and transaction.id not in duplicate_sales:
+                flag("DUPLICATE_SALES", abs(amounts[transaction.id]), transaction)
+                duplicate_sales.add(transaction.id)
     if integrity_checks_enabled and duplicate_lookback_days:
         historical_duplicates = await find_historical_duplicate_sales(
-            db, pos, amounts, duplicate_lookback_days
+            db, pos_and_oms_sales, amounts, duplicate_lookback_days
         )
         for transaction, prior in historical_duplicates:
             if transaction.id in duplicate_sales:
@@ -227,19 +240,26 @@ async def match_processor_transactions(
 
 
 def flag_duplicate_sales(pos_transactions, amounts, flag):
-    """Mark duplicate POS sale identities and return the duplicate transaction IDs."""
+    """Mark repeat same-source POS/OMS sales and return the duplicate transaction IDs."""
     seen, duplicates = set(), set()
     for transaction in pos_transactions:
-        if transaction.transaction_type != "Sale" or not transaction.payment_reference:
+        if transaction.transaction_type != "Sale":
             continue
-        key = (
-            transaction.store_id,
-            transaction.business_date,
-            transaction.register_id,
-            transaction.currency,
-            amounts[transaction.id],
-            transaction.payment_reference,
-        )
+        if transaction.transaction_number:
+            key = duplicate_transaction_key(transaction)
+        elif transaction.payment_reference:
+            key = (
+                "payment_reference",
+                transaction.source_lineage,
+                transaction.store_id,
+                transaction.business_date,
+                transaction.register_id,
+                transaction.currency,
+                amounts[transaction.id],
+                transaction.payment_reference,
+            )
+        else:
+            continue
         if key in seen:
             duplicates.add(transaction.id)
             flag("DUPLICATE_SALES", abs(amounts[transaction.id]), transaction)
@@ -247,12 +267,73 @@ def flag_duplicate_sales(pos_transactions, amounts, flag):
     return duplicates
 
 
+def duplicate_transaction_key(transaction):
+    """Source-local transaction identity for one store day and register."""
+    if not transaction.transaction_number:
+        return None
+    return (
+        transaction.source_lineage,
+        transaction.store_id,
+        transaction.business_date,
+        transaction.register_id or "",
+        transaction.transaction_number,
+    )
+
+
+async def find_same_day_duplicate_keys(db, transactions):
+    """Find current POS/OMS sale identities already stored, including previously reconciled rows."""
+    keys = sorted(
+        {key for transaction in transactions if (key := duplicate_transaction_key(transaction))}
+    )
+    if not keys:
+        return set()
+    current_ids = {transaction.id for transaction in transactions}
+    found = set()
+    for offset in range(0, len(keys), 100):
+        query = (
+            select(
+                CanonicalTransaction.id,
+                CanonicalTransaction.source_lineage,
+                CanonicalTransaction.store_id,
+                CanonicalTransaction.business_date,
+                CanonicalTransaction.register_id,
+                CanonicalTransaction.transaction_number,
+            )
+            .where(
+                CanonicalTransaction.transaction_type == "Sale",
+                CanonicalTransaction.source_lineage.in_((LINEAGE["POS"], LINEAGE["OMS"])),
+                tuple_(
+                    CanonicalTransaction.source_lineage,
+                    CanonicalTransaction.store_id,
+                    CanonicalTransaction.business_date,
+                    func.coalesce(CanonicalTransaction.register_id, ""),
+                    CanonicalTransaction.transaction_number,
+                ).in_(
+                    keys[offset : offset + 100]
+                ),
+            )
+            .limit(10_001)
+        )
+        rows = (await db.execute(query)).all()
+        if len(rows) > 10_000:
+            raise ReconciliationCapacityError(
+                "Same-day duplicate lookup exceeds 10,000 matching sales; narrow the reconciliation scope."
+            )
+        found.update(
+            (lineage, store, business_date, register or "", number)
+            for row_id, lineage, store, business_date, register, number in rows
+            if row_id not in current_ids
+        )
+    return found
+
+
 async def find_historical_duplicate_sales(db, pos_transactions, amounts, lookback_days):
-    """Find exact POS sale identities repeated on an earlier business date."""
+    """Find POS or OMS sale identities repeated earlier within the same source lineage."""
     current_sales = [
         transaction
         for transaction in pos_transactions
-        if transaction.transaction_type == "Sale" and transaction.payment_reference
+        if transaction.transaction_type == "Sale"
+        and (transaction.transaction_number or transaction.payment_reference)
     ]
     if not current_sales:
         return []
@@ -262,66 +343,82 @@ async def find_historical_duplicate_sales(db, pos_transactions, amounts, lookbac
     latest = max(current_dates)
     start_date = (earliest - timedelta(days=lookback_days)).isoformat()
     end_date = latest.isoformat()
-    references = sorted({transaction.payment_reference for transaction in current_sales})
-    candidates = []
-    for offset in range(0, len(references), 500):
+    candidates_by_id = {}
+    for offset in range(0, len(current_sales), 200):
+        batch = current_sales[offset : offset + 200]
+        references = {transaction.payment_reference for transaction in batch if transaction.payment_reference}
+        numbers = {transaction.transaction_number for transaction in batch if transaction.transaction_number}
+        identities = []
+        if references:
+            identities.append(CanonicalTransaction.payment_reference.in_(references))
+        if numbers:
+            identities.append(CanonicalTransaction.transaction_number.in_(numbers))
+        if not identities:
+            continue
         query = (
             select(CanonicalTransaction)
             .where(
-                CanonicalTransaction.source_lineage == LINEAGE["POS"],
+                CanonicalTransaction.source_lineage.in_((LINEAGE["POS"], LINEAGE["OMS"])),
                 CanonicalTransaction.transaction_type == "Sale",
-                CanonicalTransaction.payment_reference.in_(references[offset : offset + 500]),
+                or_(*identities),
                 CanonicalTransaction.business_date >= start_date,
                 CanonicalTransaction.business_date < end_date,
             )
             .order_by(CanonicalTransaction.business_date.desc(), CanonicalTransaction.id)
-            .limit(MAX_RECONCILIATION_TRANSACTIONS - len(candidates) + 1)
+            .limit(MAX_RECONCILIATION_TRANSACTIONS - len(candidates_by_id) + 1)
         )
-        candidates.extend((await db.execute(query)).scalars().all())
-        if len(candidates) > MAX_RECONCILIATION_TRANSACTIONS:
+        candidates_by_id.update(
+            {candidate.id: candidate for candidate in (await db.execute(query)).scalars().all()}
+        )
+        if len(candidates_by_id) > MAX_RECONCILIATION_TRANSACTIONS:
             raise ReconciliationCapacityError(
                 "Historical duplicate search exceeds the 50,000-transaction limit; "
                 "reduce the lookback window or narrow the reconciliation scope."
             )
 
+    candidates = list(candidates_by_id.values())
     if not candidates:
         return []
     candidate_amounts = await effective_amounts(db, candidates)
 
     indexed = defaultdict(list)
     for candidate in candidates:
-        key = (
-            candidate.store_id,
-            candidate.register_id,
-            candidate.currency,
-            candidate_amounts[candidate.id],
-            candidate.payment_reference,
-        )
-        indexed[key].append(candidate)
+        for key in historical_duplicate_keys(candidate, candidate_amounts[candidate.id]):
+            indexed[key].append(candidate)
 
     duplicates = []
     for transaction in current_sales:
         current_date = date.fromisoformat(transaction.business_date)
-        key = (
-            transaction.store_id,
-            transaction.register_id,
-            transaction.currency,
-            amounts[transaction.id],
-            transaction.payment_reference,
-        )
+        keys = historical_duplicate_keys(transaction, amounts[transaction.id])
+        if not keys:
+            continue
         prior = next(
             (
-                candidate
-                for candidate in indexed.get(key, [])
-                if 0
-                < (current_date - date.fromisoformat(candidate.business_date)).days
-                <= lookback_days
+                candidate for key in keys for candidate in indexed.get(key, [])
+                if 0 < (current_date - date.fromisoformat(candidate.business_date)).days <= lookback_days
             ),
             None,
         )
         if prior is not None:
             duplicates.append((transaction, prior))
     return duplicates
+
+
+def historical_duplicate_keys(transaction, amount):
+    """Return source-local transaction-number and exact-reference identities when available."""
+    base = (
+        transaction.source_lineage,
+        transaction.store_id,
+        transaction.register_id or "",
+        transaction.currency,
+        amount,
+    )
+    keys = []
+    if transaction.transaction_number:
+        keys.append(("transaction_number", *base, transaction.transaction_number))
+    if transaction.payment_reference:
+        keys.append(("payment_reference", *base, transaction.payment_reference))
+    return keys
 
 
 async def load_tenders(db, pos_transactions):
@@ -474,7 +571,7 @@ async def run_transaction_audit(
     pos = [
         t
         for t in txns
-        if t.source_lineage in (LINEAGE["POS"], LINEAGE["Shopify"])
+        if t.source_lineage in (LINEAGE["POS"], LINEAGE["OMS"], LINEAGE["Shopify"])
         and t.reconciliation_status != "Exception"
     ]
     for t in pos:

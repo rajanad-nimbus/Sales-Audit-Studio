@@ -325,6 +325,12 @@ async def update_source(
         raise HTTPException(
             status_code=404, detail=f"Unknown source. Choose one of {list(source_settings.SOURCES)}"
         )
+    changes = body.model_dump(exclude_unset=True, exclude_none=True)
+    if source_system in {"OMS", "OMSControl"} and changes.get("in_daily_batch") is True:
+        raise HTTPException(
+            status_code=422,
+            detail="OMS nightly batch is unavailable until a retailer-specific OMS connector is configured",
+        )
     row = await source_settings.lock_source_settings(db, source_system)
     previous_day_close_requirement = row.require_day_close if row is not None else False
     if row is None:
@@ -332,7 +338,6 @@ async def update_source(
             source_system=source_system, **source_settings.effective(source_system, None)
         )
         db.add(row)
-    changes = body.model_dump(exclude_unset=True, exclude_none=True)
     if "require_day_close" in changes and source_system != "POS":
         raise HTTPException(
             status_code=422, detail="The Day Close requirement applies to the POS source"
@@ -421,7 +426,7 @@ async def ingest_contracts(_: dict = Depends(require_role("it", "finance"))):
             "declared_total",
         ],
         "sources": {source: sorted(types) for source, types in VALID_TYPES.items()},
-        "note": "Use ISO-8601 timestamps, positive source amounts, canonical store IDs, a unique delivery_id, and pass POS-assigned business_date for overnight store days.",
+        "note": "Use ISO-8601 timestamps, positive source amounts, canonical store IDs, a unique delivery_id, and pass the source-assigned business_date for overnight store days.",
     }
 
 
@@ -458,8 +463,19 @@ async def ingest_pos_log(
         log = rtlog.parse_rtlog(req.content, name=req.delivery_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    await source_settings.require_allowed(db, "POS", manual=True)
     mapped, left_over = standard.ingest_records(log, req.currency)
+    unmapped = standard.unmapped_merchandise(left_over)
+    blockers = list(log.problems)
+    if unmapped:
+        blockers.append(
+            f"{len(unmapped)} merchandise transaction(s) have no usable item lines and cannot be ingested"
+        )
+    if blockers:
+        raise HTTPException(
+            status_code=422,
+            detail="RTLOG was not ingested: " + "; ".join(blockers[:10]),
+        )
+    await source_settings.require_allowed(db, "POS", manual=True)
     stats = await ingest.ingest(db, "POS", req.delivery_id, mapped)
     events = await register_events.ingest_register_events(db, log, req.currency)
     await db.commit()
@@ -482,8 +498,7 @@ async def ingest_pos_log(
         "register_events": events,
         "not_mapped": [
             {"transaction_number": tx["transaction_number"], "type": tx["type"]}
-            for tx in left_over
-            if tx["type"] in standard.MERCHANDISE_TYPES
+            for tx in unmapped
         ],
         "problems": log.problems,
     }
@@ -500,6 +515,12 @@ async def profile_pos_log(
         validate_currency(req.currency)
         log = rtlog.parse_rtlog(req.content, name=req.delivery_id)
         mapped, left_over = standard.ingest_records(log, req.currency)
+        unmapped = standard.unmapped_merchandise(left_over)
+        blockers = list(log.problems)
+        if unmapped:
+            blockers.append(
+                f"{len(unmapped)} merchandise transaction(s) have no usable item lines and cannot be ingested"
+            )
         errors = []
         valid = 0
         max_age_days = await ingest.max_backdated_transaction_days(db)
@@ -523,9 +544,11 @@ async def profile_pos_log(
         return {
             **pos_profile.profile_rtlog(req.content, name=req.delivery_id),
             "ingestable_records": len(mapped),
+            "register_events": len(left_over) - len(unmapped),
             "valid_records": valid,
             "quarantined_records": len(mapped) - valid,
-            "not_mapped": len(left_over),
+            "not_mapped": len(unmapped),
+            "ingest_blockers": blockers,
             "validation_errors": errors,
             "validation_errors_truncated": len(mapped) - valid > len(errors),
         }
@@ -700,6 +723,27 @@ async def run_reconciliation(
         )
     except reconciliation.ReconciliationCapacityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return result
+
+
+@router.post("/api/reconcile/refresh-errors")
+async def refresh_audit_errors(
+    business_date: Annotated[str, Query(min_length=10, max_length=10)],
+    store_id: Annotated[str, Query(min_length=1, max_length=50)],
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("it", "finance", "admin")),
+):
+    """Re-run reconciliation rules for one store day without automation or export handoffs."""
+    try:
+        validate_business_date(business_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    scope.require_store(user, store_id)
+    try:
+        result = await reconciliation.reconcile(db, business_date, store_ids={store_id})
+    except reconciliation.ReconciliationCapacityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
     return result
 
 

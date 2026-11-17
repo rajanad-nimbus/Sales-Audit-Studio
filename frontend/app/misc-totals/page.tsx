@@ -136,7 +136,7 @@ export default function MiscellaneousTotalsPage() {
   const [store, setStore] = useState(initialQuery.store);
   const [dateFrom, setDateFrom] = useState(initialQuery.dateFrom);
   const [dateTo, setDateTo] = useState(initialQuery.dateTo);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialQuery.search);
   const [applied, setApplied] = useState({ store: '', dateFrom: '', dateTo: '', search: '' });
   const [result, setResult] = useState<Result | null>(null);
   const [page, setPage] = useState(1);
@@ -144,8 +144,10 @@ export default function MiscellaneousTotalsPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const autoLoaded = useRef(false);
+  const requestId = useRef(0);
 
   async function load(nextPage = 1, filters = applied) {
+    const currentRequest = ++requestId.current;
     setBusy(true);
     setError('');
     try {
@@ -159,23 +161,24 @@ export default function MiscellaneousTotalsPage() {
           page_size: 50,
         },
       });
+      if (currentRequest !== requestId.current) return;
       setResult(data);
       setPage(nextPage);
       setApplied(filters);
       setNotice('');
     } catch (e) {
+      if (currentRequest !== requestId.current) return;
       setError(
         (e as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
           'Could not load miscellaneous totals.'
       );
     } finally {
-      setBusy(false);
+      if (currentRequest === requestId.current) setBusy(false);
     }
   }
 
   useEffect(() => {
-    if (!initialQuery.store || !initialQuery.dateFrom || !initialQuery.dateTo || autoLoaded.current)
-      return;
+    if (autoLoaded.current || !Object.values(initialQuery).some(Boolean)) return;
     autoLoaded.current = true;
     void load(1, initialQuery);
   }, [initialQuery, load]);
@@ -190,7 +193,7 @@ export default function MiscellaneousTotalsPage() {
     setDateFrom(filters.dateFrom);
     setDateTo(filters.dateTo);
     setSearch(filters.search);
-    setApplied(filters);
+    setResult(null);
     const params = new URLSearchParams();
     if (filters.store) params.set('store_id', filters.store);
     if (filters.dateFrom) params.set('date_from', filters.dateFrom);

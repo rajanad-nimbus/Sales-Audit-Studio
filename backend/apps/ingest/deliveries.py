@@ -152,7 +152,7 @@ async def load_delivery_page(
 async def delivery_history(
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("it", "finance")),
+    _: dict = Depends(require_role("it", "finance", "auditor")),
 ):
     """Retain the compact latest-deliveries view for integrations using the legacy endpoint."""
     rows, _ = await load_delivery_page(db, [], 0, limit)
@@ -168,7 +168,7 @@ async def paged_delivery_history(
     page: Annotated[int, Query(ge=1, le=100_000)] = 1,
     page_size: Annotated[int, Query(ge=10, le=DELIVERY_MAX_PAGE_SIZE)] = DELIVERY_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("it", "finance")),
+    _: dict = Depends(require_role("it", "finance", "auditor")),
 ):
     """Search and page through source delivery summaries."""
     items, has_more = await load_delivery_page(
@@ -184,7 +184,7 @@ async def export_delivery_history(
     start: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     end: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("it", "finance")),
+    _: dict = Depends(require_role("it", "finance", "auditor")),
 ):
     """Export matching delivery summaries, capped to keep report work bounded."""
     filters = delivery_filters(source_system, query, start, end)

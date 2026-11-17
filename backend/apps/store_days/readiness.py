@@ -30,7 +30,7 @@ from apps.transactions.models import CanonicalTransaction
 Key = tuple[str, str]  # (store_id, business_date)
 CHUNK = 250
 GAP_ERRORS = ("INCOMPLETE_FEED", "MISSING_TRAN_BIG_GAP", "SHOPIFY_INCOMPLETE_FEED")
-SALES_LINEAGE = (LINEAGE["POS"], LINEAGE["Shopify"])
+SALES_LINEAGE = (LINEAGE["POS"], LINEAGE["OMS"], LINEAGE["Shopify"])
 
 # Ingest
 COMPLETE = "Complete"
@@ -55,18 +55,26 @@ def chunks(keys: list[Key]):
         yield keys[offset : offset + CHUNK]
 
 
-async def manifests_by_key(db: AsyncSession, keys: list[Key]) -> dict[Key, set[str]]:
-    """Statuses of the control totals on file for each store day: POS manifests and Shopify day totals."""
+async def manifests_by_key(db: AsyncSession, keys: list[Key]) -> dict[Key, dict[str, set[str]]]:
+    """Statuses of POS/OMS control manifests and Shopify day totals for each store day."""
     if not keys:
         return {}
     wanted = set(keys)
     dates = sorted({business_date for _store, business_date in keys})
     start = datetime.combine(date.fromisoformat(dates[0]), time.min, tzinfo=UTC)
     end = datetime.combine(date.fromisoformat(dates[-1]), time.min, tzinfo=UTC) + timedelta(days=1)
-    found: dict[Key, set[str]] = defaultdict(set)
+    found: dict[Key, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     rows = await db.execute(
         select(SourceRecord.payload, SourceRecord.status).where(
             SourceRecord.source_system == "POSControl",
+            SourceRecord.status.in_(("Archived", "Processed")),
+            SourceRecord.source_event_time >= start,
+            SourceRecord.source_event_time < end,
+        )
+    )
+    oms_controls = await db.execute(
+        select(SourceRecord.payload, SourceRecord.status).where(
+            SourceRecord.source_system == "OMSControl",
             SourceRecord.status.in_(("Archived", "Processed")),
             SourceRecord.source_event_time >= start,
             SourceRecord.source_event_time < end,
@@ -85,7 +93,12 @@ async def manifests_by_key(db: AsyncSession, keys: list[Key]) -> dict[Key, set[s
                 )
             )
         )
-    for payload, status in [*rows, *day_totals]:
+    source_rows = [
+        *((payload, status, "POS") for payload, status in rows),
+        *((payload, status, "OMS") for payload, status in oms_controls),
+        *((payload, status, "Shopify") for payload, status in day_totals),
+    ]
+    for payload, status, source in source_rows:
         try:
             content = json.loads(payload)
             key = (content["store_id"], str(content["business_date"])[:10])
@@ -94,17 +107,19 @@ async def manifests_by_key(db: AsyncSession, keys: list[Key]) -> dict[Key, set[s
         if content.get("record_type", "DayTotal") != "DayTotal":
             continue
         if key in wanted:
-            found[key].add(status)
+            found[key][source].add(status)
     return found
 
 
-async def transaction_counts(db: AsyncSession, keys: list[Key]) -> dict[Key, int]:
-    counts: dict[Key, int] = {}
+async def transaction_counts(db: AsyncSession, keys: list[Key]) -> dict[Key, dict[str, int]]:
+    counts: dict[Key, dict[str, int]] = defaultdict(dict)
+    source_by_lineage = {lineage: source for source, lineage in LINEAGE.items()}
     for batch in chunks(keys):
         rows = await db.execute(
             select(
                 CanonicalTransaction.store_id,
                 CanonicalTransaction.business_date,
+                CanonicalTransaction.source_lineage,
                 func.count(),
             )
             .where(
@@ -113,9 +128,18 @@ async def transaction_counts(db: AsyncSession, keys: list[Key]) -> dict[Key, int
                     batch
                 ),
             )
-            .group_by(CanonicalTransaction.store_id, CanonicalTransaction.business_date)
+            .group_by(
+                CanonicalTransaction.store_id,
+                CanonicalTransaction.business_date,
+                CanonicalTransaction.source_lineage,
+            )
         )
-        counts.update({(store, day): count for store, day, count in rows})
+        # Keep the source dimension so a POS control cannot certify OMS or Shopify data.
+        # Group by it in SQL and accumulate each source independently.
+        for store, day, source_lineage, count in rows:
+            source = source_by_lineage.get(source_lineage)
+            if source in {"POS", "OMS", "Shopify"}:
+                counts[(store, day)][source] = count
     return counts
 
 
@@ -209,15 +233,30 @@ async def unresolved_sequence_gap_counts(db: AsyncSession, days: list[StoreDay])
     return counts
 
 
-def ingest_view(transactions: int, manifest_statuses: set[str], gap_open: bool) -> dict:
+def ingest_view(
+    source_transactions: dict[str, int],
+    source_manifest_statuses: dict[str, set[str]],
+    gap_open: bool,
+    has_register_activity: bool = False,
+) -> dict:
+    transactions = sum(source_transactions.values())
     if gap_open:
         state, detail = INCOMPLETE, "Fewer transactions arrived than the store's control total"
-    elif "Processed" in manifest_statuses:
+    elif any("Archived" in statuses for statuses in source_manifest_statuses.values()):
+        state, detail = NOT_RECONCILED, "A source control total is awaiting reconciliation"
+    elif any(
+        count > 0 and not source_manifest_statuses.get(source)
+        for source, count in source_transactions.items()
+    ):
+        state, detail = NO_CONTROL, "Transactions arrived without a matching source control total"
+    elif any("Processed" in statuses for statuses in source_manifest_statuses.values()):
         state, detail = COMPLETE, "Transactions match the store's control total"
-    elif manifest_statuses:
+    elif source_manifest_statuses:
         state, detail = NOT_RECONCILED, "Control total received; reconciliation has not run"
     elif transactions:
         state, detail = NO_CONTROL, "Transactions arrived but no control total to check them"
+    elif has_register_activity:
+        state, detail = NO_CONTROL, "Register activity arrived without a sales control total"
     else:
         state, detail = NO_DATA, "No transactions or control total yet"
     return {"state": state, "transactions": transactions, "detail": detail}
@@ -277,7 +316,12 @@ async def ingest_states(db: AsyncSession, keys: list[Key]) -> dict[Key, dict]:
     require_day_close = (await source_settings.load(db))["POS"]["require_day_close"]
     return {
         key: with_day_close(
-            ingest_view(counts.get(key, 0), manifests.get(key, set()), key in gaps),
+            ingest_view(
+                counts.get(key, {}),
+                manifests.get(key, {}),
+                key in gaps,
+                bool(markers.get(key, {}).get("events")),
+            ),
             markers.get(key),
             required=require_day_close,
         )
@@ -322,7 +366,12 @@ async def readiness(
     result = {}
     for day, key in zip(days, keys, strict=True):
         ingest = with_day_close(
-            ingest_view(counts.get(key, 0), manifests.get(key, set()), key in gaps),
+            ingest_view(
+                counts.get(key, {}),
+                manifests.get(key, {}),
+                key in gaps,
+                bool(markers.get(key, {}).get("events")),
+            ),
             markers.get(key),
             required=require_day_close,
         )

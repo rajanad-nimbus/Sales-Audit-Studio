@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, caseMoney, currencyBreakdown } from '@/lib/api';
+import { downloadCsv } from '@/lib/csv';
 import { formatBusinessDate, formatDateTime, formatNumber } from '@/lib/preferences';
 import type { BatchStatus, CurrencyAmount } from '@/lib/api';
 import { useLive } from '@/lib/sync';
@@ -1004,6 +1005,29 @@ function BalancingStrip({ data }: { data: Balancing | Failed }) {
           </p>
           {data.top.length > 0 && (
             <div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  downloadCsv(
+                    `over-short-largest-differences-${data.business_date}.csv`,
+                    ['Business date', 'Store', 'Status', 'Currency', 'Difference', 'Amount'],
+                    data.top.map((row) => {
+                      const variance = Number(row.variance_amount);
+                      return [
+                        data.business_date,
+                        row.store_id,
+                        row.status,
+                        row.currency,
+                        variance > 0 ? 'Short' : 'Over',
+                        Math.abs(variance).toFixed(2),
+                      ];
+                    })
+                  )
+                }
+              >
+                Download listed differences
+              </Button>
               {topCurrencies.map((currency) => (
                 <div key={currency}>
                   <p className="page-sub" style={{ margin: 'var(--space-sm) 0 var(--space-xs)' }}>
@@ -1320,6 +1344,7 @@ export function CommandCenter() {
   const [fromLastVisit, setFromLastVisit] = useState(false);
   const started = useRef(false);
   const latest = useRef<Seen | null>(null);
+  const overviewRequestId = useRef(0);
   const current = useMemo(
     () =>
       data
@@ -1388,30 +1413,34 @@ export function CommandCenter() {
   };
 
   const load = useCallback(async (requestedDate?: string) => {
+    const requestId = ++overviewRequestId.current;
     setRefreshing(true);
     try {
       const queryDate = new URLSearchParams(window.location.search).get('business_date') || '';
       const selectedDate =
         requestedDate !== undefined ? requestedDate : businessDate || queryDate;
-      setData(
-        (
-          await api.get<Overview>('/api/command-center', {
-            params: selectedDate ? { business_date: selectedDate } : undefined,
-          })
-        ).data
-      );
+      const { data: overview } = await api.get<Overview>('/api/command-center', {
+        params: selectedDate ? { business_date: selectedDate } : undefined,
+      });
+      if (requestId !== overviewRequestId.current) return;
+      setData(overview);
       setUpdatedAt(new Date());
       setError('');
     } catch {
-      setError('The Command Center could not be loaded. Check your connection and retry.');
+      if (requestId === overviewRequestId.current) {
+        setError('The Command Center could not be loaded. Check your connection and retry.');
+      }
     } finally {
-      setRefreshing(false);
+      if (requestId === overviewRequestId.current) setRefreshing(false);
     }
   }, [businessDate]);
   useLive(load, REFRESH_MS);
 
   const chooseBusinessDate = (value: string) => {
     setBusinessDate(value);
+    setData(null);
+    setUpdatedAt(null);
+    setError('');
     const url = new URL(window.location.href);
     if (value) url.searchParams.set('business_date', value);
     else url.searchParams.delete('business_date');

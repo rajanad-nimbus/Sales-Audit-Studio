@@ -307,6 +307,27 @@ def validate_adjustment_values(adjustment_type: str, values: dict) -> None:
                     "provide a valid reference slot and a value of at most 255 characters"
                 )
             return
+        if adjustment_type == "PaidOutDetail":
+            fields = {
+                "vendor_number",
+                "vendor_invoice_number",
+                "proof_of_delivery_number",
+                "payment_reference_number",
+            }
+            if (
+                not isinstance(values, dict)
+                or set(values) - {"field", "value", "before_value"}
+                or values.get("field") not in fields
+                or not isinstance(values.get("value"), str)
+                or values["value"] != values["value"].strip()
+                or len(values["value"]) > (10 if values["field"] == "vendor_number" else 30)
+                or (
+                    values.get("before_value") is not None
+                    and not isinstance(values["before_value"], str)
+                )
+            ):
+                raise ValueError("provide a supported paid-out field and a corrected value")
+            return
         if adjustment_type in {"Tender", "Reference"}:
             field = "tender_type" if adjustment_type == "Tender" else "reference"
             before_field = f"before_{field}"

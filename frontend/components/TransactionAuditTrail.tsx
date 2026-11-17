@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/preferences';
 import { apiError } from '@/lib/storeDays';
+import { downloadBlob } from '@/lib/csv';
+import { CaseLink } from '@/components/MeProvider';
 import { Alert, Button, Card } from '@/components/ui';
 
 interface EventRow {
@@ -29,46 +31,91 @@ interface Result {
 
 export default function TransactionAuditTrail({ transactionId }: { transactionId: string }) {
   const [result, setResult] = useState<Result | null>(null);
+  const [resultFor, setResultFor] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const requestId = useRef(0);
   const path = `/api/transactions/${encodeURIComponent(transactionId)}/audit-trail`;
   const load = useCallback(
     async (nextPage: number) => {
+      const currentRequest = ++requestId.current;
       setLoading(true);
       try {
         const { data } = await api.get<Result>(path, { params: { page: nextPage, page_size: 25 } });
+        if (currentRequest !== requestId.current) return;
         setResult(data);
+        setResultFor(transactionId);
         setPage(nextPage);
         setError('');
       } catch (e) {
-        setError(apiError(e, 'Could not load this transaction’s audit trail.'));
+        if (currentRequest === requestId.current) {
+          setError(apiError(e, 'Could not load this transaction’s audit trail.'));
+        }
       } finally {
-        setLoading(false);
+        if (currentRequest === requestId.current) setLoading(false);
       }
     },
-    [path]
+    [path, transactionId]
   );
   useEffect(() => {
+    setResult(null);
+    setPage(1);
+    setError('');
     void load(1);
+    return () => {
+      requestId.current += 1;
+    };
   }, [load]);
+  const visibleResult = resultFor === transactionId ? result : null;
+  const waitingForCurrentTransaction = loading || (!visibleResult && !error);
+  const exportTrail = async () => {
+    setExporting(true);
+    setError('');
+    try {
+      const { data } = await api.get<Blob>(path, {
+        params: { format: 'csv' },
+        responseType: 'blob',
+      });
+      downloadBlob(`transaction-${transactionId}-audit-trail.csv`, data);
+    } catch (e) {
+      const statusCode = (e as { response?: { status?: number } })?.response?.status;
+      setError(
+        statusCode === 413
+          ? 'This transaction audit trail exceeds the 100,000-event export limit.'
+          : apiError(e, 'Could not export this transaction’s audit trail.')
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <Card className="case-section">
       <h2>Transaction audit trail</h2>
       <p className="hint">
         Comments, related case decisions and correction actions, ordered by the append-only audit
-        sequence.
+        sequence. CSV export includes the complete history, up to 100,000 events.
       </p>
+      <div className="toolbar">
+        <Button
+          variant="secondary"
+          disabled={exporting || !visibleResult?.total}
+          onClick={() => void exportTrail()}
+        >
+          {exporting ? 'Preparing CSV…' : 'Export complete audit trail'}
+        </Button>
+      </div>
       {error && <Alert tone="error">{error}</Alert>}
-      {loading && <p role="status">Loading audit events…</p>}
-      {!loading && result?.items.length === 0 && (
+      {waitingForCurrentTransaction && <p role="status">Loading audit events…</p>}
+      {!waitingForCurrentTransaction && visibleResult?.items.length === 0 && (
         <p className="cc-empty">No audit events are linked to this transaction yet.</p>
       )}
-      {result && result.items.length > 0 && (
+      {visibleResult && visibleResult.items.length > 0 && (
         <>
           <ol className="case-timeline">
-            {result.items.map((event) => (
+            {visibleResult.items.map((event) => (
               <li key={event.id}>
                 <time>{formatDateTime(event.created_at)}</time>
                 <div>
@@ -77,7 +124,12 @@ export default function TransactionAuditTrail({ transactionId }: { transactionId
                   <small>
                     {event.actor}
                     {event.seq ? ` · audit sequence ${event.seq}` : ''}
-                    {event.case_id ? ` · case ${event.case_id}` : ''}
+                    {event.case_id ? (
+                      <>
+                        {' · case '}
+                        <CaseLink id={event.case_id}>{event.case_id}</CaseLink>
+                      </>
+                    ) : null}
                   </small>
                   {(event.before || event.after) && (
                     <details>
@@ -91,16 +143,16 @@ export default function TransactionAuditTrail({ transactionId }: { transactionId
               </li>
             ))}
           </ol>
-          {result.pages > 1 && (
+          {visibleResult.pages > 1 && (
             <div className="toolbar">
               <span className="hint">
-                Page {page} of {result.pages} · {result.total} events
+                Page {page} of {visibleResult.pages} · {visibleResult.total} events
               </span>
               <Button disabled={loading || page <= 1} onClick={() => void load(page - 1)}>
                 Previous
               </Button>
               <Button
-                disabled={loading || page >= result.pages}
+                disabled={loading || page >= visibleResult.pages}
                 onClick={() => void load(page + 1)}
               >
                 Next

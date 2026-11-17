@@ -61,6 +61,7 @@ from apps.transactions.returns import fmt_qty as fmt_qty
 from apps.transactions.returns import return_context as return_context
 from apps.transactions.views import (
     mask_customer_id,
+    paid_out_details as resolve_paid_out_details,
     redact_customer_id_preview,
     redact_customer_ids,
     row_view,
@@ -103,6 +104,7 @@ async def transaction_audit_trail(
     transaction_id: str,
     page: int = Query(default=1, ge=1, le=100000),
     page_size: int = Query(default=50, ge=1, le=AUDIT_TRAIL_PAGE_SIZE_MAX),
+    format: Literal["json", "csv"] = Query(default="json"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
 ):
@@ -140,6 +142,66 @@ async def transaction_audit_trail(
         )
     base = select(AuditEvent).where(or_(*filters))
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    if format == "csv":
+        if total > MAX_TRANSACTION_DETAIL_EXPORT_ROWS:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Audit trail contains {total:,} events; limit is "
+                    f"{MAX_TRANSACTION_DETAIL_EXPORT_ROWS:,}."
+                ),
+            )
+
+        async def generate():
+            columns = (
+                "event_id",
+                "audit_sequence",
+                "event_type",
+                "actor",
+                "object_type",
+                "object_id",
+                "case_id",
+                "description",
+                "before",
+                "after",
+                "created_at",
+            )
+            yield csv_row(columns)
+            stream = await db.stream(
+                base.order_by(AuditEvent.seq.desc(), AuditEvent.id.desc()).execution_options(
+                    yield_per=500
+                )
+            )
+            try:
+                async for event in stream.scalars():
+                    safe_states = redact_sensitive_fields(
+                        {"before": event.before_state, "after": event.after_state}
+                    )
+                    yield csv_row(
+                        (
+                            event.id,
+                            event.seq,
+                            event.event_type,
+                            event.actor,
+                            event.object_type,
+                            event.object_id,
+                            event.case_id,
+                            event.action_description,
+                            json.dumps(safe_states["before"], ensure_ascii=False, default=str),
+                            json.dumps(safe_states["after"], ensure_ascii=False, default=str),
+                            event.created_at.isoformat(),
+                        )
+                    )
+            finally:
+                await stream.close()
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="transaction-audit-trail.csv"'
+            },
+        )
     rows = (
         (
             await db.execute(
@@ -399,6 +461,10 @@ async def transaction_changes(
     initial_cashier_id = tx.cashier_id
     initial_salesperson_id = tx.salesperson_id
     initial_user_references = dict(tx.user_references or {})
+    history_source = (
+        await db.get(SourceRecord, tx.source_record_id) if tx.source_record_id else None
+    )
+    initial_paid_out_details = resolve_paid_out_details(tx, history_source)
     initial_customer_attributes = dict(tx.customer_attributes or {})
     applied_adjustments = sorted(
         (row for row in adjustments if row.status == "Approved"),
@@ -455,6 +521,13 @@ async def transaction_changes(
                     initial_user_references[reference_field] = values["before_value"]
                 else:
                     initial_user_references.pop(reference_field, None)
+        if adjustment.adjustment_type == "PaidOutDetail":
+            field_name = values.get("field")
+            if field_name:
+                if values.get("before_value"):
+                    initial_paid_out_details[field_name] = values["before_value"]
+                else:
+                    initial_paid_out_details.pop(field_name, None)
         if adjustment.adjustment_type == "CustomerAttribute":
             attribute_type = values.get("attribute_type")
             if attribute_type and "before_value" in values:
@@ -474,6 +547,7 @@ async def transaction_changes(
             "cashier_id": initial_cashier_id,
             "salesperson_id": initial_salesperson_id,
             "user_references": redact_sensitive_fields(initial_user_references),
+            "paid_out_details": redact_sensitive_fields(initial_paid_out_details),
             "customer_attributes": initial_customer_attributes,
             "items": initial_items,
             "discounts": initial_discounts,
@@ -844,6 +918,52 @@ async def export_transaction_detail_section(
     )
 
 
+@router.get("/{transaction_id}/related-cases")
+async def transaction_related_cases(
+    transaction_id: str,
+    offset: int = Query(ge=0, le=100000, default=0),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """Return a bounded page of cases raised from a transaction or its store day."""
+    tx = await db.get(CanonicalTransaction, transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    scope.require_store(user, tx.store_id)
+    causal_case_ids = select(AuditEvent.case_id).where(
+        AuditEvent.event_type == "CASE_CREATED",
+        case_creation_mentions_transaction(db, tx.id),
+    )
+    causal = Case.id.in_(causal_case_ids)
+    query = select(Case, causal.label("is_causal")).where(
+        or_(
+            causal,
+            (Case.store_id == tx.store_id) & (Case.business_date == tx.business_date),
+        )
+    )
+    query = scope.restrict(query, user, Case.store_id).order_by(
+        sql_case((causal, 0), else_=1), Case.case_number, Case.id
+    )
+    cases = (await db.execute(query.offset(offset).limit(MAX_RELATED_CASES + 1))).all()
+    return {
+        "items": [
+            {
+                "id": case.id,
+                "case_number": case.case_number,
+                "case_type": case.case_type,
+                "status": case.status,
+                "link": (
+                    "raised from this transaction"
+                    if is_causal
+                    else "same store and day"
+                ),
+            }
+            for case, is_causal in cases[:MAX_RELATED_CASES]
+        ],
+        "has_more": len(cases) > MAX_RELATED_CASES,
+    }
+
+
 @router.get("/{transaction_id}")
 async def transaction_detail(
     transaction_id: str,
@@ -865,6 +985,7 @@ async def transaction_detail(
         if tx.source_record_id
         else None
     )
+    paid_out_values = resolve_paid_out_details(tx, source)
 
     # Cases that were raised from this transaction (the case-creation event lists the transactions behind it).
     candidate_case_ids = select(AuditEvent.case_id).where(
@@ -884,8 +1005,9 @@ async def transaction_detail(
             )
         )
         .order_by(
-            sql_case((Case.id.in_(causal_ids), 0), else_=1) if causal_ids else Case.case_number,
+            sql_case((Case.id.in_(causal_ids), 0), else_=1),
             Case.case_number,
+            Case.id,
         )
     )
     related_case_query = scope.restrict(related_case_query, _, Case.store_id).limit(
@@ -911,7 +1033,7 @@ async def transaction_detail(
                 scope.restrict(
                     select(DBException, Case)
                     .join(Case, Case.id == DBException.case_id)
-                    .where(DBException.case_id.in_(causal_ids))
+                    .where(DBException.case_id.in_(candidate_case_ids))
                     .order_by(DBException.created_at.desc(), DBException.id)
                     .limit(MAX_TRANSACTION_ERRORS + 1),
                     _,
@@ -987,6 +1109,7 @@ async def transaction_detail(
             "quantity": tx.quantity,
             "source_lineage": tx.source_lineage,
             "disposition": tx.disposition,
+            "paid_out_details": paid_out_values,
         }
     )
     out["source"] = (

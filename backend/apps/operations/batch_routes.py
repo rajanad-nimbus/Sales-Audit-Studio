@@ -181,7 +181,7 @@ async def run_history(
     page: Annotated[int, Query(ge=1, le=100_000)] = 1,
     page_size: Annotated[int, Query(ge=10, le=RUN_HISTORY_MAX_PAGE_SIZE)] = RUN_HISTORY_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("finance", "it")),
+    _: dict = Depends(require_role("finance", "it", "auditor")),
 ):
     """Page through batch history without counting the full history table."""
     query = (
@@ -203,7 +203,7 @@ async def export_run_history(
     end: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     status: Annotated[str | None, Query(pattern="^(Running|Succeeded|Failed)$")] = None,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("finance", "it")),
+    _: dict = Depends(require_role("finance", "it", "auditor")),
 ):
     """Export matching batch outcomes in bounded database chunks."""
     filters = run_history_filters(start, end, status)
@@ -238,7 +238,7 @@ async def export_run_history(
 async def batch_run_detail(
     run_id: str,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("finance", "it")),
+    _: dict = Depends(require_role("finance", "it", "auditor")),
 ):
     """Read one batch process by its stable ID for direct operational handoffs."""
     run = (
@@ -253,7 +253,7 @@ async def batch_run_detail(
 async def export_batch_run(
     run_id: str,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_role("finance", "it")),
+    _: dict = Depends(require_role("finance", "it", "auditor")),
 ):
     """Download one complete, sanitized batch outcome for an operational handoff."""
     run = (

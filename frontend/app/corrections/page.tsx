@@ -314,6 +314,7 @@ export default function CorrectionsPage() {
           rows={rows === null ? null : shown}
           rowKey={(r) => r.id}
           csvFileName="corrections-visible.csv"
+          detachTitle={`Corrections · ${filter === 'Proposed' ? 'awaiting review' : filter.toLowerCase()}${adjustmentId ? ' · selected proposal' : ''}`}
           onRowClick={(r) => {
             const next = openId === r.id ? null : r.id;
             setOpenId(next);

@@ -279,6 +279,20 @@ def create_canonical_transaction(db, source, record, parsed, source_record, mask
         customer_attributes=redact_customer_attributes(
             parsed.get("customer_attributes"), mask_character
         ),
+        paid_out_details=redact_sensitive_fields(
+            {
+                key: value
+                for key, value in (record.get("details") or {}).items()
+                if key
+                in {
+                    "vendor_number",
+                    "vendor_invoice_number",
+                    "proof_of_delivery_number",
+                    "payment_reference_number",
+                }
+            },
+            mask_character,
+        ),
         user_references=redact_sensitive_fields(parsed.get("user_references"), mask_character),
         register_id=record.get("register_id"),
         transaction_number=record.get("transaction_number"),
@@ -332,7 +346,7 @@ def parse(source: str, rec: dict) -> dict:
         raise ValueError(f"unknown source_system {source}")
     validate_source_identifiers(rec)
     validate_currency(rec.get("currency", "USD"))
-    if source == "POSControl":
+    if source in {"POSControl", "OMSControl"}:
         return parse_manifest(rec)
     cashier = rec.get("cashier_id")
     if cashier is not None and not cashier.strip():
@@ -387,7 +401,7 @@ def validate_source_identifiers(rec: dict) -> None:
 
 
 def parse_manifest(rec: dict) -> dict:
-    """Validate a POS control manifest and return its canonical values."""
+    """Validate a POS or OMS control manifest and return its canonical values."""
     need = ["source_record_id", "business_date", "store_id", "declared_count", "declared_total"]
     missing = [key for key in need if rec.get(key) in (None, "")]
     if missing:

@@ -111,13 +111,17 @@ export default function AuditErrorsPage() {
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState('');
   const savedViewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const overviewRequestId = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++overviewRequestId.current;
     try {
       const { data } = await api.get('/api/audit-errors', { params: { days } });
+      if (requestId !== overviewRequestId.current) return;
       setData(data);
       setError(null);
     } catch (e) {
+      if (requestId !== overviewRequestId.current) return;
       setError(
         (e as { response?: { status?: number } })?.response?.status === 403
           ? 'Your role cannot view audit errors.'
@@ -182,10 +186,15 @@ export default function AuditErrorsPage() {
       });
   }, []);
 
-  const families = data ? [...new Set(data.items.map((i) => i.family))].sort() : [];
+  // The raised-in totals are tied to this window. Do not show a prior window's
+  // counts under the newly selected filter while its overview is still loading.
+  const currentData = data?.window_days === Number(days) ? data : null;
+  const families = currentData
+    ? [...new Set(currentData.items.map((i) => i.family))].sort()
+    : [];
   const term = q.trim().toLowerCase();
-  const rows = data
-    ? data.items.filter(
+  const rows = currentData
+    ? currentData.items.filter(
         (i) =>
           (show === 'all' || i.open_count > 0) &&
           (!family || i.family === family) &&
@@ -313,12 +322,18 @@ export default function AuditErrorsPage() {
       {tab === 'types' && (
         <>
           <MetricGrid>
-            <MetricTile label="Open errors" value={data ? formatNumber(data.open_total) : '—'} />
+            <MetricTile
+              label="Open errors"
+              value={currentData ? formatNumber(currentData.open_total) : '—'}
+            />
             <MetricTile
               label="Error types affected"
-              value={data ? formatNumber(data.open_types) : '—'}
+              value={currentData ? formatNumber(currentData.open_types) : '—'}
             />
-            <MetricTile label="Error types known" value={data ? data.items.length : '—'} />
+            <MetricTile
+              label="Error types known"
+              value={currentData ? currentData.items.length : '—'}
+            />
           </MetricGrid>
 
           <Toolbar count={rows ? `${rows.length} shown` : ''}>
@@ -367,6 +382,7 @@ export default function AuditErrorsPage() {
           <DataTable
             columns={columnsFor(Number(days))}
             csvFileName="audit-errors-visible.csv"
+            detachTitle={`Audit Errors · ${show} · ${windowLabel(Number(days))}${family ? ` · ${family}` : ''}`}
             rows={rows}
             rowKey={(r) => r.code}
             onRowClick={(r) => router.push(errorPath(r.code))}

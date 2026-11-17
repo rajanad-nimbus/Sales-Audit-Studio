@@ -1,18 +1,21 @@
 """Scheduled store-day lifecycle automation."""
 
+import json
 import logging
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from fastapi import HTTPException
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
-from sqlalchemy import select, tuple_
+from sqlalchemy import and_, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.controls.foundation.models import FoundationReference
 from apps.ingest import reconciliation
 from apps.ingest.manifests import validate_business_date
+from apps.ingest.models import RegisterEvent, SourceRecord
+from apps.ingest.shopify.day_totals import RECORD_PREFIX as SHOPIFY_DAY_TOTAL_PREFIX
 from apps.store_days.freshness import lock_configuration, lock_store_days
 from apps.store_days.models import StoreDay, StoreDayClosureRequest
 from apps.store_days.readiness import CLEAN, COMPLETE, NO_DATA, ingest_states, readiness
@@ -185,25 +188,64 @@ def ready(view: dict) -> bool:
 async def open_days_with_data(
     db: AsyncSession, business_date: str, store_ids: set[str] | None = None
 ) -> int:
-    """Open a store day for every store that has transactions on the date and no store day yet."""
-    query = (
-        select(CanonicalTransaction.store_id)
-        .where(
-            CanonicalTransaction.business_date == business_date,
-            CanonicalTransaction.store_id.is_not(None),
-        )
-        .distinct()
+    """Open days represented by sales, register activity, or source control records."""
+    transaction_query = select(
+        CanonicalTransaction.store_id, CanonicalTransaction.business_date
+    ).where(
+        CanonicalTransaction.business_date == business_date,
+        CanonicalTransaction.store_id.is_not(None),
     )
     if store_ids is not None:
-        query = query.where(CanonicalTransaction.store_id.in_(store_ids))
-    stores = {store for store in (await db.execute(query)).scalars() if store}
-    if not stores:
+        transaction_query = transaction_query.where(CanonicalTransaction.store_id.in_(store_ids))
+    day_keys = {tuple(row) for row in await db.execute(transaction_query.distinct())}
+    event_query = select(RegisterEvent.store_id).where(
+        RegisterEvent.business_date == business_date,
+        RegisterEvent.store_id.is_not(None),
+    ).distinct()
+    if store_ids is not None:
+        day_keys = {key for key in day_keys if key[0] in store_ids}
+        event_query = event_query.where(RegisterEvent.store_id.in_(store_ids))
+    day_keys.update(
+        (store, business_date)
+        for store in (await db.execute(event_query)).scalars()
+        if store
+    )
+
+    day_start = datetime.combine(date.fromisoformat(business_date), time.min, tzinfo=UTC)
+    source_rows = await db.execute(
+        select(SourceRecord.source_system, SourceRecord.payload).where(
+            or_(
+                SourceRecord.source_system.in_(("POSControl", "OMSControl")),
+                and_(
+                    SourceRecord.source_system == "Shopify",
+                    SourceRecord.source_record_id.like(f"{SHOPIFY_DAY_TOTAL_PREFIX}-%"),
+                ),
+            ),
+            SourceRecord.status.in_(("Archived", "Processed")),
+            SourceRecord.source_event_time >= day_start,
+            SourceRecord.source_event_time < day_start + timedelta(days=1),
+        )
+    )
+    for source, payload in source_rows:
+        try:
+            record = json.loads(payload)
+            store = record["store_id"]
+            record_date = str(record["business_date"])[:10]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not isinstance(store, str) or not store or record_date != business_date:
+            continue
+        if store_ids is not None and store not in store_ids:
+            continue
+        if source in {"POSControl", "OMSControl"} or record.get("record_type") == "DayTotal":
+            day_keys.add((store, business_date))
+
+    if not day_keys:
         return 0
     await lock_configuration(db)
-    identities = {(store_id, business_date) for store_id in stores}
-    existing = await lock_store_days(db, identities)
+    existing = await lock_store_days(db, day_keys)
     opened = 0
-    for store_id, day_date in sorted(identities - set(existing)):
+    for store_id, day_date in sorted(day_keys - set(existing)):
         day = StoreDay(
             id=str(uuid.uuid4()), store_id=store_id, business_date=day_date, status="Open"
         )
@@ -298,8 +340,8 @@ async def settle_day(db: AsyncSession, store_id: str, business_date: str, *, clo
         after={"trigger": "automation", "audit_version": day.audit_version},
     )
     outcome["closed"] = True
-    return outcome
     await open_following_day(db, store_id, business_date)
+    return outcome
 
 
 async def open_following_day(

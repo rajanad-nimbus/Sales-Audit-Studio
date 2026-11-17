@@ -25,6 +25,7 @@ export function applyUserPreferences(preferences: UserPreferences) {
   }
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
+  root.lang = preferences.locale.split('-')[0] || 'en';
   root.dataset.density = preferences.density;
   root.dataset.contrast = preferences.contrast;
   root.dataset.motion = preferences.motion;

@@ -25,6 +25,7 @@ export type Kind =
   | 'Employee'
   | 'CustomerAttribute'
   | 'UserReference'
+  | 'PaidOutDetail'
   | 'MissingTransaction';
 export const KINDS: { key: Kind; title: string; help: string }[] = [
   {
@@ -82,6 +83,11 @@ export const KINDS: { key: Kind; title: string; help: string }[] = [
     key: 'UserReference',
     title: 'Retailer reference',
     help: 'Correct one of the four retailer-defined transaction reference fields.',
+  },
+  {
+    key: 'PaidOutDetail',
+    title: 'Paid-out details',
+    help: 'Correct a vendor, invoice, proof-of-delivery, or payment reference with Finance approval.',
   },
   {
     key: 'MissingTransaction',

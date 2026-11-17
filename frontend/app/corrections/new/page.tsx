@@ -26,6 +26,7 @@ type Tx = {
   salesperson_id: string | null;
   customer_attributes: Record<string, string> | null;
   user_references: Record<string, string> | null;
+  paid_out_details?: Record<string, string> | null;
   reconciliation_status: string;
 };
 type Facets = { stores: string[]; tenders: string[]; transaction_types: string[] };
@@ -144,6 +145,7 @@ export default function NewCorrectionPage() {
   const [taxableAmount, setTaxableAmount] = useState('');
   const [taxAmount, setTaxAmount] = useState('');
   const [userReferenceField, setUserReferenceField] = useState('reference_1');
+  const [paidOutField, setPaidOutField] = useState('vendor_number');
   const [clearUserReference, setClearUserReference] = useState(false);
   const [kind, setKind] = useState<Kind>('Amount');
   const [search, setSearch] = useState('');
@@ -174,6 +176,7 @@ export default function NewCorrectionPage() {
   const [manualTenders, setManualTenders] = useState<DraftTender[]>([]);
   const [manualDiscounts, setManualDiscounts] = useState<DraftDiscount[]>([]);
   const [transactionType, setTransactionType] = useState('Sale');
+  const [missingSourceSystem, setMissingSourceSystem] = useState('POS');
   const [refundSource, setRefundSource] = useState('Processor');
   const [busy, setBusy] = useState(false);
 
@@ -543,6 +546,9 @@ export default function NewCorrectionPage() {
         ...(references.length ? { user_references: references } : {}),
         amount: Number(amount),
         transaction_type: transactionType,
+        ...(['Sale', 'Return'].includes(transactionType)
+          ? { source_system: missingSourceSystem }
+          : {}),
         ...(transactionType === 'Refund' ? { source_system: refundSource } : {}),
         tender_type: tenders[0]?.tender_type ?? tender,
         ...(lines.length ? { lines } : {}),
@@ -614,6 +620,7 @@ export default function NewCorrectionPage() {
         reference_field: userReferenceField,
         value: clearUserReference ? '' : value.trim(),
       };
+    if (kind === 'PaidOutDetail') return { field: paidOutField, value: value.trim() };
     return { item: value, line_no: Number(selectedItemLineNo) };
   }, [
     kind,
@@ -634,6 +641,7 @@ export default function NewCorrectionPage() {
     userReferences,
     amount,
     transactionType,
+    missingSourceSystem,
     refundSource,
     tender,
     manualLines,
@@ -657,6 +665,7 @@ export default function NewCorrectionPage() {
     taxAmount,
     userReferenceField,
     clearUserReference,
+    paidOutField,
   ]);
   const valid =
     !!rationale.trim() &&
@@ -801,6 +810,8 @@ export default function NewCorrectionPage() {
                       ? !!customerAttributeType.trim() && (clearCustomerAttribute || !!value.trim())
                       : kind === 'UserReference'
                         ? !!userReferenceField && (clearUserReference || !!value.trim())
+                        : kind === 'PaidOutDetail'
+                          ? !!paidOutField && !!value.trim()
                         : missing || !!value.trim());
 
   const pickKind = (k: Kind) => {
@@ -1160,6 +1171,17 @@ export default function NewCorrectionPage() {
                         ))}
                       </select>
                     </Field>
+                    {['Sale', 'Return'].includes(transactionType) && (
+                      <Field label="Source system">
+                        <select
+                          value={missingSourceSystem}
+                          onChange={(e) => setMissingSourceSystem(e.target.value)}
+                        >
+                          <option>POS</option>
+                          <option>OMS</option>
+                        </select>
+                      </Field>
+                    )}
                     {transactionType === 'Refund' && (
                       <Field label="Refund source">
                         <select
@@ -1655,6 +1677,31 @@ export default function NewCorrectionPage() {
                   />
                   <span>Clear this reference field</span>
                 </label>
+              </div>
+            )}
+            {kind === 'PaidOutDetail' && (
+              <div className="stack stack-sm">
+                <Field label="Paid-out field">
+                  <select
+                    value={paidOutField}
+                    onChange={(event) => setPaidOutField(event.target.value)}
+                  >
+                    <option value="vendor_number">Vendor number</option>
+                    <option value="vendor_invoice_number">Vendor invoice number</option>
+                    <option value="proof_of_delivery_number">Proof of delivery number</option>
+                    <option value="payment_reference_number">Payment reference number</option>
+                  </select>
+                </Field>
+                <p className="hint">
+                  Current value: {picked?.paid_out_details?.[paidOutField] || 'not recorded'}
+                </p>
+                <Field label="Corrected value">
+                  <input
+                    value={value}
+                    onChange={(event) => setValue(event.target.value)}
+                    maxLength={paidOutField === 'vendor_number' ? 10 : 30}
+                  />
+                </Field>
               </div>
             )}
             {kind === 'Reference' && (

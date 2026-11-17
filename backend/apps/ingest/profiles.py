@@ -191,7 +191,8 @@ async def list_source_profiles(
 
 @router.get("/api/ingest/feed-health")
 async def feed_health(
-    db: AsyncSession = Depends(get_db), _: dict = Depends(require_role("it", "finance"))
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("it", "finance", "auditor")),
 ):
     """Freshness for enabled source profiles, based solely on received immutable deliveries."""
     profiles = (

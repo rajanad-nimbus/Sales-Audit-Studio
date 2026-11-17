@@ -101,8 +101,12 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
   const [blockedDestinations, setBlockedDestinations] = useState<string[]>(
     error.export_block_destinations ?? []
   );
+  const [impactConfigured, setImpactConfigured] = useState(error.export_impact_configured);
   const [savingImpact, setSavingImpact] = useState(false);
   const [impactMessage, setImpactMessage] = useState('');
+  const [destinationsLoaded, setDestinationsLoaded] = useState(false);
+  const [destinationsLoading, setDestinationsLoading] = useState(false);
+  const [destinationLoadAttempt, setDestinationLoadAttempt] = useState(0);
   const [cases, setCases] = useState<ErrorCases | null>(null);
   const [failed, setFailed] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -118,18 +122,32 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
   useEffect(() => {
     if (!canConfigureImpact) return;
     let live = true;
+    setDestinationsLoading(true);
+    setDestinationsLoaded(false);
+    setImpactMessage('');
+    setImpactConfigured(error.export_impact_configured);
+    setBlockedDestinations(error.export_block_destinations ?? []);
     api
       .get('/api/exports/destinations')
       .then((r) => {
-        if (live) setDestinations(r.data);
+        if (live) {
+          setDestinations(r.data);
+          setDestinationsLoaded(true);
+          if (!error.export_impact_configured) {
+            setBlockedDestinations(r.data.map((destination: { name: string }) => destination.name));
+          }
+        }
       })
       .catch(() => {
         if (live) setImpactMessage('Could not load export destinations.');
+      })
+      .finally(() => {
+        if (live) setDestinationsLoading(false);
       });
     return () => {
       live = false;
     };
-  }, [canConfigureImpact]);
+  }, [canConfigureImpact, destinationLoadAttempt, error.code, error.export_impact_configured]);
 
   const saveExportImpact = async () => {
     setSavingImpact(true);
@@ -138,6 +156,7 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
       await api.put(`/api/audit-errors/${encodeURIComponent(error.code)}/export-impact`, {
         destinations: blockedDestinations,
       });
+      setImpactConfigured(true);
       setImpactMessage('Export impact saved.');
     } catch {
       setImpactMessage('Could not save export impact.');
@@ -238,12 +257,29 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
       </Card>
       {canConfigureImpact && (
         <Card title="Downstream export impact">
-          <p className="muted">
-            An open occurrence of this error holds transactions from the selected destinations. With
-            none selected, the error stays visible for audit but does not block delivery.
-            Unconfigured errors retain the default and block every destination.
-          </p>
+          {!impactConfigured ? (
+            <Alert tone="warning">
+              No impact policy is saved. Open occurrences currently block export to every
+              destination by default. All known destinations are selected below; save an explicit
+              policy to keep this behavior or choose which destinations the error should block.
+            </Alert>
+          ) : (
+            <p className="muted">
+              Open occurrences block export only to the selected destinations. With none selected,
+              the error remains visible for audit but does not block delivery.
+            </p>
+          )}
           <div className="stack-sm">
+            {destinationsLoading && <p className="muted">Loading export destinations…</p>}
+            {!destinationsLoading && !destinationsLoaded && impactMessage && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setDestinationLoadAttempt((n) => n + 1)}
+              >
+                Retry destination load
+              </Button>
+            )}
             {destinations.map((destination) => (
               <label key={destination.name} className="check-row">
                 <input
@@ -264,10 +300,31 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
               </label>
             ))}
           </div>
-          <Button size="sm" disabled={savingImpact} onClick={saveExportImpact}>
+          <Button
+            size="sm"
+            disabled={savingImpact || !destinationsLoaded || destinationsLoading}
+            onClick={saveExportImpact}
+          >
             {savingImpact ? 'Saving…' : 'Save export impact'}
           </Button>
           {impactMessage && <small role="status">{impactMessage}</small>}
+        </Card>
+      )}
+      {!canConfigureImpact && (
+        <Card title="Downstream export impact">
+          {error.export_impact_configured ? (
+            <p>
+              Open occurrences block{' '}
+              {error.export_block_destinations.length
+                ? `export to ${error.export_block_destinations.join(', ')}.`
+                : 'no downstream destinations.'}
+            </p>
+          ) : (
+            <Alert tone="warning">
+              No impact policy is configured. Open occurrences block export to every destination by
+              default.
+            </Alert>
+          )}
         </Card>
       )}
       <Card title="Cases">

@@ -172,6 +172,7 @@ export function ErrorPatterns() {
             primary: true,
             nowrap: true,
             render: (r) => (r.register_id ? `${r.store_id} · ${r.register_id}` : r.store_id),
+            csvValue: (r) => (r.register_id ? `${r.store_id} · ${r.register_id}` : r.store_id),
           },
           {
             key: 'error',
@@ -184,16 +185,30 @@ export function ErrorPatterns() {
                 </small>
               </>
             ),
+            csvValue: (r) => `${r.label} (${r.code}) · ${r.sources.join(', ')}`,
           },
-          { key: 'days', header: 'Seen on', render: (r) => <Seen r={r} /> },
+          {
+            key: 'days',
+            header: 'Seen on',
+            render: (r) => <Seen r={r} />,
+            csvValue: (r) => `${r.days}${r.repeating ? ' · Repeating' : ''}`,
+          },
           {
             key: 'range',
             header: 'First · last',
             nowrap: true,
             render: (r) => `${r.first_seen} · ${r.last_seen}`,
+            csvValue: (r) => `${r.first_seen} · ${r.last_seen}`,
           },
-          { key: 'trend', header: 'Trend', render: (r) => <Trend t={r.trend} /> },
+          {
+            key: 'trend',
+            header: 'Trend',
+            render: (r) => <Trend t={r.trend} />,
+            csvValue: (r) => r.trend,
+          },
         ]}
+        csvFileName={`audit-error-patterns-${view}-${onlyRepeating ? 'repeating' : 'all'}-${days}d-min${minDays}.csv`}
+        detachTitle={`Audit error patterns · ${view} · ${onlyRepeating ? 'repeating' : 'all'} · ${days} days`}
       />
       {data && data.store_summary.length > 0 && (
         <>
@@ -202,22 +217,43 @@ export function ErrorPatterns() {
             rows={data.store_summary}
             rowKey={(s) => s.store_id}
             columns={[
-              { key: 'store', header: 'Store', primary: true, render: (s) => s.store_id },
+              {
+                key: 'store',
+                header: 'Store',
+                primary: true,
+                render: (s) => s.store_id,
+                csvValue: (s) => s.store_id,
+              },
               {
                 key: 'days',
                 header: 'Days with errors',
                 numeric: true,
                 render: (s) => s.error_days,
+                csvValue: (s) => s.error_days,
               },
-              { key: 'codes', header: 'Error types', numeric: true, render: (s) => s.error_codes },
+              {
+                key: 'codes',
+                header: 'Error types',
+                numeric: true,
+                render: (s) => s.error_codes,
+                csvValue: (s) => s.error_codes,
+              },
               {
                 key: 'repeat',
                 header: 'Repeating types',
                 numeric: true,
                 render: (s) => s.repeating_codes,
+                csvValue: (s) => s.repeating_codes,
               },
-              { key: 'trend', header: 'Trend', render: (s) => <Trend t={s.trend} /> },
+              {
+                key: 'trend',
+                header: 'Trend',
+                render: (s) => <Trend t={s.trend} />,
+                csvValue: (s) => s.trend,
+              },
             ]}
+            csvFileName={`audit-error-pattern-store-summary-${days}d-min${minDays}.csv`}
+            detachTitle={`Audit error store summary · ${days} days`}
           />
         </>
       )}
