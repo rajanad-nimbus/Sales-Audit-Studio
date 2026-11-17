@@ -21,7 +21,7 @@ from apps.cases.models import (
 )
 from apps.cases.models import Exception as DBException
 from apps.cases.schemas import Recommendation as RecommendationSchema
-from apps.cases.schemas import ValidationRunRequest
+from apps.cases.schemas import ValidationRunRequest, ValidationWaiveRequest
 from apps.ingest.models import SourceRecord
 from apps.security import scope
 from apps.security.authentication import require_role
@@ -288,6 +288,53 @@ async def run_validation(
         fresh,
         rationale=req.rationale,
         actor=_.get("user") or "ontology.user",
+    )
+    await db.commit()
+    return {
+        "status": ob.status,
+        "verification_result": ob.verification_result,
+        "case_status": case.status,
+    }
+
+
+@router.post("/api/validations/{validation_id}/waive")
+async def waive_validation(
+    validation_id: str,
+    db: AsyncSession = Depends(get_db),
+    req: ValidationWaiveRequest = Body(...),
+    user: dict = Depends(require_role("finance")),
+):
+    """Auditor override: close a validation with a mandatory, audited comment."""
+    ob = (
+        await db.execute(
+            select(ValidationObligation)
+            .where(ValidationObligation.id == validation_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if ob is None:
+        raise HTTPException(status_code=404, detail="Validation not found")
+    case = (
+        await db.execute(
+            select(Case)
+            .where(Case.id == ob.case_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    scope.require_store(user, case.store_id)
+    wf = await db.get(Workflow, ob.workflow_id)
+    if wf is None or wf.case_id != case.id:
+        raise HTTPException(status_code=404, detail="Validation not found")
+    if ob.status == "Complete":
+        raise HTTPException(status_code=409, detail="Already verified")
+    if case.status != "Pending Validation" or wf.state != "Executed":
+        raise HTTPException(
+            status_code=409, detail="Case or workflow is no longer awaiting validation"
+        )
+    nimbus.waive_validation(
+        db, case, wf, ob, req.rationale, actor=user.get("user") or "ontology.user"
     )
     await db.commit()
     return {

@@ -6,6 +6,7 @@ from datetime import UTC
 from database import get_db
 from fastapi import APIRouter, Depends, Request
 from integrations.ontology import nimbus
+from integrations.ontology.audit_controls import AuditRulesUnavailable
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -169,17 +170,31 @@ async def shadow(
 def eligible(case, rec, result) -> bool:
     """Read-only check mirroring the Permit conditions in nimbus.evaluate_policy plus a grounded agent finding.
     It only nominates cases; approval still goes through the finance-role bulk approve and the policy gate."""
+    limits = nimbus.policy_limits()
     return bool(
         agent_supported(result)
         and case.status == "In Review"
         and case.evidence_completeness == 100
         and not getattr(case, "amount_needs_review", False)
-        and case.currency == nimbus.THRESHOLD_CURRENCY
+        and case.currency == limits.limit_currency
         and rec.status == "Proposed"
         and rec.disposition_type == "Timing"
         and rec.financial_impact == 0
-        and case.total_exception_amount <= nimbus.TIMING_AUTONOMY_LIMIT
+        and case.total_exception_amount <= limits.timing_autonomy_limit
     )
+
+
+def _policy_limit_view() -> dict:
+    """Limits shown in agent settings; blank (never a default) while the ontology has none."""
+    try:
+        limits = nimbus.policy_limits()
+    except AuditRulesUnavailable:
+        return {"autonomy_limit": None, "timing_autonomy_limit": None, "source": "unavailable"}
+    return {
+        "autonomy_limit": str(limits.autonomy_limit),
+        "timing_autonomy_limit": str(limits.timing_autonomy_limit),
+        "source": f"ontology release {limits.release_id}",
+    }
 
 
 @router.get("/eligible")
@@ -347,8 +362,7 @@ def agent_registry(cfg: dict, auto_close: bool = True) -> list[dict]:
             "limits": {
                 "policy_version": nimbus.POLICY_VERSION,
                 "ontology_version": ontology.ONTOLOGY_VERSION,
-                "autonomy_limit": str(nimbus.AUTONOMY_LIMIT),
-                "timing_autonomy_limit": str(nimbus.TIMING_AUTONOMY_LIMIT),
+                **_policy_limit_view(),
             },
         },
         {

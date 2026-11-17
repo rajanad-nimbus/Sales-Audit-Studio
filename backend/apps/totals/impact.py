@@ -12,7 +12,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.controls.rules.models import ConfiguredAuditRule
+from apps.store_days.rule_evaluation import current_controls
 from apps.security import scope
 from apps.store_days.models import StoreDay, StoreDayClosureRequest
 from apps.totals.calculation import NOT_LIVE_STATUSES, calculate_store_day, effective_definitions
@@ -135,18 +135,11 @@ async def change_impact(db: AsyncSession, draft: AuditTotalDefinition, user: dic
     )
 
     # Rules read configured totals by their "Configured: <name>" total name.
-    rules = list(
-        (
-            await db.execute(
-                select(ConfiguredAuditRule)
-                .where(
-                    ConfiguredAuditRule.enabled.is_(True),
-                    ConfiguredAuditRule.total_name.like("Configured: %"),
-                )
-                .order_by(ConfiguredAuditRule.id)
-            )
-        ).scalars()
-    )
+    rules = [
+        rule
+        for rule in current_controls().total_rules
+        if rule.total_name.startswith("Configured: ")
+    ]
 
     rows = []
     for day in days:

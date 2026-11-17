@@ -3,12 +3,12 @@
 from collections import defaultdict
 from decimal import Decimal
 
+from integrations.ontology.ontology_integration import integration
 from sqlalchemy import exists, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.models import Case, Exception as DBException
 from apps.controls.foundation.models import FoundationReference
-from apps.controls.rules.transaction_models import ConfiguredTransactionAuditRule
 from apps.controls.rules.transaction_logic import condition_matches, sql_condition
 from apps.store_days.models import StoreDay
 from apps.totals.calculation import store_location_traits
@@ -60,22 +60,7 @@ async def run_configured_transaction_rules(
     store_ids: set[str] | None = None,
 ) -> None:
     """Run approved transaction predicates and Store Day presence/absence rules."""
-    rules = list(
-        (
-            await db.execute(
-                select(ConfiguredTransactionAuditRule)
-                .where(
-                    ConfiguredTransactionAuditRule.enabled.is_(True),
-                    ConfiguredTransactionAuditRule.status == "Active",
-                )
-                .order_by(
-                    ConfiguredTransactionAuditRule.execution_order,
-                    ConfiguredTransactionAuditRule.name,
-                    ConfiguredTransactionAuditRule.id,
-                )
-            )
-        ).scalars()
-    )
+    rules = list(integration.audit_controls().transaction_rules)
     if not rules:
         return
     by_day: dict[tuple[str, str], list] = defaultdict(list)

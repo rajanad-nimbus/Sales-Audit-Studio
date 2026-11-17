@@ -6,23 +6,35 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from fastapi import HTTPException
+from integrations.ontology.audit_controls import AuditRulesUnavailable, TotalRule
 from integrations.ontology.nimbus import audit, sla_due
+from integrations.ontology.ontology_integration import integration
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.identifiers import generate_case_number
 from apps.cases.models import Case
 from apps.cases.models import Exception as DBException
-from apps.controls.rules.models import ConfiguredAuditRule
 from apps.totals.calculation import TotalKey, store_location_traits
 from apps.totals.models import AuditTotalDefinition
+
+
+def current_controls():
+    """Audit rules from the approved ontology release; with none, a re-total is refused (fail closed)."""
+    try:
+        return integration.audit_controls()
+    except AuditRulesUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Audit rules are unavailable from Ontology Studio: {exc}",
+        ) from exc
 
 
 @dataclass(slots=True)
 class RuleEvaluation:
     """Rules selected and validated before a totals version is persisted."""
 
-    rules: list[ConfiguredAuditRule]
+    rules: list[TotalRule]
     observations: dict[str, list[tuple[str | None, Decimal]]]
     errors: dict[str, HTTPException]
 
@@ -51,6 +63,7 @@ async def prepare_rule_evaluation(
     store_id: str,
 ) -> RuleEvaluation:
     """Select relevant rules once, validate targets, and capture balancing observations."""
+    controls = current_controls()  # refuse even a day with no totals when the ontology is unavailable
     totals_by_name: dict[str, dict[tuple[str, str | None], Decimal]] = {}
     for (name, level, dimension), amount in calculated.items():
         level_totals = totals_by_name.setdefault(name, {})
@@ -67,27 +80,13 @@ async def prepare_rule_evaluation(
     if not applicable_totals:
         return RuleEvaluation(rules=[], observations={}, errors={})
 
-    rules = list(
-        (
-            await db.execute(
-                select(ConfiguredAuditRule)
-                .where(
-                    ConfiguredAuditRule.enabled.is_(True),
-                    ConfiguredAuditRule.status == "Active",
-                    ConfiguredAuditRule.total_name.in_(applicable_totals),
-                    (ConfiguredAuditRule.start_date.is_(None))
-                    | (ConfiguredAuditRule.start_date <= business_date),
-                    (ConfiguredAuditRule.end_date.is_(None))
-                    | (ConfiguredAuditRule.end_date >= business_date),
-                )
-                .order_by(
-                    ConfiguredAuditRule.execution_order,
-                    ConfiguredAuditRule.name,
-                    ConfiguredAuditRule.id,
-                )
-            )
-        ).scalars()
-    )
+    rules = [
+        rule
+        for rule in controls.total_rules
+        if rule.total_name in applicable_totals
+        and (rule.start_date is None or rule.start_date <= business_date)
+        and (rule.end_date is None or rule.end_date >= business_date)
+    ]
     if any(rule.location_traits for rule in rules):
         store_traits = await store_location_traits(db, store_id)
         rules = [
@@ -184,14 +183,14 @@ def rule_breaches(observed: Decimal, threshold: Decimal, comparison: str) -> boo
     raise ValueError(f"Unsupported audit-rule comparison: {comparison}")
 
 
-def rule_applies_to_currency(rule: ConfiguredAuditRule, currency: str) -> bool:
+def rule_applies_to_currency(rule: TotalRule, currency: str) -> bool:
     """Currency-scoped rules apply only when their currency matches the store day."""
     return rule.threshold_currency is None or rule.threshold_currency == currency
 
 
 async def create_rule_breach(
     db: AsyncSession,
-    rule: ConfiguredAuditRule,
+    rule: TotalRule,
     breaches: list[tuple[str | None, Decimal]],
     store_id: str,
     business_date: str,
@@ -273,7 +272,7 @@ async def create_rule_breach(
         db,
         "CONFIGURED_RULE_BREACH",
         case_id,
-        "ConfiguredAuditRule",
+        "OntologyAuditControl",
         rule.id,
         f"{rule.name} breached at {len(breaches)} {rule.balance_level or 'Store'} balance(s); "
         f"{rule.comparison} threshold {rule.threshold}",

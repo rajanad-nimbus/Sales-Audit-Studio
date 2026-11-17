@@ -46,3 +46,52 @@ def middleware_database(monkeypatch):
                 await db.commit()
 
         asyncio.run(clean())
+
+
+@pytest.fixture(autouse=True)
+def install_controls(monkeypatch):
+    """Stand in for an approved Ontology Studio release.
+
+    Audit rules exist only in the ontology, so every test starts with a release that defines the policy
+    limits and no rules. A test installs rules with ``install_controls(total_rules=[...])`` or the
+    unavailable case with ``install_controls(None)``.
+    """
+    from decimal import Decimal
+
+    from integrations.ontology import audit_controls as ac
+    from integrations.ontology.ontology_integration import integration
+
+    state: dict = {}
+
+    def install(
+        controls="default",
+        *,
+        total_rules=(),
+        transaction_rules=(),
+        autonomy="1000",
+        timing="250",
+        currency="USD",
+    ):
+        state["controls"] = (
+            None
+            if controls is None
+            else ac.AuditControls(
+                release_id=1,
+                total_rules=tuple(total_rules),
+                transaction_rules=tuple(transaction_rules),
+                limits={
+                    "autonomy_limit": Decimal(autonomy),
+                    "timing_autonomy_limit": Decimal(timing),
+                },
+                limit_currency=currency,
+            )
+        )
+
+    def audit_controls():
+        if state["controls"] is None:
+            raise ac.AuditRulesUnavailable("No approved ontology release has been loaded")
+        return state["controls"]
+
+    monkeypatch.setattr(integration, "audit_controls", audit_controls)
+    install()
+    return install

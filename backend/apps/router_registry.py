@@ -2,6 +2,9 @@
 
 from fastapi import FastAPI
 
+from fastapi.responses import JSONResponse
+from integrations.ontology.audit_controls import AuditRulesUnavailable
+
 from apps.admin.routes import router as admin_router
 from apps.agents.action_center import router as action_router
 from apps.agents.routes import router as agent_router
@@ -104,3 +107,11 @@ def register_routes(app: FastAPI) -> None:
     for router in ROUTERS:
         app.include_router(router)
     app.middleware("http")(ontology_authentication)
+
+    @app.exception_handler(AuditRulesUnavailable)
+    async def audit_rules_unavailable(_request, exc: AuditRulesUnavailable):
+        """Audit rules come only from Ontology Studio; without them work stops rather than using defaults."""
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"Audit rules are unavailable from Ontology Studio: {exc}"},
+        )

@@ -1,8 +1,8 @@
 """Read approved Nimbus audit rules from Ontology Studio's integration API.
 
-The remote API is advisory to availability, never to safety: if it is not
-configured, unavailable, or returns an incomplete approved release, Nimbus
-continues with its built-in deterministic controls.
+Audit rules are owned by the ontology. If it is not configured, unavailable, or
+returns an incomplete or malformed approved release, no audit rule is evaluated:
+``audit_controls()`` raises ``AuditRulesUnavailable`` and callers fail closed.
 """
 
 import asyncio
@@ -11,6 +11,8 @@ import os
 from datetime import UTC, datetime
 
 import httpx
+
+from integrations.ontology.audit_controls import AuditControls, AuditRulesUnavailable, parse_controls
 
 RULE_CODES = frozenset(
     {
@@ -82,6 +84,17 @@ class OntologyIntegration:
         self.last_error = None
         self.rule_codes = frozenset()
         self._snapshot = None
+        self._controls: AuditControls | None = None
+
+    def audit_controls(self) -> AuditControls:
+        """The audit rules of the current approved release, or raise: never a built-in default."""
+        if not self.configured:
+            raise AuditRulesUnavailable("Ontology Studio is not configured")
+        if self._controls is None or self._snapshot is None:
+            raise AuditRulesUnavailable(
+                self.last_error or "No approved ontology release has been loaded"
+            )
+        return self._controls
 
     @property
     def configured(self) -> bool:
@@ -112,7 +125,16 @@ class OntologyIntegration:
             "approved_rule_codes": sorted(codes),
             "expected_rule_codes": sorted(RULE_CODES),
             "missing_rule_codes": sorted(RULE_CODES - codes),
-            "ready": bool(context["ontology"]) and RULE_CODES <= codes,
+            "audit_rules_ready": self._controls is not None and bool(context["ontology"]),
+            "audit_rule_counts": {
+                "store_day_total": len(self._controls.total_rules),
+                "transaction_field": len(self._controls.transaction_rules),
+            }
+            if self._controls is not None and context["ontology"]
+            else None,
+            "ready": bool(context["ontology"])
+            and RULE_CODES <= codes
+            and self._controls is not None,
             "definition_counts": {k: len(v) for k, v in context["definitions"].items()},
         }
 
@@ -136,7 +158,7 @@ class OntologyIntegration:
         async with self._lock:
             self.last_checked_at = datetime.now(UTC)
             if not self.configured:
-                self._snapshot, self.rule_codes = None, frozenset()
+                self._snapshot, self.rule_codes, self._controls = None, frozenset(), None
                 missing = [
                     name
                     for name in ("NIMBUS_ONTOLOGY_API_URL", "NIMBUS_ONTOLOGY_API_KEY")
@@ -157,12 +179,24 @@ class OntologyIntegration:
                 )
                 if not RULE_CODES <= codes:
                     raise ValueError("Approved release is missing required Sales Audit controls")
-                self._snapshot, self.rule_codes = snapshot, codes
+                controls = parse_controls(
+                    snapshot["ontology"].get("releaseId"), snapshot["definitions"]["business-rules"]
+                )
+                self._snapshot, self.rule_codes, self._controls = snapshot, codes, controls
                 self.last_success_at = datetime.now(UTC)
                 self.last_error = None
-            except (TimeoutError, httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
-                self._snapshot, self.rule_codes = None, frozenset()
+            except (
+                TimeoutError,
+                httpx.HTTPError,
+                ValueError,
+                TypeError,
+                KeyError,
+                AuditRulesUnavailable,
+            ) as exc:
+                self._snapshot, self.rule_codes, self._controls = None, frozenset(), None
                 self.last_error = f"Ontology context refresh failed: {exc.__class__.__name__}"
+                if isinstance(exc, AuditRulesUnavailable):
+                    self.last_error += f": {exc}"
             return self.rule_codes
 
     async def _read(self, client):

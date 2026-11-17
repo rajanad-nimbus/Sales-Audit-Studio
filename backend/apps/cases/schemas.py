@@ -196,6 +196,20 @@ class ValidationRunRequest(BaseModel):
         return normalized
 
 
+class ValidationWaiveRequest(BaseModel):
+    """An auditor closes a validation without fresh source records, and must say why."""
+
+    rationale: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("rationale")
+    @classmethod
+    def validate_rationale(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 10:
+            raise ValueError("waiver rationale must contain at least 10 non-whitespace characters")
+        return normalized
+
+
 class CaseNoteCreate(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
 

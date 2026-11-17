@@ -175,12 +175,16 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
             )
 
     existing_rows = (
-        await db.execute(
-            select(AuditTotalDefinition).order_by(
-                AuditTotalDefinition.name, AuditTotalDefinition.revision
+        (
+            await db.execute(
+                select(AuditTotalDefinition).order_by(
+                    AuditTotalDefinition.name, AuditTotalDefinition.revision
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     existing_by_name: dict[str, AuditTotalDefinition] = {}
     max_revision: dict[str, int] = {}
     for row in existing_rows:
@@ -215,7 +219,9 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
             continue
         target_name = current.name if current else str(raw["name"]).strip()
         if target_name.casefold() in used_names:
-            errors.append({"row": row_number, "message": f"Duplicate target total name {target_name}"})
+            errors.append(
+                {"row": row_number, "message": f"Duplicate target total name {target_name}"}
+            )
             continue
         used_names.add(target_name.casefold())
         fields = TotalDefinitionBody.model_fields
@@ -258,9 +264,9 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
         )
 
     import_by_name = {entry["name"].casefold(): entry for entry in imported}
-    all_target_ids = {
-        key: row.id for key, row in existing_by_name.items()
-    } | {key: entry["id"] for key, entry in import_by_name.items()}
+    all_target_ids = {key: row.id for key, row in existing_by_name.items()} | {
+        key: entry["id"] for key, entry in import_by_name.items()
+    }
     combined_views: dict[str, dict] = {
         key: {
             "name": row.name,
@@ -295,7 +301,9 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
         if source_names is None:
             source_ids_for_row = raw.get("combined_total_ids") or []
             if not isinstance(source_ids_for_row, list):
-                errors.append({"row": entry["row"], "message": "Combined total references must be a list"})
+                errors.append(
+                    {"row": entry["row"], "message": "Combined total references must be a list"}
+                )
                 continue
             source_names = [
                 source_ids.get(identifier) if isinstance(identifier, str) else None
@@ -306,26 +314,45 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
             continue
         source_component_ids = raw.get("combined_total_ids") or []
         if not isinstance(source_component_ids, list):
-            errors.append({"row": entry["row"], "message": "Combined total references must be a list"})
+            errors.append(
+                {"row": entry["row"], "message": "Combined total references must be a list"}
+            )
             continue
         normalized_names = [
             name.strip() for name in source_names if isinstance(name, str) and name.strip()
         ]
-        if body.calculation_basis == "Combined" and len(normalized_names) != len(source_component_ids):
-            errors.append({"row": entry["row"], "message": "Combined totals need readable component names in the package"})
+        if body.calculation_basis == "Combined" and len(normalized_names) != len(
+            source_component_ids
+        ):
+            errors.append(
+                {
+                    "row": entry["row"],
+                    "message": "Combined totals need readable component names in the package",
+                }
+            )
             continue
         if body.calculation_basis == "Combined" and (
             entry["name"].casefold() in {name.casefold() for name in normalized_names}
             or len({name.casefold() for name in normalized_names}) != len(normalized_names)
         ):
-            errors.append({"row": entry["row"], "message": "Combined totals cannot reference themselves or repeat a component"})
+            errors.append(
+                {
+                    "row": entry["row"],
+                    "message": "Combined totals cannot reference themselves or repeat a component",
+                }
+            )
             continue
         component_ids = []
         for component_name in normalized_names:
             component_key = component_name.casefold()
             identifier = all_target_ids.get(component_key)
             if identifier is None:
-                errors.append({"row": entry["row"], "message": f"Combined component {component_name!r} is missing in the target environment and package"})
+                errors.append(
+                    {
+                        "row": entry["row"],
+                        "message": f"Combined component {component_name!r} is missing in the target environment and package",
+                    }
+                )
                 break
             component_ids.append(identifier)
         usage_rows = raw.get("usage_destinations") or []
@@ -333,9 +360,7 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
         if not isinstance(usage_rows, list) or not isinstance(source_usages, list):
             errors.append({"row": entry["row"], "message": "Export usages must be lists"})
             continue
-        usage_names = [
-            row.get("name") if isinstance(row, dict) else None for row in usage_rows
-        ]
+        usage_names = [row.get("name") if isinstance(row, dict) else None for row in usage_rows]
         if len(usage_names) != len(source_usages):
             usage_names = [
                 destination_by_id.get(row.get("destination_id"))
@@ -343,7 +368,9 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
                 if isinstance(row, dict) and isinstance(row.get("destination_id"), str)
             ]
         if len(usage_names) != len(source_usages):
-            errors.append({"row": entry["row"], "message": "Every export usage needs a destination"})
+            errors.append(
+                {"row": entry["row"], "message": "Every export usage needs a destination"}
+            )
             continue
         usage_ids = []
         for index, usage_name in enumerate(usage_names):
@@ -361,7 +388,12 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
                 if isinstance(old_id, str) and old_id in destination_by_id:
                     identifier = old_id
             if identifier is None:
-                errors.append({"row": entry["row"], "message": f"Export destination {usage_name!r} is missing in the target environment"})
+                errors.append(
+                    {
+                        "row": entry["row"],
+                        "message": f"Export destination {usage_name!r} is missing in the target environment",
+                    }
+                )
                 break
             usage_ids.append(identifier)
         if len(component_ids) != len(normalized_names) or len(usage_ids) != len(source_usages):
@@ -453,7 +485,11 @@ async def prepare_total_definition_package(db: AsyncSession, package: TotalDefin
 
     state = {
         "source": [
-            {"name": entry["name"], "revision": entry["source_revision"], "body": entry["body"].model_dump()}
+            {
+                "name": entry["name"],
+                "revision": entry["source_revision"],
+                "body": entry["body"].model_dump(),
+            }
             for entry in imported
         ],
         "target_totals": [
@@ -585,12 +621,16 @@ async def export_definition_package(
 ):
     """Export every total revision with readable names for environment-specific references."""
     definitions = (
-        await db.execute(
-            select(AuditTotalDefinition).order_by(
-                AuditTotalDefinition.name, AuditTotalDefinition.revision
+        (
+            await db.execute(
+                select(AuditTotalDefinition).order_by(
+                    AuditTotalDefinition.name, AuditTotalDefinition.revision
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     destinations = (
         await db.execute(
             select(
@@ -613,9 +653,7 @@ async def preview_definition_package(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_role("finance", "it")),
 ):
-    imported, errors, token, skipped_protected = await prepare_total_definition_package(
-        db, package
-    )
+    imported, errors, token, skipped_protected = await prepare_total_definition_package(db, package)
     return {
         "valid": not errors,
         "preview_token": token if not errors else None,

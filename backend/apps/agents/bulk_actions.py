@@ -198,7 +198,7 @@ async def _decide_case(db, case, action, user, actor, data, skipped) -> bool:
         return False
 
     if action == "approve":
-        if recommendation.financial_impact != 0 and case.currency != nimbus.THRESHOLD_CURRENCY:
+        if recommendation.financial_impact != 0 and case.currency != nimbus.policy_limits().limit_currency:
             _skip(
                 case, "bulk financial limit is in USD; review this currency individually", skipped
             )

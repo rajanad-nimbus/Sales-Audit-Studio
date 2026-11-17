@@ -433,8 +433,9 @@ async def override_evidence_request(
         req.override_requested_by,
         req.override_requested_at,
     ) = body.rationale.strip(), body.financial_impact, actor, utcnow()
-    if body.financial_impact > nimbus.AUTONOMY_LIMIT or (
-        body.financial_impact > 0 and case.currency != nimbus.THRESHOLD_CURRENCY
+    limits = nimbus.policy_limits()
+    if body.financial_impact > limits.autonomy_limit or (
+        body.financial_impact > 0 and case.currency != limits.limit_currency
     ):
         req.status = "Override Pending"
         nimbus.audit(

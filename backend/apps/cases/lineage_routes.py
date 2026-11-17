@@ -55,18 +55,21 @@ async def case_reconciliation(
     if has_linked_transactions:
         created_event = aliased(AuditEvent)
         transaction_ids = case_transaction_ids_table(db, created_event)
-        query = (
-            select(CanonicalTransaction, SourceRecord)
+        # De-duplicate the linked ids, not the joined rows: canonical_transactions has json
+        # columns, and Postgres cannot DISTINCT over json.
+        linked_ids = (
+            select(transaction_ids.c.value)
             .select_from(created_event)
             .join(transaction_ids, true())
-            .join(CanonicalTransaction, CanonicalTransaction.id == transaction_ids.c.value)
-            .outerjoin(SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id)
-            .where(
-                created_event.case_id == case_id,
-                created_event.event_type == "CASE_CREATED",
-                CanonicalTransaction.store_id == case.store_id,
-            )
+            .where(created_event.case_id == case_id, created_event.event_type == "CASE_CREATED")
             .distinct()
+            .subquery()
+        )
+        query = (
+            select(CanonicalTransaction, SourceRecord)
+            .join(linked_ids, CanonicalTransaction.id == linked_ids.c.value)
+            .outerjoin(SourceRecord, CanonicalTransaction.source_record_id == SourceRecord.id)
+            .where(CanonicalTransaction.store_id == case.store_id)
         )
     else:
         # Legacy/demo cases cannot claim a causal link; return only relevant context.

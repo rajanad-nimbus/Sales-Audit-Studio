@@ -374,6 +374,19 @@ if "--clean" in sys.argv:
     S[:] = CLEAN
 
 
+# --messy: a small set that deliberately fails audit checks, so a store day stays open for review.
+MESSY = [
+    scenario("messy dup 1", "messy", [L("Blue shirt", 40)]),
+    scenario("messy dup 2", "messy", [L("Blue shirt", 40)]),  # identical to dup 1: possible duplicate order
+    scenario("messy partial refund", "messy", [L("Sneakers", 120)], fulfilled=True, refunds=[{"amount": 50}]),
+    scenario("messy unpaid", "messy", [L("Hat", 25)], status="pending"),
+    scenario("messy unknown sku", "messy", [L("Mystery widget", 77, sku="UNKNOWN-SKU-999")]),
+    scenario("messy gift tender", "messy", [L("Scarf", 35)], tenders=[(GIFT_TENDER, "rest")]),
+]
+if "--messy" in sys.argv:
+    S[:] = MESSY
+
+
 def create(spec, locations, parent=None):
     total, tax, discount, tax_lines = totals(spec)
     tender_text = "+".join(f"{g}:{a:.2f}" for g, a in tender_amounts(spec, total))

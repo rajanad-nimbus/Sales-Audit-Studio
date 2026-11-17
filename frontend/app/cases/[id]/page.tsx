@@ -325,6 +325,24 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     );
   };
 
+  const waiveValidation = (vId: string) => {
+    const rationale = validationRationales[vId]?.trim() ?? '';
+    if (rationale.length < 10) {
+      toast('Explain why validation is being waived (at least 10 characters).', 'error');
+      return;
+    }
+    if (
+      !window.confirm(
+        'Close this case without fresh source evidence? The override and your reason are audited.'
+      )
+    )
+      return;
+    return act(
+      () => api.post(`/api/validations/${vId}/waive`, { rationale }),
+      'Validation waived and recorded.'
+    );
+  };
+
   const loadMoreValidationCandidates = async (validationId: string) => {
     const cursor = validationCandidatePages[validationId]?.next_cursor;
     if (!cursor || loadingValidationCandidates[validationId]) return;
@@ -786,7 +804,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <p>Expected: {v.expected_observation}</p>
                 <p className="hint">
                   Select newly received records that demonstrate the outcome and explain how they
-                  verify it. Unrelated transactions cannot complete validation.
+                  verify it. Unrelated transactions cannot complete validation. If no evidence will
+                  arrive, a finance reviewer can waive validation with a written reason.
                 </p>
                 {(validationCandidates[v.id] ?? []).length === 0 ? (
                   <p className="cc-empty">
@@ -866,6 +885,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 onClick={() => validate(v.id)}
               >
                 Run validation
+              </Button>
+              <Button
+                disabled={busy || (validationRationales[v.id]?.trim().length ?? 0) < 10}
+                onClick={() => waiveValidation(v.id)}
+              >
+                Waive validation
               </Button>
             </div>
           ))

@@ -10,17 +10,17 @@ import json
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import case, func, select, tuple_
+from sqlalchemy import case, exists, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.cases.models import Case
 from apps.cases.models import Exception as ExceptionRow
 from apps.controls.foundation.models import FoundationReference
 from apps.exports.models import ExportBatch, ExportItem
+from apps.ingest import source_settings
 from apps.ingest.common import LINEAGE
 from apps.ingest.models import RegisterEvent, SourceRecord
 from apps.ingest.pos_formats.standard import DAY_CLOSE
-from apps.ingest import source_settings
 from apps.ingest.sequence import find_gaps, undismissed_gaps
 from apps.security import scope
 from apps.store_days.models import AuditTotal, StoreDay
@@ -143,12 +143,29 @@ async def transaction_counts(db: AsyncSession, keys: list[Key]) -> dict[Key, dic
     return counts
 
 
+def _blocks_close():
+    """A case holds the day open unless every exception on it is a warning (close_impact "No").
+
+    Mirrors Oracle ReSA, where only fatal errors block the audit and warnings do not. A case with
+    no exceptions at all still blocks, since nothing says it is harmless.
+    """
+    has = select(ExceptionRow.id).where(ExceptionRow.case_id == Case.id)
+    return or_(
+        ~exists(has),
+        exists(has.where(ExceptionRow.close_impact != "No")),
+    )
+
+
 async def open_case_counts(db: AsyncSession, keys: list[Key]) -> dict[Key, int]:
     counts: dict[Key, int] = {}
     for batch in chunks(keys):
         rows = await db.execute(
             select(Case.store_id, Case.business_date, func.count())
-            .where(tuple_(Case.store_id, Case.business_date).in_(batch), Case.status != "Closed")
+            .where(
+                tuple_(Case.store_id, Case.business_date).in_(batch),
+                Case.status != "Closed",
+                _blocks_close(),
+            )
             .group_by(Case.store_id, Case.business_date)
         )
         counts.update({(store, day): count for store, day, count in rows})

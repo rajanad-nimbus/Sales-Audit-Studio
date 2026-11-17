@@ -15,7 +15,6 @@ from apps.cash.models import (
     CashDeposit,
 )
 from apps.controls.foundation.models import FoundationReference
-from apps.controls.rules.models import ConfiguredAuditRule
 from apps.gl.models import GLCrossReference
 from apps.ingest import reconciliation
 from apps.ingest import service as ingest
@@ -74,18 +73,6 @@ async def main():
                 tender_type="Card",
                 level="Store",
                 active=True,
-                updated_by="demo.seed",
-            )
-        )
-        db.add(
-            ConfiguredAuditRule(
-                id=str(uuid.uuid4()),
-                name="Large daily card sales",
-                total_name="Configured: Card sales",
-                threshold=Decimal("1000"),
-                severity="High",
-                owner="demo.finance",
-                enabled=True,
                 updated_by="demo.seed",
             )
         )

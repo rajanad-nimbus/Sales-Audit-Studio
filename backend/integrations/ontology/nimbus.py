@@ -17,9 +17,13 @@ from model_base import utcnow
 from integrations.ontology import ontology
 
 POLICY_VERSION = "policy-v1.1"
-AUTONOMY_LIMIT = Decimal("1000")
-TIMING_AUTONOMY_LIMIT = Decimal("250")
-THRESHOLD_CURRENCY = "USD"
+
+
+def policy_limits():
+    """Autonomy limits from the approved ontology release. Raises AuditRulesUnavailable without one."""
+    from integrations.ontology.ontology_integration import integration
+
+    return integration.audit_controls()
 
 SLA_HOURS = {"Critical": 4, "High": 24, "Normal": 72}
 
@@ -129,6 +133,11 @@ def investigate(db, case, exceptions, evidence_by_requirement, narrative=None):
             "zero",
             "Retrieve missing required evidence",
         )
+    elif etype == "SHOPIFY_POSSIBLE_DUPLICATE_ORDER":
+        # Detection only flags an order whose store, currency, amount, customer, items and
+        # timing all match an earlier order, and evidence is complete: treat it as a confirmed
+        # duplicate and reverse it like a repeated order rather than escalating.
+        disp, aclass, mode, workflow = ontology.get("SHOPIFY_DUPLICATE_ORDER")["disposition"]
     elif od:
         disp, aclass, mode, workflow = od["disposition"]
     else:
@@ -164,25 +173,26 @@ def investigate(db, case, exceptions, evidence_by_requirement, narrative=None):
 def evaluate_policy(db, case, rec, approved_rule_codes=frozenset()):
     """Deterministic gate: permit autonomously, require human, request evidence, or block."""
     reasons = []
+    limits = policy_limits()
     if getattr(case, "amount_needs_review", False):
         outcome = "RequestEvidence"
         reasons.append("Case amounts require finance review")
     elif case.evidence_completeness < 100:
         outcome = "RequestEvidence"
         reasons.append("Required evidence incomplete")
-    elif case.currency != THRESHOLD_CURRENCY:
+    elif case.currency != limits.limit_currency:
         outcome = "RequireHuman"
         reasons.append(
-            "Autonomy thresholds are defined in USD; review cases with other or unknown currencies individually"
+            f"Autonomy thresholds are defined in {limits.limit_currency}; review cases with other or unknown currencies individually"
         )
     elif (
         rec.disposition_type == "Timing"
         and rec.financial_impact == 0
-        and case.total_exception_amount <= TIMING_AUTONOMY_LIMIT
+        and case.total_exception_amount <= limits.timing_autonomy_limit
     ):
         outcome = "Permit"
         reasons.append("Timing classification with no financial movement within autonomy limit")
-    elif rec.financial_impact > AUTONOMY_LIMIT or rec.disposition_type == "Correction":
+    elif rec.financial_impact > limits.autonomy_limit or rec.disposition_type == "Correction":
         outcome = "RequireHuman"
         reasons.append("Financial correction or amount above autonomy limit")
     else:
@@ -310,5 +320,23 @@ def validate(
         "Outcome verified from fresh linked source evidence",
         actor=actor,
         after=after,
+    )
+    return ob
+
+
+def waive_validation(db, case, wf, ob, rationale: str, actor: str):
+    """Auditor override: close the case without fresh evidence, recording who and why."""
+    ob.status, ob.verification_result = "Complete", "Waived"
+    wf.state, wf.current_step = "Completed", "Closed"
+    case.status, case.investigation_status = "Closed", "Resolved"
+    audit(
+        db,
+        "VALIDATION_WAIVED",
+        case.id,
+        "ValidationObligation",
+        ob.id,
+        "Validation waived by auditor override without fresh source evidence",
+        actor=actor,
+        after={"rationale": rationale, "waived": True},
     )
     return ob

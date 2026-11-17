@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 from backend.database import (SessionLocal, Workspace, Entity, Property, Relationship,
                               Persona, Consumer, ProcessDefinition, BusinessRule, AuditLog)
-from backend.services import agent_policy, ontology_doc, process_actors, persona_scope
+from backend.services import agent_policy, audit_controls, ontology_doc, process_actors, persona_scope
 
 ALIASES = {"Case": "SalesAuditCase", "Exception": "FinancialException", "Recommendation": "ResolutionRecommendation"}
 # code, name, runtime role/actor, kind, responsibilities, process codes, entity scope
@@ -33,6 +33,12 @@ PERSONAS = [
  ("NSA-INGESTOR", "Source Ingestion Service", "ingestion service", "system", "Preserve source payload and identity; normalize accepted transactions and quarantine invalid records. No approval or financial correction authority.", ["INGESTION"], ["SourceRecord", "CanonicalTransaction", "Connector", "SourceFeedProfile", "BatchRun", "AuditEvent"]),
  ("NSA-EXPORTER", "Sales Audit Export Service", "export service", "system", "Build record-level export manifests, track deliveries and acknowledgments, and preserve retries and backposting lineage. Only approved and eligible work is exported.", ["EXPORT"], ["ExportDestination", "ExportBatch", "ExportItem", "CanonicalTransaction", "StoreDay", "AuditEvent"]),
  ("NSA-ASSISTANT", "Nimbus Read-only Assistant", "assistant", "system", "Explain scoped live case data and ontology definitions with citations. Cannot change records, approve decisions, execute workflows or claim draft definitions are approved.", ["ASSISTANCE"], ["SalesAuditCase", "FinancialException", "EvidenceSnapshot", "Finding", "ResolutionRecommendation", "ValidationObligation"]),
+]
+# code, name, statement, limit, amount: the autonomy limits Nimbus reads from an approved release. They are
+# created as drafts at the values Nimbus previously hard-coded; a data steward approves or changes them.
+AUDIT_LIMITS = [
+ ("NSA-LIMIT-AUTONOMY", "Autonomy limit", "A recommendation whose financial impact exceeds this amount always needs a human decision.", "autonomy_limit", "1000"),
+ ("NSA-LIMIT-TIMING-AUTONOMY", "Timing autonomy limit", "A no-movement timing classification may be permitted without a human only up to this exposure.", "timing_autonomy_limit", "250"),
 ]
 # suffix, label, target, ordered (actor, step) pairs
 PROCESSES = [
@@ -164,6 +170,15 @@ def apply(db, workspace_id, schema):
                                entityId=entities["AuditEvent"].id, category="policy", severity="critical",
                                ruleType="agent_policy", source="manual", status="draft", config=config))
             changed["policies"].append(code)
+    changed.setdefault("audit_controls", [])
+    for code, name, statement, limit, amount in AUDIT_LIMITS:
+        if not db.query(BusinessRule).filter_by(workspaceId=workspace_id, ruleCode=code).first():
+            config = audit_controls.validate_config({"family": "policy_limit", "limit": limit, "amount": amount, "currency": "USD"})
+            db.add(BusinessRule(workspaceId=workspace_id, ruleCode=code, name=name, expression=statement,
+                               statement=statement, description="Sales Audit policy limit read by Nimbus from an approved release.",
+                               entityId=entities["ResolutionRecommendation"].id, category="policy", severity="error",
+                               ruleType=audit_controls.RULE_TYPE, source="manual", status="draft", config=config))
+            changed["audit_controls"].append(code)
     db.flush()
     for persona in db.query(Persona).filter_by(workspaceId=workspace_id):
         if persona.code not in {p[0] for p in PERSONAS}:

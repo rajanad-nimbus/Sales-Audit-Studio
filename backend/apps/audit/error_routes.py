@@ -23,7 +23,7 @@ from apps.audit.models import AuditEvent
 from apps.audit.patterns import error_patterns
 from apps.cases.models import Case
 from apps.cases.models import Exception as ExceptionRow
-from apps.controls.rules.transaction_models import ConfiguredTransactionAuditRule
+from integrations.ontology.ontology_integration import integration
 from apps.csv_export import csv_row
 from apps.database_errors import violates_unique_constraint
 from apps.exports.models import ExportDestination
@@ -155,16 +155,9 @@ async def prepare_error_definition_package(db: AsyncSession, package: ErrorDefin
     )
     existing_by_code = {row.code: row for row in existing_rows}
     destination_names = set((await db.execute(select(ExportDestination.name))).scalars())
-    active_rule_codes = set(
-        (
-            await db.execute(
-                select(ConfiguredTransactionAuditRule.error_code).where(
-                    ConfiguredTransactionAuditRule.status == "Active",
-                    ConfiguredTransactionAuditRule.enabled.is_(True),
-                )
-            )
-        ).scalars()
-    )
+    active_rule_codes = {
+        rule.error_code for rule in integration.audit_controls().transaction_rules
+    }
     prepared: list[dict] = []
     seen: set[str] = set()
     for row_number, raw in enumerate(package.definitions, start=1):
