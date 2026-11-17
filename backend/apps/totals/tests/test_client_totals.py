@@ -173,6 +173,26 @@ def test_register_lists_are_exact_and_condition_matches_in_lists():
     assert store["operator"] == "not_in"
     assert condition_matches(store, SimpleNamespace(register_id="R1"))
     assert not condition_matches(store, SimpleNamespace(register_id="897"))
+    assert not any(r["field"] == "channel_id" for t in CLIENT_TOTALS for r in t["restrictions"])
+
+
+def test_item_lists_are_exact_on_sales_and_paid_in_out_totals():
+    by_name = {t["name"]: t for t in CLIENT_TOTALS}
+
+    def item_restriction(name):
+        return next(r for r in by_name[name]["restrictions"] if r["field"] == "item_code")
+
+    remote = item_restriction("REMSLSOUT")
+    assert remote["operator"] == "not_in" and len(remote["value"].split(",")) == 30
+    assert item_restriction("REMNMSBSI")["operator"] == "in"
+    assert item_restriction("BCOLLPLCC") == {
+        "realm": "Line",
+        "field": "item_code",
+        "operator": "in",
+        "value": "NM050OUT,NM050BSI",
+    }
     assert not any(
-        r["field"] == "channel_id" for t in CLIENT_TOTALS for r in t["restrictions"]
+        r["operator"] == "contains" and r["value"].startswith("NM")
+        for t in CLIENT_TOTALS
+        for r in t["restrictions"]
     )

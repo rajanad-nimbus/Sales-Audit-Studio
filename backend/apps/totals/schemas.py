@@ -87,7 +87,7 @@ class TotalRestrictionBody(BaseModel):
     operator: Literal[
         "eq", "ne", "gt", "gte", "lt", "lte", "contains", "in", "not_in", "is_empty", "not_empty"
     ]
-    value: str | None = Field(default=None, max_length=255)
+    value: str | None = Field(default=None, max_length=2000)  # a list restriction holds many values
 
     @model_validator(mode="after")
     def validate_restriction(self):

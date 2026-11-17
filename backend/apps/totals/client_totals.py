@@ -4739,7 +4739,13 @@ CLIENT_TOTALS = [
                 "field": "register_id",
                 "operator": "in",
                 "value": "880,881,889,893,892,895,896,897",
-            }
+            },
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM050OUT,NM842OUT,NM857OUT,NM971OUT,NM984OUT,NM981OUT,NM972OUT,NM991OUT,NM895OUT,NM846OUT,NM840OUT,NM831OUT,NM841OUT,NM832OUT,NM858OUT,NM847OUT,NM849OUT,NM835OUT,NM051OUT,NM052OUT,NM853OUT,NM854OUT,NM877OUT,NM887OUT,NM848OUT,NM894OUT,NM977OUT,NM978OUT,NM893OUT,NM845OUT",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4780,7 +4786,13 @@ CLIENT_TOTALS = [
                 "field": "register_id",
                 "operator": "in",
                 "value": "880,881,889,893,892,895,896,897",
-            }
+            },
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM050BSI,NM842BSI,NM857BSI,NM971BSI,NM984BSI,NM981BSI,NM972BSI,NM991BSI,NM895BSI,NM846BSI,NM840BSI,NM831BSI,NM841BSI,NM832BSI,NM858BSI,NM847BSI,NM849BSI,NM835BSI,NM051BSI,NM052BSI,NM853BSI,NM854BSI,NM877BSI,NM887BSI,NM848BSI,NM894BSI,NM977BSI,NM978BSI,NM893BSI,NM845BSI",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4821,7 +4833,13 @@ CLIENT_TOTALS = [
                 "field": "register_id",
                 "operator": "in",
                 "value": "880,881,889,893,892,895,896,897",
-            }
+            },
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "not_in",
+                "value": "NM050BSI,NM842BSI,NM857BSI,NM971BSI,NM984BSI,NM981BSI,NM972BSI,NM991BSI,NM895BSI,NM846BSI,NM840BSI,NM831BSI,NM841BSI,NM832BSI,NM858BSI,NM847BSI,NM849BSI,NM835BSI,NM051BSI,NM052BSI,NM853BSI,NM854BSI,NM877BSI,NM887BSI,NM848BSI,NM894BSI,NM977BSI,NM978BSI,NM893BSI,NM845BSI",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4895,7 +4913,13 @@ CLIENT_TOTALS = [
                 "field": "register_id",
                 "operator": "in",
                 "value": "880,881,889,893,892,895,896,897",
-            }
+            },
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "not_in",
+                "value": "NM050OUT,NM842OUT,NM857OUT,NM971OUT,NM984OUT,NM981OUT,NM972OUT,NM991OUT,NM895OUT,NM846OUT,NM840OUT,NM831OUT,NM841OUT,NM832OUT,NM858OUT,NM847OUT,NM849OUT,NM835OUT,NM051OUT,NM052OUT,NM853OUT,NM854OUT,NM877OUT,NM887OUT,NM848OUT,NM894OUT,NM977OUT,NM978OUT,NM893OUT,NM845OUT",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4969,7 +4993,13 @@ CLIENT_TOTALS = [
                 "field": "register_id",
                 "operator": "not_in",
                 "value": "880,881,889,893,892,895,896,897",
-            }
+            },
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "not_in",
+                "value": "NM050BSI,NM842BSI,NM857BSI,NM971BSI,NM984BSI,NM981BSI,NM972BSI,NM991BSI,NM895BSI,NM846BSI,NM840BSI,NM831BSI,NM841BSI,NM832BSI,NM858BSI,NM847BSI,NM849BSI,NM835BSI,NM051BSI,NM052BSI,NM853BSI,NM854BSI,NM877BSI,NM887BSI,NM848BSI,NM894BSI,NM977BSI,NM978BSI,NM893BSI,NM845BSI",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5012,7 +5042,13 @@ CLIENT_TOTALS = [
                 "field": "register_id",
                 "operator": "not_in",
                 "value": "880,881,889,893,892,895,896,897",
-            }
+            },
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "not_in",
+                "value": "NM050OUT,NM842OUT,NM857OUT,NM971OUT,NM984OUT,NM981OUT,NM972OUT,NM991OUT,NM895OUT,NM846OUT,NM840OUT,NM831OUT,NM841OUT,NM832OUT,NM858OUT,NM847OUT,NM849OUT,NM835OUT,NM051OUT,NM052OUT,NM853OUT,NM854OUT,NM877OUT,NM887OUT,NM848OUT,NM894OUT,NM977OUT,NM978OUT,NM893OUT,NM845OUT",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5298,7 +5334,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM050"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM050OUT,NM050BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5338,7 +5374,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM842"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM842OUT,NM842BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5378,7 +5414,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM857"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM857OUT,NM857BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5418,7 +5454,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM971"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM971OUT,NM984OUT,NM971BSI,NM984BSI",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5458,7 +5499,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM981"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM981OUT,NM981BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5499,7 +5540,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM972"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM972BSI,NM991BSI,NM972OUT,NM991OUT",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5539,7 +5585,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM895"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM895OUT,NM895BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5579,7 +5625,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM846"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM846OUT,NM846BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5619,7 +5665,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM831"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM831OUT,NM831BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5659,7 +5705,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM840"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM840OUT,NM840BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5699,7 +5745,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM841"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM841OUT,NM841BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5739,7 +5785,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM832"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM832OUT,NM832BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5780,7 +5826,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM858"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM858OUT,NM858BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5820,7 +5866,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM847"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM847OUT,NM847BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5860,7 +5906,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM849"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM849OUT,NM849BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5900,7 +5946,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM835"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM835OUT,NM835BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5940,7 +5986,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM051"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM051OUT,NM052OUT,NM051BSI,NM052BSI",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5980,7 +6031,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM853"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM853OUT,NM853BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6020,7 +6071,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM854"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM854OUT,NM854BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6060,7 +6111,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM877"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM877OUT,NM887OUT,NM877BSI,NM887BSI",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6101,7 +6157,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM848"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM848OUT,NM848BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6141,7 +6197,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM894"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM894OUT,NM977OUT,NM978OUT,NM894BSI,NM977BSI,NM978BSI",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6181,7 +6242,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM893"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM893OUT,NM893BSI"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6221,7 +6282,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM845"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM845BSI,NM845OUT"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6261,7 +6322,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM877"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM877BSI,NM877OUT,NM887BSI,NM887OUT,NM832BSI,NM832OUT",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6302,7 +6368,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM877"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM877BSI,NM877OUT,NM887BSI,NM887OUT,NM832BSI,NM832OUT",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6343,7 +6414,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM877"}
+            {
+                "realm": "Line",
+                "field": "item_code",
+                "operator": "in",
+                "value": "NM877BSI,NM877OUT,NM887BSI,NM887OUT,NM832BSI,NM832OUT",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6384,7 +6460,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "NM981"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM981BSI,NM981OUT"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
