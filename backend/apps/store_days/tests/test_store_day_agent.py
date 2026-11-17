@@ -1,7 +1,7 @@
 """The store-day agent opens, totals and closes clean store days and leaves the exceptions."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from apps.ingest import auto_audit, reconciliation
 from apps.ingest import service as ingest
@@ -222,6 +222,22 @@ def test_an_import_audit_settles_the_store_days_it_touched():
 
         assert outcome["runs"][0]["store_days"]["closed"] == 1
         assert (await day_of(db, "S1")).status == "Closed"
+
+    run_with_db(scenario)
+
+
+def test_closing_a_day_opens_the_next_one():
+    async def scenario(db):
+        await load(db, shopify_feed("S1"))
+        await automation.run_store_day_agent(db, DATE)
+        assert (await day_of(db, "S1")).status == "Closed"
+        following = (date.fromisoformat(DATE) + timedelta(days=1)).isoformat()
+        # A past day with no data stays unopened; today's day always opens.
+        assert await day_of(db, "S1", following) is None
+        yesterday = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
+        assert await automation.open_following_day(db, "S1", yesterday) is True
+        assert (await day_of(db, "S1", datetime.now(UTC).date().isoformat())).status == "Open"
+        assert await automation.open_following_day(db, "S1", yesterday) is False
 
     run_with_db(scenario)
 

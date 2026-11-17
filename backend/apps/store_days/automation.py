@@ -299,3 +299,41 @@ async def settle_day(db: AsyncSession, store_id: str, business_date: str, *, clo
     )
     outcome["closed"] = True
     return outcome
+    await open_following_day(db, store_id, business_date)
+
+
+async def open_following_day(
+    db: AsyncSession, store_id: str, closed_date: str, *, actor: str = AGENT
+) -> bool:
+    """Open the day after a day that was just closed, so the store always has a current day.
+
+    Never opens a day in the future. A past day with no data is left unopened, so a backfill does
+    not leave a run of empty open days; today's day always opens, as its data has yet to arrive.
+    """
+    next_day = date.fromisoformat(closed_date) + timedelta(days=1)
+    today = datetime_today_utc()
+    if next_day > today:
+        return False
+    next_date = next_day.isoformat()
+    if next_day < today:
+        state = (await ingest_states(db, [(store_id, next_date)]))[(store_id, next_date)]
+        if state["state"] == NO_DATA:
+            return False
+    existing = await lock_store_days(db, {(store_id, next_date)})
+    if (store_id, next_date) in existing:
+        return False
+    day = StoreDay(
+        id=str(uuid.uuid4()), store_id=store_id, business_date=next_date, status="Open"
+    )
+    db.add(day)
+    audit(
+        db,
+        "STORE_DAY_OPENED",
+        None,
+        "StoreDay",
+        day.id,
+        f"Store day {store_id}/{next_date} automatically opened after {closed_date} was closed",
+        actor=actor,
+        after={"store_id": store_id, "business_date": next_date, "trigger": "previous_day_closed"},
+    )
+    return True

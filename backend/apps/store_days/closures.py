@@ -328,6 +328,9 @@ async def close_store_day(
         f"Store day {store_id}/{business_date} closed",
         actor=actor,
     )
+    from apps.store_days.automation import open_following_day
+
+    await open_following_day(db, store_id, business_date, actor=actor)
     await db.commit()
     await db.refresh(day)
     return store_day_view(day)
