@@ -187,8 +187,7 @@ export function FoundationData() {
 
   useEffect(() => {
     const syncProcessFromUrl = () => {
-      const processId =
-        new URLSearchParams(window.location.search).get('process_id')?.trim() ?? '';
+      const processId = new URLSearchParams(window.location.search).get('process_id')?.trim() ?? '';
       setLinkedProcessId(processId);
       setImportRunQuery(processId);
       setImportRunOffset(0);
@@ -462,155 +461,159 @@ export function FoundationData() {
         </Alert>
       )}
       <Card title={group.label}>
-        <p className="hint">{group.blurb}</p>
-        <div className="form-row">
-          <Button
-            variant="secondary"
-            disabled={!total || exporting}
-            onClick={() => void downloadFilteredCsv()}
-          >
-            {exporting ? 'Preparing CSV…' : 'Download all matching CSV'}
-          </Button>
-          <span className="hint">
-            {query.trim() ? `${total} records match this search.` : `${total} records in this tab.`}
-          </span>
-        </div>
-        {group.synced ? (
+        <div className="foundation-body">
+          <p className="hint">{group.blurb}</p>
           <div className="form-row">
-            <Button variant="primary" onClick={syncShopify} disabled={syncing}>
-              {syncing ? 'Syncing…' : 'Sync from Shopify'}
+            <Button
+              variant="secondary"
+              disabled={!total || exporting}
+              onClick={() => void downloadFilteredCsv()}
+            >
+              {exporting ? 'Preparing CSV…' : 'Download all matching CSV'}
             </Button>
             <span className="hint">
-              Read-only here. Records you add elsewhere are never overwritten, and items removed
-              from Shopify are marked inactive.
+              {query.trim()
+                ? `${total} records match this search.`
+                : `${total} records in this tab.`}
             </span>
           </div>
-        ) : (
-          <div className="form-row">
-            {group.cats.length > 1 && (
-              <Field label="Type">
-                <select
-                  value={category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                >
-                  {group.cats.map((c) => (
-                    <option key={c} value={c}>
-                      {LABELS[c]}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-            <Field label="Code">
-              <input
-                value={form.code}
-                onChange={(e) => setForm({ ...form, code: e.target.value })}
-              />
-            </Field>
-            <div className="grow">
-              <Field label="Name">
+          {group.synced ? (
+            <div className="form-row">
+              <Button variant="primary" onClick={syncShopify} disabled={syncing}>
+                {syncing ? 'Syncing…' : 'Sync from Shopify'}
+              </Button>
+              <span className="hint">
+                Read-only here. Records you add elsewhere are never overwritten, and items removed
+                from Shopify are marked inactive.
+              </span>
+            </div>
+          ) : (
+            <div className="form-row">
+              {group.cats.length > 1 && (
+                <Field label="Type">
+                  <select
+                    value={category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  >
+                    {group.cats.map((c) => (
+                      <option key={c} value={c}>
+                        {LABELS[c]}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              <Field label="Code">
                 <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  value={form.code}
+                  onChange={(e) => setForm({ ...form, code: e.target.value })}
                 />
               </Field>
-            </div>
-            <Button
-              variant="primary"
-              disabled={!form.code.trim() || !form.name.trim()}
-              onClick={add}
-            >
-              Add
-            </Button>
-            <Button variant="secondary" onClick={downloadTemplate}>
-              Download CSV template
-            </Button>
-            <Field label="Process name">
+              <div className="grow">
+                <Field label="Name">
+                  <input
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <Button
+                variant="primary"
+                disabled={!form.code.trim() || !form.name.trim()}
+                onClick={add}
+              >
+                Add
+              </Button>
+              <Button variant="secondary" onClick={downloadTemplate}>
+                Download CSV template
+              </Button>
+              <Field label="Process name">
+                <input
+                  value={processName}
+                  maxLength={100}
+                  onChange={(event) => setProcessName(event.target.value)}
+                  placeholder="Defaults to the file name"
+                />
+              </Field>
               <input
-                value={processName}
-                maxLength={100}
-                onChange={(event) => setProcessName(event.target.value)}
-                placeholder="Defaults to the file name"
+                ref={importFile}
+                type="file"
+                accept=".csv,text/csv"
+                hidden
+                onChange={(event) => void previewImport(event.target.files?.[0])}
               />
-            </Field>
+              <Button
+                variant="secondary"
+                disabled={importing}
+                onClick={() => importFile.current?.click()}
+              >
+                {importing ? 'Reading CSV…' : 'Import CSV'}
+              </Button>
+            </div>
+          )}
+          {countOf(group.cats) > 8 && (
             <input
-              ref={importFile}
-              type="file"
-              accept=".csv,text/csv"
-              hidden
-              onChange={(event) => void previewImport(event.target.files?.[0])}
+              aria-label={`Search ${group.label}`}
+              placeholder={`Search ${group.label.toLowerCase()} by code or name`}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(0);
+              }}
             />
-            <Button
-              variant="secondary"
-              disabled={importing}
-              onClick={() => importFile.current?.click()}
-            >
-              {importing ? 'Reading CSV…' : 'Import CSV'}
-            </Button>
-          </div>
-        )}
-        {countOf(group.cats) > 8 && (
-          <input
-            aria-label={`Search ${group.label}`}
-            placeholder={`Search ${group.label.toLowerCase()} by code or name`}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setPage(0);
-            }}
+          )}
+          <DataTable
+            columns={[
+              { key: 'code', header: 'Code', primary: true, render: (r) => r.code },
+              { key: 'name', header: 'Name', render: (r) => r.name },
+              ...(group.cats.length > 1
+                ? [{ key: 'type', header: 'Type', render: (r: Ref) => LABELS[r.category] }]
+                : []),
+              {
+                key: 'source',
+                header: 'Source',
+                render: (r) => (
+                  <Badge variant={sourceOf(r) === 'Shopify' ? 'info' : 'secondary'} size="sm">
+                    {sourceOf(r)}
+                  </Badge>
+                ),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                render: (r) => (
+                  <Badge variant={r.active ? 'success' : 'secondary'} size="sm">
+                    {r.active ? 'Active' : 'Inactive'}
+                  </Badge>
+                ),
+              },
+              {
+                key: 'updated',
+                header: 'Updated',
+                nowrap: true,
+                render: (r) => formatDateTime(r.updated_at, { dateStyle: 'medium' }),
+              },
+            ]}
+            rows={refs}
+            rowKey={(r) => r.id}
+            emptyTitle={`No ${group.label.toLowerCase()} yet`}
+            emptyHint={
+              group.synced ? 'Use "Sync from Shopify" to load them.' : 'Add the first one above.'
+            }
           />
-        )}
-        <DataTable
-          columns={[
-            { key: 'code', header: 'Code', primary: true, render: (r) => r.code },
-            { key: 'name', header: 'Name', render: (r) => r.name },
-            ...(group.cats.length > 1
-              ? [{ key: 'type', header: 'Type', render: (r: Ref) => LABELS[r.category] }]
-              : []),
-            {
-              key: 'source',
-              header: 'Source',
-              render: (r) => (
-                <Badge variant={sourceOf(r) === 'Shopify' ? 'info' : 'secondary'} size="sm">
-                  {sourceOf(r)}
-                </Badge>
-              ),
-            },
-            {
-              key: 'status',
-              header: 'Status',
-              render: (r) => (
-                <Badge variant={r.active ? 'success' : 'secondary'} size="sm">
-                  {r.active ? 'Active' : 'Inactive'}
-                </Badge>
-              ),
-            },
-            {
-              key: 'updated',
-              header: 'Updated',
-              nowrap: true,
-              render: (r) => formatDateTime(r.updated_at, { dateStyle: 'medium' }),
-            },
-          ]}
-          rows={refs}
-          rowKey={(r) => r.id}
-          emptyTitle={`No ${group.label.toLowerCase()} yet`}
-          emptyHint={
-            group.synced ? 'Use "Sync from Shopify" to load them.' : 'Add the first one above.'
-          }
-        />
-        {refs && refs.length < total && (
-          <p className="hint">
-            Showing {refs.length} of {total} matching record(s).
-            <Button
-              variant="secondary"
-              onClick={() => setPage((current) => current + 1)}
-              disabled={loadingMore}
-            >
-              {loadingMore ? 'Loading…' : 'Load more'}
-            </Button>
-          </p>
-        )}
+          {refs && refs.length < total && (
+            <p className="hint">
+              Showing {refs.length} of {total} matching record(s).
+              <Button
+                variant="secondary"
+                onClick={() => setPage((current) => current + 1)}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </Button>
+            </p>
+          )}
+        </div>
       </Card>
       {importPreview && (
         <Card title={`Import preview · ${importPreview.fileName}`}>
@@ -909,9 +912,7 @@ export function FoundationData() {
                 </table>
               </div>
             ) : (
-              <p className="hint">
-                No row-level validation issues were recorded for this process.
-              </p>
+              <p className="hint">No row-level validation issues were recorded for this process.</p>
             )}
             <div className="row-actions">
               <Button variant="secondary" onClick={() => void copyImportRunLink()}>

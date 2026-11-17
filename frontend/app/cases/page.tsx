@@ -258,14 +258,6 @@ export default function CasesPage() {
     load();
   });
 
-  const seed = async () => {
-    try {
-      await api.post('/api/seed');
-      await load();
-    } catch {
-      setError('Seed failed (data may already exist)');
-    }
-  };
   const downloadFilteredCsv = async () => {
     setExporting(true);
     setExportError(null);
@@ -318,11 +310,6 @@ export default function CasesPage() {
                 onClick={() => void downloadFilteredCsv()}
               >
                 {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-              </Button>
-            )}
-            {noData && (
-              <Button variant="primary" onClick={seed}>
-                Load demo data
               </Button>
             )}
           </>

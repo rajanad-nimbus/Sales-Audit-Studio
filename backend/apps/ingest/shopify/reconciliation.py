@@ -128,7 +128,7 @@ async def load_earliest_shopify_orders(db, key_batch):
                 .join(ranked_orders, CanonicalTransaction.id == ranked_orders.c.id)
                 .where(ranked_orders.c.order_rank == 1)
                 .order_by(CanonicalTransaction.id)
-                .with_for_update()
+                .with_for_update(of=CanonicalTransaction)
                 .execution_options(populate_existing=True)
             )
         )

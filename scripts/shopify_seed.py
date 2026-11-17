@@ -356,6 +356,24 @@ def refund_order(order, spec, refund, locations):
     return call("POST", f"/orders/{order['id']}/refunds.json", {"refund": body})["refund"]
 
 
+# --clean: plain paid sales that reconcile and total without findings. Every order is distinct (items and
+# amount), single tender (card or cash), no refunds, voids, unpaid or exotic tenders, so nothing is a duplicate.
+CLEAN = [
+    scenario("clean 01 shirt", "clean", [L("Blue shirt", 40)]),
+    scenario("clean 02 jeans", "clean", [L("Jeans", 80)], tenders=[(CASH, "rest")]),
+    scenario("clean 03 jacket", "clean", [L("Jacket", 150)], discounts=[("SEED", "fixed", 15)]),
+    scenario("clean 04 hat and socks", "clean", [L("Hat", 25), L("Socks", 10, 3)], fulfilled=True),
+    scenario("clean 05 sneakers", "clean", [L("Sneakers", 120)], tenders=[(CASH, "rest")]),
+    scenario("clean 06 watch", "clean", [L("Watch", 300)], fulfilled=True),
+    scenario("clean 07 scarf", "clean", [L("Scarf", 35), L("Gloves", 22)]),
+    scenario("clean 08 belt", "clean", [L("Belt", 28)], tenders=[(CASH, "rest")]),
+    scenario("clean 09 backpack", "clean", [L("Backpack", 60), L("Water bottle", 12, 2)]),
+    scenario("clean 10 sunglasses", "clean", [L("Sunglasses", 95)], taxes=TAX_NONE),
+]
+if "--clean" in sys.argv:
+    S[:] = CLEAN
+
+
 def create(spec, locations, parent=None):
     total, tax, discount, tax_lines = totals(spec)
     tender_text = "+".join(f"{g}:{a:.2f}" for g, a in tender_amounts(spec, total))

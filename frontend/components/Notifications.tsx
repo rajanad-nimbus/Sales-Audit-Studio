@@ -55,6 +55,8 @@ const ago = (iso: string) => {
 };
 
 const SEEN = 'nimbus_notif_seen';
+const READ = 'nimbus_notif_read';
+const MAX_READ = 200;
 
 export function NotificationBell() {
   const router = useRouter();
@@ -62,6 +64,7 @@ export function NotificationBell() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<string>('');
+  const [read, setRead] = useState<string[]>([]);
   const [toasts, setToasts] = useState<Note[]>([]);
   const known = useRef<Set<string> | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -82,6 +85,12 @@ export function NotificationBell() {
       }
     }
     setSeen(s);
+    try {
+      const saved = JSON.parse(localStorage.getItem(READ) || '[]');
+      if (Array.isArray(saved)) setRead(saved.filter((x) => typeof x === 'string'));
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const poll = useCallback(async () => {
@@ -115,7 +124,8 @@ export function NotificationBell() {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  const unread = notes.filter((n) => n.at > seen).length;
+  const isUnread = (n: Note) => n.at > seen && !read.includes(n.id);
+  const unread = notes.filter(isUnread).length;
   const markAll = () => {
     const now = new Date().toISOString();
     setSeen(now);
@@ -125,7 +135,18 @@ export function NotificationBell() {
       /* ignore */
     }
   };
+  const markRead = (id: string) => {
+    if (read.includes(id)) return;
+    const next = [...read, id].slice(-MAX_READ);
+    setRead(next);
+    try {
+      localStorage.setItem(READ, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
   const go = (n: Note) => {
+    markRead(n.id);
     setOpen(false);
     setToasts((t) => t.filter((x) => x.id !== n.id));
     if (n.caseId && canOpen('/cases')) router.push(`/cases/${n.caseId}`);
@@ -170,7 +191,7 @@ export function NotificationBell() {
               {notes.map((n) => (
                 <button
                   key={n.id}
-                  className={`notif-item${n.at > seen ? ' unread' : ''}`}
+                  className={`notif-item${isUnread(n) ? ' unread' : ''}`}
                   onClick={() => go(n)}
                 >
                   <i className={`lvl ${n.level}`} />

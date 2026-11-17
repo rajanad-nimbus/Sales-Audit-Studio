@@ -665,11 +665,12 @@ async def close_summary(db: AsyncSession, user: dict, business_date: str, expect
     from apps.store_days.automation import AGENT
 
     automatic = case((StoreDay.closed_by == AGENT, 1), else_=0)
+    closed = (StoreDay.status == "Closed").label("closed")  # group by the label: two bound copies break GROUP BY
     rows = await db.execute(
         scope.restrict(
-            select(StoreDay.status == "Closed", func.sum(automatic), func.count())
+            select(closed, func.sum(automatic), func.count())
             .where(StoreDay.business_date == business_date)
-            .group_by(StoreDay.status == "Closed"),
+            .group_by(closed),
             user,
             StoreDay.store_id,
         )
