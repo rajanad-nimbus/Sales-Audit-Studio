@@ -225,3 +225,27 @@ def test_a_trait_excluded_operand_counts_as_zero_inside_a_combined_total():
         [AuditTotalDefinition(**{**t, "revision": 1}) for t in CLIENT_TOTALS], set()
     )
     assert not any(trait_excluded(d) for d in unrestricted)
+
+
+def test_voucher_totals_use_the_number_range_classification():
+    from apps.transactions.detail import parse_line, voucher_kind_for
+
+    assert voucher_kind_for("100000000001") == "GIFTCARD"
+    assert voucher_kind_for("250000000000") == "MCR"
+    assert voucher_kind_for("399999999999") == "VIRTUAL"
+    assert voucher_kind_for("4000") is None and voucher_kind_for(None) is None
+    line = parse_line(
+        {
+            "item_code": "GC",
+            "quantity": "1",
+            "unit_price": "25",
+            "source_attributes": {"voucher_number": "250000000000", "item_type": "GCN"},
+        },
+        1,
+        1,
+    )
+    assert line["voucher_kind"] == "MCR"
+    by_name = {t["name"]: t for t in CLIENT_TOTALS}
+    for name, expected in (("GFTCRDSL", "GIFTCARD,MCR"), ("VIRTGCSL", "VIRTUAL")):
+        restriction = by_name[name]["restrictions"][0]
+        assert restriction["field"] == "voucher_kind" and restriction["value"] == expected

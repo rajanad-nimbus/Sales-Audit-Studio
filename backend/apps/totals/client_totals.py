@@ -4786,7 +4786,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "GC"}
+            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5228,7 +5228,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "VGC"}
+            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "VIRTUAL"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5267,7 +5267,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "contains", "value": "GC"}
+            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],

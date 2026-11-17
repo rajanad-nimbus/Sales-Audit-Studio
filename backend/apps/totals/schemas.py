@@ -28,6 +28,7 @@ REALM_FIELDS = {
     },
     "Line": {
         "item_code": "text",
+        "voucher_kind": "text",
         "quantity": "number",
         "unit_price": "number",
         "gross_amount": "number",

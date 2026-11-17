@@ -94,6 +94,8 @@ class TransactionLine(Base):
     original_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     price_override_reason: Mapped[str | None] = mapped_column(String(255))
     source_attributes: Mapped[dict | None] = mapped_column(JSON)
+    # GIFTCARD, MCR or VIRTUAL when the line sells or issues a voucher, from its number range.
+    voucher_kind: Mapped[str | None] = mapped_column(String(12))
     gross_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     tax_code: Mapped[str | None] = mapped_column(String(30))
     tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=0, server_default="0")

@@ -149,6 +149,17 @@ def normalized_metadata(record: dict, field: str) -> str | None:
     return (optional_text(record.get(field), field) or "").strip() or None
 
 
+VOUCHER_KINDS = ("GIFTCARD", "MCR", "VIRTUAL")
+
+
+def voucher_kind_for(number: object) -> str | None:
+    """Classify a 12-digit voucher number: 1xxx gift card, 2xxx MCR, 3xxx virtual gift card."""
+    text = str(number or "").strip()
+    if len(text) != 12 or not text.isdigit():
+        return None
+    return {"1": "GIFTCARD", "2": "MCR", "3": "VIRTUAL"}.get(text[0])
+
+
 def parse_line(line: dict, number: int, sign: int) -> dict:
     """Validate and normalize one transaction line."""
     if not isinstance(line, dict):
@@ -174,6 +185,11 @@ def parse_line(line: dict, number: int, sign: int) -> dict:
         else None
     )
     source_attributes = parse_source_attributes(line.get("source_attributes"), number)
+    voucher_kind = line.get("voucher_kind")
+    if voucher_kind is None:
+        voucher_kind = voucher_kind_for((source_attributes or {}).get("voucher_number"))
+    elif voucher_kind not in VOUCHER_KINDS:
+        raise ValueError(f"line {number} voucher_kind must be one of {', '.join(VOUCHER_KINDS)}")
     gross = (
         money(line["gross_amount"], f"line {number} gross_amount")
         if line.get("gross_amount") is not None
@@ -196,6 +212,7 @@ def parse_line(line: dict, number: int, sign: int) -> dict:
         "original_unit_price": original_price,
         "price_override_reason": price_override_reason,
         "source_attributes": source_attributes,
+        "voucher_kind": voucher_kind,
         "gross_amount": gross * sign,
         "tax_code": tax_code,
         "tax_rate": rate,
