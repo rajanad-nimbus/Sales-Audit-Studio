@@ -157,3 +157,22 @@ def test_a_visa_tender_lands_in_the_visa_total_and_not_in_amex():
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_register_lists_are_exact_and_condition_matches_in_lists():
+    from types import SimpleNamespace
+
+    from apps.controls.rules.transaction_logic import condition_matches
+
+    by_name = {t["name"]: t for t in CLIENT_TOTALS}
+    amazon = by_name["SLSTXAMZN"]["restrictions"][0]
+    assert amazon["operator"] == "in" and amazon["value"] == "892,897"
+    assert condition_matches(amazon, SimpleNamespace(register_id="892"))
+    assert not condition_matches(amazon, SimpleNamespace(register_id="895"))
+    store = by_name["SLSTAXACC"]["restrictions"][0]
+    assert store["operator"] == "not_in"
+    assert condition_matches(store, SimpleNamespace(register_id="R1"))
+    assert not condition_matches(store, SimpleNamespace(register_id="897"))
+    assert not any(
+        r["field"] == "channel_id" for t in CLIENT_TOTALS for r in t["restrictions"]
+    )

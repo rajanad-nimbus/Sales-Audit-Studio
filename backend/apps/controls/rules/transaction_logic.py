@@ -45,6 +45,11 @@ def sql_condition(condition: dict):
     return func.coalesce(expression, false())
 
 
+def comma_list(value: str) -> set[str]:
+    """A comma-separated list of exact values, such as the registers a total includes."""
+    return {part.strip() for part in value.split(",") if part.strip()}
+
+
 def condition_matches(condition: dict, transaction) -> bool:
     """Evaluate one validated field predicate without executing retailer-provided code."""
     field = condition["field"]
@@ -85,4 +90,6 @@ def condition_matches(condition: dict, transaction) -> bool:
         "eq": actual_text == expected_text,
         "ne": actual_text != expected_text,
         "contains": expected_text.casefold() in actual_text.casefold(),
+        "in": actual_text in comma_list(expected_text),
+        "not_in": actual_text not in comma_list(expected_text),
     }.get(operator, False)

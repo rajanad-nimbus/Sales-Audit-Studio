@@ -84,7 +84,9 @@ class TotalRestrictionBody(BaseModel):
 
     realm: Literal["Transaction", "Line", "Tax", "Tender", "Discount"]
     field: str = Field(min_length=1, max_length=40)
-    operator: Literal["eq", "ne", "gt", "gte", "lt", "lte", "contains", "is_empty", "not_empty"]
+    operator: Literal[
+        "eq", "ne", "gt", "gte", "lt", "lte", "contains", "in", "not_in", "is_empty", "not_empty"
+    ]
     value: str | None = Field(default=None, max_length=255)
 
     @model_validator(mode="after")
@@ -94,6 +96,8 @@ class TotalRestrictionBody(BaseModel):
             raise ValueError(f"Field {self.field} is not available in the {self.realm} realm")
         if self.operator in {"gt", "gte", "lt", "lte"} and available[self.field] != "number":
             raise ValueError("Ordered comparisons are supported only for numeric fields")
+        if self.operator in {"in", "not_in"} and available[self.field] != "text":
+            raise ValueError("List comparisons are supported only for text fields")
         if self.operator in {"is_empty", "not_empty"}:
             if self.value not in (None, ""):
                 raise ValueError("Empty checks do not take a comparison value")

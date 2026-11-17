@@ -4734,7 +4734,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "eq", "value": "Remote"}
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "in",
+                "value": "880,881,889,893,892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4770,7 +4775,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "eq", "value": "Remote"}
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "in",
+                "value": "880,881,889,893,892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4806,7 +4816,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "eq", "value": "Remote"}
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "in",
+                "value": "880,881,889,893,892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4875,7 +4890,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "eq", "value": "Remote"}
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "in",
+                "value": "880,881,889,893,892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4944,7 +4964,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "ne", "value": "Remote"}
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "not_in",
+                "value": "880,881,889,893,892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4982,7 +5007,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "ne", "value": "Remote"}
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "not_in",
+                "value": "880,881,889,893,892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5095,7 +5125,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "gross_amount"}],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "eq", "value": "Remote"}
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "in",
+                "value": "880,881,889,893,892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5132,10 +5167,12 @@ CLIENT_TOTALS = [
         "joins": [],
         "parameters": [],
         "restrictions": [
-            {"realm": "Transaction", "field": "register_id", "operator": "ne", "value": "892"},
-            {"realm": "Transaction", "field": "register_id", "operator": "ne", "value": "895"},
-            {"realm": "Transaction", "field": "register_id", "operator": "ne", "value": "896"},
-            {"realm": "Transaction", "field": "register_id", "operator": "ne", "value": "897"},
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "not_in",
+                "value": "892,895,896,897",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5177,7 +5214,7 @@ CLIENT_TOTALS = [
         "joins": [],
         "parameters": [],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "eq", "value": "Amazon"}
+            {"realm": "Transaction", "field": "register_id", "operator": "in", "value": "892,897"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5219,7 +5256,7 @@ CLIENT_TOTALS = [
         "joins": [],
         "parameters": [],
         "restrictions": [
-            {"realm": "Transaction", "field": "channel_id", "operator": "eq", "value": "eBay"}
+            {"realm": "Transaction", "field": "register_id", "operator": "in", "value": "895,896"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
