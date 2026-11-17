@@ -135,6 +135,7 @@ export default function StoreDaysPage() {
   const [stuckAfter, setStuckAfter] = useState(1);
   const [savedViews, setSavedViews] = useState<SavedStoreDaysView[]>([]);
   const [savedViewsError, setSavedViewsError] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const savedViewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const attentionRequest = useRef(0);
   const listRequest = useRef(0);
@@ -488,6 +489,16 @@ export default function StoreDaysPage() {
     }
   };
 
+  const copyWorkspaceLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      toast('Could not copy the link. You can copy it from the address bar.', 'error');
+    }
+  };
+
   return (
     <div className="page-container">
       {viewNameDialog}
@@ -495,14 +506,19 @@ export default function StoreDaysPage() {
         title="Store Days & Totals"
         subtitle="Versioned balancing totals for the controlled store-day audit lifecycle. Select a Store Day to see its totals, closure, cases and history."
         actions={
-          canOpen && (
-            <Button
-              variant={showOpen ? 'secondary' : 'primary'}
-              onClick={() => setShowOpen(!showOpen)}
-            >
-              {showOpen ? 'Cancel' : 'Open Store Day'}
+          <div className="row-actions">
+            <Button variant="secondary" onClick={() => void copyWorkspaceLink()}>
+              {linkCopied ? 'Link copied' : 'Copy workspace link'}
             </Button>
-          )
+            {canOpen && (
+              <Button
+                variant={showOpen ? 'secondary' : 'primary'}
+                onClick={() => setShowOpen(!showOpen)}
+              >
+                {showOpen ? 'Cancel' : 'Open Store Day'}
+              </Button>
+            )}
+          </div>
         }
       />
       <StoreScopeNote />

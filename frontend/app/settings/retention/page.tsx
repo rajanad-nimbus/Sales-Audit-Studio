@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { downloadBlob } from '@/lib/csv';
 import { formatDateTime } from '@/lib/preferences';
 import { SkeletonRows, useToast } from '@/components/Feedback';
-import { Alert, Button, Card, DataTable } from '@/components/ui';
+import { Alert, Button, Card, DataTable, Pager, Toolbar } from '@/components/ui';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 
 interface Policy {
@@ -21,6 +22,17 @@ interface Run {
   purged_records: number;
   status: string;
   created_at: string;
+  archive_location: string | null;
+  archive_hash: string | null;
+  error: string | null;
+  performed_by: string;
+}
+interface RunsResult {
+  items: Run[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
 }
 const apiError = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback;
@@ -29,26 +41,83 @@ export default function RetentionPage() {
   const toast = useToast();
   const [policies, setPolicies] = useState<Policy[] | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [runTotal, setRunTotal] = useState(0);
+  const [runPages, setRunPages] = useState(1);
+  const [runPage, setRunPage] = useState(1);
+  const [runPageSize, setRunPageSize] = useState(50);
+  const [runQuery, setRunQuery] = useState('');
+  const [runDataset, setRunDataset] = useState('');
+  const [runStatus, setRunStatus] = useState('');
+  const [runsLoading, setRunsLoading] = useState(true);
+  const [runsExporting, setRunsExporting] = useState(false);
+  const [runsNotice, setRunsNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [p, r] = await Promise.all([
-        api.get('/api/operations/retention'),
-        api.get('/api/operations/retention/runs'),
-      ]);
-      setPolicies(p.data);
-      setRuns(r.data);
-      setError(null);
-    } catch (e) {
-      setError(apiError(e, 'Could not load retention policies.'));
-    }
-  }, []);
+  const load = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
+      setRunsLoading(true);
+      try {
+        const [p, r] = await Promise.all([
+          api.get('/api/operations/retention'),
+          api.get<RunsResult>('/api/operations/retention/runs', {
+            params: {
+              q: runQuery.trim() || undefined,
+              dataset: runDataset || undefined,
+              status: runStatus || undefined,
+              page: runPage,
+              page_size: runPageSize,
+            },
+          }),
+        ]);
+        if (!isCurrent()) return;
+        setPolicies(p.data);
+        setRuns(r.data.items);
+        setRunTotal(r.data.total);
+        setRunPages(r.data.pages);
+        setError(null);
+      } catch (e) {
+        if (isCurrent()) setError(apiError(e, 'Could not load retention policies.'));
+      } finally {
+        if (isCurrent()) setRunsLoading(false);
+      }
+    },
+    [runQuery, runDataset, runStatus, runPage, runPageSize]
+  );
   useEffect(() => {
-    load();
+    let current = true;
+    const timer = window.setTimeout(() => void load(() => current), 180);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
   }, [load]);
+
+  const exportRuns = async () => {
+    setRunsExporting(true);
+    setRunsNotice(null);
+    try {
+      const params = new URLSearchParams({ format: 'csv' });
+      if (runQuery.trim()) params.set('q', runQuery.trim());
+      if (runDataset) params.set('dataset', runDataset);
+      if (runStatus) params.set('status', runStatus);
+      const { data, headers } = await api.get(
+        `/api/operations/retention/runs?${params.toString()}`,
+        { responseType: 'blob' }
+      );
+      downloadBlob('retention-runs.csv', data);
+      if (headers?.['x-retention-runs-truncated'] === 'true') {
+        setRunsNotice(
+          'The export reached 50,000 runs. Narrow the dataset or search filter to export more.'
+        );
+      }
+    } catch (e) {
+      setError(apiError(e, 'Could not export retention run history.'));
+    } finally {
+      setRunsExporting(false);
+    }
+  };
 
   const preview = async (dataset: string) => {
     try {
@@ -181,12 +250,73 @@ export default function RetentionPage() {
         )}
       </Card>
       <Card title="History">
-        {runs.length === 0 ? (
-          <p className="cc-empty">No retention runs yet.</p>
+        <Toolbar count={`${runTotal} matching runs`}>
+          <input
+            className="grow"
+            type="search"
+            aria-label="Search retention runs"
+            placeholder="Search run, archive, error, or operator"
+            value={runQuery}
+            maxLength={255}
+            onChange={(event) => {
+              setRunQuery(event.target.value);
+              setRunPage(1);
+            }}
+          />
+          <select
+            aria-label="Filter retention runs by dataset"
+            value={runDataset}
+            onChange={(event) => {
+              setRunDataset(event.target.value);
+              setRunPage(1);
+            }}
+          >
+            <option value="">All datasets</option>
+            {(policies ?? []).map((policy) => (
+              <option key={policy.dataset} value={policy.dataset}>
+                {policy.dataset}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Filter retention runs by status"
+            value={runStatus}
+            onChange={(event) => {
+              setRunStatus(event.target.value);
+              setRunPage(1);
+            }}
+          >
+            <option value="">All statuses</option>
+            <option value="Succeeded">Succeeded</option>
+            <option value="Failed">Failed</option>
+          </select>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!runTotal || runsExporting}
+            onClick={() => void exportRuns()}
+          >
+            {runsExporting ? 'Preparing CSV…' : 'Download matching CSV'}
+          </Button>
+        </Toolbar>
+        {runsNotice && (
+          <Alert tone="warning" onDismiss={() => setRunsNotice(null)}>
+            {runsNotice}
+          </Alert>
+        )}
+        {runsLoading ? (
+          <SkeletonRows rows={3} label="Loading retention run history" />
+        ) : runTotal === 0 ? (
+          <p className="cc-empty">
+            {runQuery.trim() || runDataset || runStatus
+              ? 'No retention runs match these filters.'
+              : 'No retention runs yet.'}
+          </p>
         ) : (
           <DataTable
             columns={[
-              { key: 'dataset', header: 'Dataset', render: (r) => r.dataset },
+              { key: 'dataset', header: 'Dataset', primary: true, render: (r) => r.dataset },
+              { key: 'status', header: 'Status', render: (r) => r.status },
               {
                 key: 'eligible',
                 header: 'Eligible',
@@ -201,6 +331,34 @@ export default function RetentionPage() {
               },
               { key: 'purged', header: 'Purged', numeric: true, render: (r) => r.purged_records },
               {
+                key: 'archive',
+                header: 'Archive',
+                render: (r) => r.archive_location || '—',
+              },
+              {
+                key: 'hash',
+                header: 'Archive hash',
+                render: (r) =>
+                  r.archive_hash ? (
+                    <code title={r.archive_hash}>{r.archive_hash.slice(0, 12)}…</code>
+                  ) : (
+                    '—'
+                  ),
+              },
+              {
+                key: 'error',
+                header: 'Run detail',
+                render: (r) =>
+                  r.error ? (
+                    <span title={r.error}>
+                      {r.error.length > 140 ? `${r.error.slice(0, 140)}…` : r.error}
+                    </span>
+                  ) : (
+                    'Completed'
+                  ),
+              },
+              { key: 'operator', header: 'Performed by', render: (r) => r.performed_by },
+              {
                 key: 'when',
                 header: 'When',
                 nowrap: true,
@@ -209,6 +367,20 @@ export default function RetentionPage() {
             ]}
             rows={runs}
             rowKey={(r) => String(r.id)}
+            footer={
+              <Pager
+                page={runPage}
+                pages={runPages}
+                total={runTotal}
+                pageSize={runPageSize}
+                pageSizes={[25, 50, 100, 200]}
+                onPage={setRunPage}
+                onPageSize={(size) => {
+                  setRunPageSize(size);
+                  setRunPage(1);
+                }}
+              />
+            }
           />
         )}
       </Card>

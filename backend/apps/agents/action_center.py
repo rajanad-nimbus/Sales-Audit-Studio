@@ -20,6 +20,7 @@ from apps.agents.action_center_filters import (
     apply,
     as_utc,
     filters,
+    me_identifier,
     me_name,
 )
 from apps.agents.bulk_actions import BULK_LIMIT, HEAVY_LIMIT
@@ -30,11 +31,60 @@ from apps.cases.models import (
 from apps.csv_export import csv_row
 from apps.security import scope
 from apps.security.authentication import require_role
+from apps.security.models import UserRoleAssignment, VerifiedStoreUser
 
 router = APIRouter(prefix="/api/action-center")
 
 EXPORT_BATCH_SIZE = 1000
 MAX_ACTION_CENTER_EXPORT_CASES = 50_000
+
+
+@router.get("/assignees")
+async def list_assignees(
+    q: str | None = Query(default=None, max_length=100),
+    page: int = Query(default=1, ge=1, le=100_000),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_role("sales_audit_manager")),
+):
+    """Verified Sales Auditors a Sales Audit Manager may assign work to."""
+    effective_role = func.coalesce(UserRoleAssignment.role, VerifiedStoreUser.role)
+    query = select(VerifiedStoreUser).outerjoin(
+        UserRoleAssignment,
+        UserRoleAssignment.assignment_identifier == VerifiedStoreUser.assignment_identifier,
+    )
+    conditions = [effective_role == "analyst"]
+    needle = (q or "").strip().lower()
+    if needle:
+        conditions.append(
+            or_(
+                func.lower(VerifiedStoreUser.display_name).contains(needle, autoescape=True),
+                func.lower(VerifiedStoreUser.user_identifier).contains(needle, autoescape=True),
+            )
+        )
+    query = query.where(*conditions)
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+    rows = (
+        await db.execute(
+            query.order_by(
+                func.lower(VerifiedStoreUser.display_name), VerifiedStoreUser.user_identifier
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars()
+    return {
+        "items": [
+            {
+                "user_identifier": person.user_identifier,
+                "display_name": person.display_name,
+            }
+            for person in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 def sla_state(c: Case, now: datetime) -> str:
@@ -148,7 +198,7 @@ async def summary(
             live, Case.sla_due_at >= now, Case.sla_due_at < now + timedelta(hours=8), visible
         ),
         "unassigned": and_(live, Case.assigned_to.is_(None), visible),
-        "mine": and_(live, Case.assigned_to == me_name(user)),
+        "mine": and_(live, func.lower(Case.assigned_to) == me_identifier(user)),
         "snoozed": and_(live, Case.snoozed_until > now),
         "open_total": live,
         "stale_amount_cases": and_(live, Case.amount_needs_review.is_(True)),
@@ -373,6 +423,29 @@ async def bulk(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
 ):
+    if req.action == "assign" and user["role"] == "sales_audit_manager":
+        assignee = req.params.get("assignee", "me")
+        if assignee != "me":
+            assignee = assignee.strip().casefold()
+            effective_role = func.coalesce(UserRoleAssignment.role, VerifiedStoreUser.role)
+            verified = await db.scalar(
+                select(VerifiedStoreUser.assignment_identifier)
+                .outerjoin(
+                    UserRoleAssignment,
+                    UserRoleAssignment.assignment_identifier
+                    == VerifiedStoreUser.assignment_identifier,
+                )
+                .where(
+                    VerifiedStoreUser.user_identifier == assignee,
+                    effective_role == "analyst",
+                )
+            )
+            if verified is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Choose a verified person with the Sales Auditor role",
+                )
+            req.params["assignee"] = assignee
     actor = me_name(user)
     if req.ids:
         stmt = select(Case).where(Case.id.in_(req.ids[:BULK_LIMIT]))

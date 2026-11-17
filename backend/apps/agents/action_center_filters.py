@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
 from fastapi import HTTPException, Query
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 
 from apps.cases.models import Case
 from apps.search import contains_literal
@@ -81,6 +81,11 @@ def me_name(user: dict) -> str:
     return user["user"] or "demo.user"
 
 
+def me_identifier(user: dict) -> str:
+    """Canonical assignee key; email casing from the identity provider is not significant."""
+    return me_name(user).strip().casefold()
+
+
 def as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
@@ -121,7 +126,8 @@ def _text_filter_conditions(f: Filters, user: dict, skip: str | None) -> list:
             conditions.append(Case.assigned_to.is_(None))
         else:
             conditions.append(
-                Case.assigned_to == (me_name(user) if f.assignee == "me" else f.assignee)
+                func.lower(Case.assigned_to)
+                == (me_identifier(user) if f.assignee == "me" else f.assignee.casefold())
             )
     return conditions
 

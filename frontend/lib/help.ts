@@ -27,6 +27,7 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Confirm the expected POS and OMS feeds have arrived and reconciled.',
       'Review totals, cash differences, and open audit errors for the day.',
       'Resolve or document outstanding work, then sign off and close when ready.',
+      'Copy the workspace link to share the current Store Days queue and filters.',
     ],
     notes: [
       'A closed day retains its audit history; corrections use the governed correction flow.',
@@ -40,6 +41,7 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Choose the configured source and submit a file that matches its feed contract.',
       'Review validation findings and reconcile accepted, duplicate, and rejected records.',
       'Review batch history by date or status, then open the resulting store day to inspect totals and audit-rule findings.',
+      'If automatic reconciliation fails after an upload, retry it for that business date from the upload result.',
       'Search source deliveries by source, received date, or delivery ID to trace record counts and quarantine outcomes.',
       'Search quarantined records by source, received date, record ID, or validation reason; export matching metadata when follow-up is needed.',
     ],
@@ -486,6 +488,8 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Review role capabilities and assign verified store users to stores or location traits.',
     steps: [
       'Review the role matrix and each screen’s access requirements.',
+      'Filter the verified employee directory by time since last activity to find accounts for review; inactivity does not prove the identity was removed upstream.',
+      'Filter business-role assignments by time since last activity and export the full matching directory for access review.',
       'Choose a verified store user, assign stores or active-store traits, and save the scope.',
       'For bulk changes, preview the CSV rows and validation results before applying them.',
     ],

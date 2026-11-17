@@ -1207,7 +1207,7 @@ export function CommandCenter() {
   // What this person may do from here. The server checks every action again.
   const role = me?.role ?? '';
   const may = {
-    assign: ['finance', 'it', 'admin'].includes(role) && canOpen('/actions'),
+    assign: ['finance', 'it', 'sales_audit_manager', 'admin'].includes(role) && canOpen('/actions'),
     approve: ['finance', 'admin'].includes(role) && canOpen('/actions'),
     retry: ['it', 'admin'].includes(role) && canOpen('/exports'),
     rerun: ['it', 'admin'].includes(role) && canOpen('/imports'),

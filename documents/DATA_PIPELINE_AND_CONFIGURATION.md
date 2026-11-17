@@ -481,6 +481,7 @@ Screens and the API paths each one needs are defined in `backend/access.py`. A r
 | `finance`       | Finance Approver                    |
 | `it`            | IT Support Admin                    |
 | `analyst`       | Sales Auditor                       |
+| `sales_audit_manager` | Sales Audit Manager (team workload and case assignment; no Finance approval) |
 | `auditor`       | Internal Auditor                    |
 | `store_manager` | Store Manager                       |
 | `viewer`        | Viewer                              |

@@ -13,7 +13,8 @@ import {
 } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useDataChanged } from '@/lib/sync';
-import { Alert, Badge, Button, Segmented, useNameDialog } from '@/components/ui';
+import { useMe } from '@/components/MeProvider';
+import { Alert, Badge, Button, Field, Segmented, useNameDialog } from '@/components/ui';
 
 interface F {
   q: string;
@@ -151,6 +152,7 @@ const slaText = (r: ACRow) => {
 };
 
 export default function ActionCenter() {
+  const { me } = useMe();
   const [f, setF] = useState<F>(EMPTY);
   const skipReset = useRef(1); // effect runs to ignore: the mount, plus one more if a saved view is restored
   const [restored, setRestored] = useState(false);
@@ -224,6 +226,13 @@ export default function ActionCenter() {
     params?: object;
     ids?: string[];
   } | null>(null);
+  const [teamQuery, setTeamQuery] = useState('');
+  const [teamAssignee, setTeamAssignee] = useState('me');
+  const [teamAssignees, setTeamAssignees] = useState<
+    { user_identifier: string; display_name: string }[]
+  >([]);
+  const [teamAssigneeTotal, setTeamAssigneeTotal] = useState(0);
+  const [teamAssigneeError, setTeamAssigneeError] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [proposed, setProposed] = useState<
     { case_id: string; case_number: string; amount: string; currency: string | null }[]
@@ -235,6 +244,28 @@ export default function ActionCenter() {
   const [viewsError, setViewsError] = useState(false);
   const viewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const seq = useRef(0);
+
+  useEffect(() => {
+    if (me?.role !== 'sales_audit_manager' || confirm?.id !== 'assign') return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      api
+        .get('/api/action-center/assignees', { params: { q: teamQuery || undefined } })
+        .then(({ data }) => {
+          if (!active) return;
+          setTeamAssignees(data.items);
+          setTeamAssigneeTotal(data.total);
+          setTeamAssigneeError('');
+        })
+        .catch(() => {
+          if (active) setTeamAssigneeError('Could not load verified Sales Auditors.');
+        });
+    }, 180);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [me?.role, confirm?.id, teamQuery]);
 
   useEffect(() => {
     let active = true;
@@ -412,7 +443,11 @@ export default function ActionCenter() {
   const runBulk = async () => {
     if (!confirm) return;
     try {
-      const body: any = { action: confirm.id, params: confirm.params ?? {} };
+      const params: Record<string, unknown> = { ...(confirm.params ?? {}) };
+      if (confirm.id === 'assign' && me?.role === 'sales_audit_manager') {
+        params.assignee = teamAssignee;
+      }
+      const body: any = { action: confirm.id, params };
       if (allMatching)
         body.select_all = Object.fromEntries(Object.entries(f).filter(([, v]) => v !== ''));
       else body.ids = confirm.ids ?? [...selected];
@@ -827,9 +862,25 @@ export default function ActionCenter() {
             )}
             {allMatching && <span>· all matching the current filters</span>}
             <span className="ac-spacer" />
-            {ACTIONS.map((a) => (
-              <Button size="sm" key={a.id} onClick={() => setConfirm(a)}>
-                {a.label}
+            {ACTIONS.filter(
+              (action) => action.id !== 'approve' || ['finance', 'admin'].includes(me?.role ?? '')
+            ).map((a) => (
+              <Button
+                size="sm"
+                key={a.id}
+                onClick={() => {
+                  if (a.id === 'assign' && me?.role === 'sales_audit_manager') {
+                    setTeamQuery('');
+                    setTeamAssignee('me');
+                    setConfirm({ ...a, label: 'Assign cases to a teammate' });
+                  } else {
+                    setConfirm(a);
+                  }
+                }}
+              >
+                {a.id === 'assign' && me?.role === 'sales_audit_manager'
+                  ? 'Assign to teammate'
+                  : a.label}
               </Button>
             ))}
             <button
@@ -1059,6 +1110,37 @@ export default function ActionCenter() {
             )}
             {allMatching && (
               <p className="ac-hint">Bulk actions touch at most 1,000 cases per run.</p>
+            )}
+            {confirm.id === 'assign' && me?.role === 'sales_audit_manager' && (
+              <div className="stack stack-sm">
+                <Field label="Search verified Sales Auditors">
+                  <input
+                    value={teamQuery}
+                    onChange={(event) => {
+                      setTeamQuery(event.target.value);
+                      setTeamAssignee('me');
+                    }}
+                    placeholder="Name or email"
+                  />
+                </Field>
+                <Field label="Assign cases to">
+                  <select
+                    value={teamAssignee}
+                    onChange={(event) => setTeamAssignee(event.target.value)}
+                  >
+                    <option value="me">Myself ({me.user})</option>
+                    {teamAssignees.map((person) => (
+                      <option key={person.user_identifier} value={person.user_identifier}>
+                        {person.display_name} · {person.user_identifier}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <p className="ac-hint">
+                  {teamAssigneeError ||
+                    `${teamAssigneeTotal > teamAssignees.length ? `Showing ${teamAssignees.length} of ${formatNumber(teamAssigneeTotal)} matches; refine the search. ` : `${formatNumber(teamAssigneeTotal)} verified Sales Auditor${teamAssigneeTotal === 1 ? '' : 's'} match. `}Finance decisions remain restricted to Finance.`}
+                </p>
+              </div>
             )}
             <div className="cc-actions" style={{ justifyContent: 'flex-end' }}>
               <Button onClick={() => setConfirm(null)}>Cancel</Button>

@@ -84,6 +84,7 @@ def _lens(persona: str) -> str:
         "finance": "\n<persona>The user is in Finance: emphasise exposure, approvals and close impact.</persona>\n",
         "it": "\n<persona>The user is in IT Operations: emphasise connectors, the daily batch, evidence gaps and recovery.</persona>\n",
         "analyst": "\n<persona>The user is a Sales Auditor: emphasise evidence, candidate causes and what is still unproven.</persona>\n",
+        "sales_audit_manager": "\n<persona>The user is a Sales Audit Manager: emphasise team workload, audit deadlines, exception trends and evidence; Finance approvals remain separate.</persona>\n",
         "auditor": "\n<persona>The user is Internal Audit: emphasise controls, the audit trail and agent decisions.</persona>\n",
     }.get(persona, "")
 

@@ -31,7 +31,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       NIMBUS_ENABLE_TEST_SINK: ${NIMBUS_ENABLE_TEST_SINK:-true}
       NIMBUS_ONTOLOGY_AUTH_URL: ${NIMBUS_ONTOLOGY_AUTH_URL:-http://host.docker.internal:8000/api/v1/auth/me}
-      NIMBUS_ONTOLOGY_ROLE_MAP: ${NIMBUS_ONTOLOGY_ROLE_MAP:-admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,auditor:auditor,store_manager:store_manager,store_staff:store_staff}
+      NIMBUS_ONTOLOGY_ROLE_MAP: ${NIMBUS_ONTOLOGY_ROLE_MAP:-admin:admin,owner:admin,finance:finance,it:it,analyst:analyst,sales_audit_manager:sales_audit_manager,auditor:auditor,store_manager:store_manager,store_staff:store_staff}
       NIMBUS_ONTOLOGY_STORE_CLAIM: ${NIMBUS_ONTOLOGY_STORE_CLAIM:-stores}
       NIMBUS_EXPORT_DIR: /app/exports
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

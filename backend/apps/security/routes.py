@@ -5,7 +5,7 @@ import hashlib
 import io
 import json
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -610,6 +610,27 @@ class StoreAssignmentInput(BaseModel):
         return normalized
 
 
+class StoreAssignmentClearInput(BaseModel):
+    user_identifier: str = Field(min_length=1, max_length=255)
+    reason: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("user_identifier")
+    @classmethod
+    def normalize_user_identifier(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if not normalized:
+            raise ValueError("user_identifier must not be blank")
+        return normalized
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 10:
+            raise ValueError("Provide a reason with at least 10 characters")
+        return normalized
+
+
 class StoreAssignmentImportBody(BaseModel):
     csv_text: str = Field(min_length=1, max_length=1_500_000)
     preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
@@ -1051,6 +1072,7 @@ async def list_verified_store_users(
     q: str | None = Query(default=None, max_length=100),
     role: Literal["all", "store_manager", "store_staff"] = "all",
     scope_status: Literal["all", "assigned", "unassigned"] = "all",
+    inactive_days: int | None = Query(default=None, ge=1, le=3650),
     page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=200),
     format: Literal["json", "csv"] = "json",
@@ -1066,6 +1088,8 @@ async def list_verified_store_users(
         )
     )
     filters = [VerifiedStoreUser.role.in_(STORE_ROLES)]
+    if inactive_days is not None:
+        filters.append(VerifiedStoreUser.last_seen_at < utcnow() - timedelta(days=inactive_days))
     if role != "all":
         filters.append(VerifiedStoreUser.role == role)
     normalized_query = (q or "").strip().lower()
@@ -1363,17 +1387,68 @@ async def replace_store_assignment(
     return store_assignment_view(row)
 
 
+@router.post("/api/access/store-assignments/clear")
+async def clear_store_assignment(
+    body: StoreAssignmentClearInput,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("admin")),
+):
+    row = (
+        await db.execute(
+            select(StoreAssignment)
+            .where(StoreAssignment.user_identifier == body.user_identifier)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail="No local store assignment exists for this user"
+        )
+    before = {
+        "user_identifier": row.user_identifier,
+        "store_ids": row.store_ids or [],
+        "location_traits": row.location_traits or [],
+    }
+    actor = user.get("user") or "ontology.user"
+    await db.delete(row)
+    db.add(
+        AuditEvent(
+            id=str(uuid.uuid4()),
+            event_type="STORE_ASSIGNMENT_CLEARED",
+            actor=actor,
+            object_type="StoreAssignment",
+            object_id=row.id,
+            action_description=f"Cleared local store assignment for {row.user_identifier}: {body.reason}",
+            before_state=before,
+            after_state={"user_identifier": row.user_identifier, "cleared": True},
+        )
+    )
+    await db.commit()
+    return {"user_identifier": body.user_identifier, "cleared": True}
+
+
 class RoleAssignmentInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assignment_identifier: str = Field(min_length=1, max_length=255)
-    role: Literal["finance", "it", "analyst", "auditor", "store_manager", "store_staff"]
+    role: Literal[
+        "finance",
+        "it",
+        "analyst",
+        "sales_audit_manager",
+        "auditor",
+        "store_manager",
+        "store_staff",
+    ]
     reason: str = Field(min_length=10, max_length=2000)
 
     @field_validator("assignment_identifier")
     @classmethod
     def normalize_identifier(cls, value: str) -> str:
-        return value.strip().casefold()
+        normalized = value.strip().casefold()
+        if not normalized:
+            raise ValueError("assignment_identifier must not be blank")
+        return normalized
 
     @field_validator("reason")
     @classmethod
@@ -1382,6 +1457,165 @@ class RoleAssignmentInput(BaseModel):
         if len(value) < 10:
             raise ValueError("Reason must contain at least 10 non-whitespace characters")
         return value
+
+
+class RoleAssignmentImportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    csv_text: str = Field(min_length=1, max_length=1_500_000)
+    preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+def parse_role_assignment_csv(csv_text: str) -> tuple[list[dict], list[dict]]:
+    """Parse a bounded role import, requiring an auditable reason on every row."""
+    errors: list[dict] = []
+    rows: list[dict] = []
+    seen: set[str] = set()
+    reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
+    headers = [header.strip().lower() if header else "" for header in (reader.fieldnames or [])]
+    required = {"assignment_identifier", "role", "reason"}
+    if len(headers) != 3 or len(set(headers)) != 3 or set(headers) != required:
+        return [], [
+            {
+                "row": 1,
+                "message": "CSV headers must be assignment_identifier, role, reason",
+            }
+        ]
+    reader.fieldnames = headers
+    try:
+        for row_number, raw in enumerate(reader, start=2):
+            if None in raw:
+                errors.append({"row": row_number, "message": "Row has more values than the header"})
+                continue
+            try:
+                normalized = RoleAssignmentInput.model_validate(
+                    {
+                        "assignment_identifier": raw.get("assignment_identifier") or "",
+                        "role": (raw.get("role") or "").strip().lower(),
+                        "reason": raw.get("reason") or "",
+                    }
+                )
+            except ValueError as exc:
+                errors.append({"row": row_number, "message": str(exc)})
+                continue
+            if normalized.assignment_identifier in seen:
+                errors.append(
+                    {
+                        "row": row_number,
+                        "message": f"Duplicate identity {normalized.assignment_identifier}",
+                    }
+                )
+                continue
+            seen.add(normalized.assignment_identifier)
+            rows.append({**normalized.model_dump(), "row": row_number})
+            if len(rows) > 5000:
+                errors.append(
+                    {"row": row_number, "message": "A file may contain at most 5,000 rows"}
+                )
+                break
+    except csv.Error as exc:
+        errors.append({"row": reader.line_num, "message": f"Invalid CSV: {exc}"})
+    if not rows and not errors:
+        errors.append({"row": 1, "message": "CSV contains no role assignments"})
+    return rows, errors
+
+
+async def preview_role_assignment_rows(db: AsyncSession, rows: list[dict], *, lock: bool = False):
+    """Check verified identities and fingerprint both their identity and assigned role state."""
+    identifiers = [row["assignment_identifier"] for row in rows]
+    people_query = select(VerifiedStoreUser).where(
+        VerifiedStoreUser.assignment_identifier.in_(identifiers)
+    )
+    assignments_query = select(UserRoleAssignment).where(
+        UserRoleAssignment.assignment_identifier.in_(identifiers)
+    )
+    if lock:
+        people_query = people_query.with_for_update()
+        assignments_query = assignments_query.with_for_update()
+    people = (
+        {
+            person.assignment_identifier: person
+            for person in (await db.execute(people_query)).scalars()
+        }
+        if identifiers
+        else {}
+    )
+    assignments = (
+        {
+            assignment.assignment_identifier: assignment
+            for assignment in (await db.execute(assignments_query)).scalars()
+        }
+        if identifiers
+        else {}
+    )
+    errors: list[dict] = []
+    preview_rows: list[dict] = []
+    snapshot: list[dict] = []
+    counts = {"Create": 0, "Replace": 0, "Unchanged": 0}
+    for row in rows:
+        identifier = row["assignment_identifier"]
+        person = people.get(identifier)
+        current = assignments.get(identifier)
+        if person is None:
+            errors.append(
+                {
+                    "row": row["row"],
+                    "message": "Identity has not signed in through Ontology Studio yet; assign a role after their first sign-in",
+                }
+            )
+        elif person.role == "admin":
+            errors.append(
+                {
+                    "row": row["row"],
+                    "message": "Studio administrators keep their Studio role and cannot receive a Nimbus business role",
+                }
+            )
+        before = (
+            {
+                "role": current.role,
+                "reason": current.reason,
+                "assigned_at": current.assigned_at.isoformat() if current.assigned_at else None,
+            }
+            if current
+            else None
+        )
+        action = (
+            "Create"
+            if current is None
+            else "Unchanged"
+            if current.role == row["role"] and current.reason == row["reason"]
+            else "Replace"
+        )
+        counts[action] += 1
+        preview_rows.append(
+            {
+                **row,
+                "display_name": person.display_name if person else "",
+                "user_identifier": person.user_identifier if person else "",
+                "signed_in_role": person.role if person else "",
+                "current_role": current.role if current else None,
+                "action": action,
+            }
+        )
+        snapshot.append(
+            {
+                "input": row,
+                "identity": (
+                    {
+                        "identity_id": person.identity_id,
+                        "user_identifier": person.user_identifier,
+                        "role": person.role,
+                    }
+                    if person
+                    else None
+                ),
+                "before": before,
+            }
+        )
+    token = hashlib.sha256(
+        json.dumps(snapshot, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+    return preview_rows, counts, errors, token, assignments, people
 
 
 def role_assignment_view(person: VerifiedStoreUser, assignment: UserRoleAssignment | None) -> dict:
@@ -1402,17 +1636,33 @@ def role_assignment_view(person: VerifiedStoreUser, assignment: UserRoleAssignme
 async def list_role_assignments(
     q: str | None = Query(default=None, max_length=100),
     assigned: Literal["all", "assigned", "unassigned"] = "all",
+    assigned_role: Literal[
+        "finance",
+        "it",
+        "analyst",
+        "sales_audit_manager",
+        "auditor",
+        "store_manager",
+        "store_staff",
+    ]
+    | None = None,
+    inactive_days: int | None = Query(default=None, ge=1, le=3650),
     page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=200),
+    format: Literal["json", "csv"] = "json",
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_role("admin")),
 ):
     """People who have signed in through Ontology Studio, with the business role Nimbus gives each."""
     filters = []
+    if inactive_days is not None:
+        filters.append(VerifiedStoreUser.last_seen_at < utcnow() - timedelta(days=inactive_days))
     if assigned == "assigned":
         filters.append(UserRoleAssignment.assignment_identifier.is_not(None))
     elif assigned == "unassigned":
         filters.append(UserRoleAssignment.assignment_identifier.is_(None))
+    if assigned_role is not None:
+        filters.append(UserRoleAssignment.role == assigned_role)
     needle = (q or "").strip().lower()
     if needle:
         filters.append(
@@ -1439,16 +1689,55 @@ async def list_role_assignments(
             .where(*filters)
         )
     ).scalar_one()
-    rows = (
-        await db.execute(
-            joined.where(*filters)
-            .order_by(
-                func.lower(VerifiedStoreUser.display_name), VerifiedStoreUser.assignment_identifier
+    ordered = joined.where(*filters).order_by(
+        func.lower(VerifiedStoreUser.display_name), VerifiedStoreUser.assignment_identifier
+    )
+    if format == "csv":
+        row_limit = 50_000
+
+        async def generate():
+            yield csv_row(
+                (
+                    "assignment_identifier",
+                    "user_identifier",
+                    "display_name",
+                    "signed_in_role",
+                    "assigned_role",
+                    "assigned_by",
+                    "assigned_at",
+                    "reason",
+                    "last_seen_at",
+                )
             )
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+            result = await db.stream(ordered.limit(row_limit).execution_options(yield_per=1000))
+            try:
+                async for person, assignment in result:
+                    item = role_assignment_view(person, assignment)
+                    yield csv_row(
+                        (
+                            item["assignment_identifier"],
+                            item["user_identifier"],
+                            item["display_name"],
+                            item["signed_in_role"],
+                            item["assigned_role"],
+                            item["assigned_by"],
+                            item["assigned_at"].isoformat() if item["assigned_at"] else None,
+                            item["reason"],
+                            item["last_seen_at"].isoformat() if item["last_seen_at"] else None,
+                        )
+                    )
+            finally:
+                await result.close()
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="business-role-assignments.csv"',
+                "X-Role-Assignments-Truncated": str(total > row_limit).lower(),
+            },
         )
-    ).all()
+    rows = (await db.execute(ordered.offset((page - 1) * page_size).limit(page_size))).all()
     return {
         "roles": [
             {"key": role, "label": access.ROLE_LABELS.get(role, role)} for role in ASSIGNABLE_ROLES
@@ -1463,6 +1752,106 @@ async def list_role_assignments(
     }
 
 
+@router.post("/api/access/role-assignments/import/preview")
+async def preview_role_assignment_import(
+    body: RoleAssignmentImportBody,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("admin")),
+):
+    rows, errors = parse_role_assignment_csv(body.csv_text)
+    if not errors:
+        preview, counts, identity_errors, token, _, _ = await preview_role_assignment_rows(db, rows)
+        errors.extend(identity_errors)
+    else:
+        preview, counts, token = [], {"Create": 0, "Replace": 0, "Unchanged": 0}, None
+    return {
+        "valid": not errors and bool(rows),
+        "preview_token": token if not errors else None,
+        "rows": preview,
+        "counts": counts,
+        "errors": errors[:100],
+        "errors_truncated": len(errors) > 100,
+    }
+
+
+@router.post("/api/access/role-assignments/import")
+async def apply_role_assignment_import(
+    body: RoleAssignmentImportBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("admin")),
+):
+    if not body.preview_token:
+        raise HTTPException(status_code=422, detail="Preview this CSV before applying it")
+    rows, errors = parse_role_assignment_csv(body.csv_text)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors[:100]})
+    preview, counts, identity_errors, token, existing, people = await preview_role_assignment_rows(
+        db, rows, lock=True
+    )
+    if identity_errors:
+        raise HTTPException(status_code=422, detail={"errors": identity_errors[:100]})
+    if token != body.preview_token:
+        raise HTTPException(
+            status_code=409,
+            detail="Role assignments changed after preview. Preview the file again before applying it.",
+        )
+    actor = user.get("user") or "ontology.user"
+    now = utcnow()
+    applied = {"created": 0, "replaced": 0, "unchanged": counts["Unchanged"]}
+    for item in preview:
+        if item["action"] == "Unchanged":
+            continue
+        identifier = item["assignment_identifier"]
+        person = people[identifier]
+        row = existing.get(identifier)
+        before = {"role": row.role, "reason": row.reason} if row else None
+        if row is None:
+            row = UserRoleAssignment(
+                assignment_identifier=identifier,
+                role=item["role"],
+                reason=item["reason"],
+                assigned_by=actor,
+                assigned_at=now,
+            )
+            db.add(row)
+            applied["created"] += 1
+        else:
+            row.role = item["role"]
+            row.reason = item["reason"]
+            row.assigned_by = actor
+            row.assigned_at = now
+            applied["replaced"] += 1
+        db.add(
+            AuditEvent(
+                id=str(uuid.uuid4()),
+                event_type="ROLE_ASSIGNMENT_SET",
+                actor=actor,
+                object_type="UserRoleAssignment",
+                object_id=identifier,
+                action_description=(
+                    f"{person.display_name} assigned the "
+                    f"{access.ROLE_LABELS.get(item['role'], item['role'])} role by CSV import: "
+                    f"{item['reason']}"
+                ),
+                before_state=before,
+                after_state={
+                    "role": item["role"],
+                    "reason": item["reason"],
+                    "import_source": "CSV",
+                },
+            )
+        )
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A role assignment changed while the import was being applied. Preview the file again.",
+        ) from exc
+    return {"applied": applied}
+
+
 @router.put("/api/access/role-assignments")
 async def set_role_assignment(
     body: RoleAssignmentInput,
@@ -1475,6 +1864,11 @@ async def set_role_assignment(
         raise HTTPException(
             status_code=422,
             detail="This identity has not signed in through Ontology Studio yet. Ask them to sign in first.",
+        )
+    if person.role == "admin":
+        raise HTTPException(
+            status_code=422,
+            detail="Studio administrators keep their Studio role and cannot receive a Nimbus business role.",
         )
     actor = user.get("user") or "ontology.user"
     row = (

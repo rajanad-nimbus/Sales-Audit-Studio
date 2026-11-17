@@ -19,17 +19,17 @@ const PAGE_SIZES = [25, 50, 100, 200];
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 
 function initialReportState() {
-  const params =
-    typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(window.location.search);
   const requestedPage = Number(params.get('page'));
   const requestedPageSize = Number(params.get('page_size'));
   return {
     start: params.has('start') ? params.get('start') || '' : daysAgo(7),
     end: params.get('end') || '',
     storeId: (params.get('store_id') || '').slice(0, 50),
-    page: Number.isInteger(requestedPage) && requestedPage > 0 && requestedPage <= 100_000
-      ? requestedPage
-      : 1,
+    page:
+      Number.isInteger(requestedPage) && requestedPage > 0 && requestedPage <= 100_000
+        ? requestedPage
+        : 1,
     pageSize: PAGE_SIZES.includes(requestedPageSize) ? requestedPageSize : 50,
   };
 }
@@ -39,17 +39,17 @@ function initialReportState() {
  * large store estate does not load everything on arrival; widen it when more is needed.
  */
 export function ReportView({ report }: { report: ReportPage }) {
-  const [initial] = useState(initialReportState);
-  const [start, setStart] = useState(initial.start);
-  const [end, setEnd] = useState(initial.end);
-  const [storeId, setStoreId] = useState(initial.storeId);
+  const [start, setStart] = useState(daysAgo(7));
+  const [end, setEnd] = useState('');
+  const [storeId, setStoreId] = useState('');
   const [stores, setStores] = useState<string[]>([]);
-  const [page, setPage] = useState(initial.page);
-  const [pageSize, setPageSize] = useState(initial.pageSize);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [data, setData] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [filtersReady, setFiltersReady] = useState(false);
   const range = {
     start: start || undefined,
     end: end || undefined,
@@ -64,6 +64,17 @@ export function ReportView({ report }: { report: ReportPage }) {
   }, []);
 
   useEffect(() => {
+    const initial = initialReportState();
+    setStart(initial.start);
+    setEnd(initial.end);
+    setStoreId(initial.storeId);
+    setPage(initial.page);
+    setPageSize(initial.pageSize);
+    setFiltersReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!filtersReady) return;
     const params = new URLSearchParams(window.location.search);
     for (const key of ['start', 'end', 'store_id', 'page', 'page_size']) params.delete(key);
     if (start) params.set('start', start);
@@ -76,7 +87,7 @@ export function ReportView({ report }: { report: ReportPage }) {
     if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
       window.history.replaceState(null, '', nextUrl);
     }
-  }, [start, end, storeId, page, pageSize]);
+  }, [filtersReady, start, end, storeId, page, pageSize]);
 
   const load = useCallback(async () => {
     setData(null);
@@ -97,8 +108,8 @@ export function ReportView({ report }: { report: ReportPage }) {
     }
   }, [report.name, start, end, storeId, page, pageSize]);
   useEffect(() => {
-    load();
-  }, [load]);
+    if (filtersReady) load();
+  }, [filtersReady, load]);
 
   const download = async () => {
     setNotice(null);

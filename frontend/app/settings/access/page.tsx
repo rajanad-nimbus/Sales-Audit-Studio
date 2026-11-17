@@ -67,6 +67,9 @@ export default function AccessPage() {
   const [selectedTraits, setSelectedTraits] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearReason, setClearReason] = useState('');
+  const [clearingAssignment, setClearingAssignment] = useState(false);
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [assignmentNotice, setAssignmentNotice] = useState<string | null>(null);
   const [assignmentQuery, setAssignmentQuery] = useState('');
@@ -75,6 +78,7 @@ export default function AccessPage() {
     'all'
   );
   const [directoryScope, setDirectoryScope] = useState<'all' | 'assigned' | 'unassigned'>('all');
+  const [directoryInactiveDays, setDirectoryInactiveDays] = useState('');
   const [directoryPage, setDirectoryPage] = useState(1);
   const [directoryTotal, setDirectoryTotal] = useState(0);
   const [directoryPages, setDirectoryPages] = useState(1);
@@ -145,6 +149,7 @@ export default function AccessPage() {
             q: directoryQuery.trim() || undefined,
             role: directoryRole,
             scope_status: directoryScope,
+            inactive_days: directoryInactiveDays || undefined,
             page: directoryPage,
             page_size: 50,
           },
@@ -167,13 +172,23 @@ export default function AccessPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [me?.role, directoryQuery, directoryRole, directoryScope, directoryPage, assignmentRefresh]);
+  }, [
+    me?.role,
+    directoryQuery,
+    directoryRole,
+    directoryScope,
+    directoryInactiveDays,
+    directoryPage,
+    assignmentRefresh,
+  ]);
 
   const editAssignment = (assignment: Assignment) => {
     setUserIdentifier(assignment.user_identifier);
     setSelectedStores(assignment.store_ids);
     setSelectedTraits(assignment.location_traits);
     setEditing(true);
+    setConfirmingClear(false);
+    setClearReason('');
     setAssignmentError(null);
     setAssignmentNotice(null);
   };
@@ -182,6 +197,8 @@ export default function AccessPage() {
     setSelectedStores([]);
     setSelectedTraits([]);
     setEditing(false);
+    setConfirmingClear(false);
+    setClearReason('');
     setAssignmentError(null);
     setAssignmentNotice(null);
   };
@@ -207,6 +224,28 @@ export default function AccessPage() {
       setAssignmentError(e?.response?.data?.detail ?? 'Could not save this store assignment.');
     } finally {
       setSaving(false);
+    }
+  };
+  const clearAssignment = async () => {
+    if (!userIdentifier.trim() || clearReason.trim().length < 10) return;
+    setClearingAssignment(true);
+    setAssignmentError(null);
+    try {
+      const { data } = await api.post('/api/access/store-assignments/clear', {
+        user_identifier: userIdentifier,
+        reason: clearReason.trim(),
+      });
+      newAssignment();
+      setConfirmingClear(false);
+      setClearReason('');
+      setAssignmentRefresh((current) => current + 1);
+      setAssignmentNotice(
+        `Cleared the local store override for ${data.user_identifier}. Identity-provider store claims are now effective.`
+      );
+    } catch (e: any) {
+      setAssignmentError(e?.response?.data?.detail ?? 'Could not clear this store assignment.');
+    } finally {
+      setClearingAssignment(false);
     }
   };
   if (error) return <Alert tone="error">{error}</Alert>;
@@ -258,6 +297,8 @@ export default function AccessPage() {
     setSelectedStores([]);
     setSelectedTraits([]);
     setEditing(false);
+    setConfirmingClear(false);
+    setClearReason('');
     setAssignmentError(null);
     setAssignmentNotice(null);
   };
@@ -290,6 +331,7 @@ export default function AccessPage() {
       if (directoryQuery.trim()) params.set('q', directoryQuery.trim());
       if (directoryRole !== 'all') params.set('role', directoryRole);
       if (directoryScope !== 'all') params.set('scope_status', directoryScope);
+      if (directoryInactiveDays) params.set('inactive_days', directoryInactiveDays);
       const { data, headers } = await api.get(
         `/api/access/verified-store-users?${params.toString()}`,
         { responseType: 'blob' }
@@ -493,6 +535,20 @@ export default function AccessPage() {
                   <option value="unassigned">Identity claims only</option>
                 </select>
               </Field>
+              <Field label="Last seen">
+                <select
+                  value={directoryInactiveDays}
+                  onChange={(event) => {
+                    setDirectoryInactiveDays(event.target.value);
+                    setDirectoryPage(1);
+                  }}
+                >
+                  <option value="">Any time</option>
+                  <option value="30">Not seen for 30+ days</option>
+                  <option value="90">Not seen for 90+ days</option>
+                  <option value="180">Not seen for 180+ days</option>
+                </select>
+              </Field>
               <Button
                 size="sm"
                 variant="secondary"
@@ -507,6 +563,12 @@ export default function AccessPage() {
                   : `${directoryTotal} matching employee${directoryTotal === 1 ? '' : 's'}`}
               </span>
             </div>
+            {directoryInactiveDays && (
+              <p className="hint">
+                Inactivity is a review signal only. Confirm the person’s status in Ontology Studio
+                before clearing access.
+              </p>
+            )}
             {directoryNotice && (
               <Alert tone="warning" onDismiss={() => setDirectoryNotice(null)}>
                 {directoryNotice}
@@ -701,11 +763,56 @@ export default function AccessPage() {
                 {saving ? 'Saving…' : editing ? 'Save assignment' : 'Assign stores'}
               </Button>
               {editing && (
-                <Button variant="secondary" disabled={saving} onClick={newAssignment}>
-                  New assignment
-                </Button>
+                <>
+                  <Button variant="secondary" disabled={saving} onClick={newAssignment}>
+                    New assignment
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={saving || clearingAssignment}
+                    onClick={() => setConfirmingClear((current) => !current)}
+                  >
+                    Clear local override
+                  </Button>
+                </>
               )}
             </div>
+            {confirmingClear && (
+              <div className="stack stack-sm" style={{ marginTop: '1rem' }}>
+                <Alert tone="warning">
+                  Clearing removes the ZeTSA override. If this identity remains active in Ontology
+                  Studio, its store claims become effective again. A reason is recorded in the audit
+                  trail.
+                </Alert>
+                <Field label="Reason for clearing this assignment">
+                  <textarea
+                    value={clearReason}
+                    maxLength={2000}
+                    rows={3}
+                    onChange={(event) => setClearReason(event.target.value)}
+                  />
+                </Field>
+                <div className="row-actions">
+                  <Button
+                    variant="primary"
+                    disabled={clearingAssignment || clearReason.trim().length < 10}
+                    onClick={() => void clearAssignment()}
+                  >
+                    {clearingAssignment ? 'Clearing…' : 'Confirm clear'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={clearingAssignment}
+                    onClick={() => {
+                      setConfirmingClear(false);
+                      setClearReason('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
           <Card flush title="Current assignments">
             {assignments === null || assignmentLoading ? (

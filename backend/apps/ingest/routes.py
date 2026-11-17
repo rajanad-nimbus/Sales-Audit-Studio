@@ -669,6 +669,7 @@ async def simulate_ingest(
 async def run_reconciliation(
     business_date: Annotated[str, Query(min_length=10, max_length=10)],
     store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    store_ids: Annotated[list[str] | None, Query(max_length=500)] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("it", "finance", "admin")),
     request: Request = None,
@@ -677,25 +678,28 @@ async def run_reconciliation(
         validate_business_date(business_date)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    store_ids = scope.allowed_stores(user)
+    if store_id is not None and store_ids is not None:
+        raise HTTPException(status_code=422, detail="Use store_id or store_ids, not both")
+    allowed = scope.allowed_stores(user)
     if store_id is not None:
         scope.require_store(user, store_id)
-        store_ids = {store_id}
+        selected_stores = {store_id}
+    elif store_ids is not None:
+        if not store_ids or any(
+            not value.strip() or len(value.strip()) > 50 for value in store_ids
+        ):
+            raise HTTPException(status_code=422, detail="store_ids must contain valid store IDs")
+        selected_stores = {value.strip() for value in store_ids}
+        for selected_store in selected_stores:
+            scope.require_store(user, selected_store)
+    else:
+        selected_stores = set(allowed) if allowed is not None else None
     try:
-        result = await reconciliation.reconcile(db, business_date, store_ids=store_ids)
+        result = await auto_audit.reconcile_store_scope(
+            db, business_date, selected_stores, request=request
+        )
     except reconciliation.ReconciliationCapacityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    await db.commit()
-    try:
-        from apps.exports.routes import auto_export_valid_transactions
-
-        result["automatic_exports"] = await auto_export_valid_transactions(
-            db, request, store_ids=store_ids
-        )
-    except Exception as exc:
-        await db.rollback()
-        logger.exception("Automatic transaction export could not start after reconciliation")
-        result["automatic_exports"] = [{"preparation_error": type(exc).__name__}]
     return result
 
 

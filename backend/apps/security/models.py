@@ -40,7 +40,7 @@ class UserRoleAssignment(Base):
 
 
 class VerifiedStoreUser(Base):
-    """Minimal directory cache of store-scoped identities verified by Ontology Studio."""
+    """Minimal directory cache of non-administrator identities verified by Ontology Studio."""
 
     __tablename__ = "verified_store_users"
 

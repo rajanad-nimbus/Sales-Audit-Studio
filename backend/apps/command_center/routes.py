@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents.action_center import row as case_row
 from apps.agents.action_center import summary as work_summary
-from apps.agents.action_center_filters import me_name
+from apps.agents.action_center_filters import me_identifier
 from apps.audit.error_routes import overview as error_overview
 from apps.audit.routes import recent_events
 from apps.cases.models import Case
@@ -55,14 +55,16 @@ KPI_WINDOW_DAYS = int(os.getenv("NIMBUS_KPI_WINDOW_DAYS", "30"))
 # A store day is on time when it is closed within NIMBUS_CLOSE_TARGET_DAYS of its business date.
 CLOSE_TARGET_DAYS = int(os.getenv("NIMBUS_CLOSE_TARGET_DAYS", "3"))
 
-WORK_ROLES = ("admin", "analyst", "finance", "it", "auditor")
-STORE_DAY_ROLES = ("admin", "finance", "it")
-ERROR_ROLES = ("admin", "analyst", "finance", "it", "auditor")
+WORK_ROLES = ("admin", "analyst", "sales_audit_manager", "finance", "it", "auditor")
+# Every Command Center role can open the Store Days workspace. Keep its audit-status summary
+# available to the Sales Auditor and Internal Auditor roles as well as their managers.
+STORE_DAY_ROLES = ("admin", "analyst", "sales_audit_manager", "finance", "it", "auditor")
+ERROR_ROLES = ("admin", "analyst", "sales_audit_manager", "finance", "it", "auditor")
 EXPORT_ROLES = ("admin", "finance", "it", "auditor")
 HEALTH_ROLES = ("admin", "finance", "it", "auditor")
-CASH_ROLES = ("admin", "analyst", "finance", "it", "auditor")
-ACTIVITY_ROLES = ("admin", "analyst", "finance", "it", "auditor")
-KPI_ROLES = ("admin", "analyst", "finance", "it", "auditor")
+CASH_ROLES = ("admin", "analyst", "sales_audit_manager", "finance", "it", "auditor")
+ACTIVITY_ROLES = ("admin", "analyst", "sales_audit_manager", "finance", "it", "auditor")
+KPI_ROLES = ("admin", "analyst", "sales_audit_manager", "finance", "it", "auditor")
 CASH_WINDOW_DAYS = 7
 ACTIVITY_ROWS = 8
 HOTSPOT_ROWS = 5
@@ -85,7 +87,9 @@ def close_blocker_counts():
     )
 
 
-async def prioritized_cases(db: AsyncSession, filters: list, user: dict, now: datetime) -> list[dict]:
+async def prioritized_cases(
+    db: AsyncSession, filters: list, user: dict, now: datetime
+) -> list[dict]:
     blockers = close_blocker_counts()
     statement = (
         select(Case, func.coalesce(blockers.c.close_blocking_errors, 0))
@@ -115,7 +119,7 @@ async def queue(db: AsyncSession, user: dict) -> list[dict]:
 async def mine(db: AsyncSession, user: dict) -> list[dict]:
     """Open cases assigned to the signed-in user, nearest SLA first."""
     now = datetime.now(UTC)
-    filters = [Case.status != "Closed", Case.assigned_to == me_name(user)]
+    filters = [Case.status != "Closed", func.lower(Case.assigned_to) == me_identifier(user)]
     return await prioritized_cases(db, filters, user, now)
 
 

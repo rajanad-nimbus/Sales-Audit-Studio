@@ -7,12 +7,23 @@ is never the control; this is.
 
 from dataclasses import dataclass
 
-ROLES = ("admin", "finance", "it", "analyst", "auditor", "store_manager", "store_staff", "viewer")
+ROLES = (
+    "admin",
+    "finance",
+    "it",
+    "analyst",
+    "sales_audit_manager",
+    "auditor",
+    "store_manager",
+    "store_staff",
+    "viewer",
+)
 ROLE_LABELS = {
     "admin": "Administrator",
     "finance": "Finance Approver",
     "it": "IT Support Admin",
     "analyst": "Sales Auditor",
+    "sales_audit_manager": "Sales Audit Manager",
     "auditor": "Internal Auditor",
     "store_manager": "Store Manager",
     "store_staff": "Store Sales Staff",
@@ -406,7 +417,11 @@ OPEN_PATHS = {
 
 
 def can_open(role: str, screen: Screen) -> bool:
-    return role == "admin" or role in screen.roles
+    return (
+        role == "admin"
+        or role in screen.roles
+        or (role == "sales_audit_manager" and "analyst" in screen.roles)
+    )
 
 
 def screens_for(role: str) -> list[dict]:

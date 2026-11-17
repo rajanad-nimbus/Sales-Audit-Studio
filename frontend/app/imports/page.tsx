@@ -47,6 +47,15 @@ interface Recon {
   matched_pairs: number;
   exceptions: Record<string, number>;
   cases_created: number;
+  store_days?: StoreDayRunSummary;
+}
+interface StoreDayRunSummary {
+  opened: number;
+  totaled: number;
+  closed: number;
+  needs_review: number;
+  failed: number;
+  automatic_close?: boolean;
 }
 interface Delivery {
   source_system: string;
@@ -106,8 +115,10 @@ interface AutomaticAuditResult {
   runs: {
     business_date: string;
     stores: number;
+    store_ids: string[];
     transactions_examined?: number;
     cases_created?: number;
+    store_days?: StoreDayRunSummary;
     error?: string;
   }[];
 }
@@ -660,20 +671,41 @@ export default function ImportsPage() {
       setUploadBusy(false);
     }
   };
-  const runManualReconciliation = async () => {
-    if (!reconcileDate) {
+  const runManualReconciliation = async (date = reconcileDate, storeIds?: string[]) => {
+    if (!date) {
       setReconcileError('Choose the business date to audit.');
       return;
     }
+    setReconcileDate(date);
     setReconcileBusy(true);
     setReconcileError('');
     setManualRecon(null);
     try {
-      const { data } = await api.post<Recon>('/api/reconcile', null, {
-        params: { business_date: reconcileDate },
-      });
+      const params = new URLSearchParams({ business_date: date });
+      storeIds?.forEach((storeId) => params.append('store_ids', storeId));
+      const { data } = await api.post<Recon>(`/api/reconcile?${params.toString()}`, null);
       setManualRecon(data);
-      toast(`Reconciliation completed for ${reconcileDate}.`, 'success');
+      setUploadResult((current) => {
+        if (!current?.automatic_audit?.enabled) return current;
+        return {
+          ...current,
+          automatic_audit: {
+            ...current.automatic_audit,
+            runs: current.automatic_audit.runs.map((run) =>
+              run.business_date === date
+                ? {
+                    ...run,
+                    error: undefined,
+                    transactions_examined: data.transactions_examined,
+                    cases_created: data.cases_created,
+                    store_days: data.store_days,
+                  }
+                : run
+            ),
+          },
+        };
+      });
+      toast(`Reconciliation completed for ${date}.`, 'success');
       await load();
     } catch (e: unknown) {
       setReconcileError(apiError(e, 'Reconciliation could not be completed.'));
@@ -1163,12 +1195,43 @@ export default function ImportsPage() {
                     <div className="stack stack-sm">
                       <b>Automatic audit after import</b>
                       {uploadResult.automatic_audit.runs.map((auditRun) => (
-                        <p className="hint" key={`${auditRun.business_date}:${auditRun.stores}`}>
-                          {auditRun.business_date} · {n(auditRun.stores)} store(s) ·{' '}
-                          {auditRun.error
-                            ? auditRun.error
-                            : `${n(auditRun.transactions_examined ?? 0)} transactions checked · ${n(auditRun.cases_created ?? 0)} cases raised`}
-                        </p>
+                        <div
+                          className="stack stack-sm"
+                          key={`${auditRun.business_date}:${auditRun.stores}`}
+                        >
+                          <p className="hint">
+                            {auditRun.business_date} · {n(auditRun.stores)} store(s) ·{' '}
+                            {auditRun.error
+                              ? auditRun.error
+                              : `${n(auditRun.transactions_examined ?? 0)} transactions checked · ${n(auditRun.cases_created ?? 0)} cases raised`}
+                          </p>
+                          {auditRun.store_days && (
+                            <p className="hint">
+                              Store days: {n(auditRun.store_days.opened)} opened ·{' '}
+                              {n(auditRun.store_days.totaled)} totaled ·{' '}
+                              {n(auditRun.store_days.closed)} closed ·{' '}
+                              {n(auditRun.store_days.needs_review)} need review ·{' '}
+                              {n(auditRun.store_days.failed)} failed
+                            </p>
+                          )}
+                          {auditRun.error && canReconcile && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={reconcileBusy}
+                              onClick={() =>
+                                void runManualReconciliation(
+                                  auditRun.business_date,
+                                  auditRun.store_ids
+                                )
+                              }
+                            >
+                              {reconcileBusy
+                                ? 'Retrying reconciliation…'
+                                : `Retry reconciliation for ${auditRun.business_date}`}
+                            </Button>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
@@ -1211,6 +1274,15 @@ export default function ImportsPage() {
                       <span>
                         {n(manualRecon.transactions_examined)} transactions examined ·{' '}
                         {n(manualRecon.matched_pairs)} matched pairs
+                        {manualRecon.store_days && (
+                          <>
+                            {' · '}
+                            {n(manualRecon.store_days.opened)} store days opened ·{' '}
+                            {n(manualRecon.store_days.totaled)} totaled ·{' '}
+                            {n(manualRecon.store_days.closed)} closed ·{' '}
+                            {n(manualRecon.store_days.needs_review)} need review
+                          </>
+                        )}
                       </span>
                       <b>{n(manualRecon.cases_created)} cases raised</b>
                     </div>

@@ -3,10 +3,11 @@
 import logging
 import uuid
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.csv_export import csv_row
 from apps.database_errors import violates_unique_constraint
 from apps.operations.models import RetentionPolicy, RetentionRun
 from apps.operations.retention import (
@@ -29,6 +31,7 @@ from apps.security.authentication import require_role
 
 router = APIRouter(prefix="/api/operations", tags=["Production operations"])
 logger = logging.getLogger(__name__)
+RETENTION_RUN_EXPORT_LIMIT = 50_000
 
 
 class RetentionBody(BaseModel):
@@ -163,36 +166,114 @@ class RetentionRunBody(BaseModel):
 
 @router.get("/retention/runs")
 async def retention_runs(
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    q: Annotated[str | None, Query(max_length=255)] = None,
+    dataset: Annotated[str | None, Query(max_length=50)] = None,
+    status: Annotated[str | None, Query(max_length=24)] = None,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    format: Literal["json", "csv"] = "json",
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_role("it")),
-) -> list[dict]:
-    rows = (
-        (
-            await db.execute(
-                select(RetentionRun).order_by(RetentionRun.created_at.desc()).limit(limit)
-            )
+):
+    filters = []
+    if dataset:
+        filters.append(RetentionRun.dataset == dataset)
+    if status:
+        filters.append(RetentionRun.status == status)
+    normalized_query = (q or "").strip().lower()
+    if normalized_query:
+        filters.append(
+            func.lower(RetentionRun.dataset).contains(normalized_query, autoescape=True)
+            | func.lower(RetentionRun.id).contains(normalized_query, autoescape=True)
+            | func.lower(RetentionRun.archive_location).contains(normalized_query, autoescape=True)
+            | func.lower(RetentionRun.archive_hash).contains(normalized_query, autoescape=True)
+            | func.lower(RetentionRun.error).contains(normalized_query, autoescape=True)
+            | func.lower(RetentionRun.performed_by).contains(normalized_query, autoescape=True)
         )
-        .scalars()
-        .all()
+    total = await db.scalar(select(func.count()).select_from(RetentionRun).where(*filters))
+    ordered = (
+        select(RetentionRun)
+        .where(*filters)
+        .order_by(RetentionRun.created_at.desc(), RetentionRun.id.desc())
     )
-    return [
-        {
-            "id": row.id,
-            "dataset": row.dataset,
-            "retain_days": row.retain_days,
-            "eligible_records": row.eligible_records,
-            "archived_records": row.archived_records,
-            "purged_records": row.purged_records,
-            "archive_location": row.archive_location,
-            "archive_hash": row.archive_hash,
-            "status": row.status,
-            "error": row.error,
-            "performed_by": row.performed_by,
-            "created_at": row.created_at,
-        }
-        for row in rows
-    ]
+    if format == "csv":
+
+        async def generate():
+            yield csv_row(
+                (
+                    "run_id",
+                    "dataset",
+                    "retain_days",
+                    "eligible_records",
+                    "archived_records",
+                    "purged_records",
+                    "status",
+                    "archive_location",
+                    "archive_hash",
+                    "error",
+                    "performed_by",
+                    "created_at",
+                )
+            )
+            result = await db.stream(
+                ordered.limit(RETENTION_RUN_EXPORT_LIMIT).execution_options(yield_per=1000)
+            )
+            try:
+                async for (row,) in result:
+                    yield csv_row(
+                        (
+                            row.id,
+                            row.dataset,
+                            row.retain_days,
+                            row.eligible_records,
+                            row.archived_records,
+                            row.purged_records,
+                            row.status,
+                            row.archive_location,
+                            row.archive_hash,
+                            row.error,
+                            row.performed_by,
+                            row.created_at.isoformat(),
+                        )
+                    )
+            finally:
+                await result.close()
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="retention-runs.csv"',
+                "X-Retention-Runs-Truncated": str(total > RETENTION_RUN_EXPORT_LIMIT).lower(),
+            },
+        )
+
+    rows = (
+        (await db.execute(ordered.offset((page - 1) * page_size).limit(page_size))).scalars().all()
+    )
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "dataset": row.dataset,
+                "retain_days": row.retain_days,
+                "eligible_records": row.eligible_records,
+                "archived_records": row.archived_records,
+                "purged_records": row.purged_records,
+                "archive_location": row.archive_location,
+                "archive_hash": row.archive_hash,
+                "status": row.status,
+                "error": row.error,
+                "performed_by": row.performed_by,
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+    }
 
 
 @router.post("/retention/{dataset}/run")

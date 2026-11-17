@@ -12,6 +12,29 @@ from apps.system.options import automatic_audit_after_import_enabled
 logger = logging.getLogger(__name__)
 
 
+async def reconcile_store_scope(
+    db: AsyncSession,
+    business_date: str,
+    store_ids: set[str] | None,
+    *,
+    request=None,
+) -> dict:
+    """Reconcile and complete the configured store-day handoff for one date/scope."""
+    result = await reconciliation.reconcile(db, business_date, store_ids=store_ids)
+    await db.commit()
+
+    from apps.store_days.automation import run_store_day_agent
+
+    result["store_days"] = await run_store_day_agent(db, business_date, store_ids=store_ids)
+    from apps.exports.routes import auto_export_valid_transactions
+
+    result["automatic_exports"] = await auto_export_valid_transactions(
+        db, request, store_ids=store_ids
+    )
+    await db.commit()
+    return result
+
+
 async def reconcile_after_import(
     db: AsyncSession,
     source: str,
@@ -41,24 +64,13 @@ async def reconcile_after_import(
     runs = []
     for business_date, store_ids in sorted(stores_by_date.items()):
         try:
-            result = await reconciliation.reconcile(db, business_date, store_ids=store_ids)
-            await db.commit()
-            from apps.store_days.automation import run_store_day_agent
-
-            store_days = await run_store_day_agent(db, business_date, store_ids=store_ids)
-            from apps.exports.routes import auto_export_valid_transactions
-
-            automatic_exports = await auto_export_valid_transactions(
-                db, request, store_ids=store_ids
-            )
-            await db.commit()
+            result = await reconcile_store_scope(db, business_date, store_ids, request=request)
             runs.append(
                 {
                     "business_date": business_date,
                     "stores": len(store_ids),
+                    "store_ids": sorted(store_ids),
                     **result,
-                    "store_days": store_days,
-                    "automatic_exports": automatic_exports,
                 }
             )
         except Exception as exc:
@@ -68,6 +80,7 @@ async def reconcile_after_import(
                 {
                     "business_date": business_date,
                     "stores": len(store_ids),
+                    "store_ids": sorted(store_ids),
                     "error": str(exc)
                     if isinstance(exc, reconciliation.ReconciliationCapacityError)
                     else f"Automatic audit failed ({type(exc).__name__})",
