@@ -9,7 +9,6 @@ import { useStores } from '@/lib/useStores';
 import { uiNavigationLabel } from '@/lib/ui-messages';
 
 const PERSONAS = [
-  ['analyst', 'Sales Auditor'],
   ['finance', 'Finance Approver'],
   ['it', 'IT Support Admin'],
   ['sales_audit_manager', 'Sales Audit Manager'],
@@ -160,11 +159,7 @@ export function UserMenu() {
                 <button
                   key={key}
                   className={me!.role === key ? 'on' : ''}
-                  onClick={() =>
-                    key === 'analyst'
-                      ? setPickStores((v) => (v === key ? null : key))
-                      : impersonate(key)
-                  }
+                  onClick={() => impersonate(key)}
                 >
               {tr(label)}
                 </button>

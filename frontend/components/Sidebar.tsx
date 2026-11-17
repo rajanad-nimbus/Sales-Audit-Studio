@@ -48,8 +48,10 @@ const icons: Record<string, React.ReactNode> = {
   ),
 };
 
+const iconColor = (name: string) => `var(--ic-${Object.keys(icons).indexOf(name) % 8})`;
+
 const Icon = ({ name }: { name: string }) => (
-  <span className="nav-tile">
+  <span className="nav-tile" style={{ '--ic': iconColor(name) } as React.CSSProperties}>
     <svg
       className="nav-icon"
       width="14"

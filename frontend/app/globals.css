@@ -5947,3 +5947,38 @@ button:active:not(:disabled) {
   flex-direction: column;
   gap: var(--space-md);
 }
+
+/* Colored icons: each sidebar icon carries its own hue (--ic); top-bar actions have fixed hues. */
+.menu-link .nav-tile,
+.menu-link.active .nav-tile {
+  color: var(--ic, var(--primary-text));
+  opacity: 1;
+}
+.navbar-actions > .nav-icon-btn:not(.help-trigger) {
+  color: var(--ic-amber);
+}
+.navbar-actions .help-trigger {
+  color: var(--ic-cyan);
+}
+.navbar-actions .notif .hdr-btn.icon {
+  color: var(--ic-orange);
+}
+
+/* Icon hues: bright on dark, deeper and saturated on light for contrast. */
+:root {
+  --ic-0: #38bdf8; --ic-1: #3b82f6; --ic-2: #22d3ee; --ic-3: #34d399;
+  --ic-4: #fbbf24; --ic-5: #fb923c; --ic-6: #f472b6; --ic-7: #a78bfa;
+  --ic-amber: #fbbf24; --ic-cyan: #22d3ee; --ic-orange: #fb923c;
+}
+:root[data-theme='light'] {
+  --ic-0: #0284c7; --ic-1: #1d4ed8; --ic-2: #0e7490; --ic-3: #059669;
+  --ic-4: #d97706; --ic-5: #ea580c; --ic-6: #db2777; --ic-7: #7c3aed;
+  --ic-amber: #d97706; --ic-cyan: #0e7490; --ic-orange: #ea580c;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --ic-0: #0284c7; --ic-1: #1d4ed8; --ic-2: #0e7490; --ic-3: #059669;
+    --ic-4: #d97706; --ic-5: #ea580c; --ic-6: #db2777; --ic-7: #7c3aed;
+    --ic-amber: #d97706; --ic-cyan: #0e7490; --ic-orange: #ea580c;
+  }
+}
