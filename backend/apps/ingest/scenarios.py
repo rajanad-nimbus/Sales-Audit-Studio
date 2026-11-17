@@ -68,12 +68,22 @@ def total_of(lines, discounts=()) -> Decimal:
     return gross - sum((Decimal(d["amount"]) for d in discounts), Decimal("0")) + tax
 
 
+# Demo tenders carry the client code their generic type usually is, so the per-tender totals have data.
+DEMO_CLIENT_CODE = {"Card": "VISA", "Cash": "CASH", "Voucher": "AGNCYVOU", "GiftCard": "GIFTCRDU"}
+
+
 def split(total: Decimal, tenders) -> list[dict]:
     """Share `total` between tender types (type, share); the last one takes the rounding remainder."""
     out, paid = [], Decimal("0")
     for n, (kind, share) in enumerate(tenders):
         amount = total - paid if n == len(tenders) - 1 else cents(total * Decimal(str(share)))
-        out.append({"tender_type": kind, "amount": str(amount)})
+        out.append(
+            {
+                "tender_type": kind,
+                "client_tender_code": DEMO_CLIENT_CODE.get(kind),
+                "amount": str(amount),
+            }
+        )
         paid += amount
     return out
 

@@ -503,13 +503,30 @@ def synthesize(
     detail = {
         "lines": lines,
         "discounts": discounts,
-        "tenders": [{"tender_type": "Card", "amount": str(total), "reference": "****4242"}],
+        "tenders": [
+            {
+                "tender_type": "Card",
+                "client_tender_code": "VISA",
+                "amount": str(total),
+                "reference": "****4242",
+            }
+        ],
     }
     if voucher_tender and total > Decimal("30"):
         part = (total * Decimal("0.2")).quantize(CENT)
         detail["tenders"] = [
-            {"tender_type": "Card", "amount": str(total - part), "reference": "****4242"},
-            {"tender_type": "Voucher", "amount": str(part), "reference": rng.choice(VOUCHERS)[0]},
+            {
+                "tender_type": "Card",
+                "client_tender_code": "VISA",
+                "amount": str(total - part),
+                "reference": "****4242",
+            },
+            {
+                "tender_type": "Voucher",
+                "client_tender_code": "AGNCYVOU",
+                "amount": str(part),
+                "reference": rng.choice(VOUCHERS)[0],
+            },
         ]
     if original_reference:
         detail["original_reference"] = original_reference
@@ -544,7 +561,14 @@ def synthesize_return(
             }
         ],
         "discounts": [],
-        "tenders": [{"tender_type": "Card", "amount": str(total), "reference": "****4242"}],
+        "tenders": [
+            {
+                "tender_type": "Card",
+                "client_tender_code": "VISA",
+                "amount": str(total),
+                "reference": "****4242",
+            }
+        ],
         "original_reference": original["source_record_id"],
         "return_reason": reason,
     }
