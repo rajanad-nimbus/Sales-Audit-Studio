@@ -109,12 +109,7 @@ async def effective_definitions(
             definitions.append(draft)
     if any(definition.location_traits for definition in definitions):
         traits = await store_location_traits(db, store_id)
-        definitions = [
-            definition
-            for definition in definitions
-            if not definition.location_traits
-            or set(definition.location_traits).intersection(traits)
-        ]
+        definitions = keep_trait_applicable(definitions, traits)
     if validate_all_combined:
         # Validate dependencies even when a store day has no transactions to calculate.
         validation_values = {
@@ -124,6 +119,50 @@ async def effective_definitions(
         }
         calculate_combined(definitions, validation_values)
     return definitions
+
+
+def trait_excluded(definition: AuditTotalDefinition) -> bool:
+    """True for a total this store's traits exclude, kept only so combined totals can count it as zero."""
+    return bool(getattr(definition, "trait_excluded", False))
+
+
+def keep_trait_applicable(
+    definitions: list[AuditTotalDefinition], traits: set[str]
+) -> list[AuditTotalDefinition]:
+    """Drop totals limited to traits the store lacks, except those a kept combined total still adds up.
+
+    An excluded operand counts as zero in its combined total rather than invalidating it, so a
+    BSI-only store can still evaluate a combined total that subtracts an Outlet-only one.
+    """
+    kept = [
+        definition
+        for definition in definitions
+        if not definition.location_traits or set(definition.location_traits).intersection(traits)
+    ]
+    kept_ids = {definition.id for definition in kept}
+    by_id = {definition.id: definition for definition in definitions}
+    needed: list[AuditTotalDefinition] = []
+    pending = [
+        by_id[operand]
+        for definition in kept
+        if definition.calculation_basis == "Combined"
+        for operand in definition.combined_total_ids
+        if operand in by_id and operand not in kept_ids
+    ]
+    while pending:
+        definition = pending.pop()
+        if definition.id in kept_ids:
+            continue
+        kept_ids.add(definition.id)
+        definition.trait_excluded = True
+        needed.append(definition)
+        if definition.calculation_basis == "Combined":
+            pending.extend(
+                by_id[operand]
+                for operand in definition.combined_total_ids
+                if operand in by_id and operand not in kept_ids
+            )
+    return [*kept, *needed]
 
 
 async def store_location_traits(db: AsyncSession, store_id: str) -> set[str]:
@@ -173,6 +212,9 @@ async def calculate_definitions(
     for definition in definitions:
         if definition.calculation_basis == "Combined":
             continue
+        if trait_excluded(definition):
+            grouped_values[definition.id], counts[definition.id] = {}, 0
+            continue
         candidates = matching_transactions(definition, rows)
         candidates = apply_restrictions(definition, candidates, related_rows)
         validate_definition_transactions(definition, candidates)
@@ -184,7 +226,20 @@ async def calculate_definitions(
     for identifier, grouped in grouped_values.items():
         for (dimension, _rollup_key), amount in grouped.items():
             values[identifier][dimension] += amount
-    return {identifier: dict(items) for identifier, items in values.items()}, counts, grouped_values
+    excluded = {definition.id for definition in definitions if trait_excluded(definition)}
+    return (
+        {
+            identifier: dict(items)
+            for identifier, items in values.items()
+            if identifier not in excluded
+        },
+        counts,
+        {
+            identifier: items
+            for identifier, items in grouped_values.items()
+            if identifier not in excluded
+        },
+    )
 
 
 def matching_transactions(definition: AuditTotalDefinition, rows: list[CanonicalTransaction]):
@@ -433,7 +488,7 @@ async def calculate_store_day(
     transaction_count = 0
     last_id: str | None = None
     for definition in definitions:
-        if definition.calculation_basis != "Combined":
+        if definition.calculation_basis != "Combined" and not trait_excluded(definition):
             definition_totals[definition.id]
             counts[definition.id] = 0
 

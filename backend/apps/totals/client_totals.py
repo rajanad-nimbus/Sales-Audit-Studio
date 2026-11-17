@@ -46,6 +46,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 4000\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "aecdb4d7-dd31-5727-bc9a-267e04a99afd",
@@ -82,6 +83,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 9012\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "886537e2-6f63-5f54-9bb6-ba976f361635",
@@ -118,6 +120,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 3020\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "cb3d2758-fcda-56ad-87fe-95dff74b1dbb",
@@ -159,6 +162,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 3120\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0ea19e0a-6c40-5334-bf7f-868f66adfb6e",
@@ -194,6 +198,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE in (1000,  4060) and \n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N' and SA_TRAN_HEAD.TRAN_TYPE NOT IN ('LOAN', 'PULL')",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0cacb3b8-eae7-5502-a9bb-25f51cdf4fbc",
@@ -230,6 +235,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE in (1000,  2000,2020,4060) and \n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N' and SA_TRAN_HEAD.TRAN_TYPE NOT IN ('LOAN', 'PULL')",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "6e828b00-25c1-5ea4-9fd9-c7362f96757e",
@@ -266,6 +272,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'\n"
         "SA_TRAN_HEAD.TRAN_TYPE NOT IN ('LOAN', 'PULL')",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ec54c199-a68c-54c5-bf7f-80ad360c0a04",
@@ -307,6 +314,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 3030\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "c96f8f30-262f-5469-ab2b-b9985be5f949",
@@ -343,6 +351,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 9011\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "8505c0dd-5cdb-5c6a-b03a-4a64d7970d35",
@@ -384,6 +393,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID  in 4040,4050\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "27c91646-17b3-57d7-a40d-4f7ba4cadfd1",
@@ -425,6 +435,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID =3010\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ccba28ab-79cb-5091-ac0d-3835ac6d07a5",
@@ -465,6 +476,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_GROUP = 'DCARD' and\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "fdd1e752-d40d-5f69-abde-47d9d5bf8b8e",
@@ -501,6 +513,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 3130\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "d9160b13-5826-5702-9b38-d36391cc5f85",
@@ -537,6 +550,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 9010\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "42ef6fed-3d20-56d6-951f-98567f89c0a9",
@@ -573,6 +587,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 4120\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e9777088-f6e4-52ce-9f1b-f09015285e99",
@@ -609,6 +624,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID= 3000\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "43a318b6-9272-52b6-84e0-0d4a013783c3",
@@ -645,6 +661,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 9013\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "d6209ef5-b02c-508d-9e23-649c94078e3c",
@@ -686,6 +703,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 4060\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b1dbef0b-6818-5274-9bbb-fdc63b42cf1b",
@@ -724,6 +742,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = AGNCYVOUP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b2c6c33f-78d3-513b-adac-51c044600b32",
@@ -762,6 +781,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = AMAZONP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "08ec5c95-af7d-5815-9c72-18624562c37a",
@@ -800,6 +820,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = AMEXP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "402c61f5-257f-5070-838d-f06b54db9534",
@@ -838,6 +859,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = BCOLLPLCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5b43f985-a37c-5a52-8fbc-a07f0c94538e",
@@ -876,6 +898,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = BEALLSCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ac4a5995-4537-583d-9008-bf45cdd2a26d",
@@ -914,6 +937,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = BLSPRDEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "3b0419aa-1865-5eb3-9301-eb15ddb43498",
@@ -952,6 +976,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SALESCLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7442437f-f336-5d82-b96b-babeb6ab183b",
@@ -990,6 +1015,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CASHP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "cfb2dba5-cbb4-532e-9930-2cecfcb87596",
@@ -1028,6 +1054,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CASHSHRTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0e06c76f-54bd-5a74-b8a5-9eecfc1cc347",
@@ -1059,6 +1086,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["+"],
         "sql_statement": "+ CHECKP\n+CASHP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "188a1f24-bff3-5e2a-b212-a7d5c390b1fe",
@@ -1097,6 +1125,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CHECKP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a29cd7b5-d663-5b78-a16e-e0b161dcd29b",
@@ -1135,6 +1164,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CHGORDERP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "f6fee45f-9b35-57f8-a032-87f7294cb09a",
@@ -1173,6 +1203,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CRPCHKREQP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7b35c899-93e5-5b92-8a9c-7e55f6244dcd",
@@ -1211,6 +1242,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CTSYMTRSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e1692243-dd44-5a7b-b183-94e33976b4e1",
@@ -1249,6 +1281,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CTSYSTPSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "00ce13f1-86c9-5fa4-a4f3-3c1ef2994df0",
@@ -1287,6 +1320,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CTSYSTREPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "d0dd7b1e-adbb-510c-9cb1-0298f51b9e07",
@@ -1325,6 +1359,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = CUSTGDWLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "bea69cb8-0d43-53b6-a683-f0b3c4d62094",
@@ -1363,6 +1398,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = DISCOVERP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5b5710a2-60ba-5def-b22c-ad89bbebf027",
@@ -1401,6 +1437,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = DISP_SUPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7b80bb02-8176-58b3-ba51-394d4c5139ae",
@@ -1439,6 +1476,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = DONATCOLLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "66183545-56bb-5527-91d6-92de2c88ef2a",
@@ -1477,6 +1515,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = DONATEP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b0d0d830-9ba4-5c69-9dae-35cb28640ac3",
@@ -1515,6 +1554,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = EBAYP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "3872f4a1-221f-5a84-b27d-c769d872f027",
@@ -1553,6 +1593,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = FCLTYRPRP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "c8cde75d-fd39-5e5f-a112-eb6e4baed909",
@@ -1591,6 +1632,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = FUNDDECP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ed0fac25-48dd-51c6-9eaf-e33ca6a41dfc",
@@ -1629,6 +1671,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = FUNDINCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "6e9d5894-b70d-50d7-b407-5d0252262d4f",
@@ -1667,6 +1710,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = GFTCRDSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "88f5d65d-ca93-579b-893d-9abe2c6884b3",
@@ -1705,6 +1749,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = GFTWRPSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e9cafdbf-b907-5e8d-86a3-c7d3ef8227b0",
@@ -1743,6 +1788,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = GIFTCRDUP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "9d54819f-5aae-505f-911c-beee568e69d0",
@@ -1781,6 +1827,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = HURCANDONP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "1d273757-372c-50c2-bd48-c6f1119329c4",
@@ -1819,6 +1866,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = INVENEXPEP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "194930ee-8985-5352-86c1-15ca870cd748",
@@ -1857,6 +1905,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = MASTERCDP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "30c534e4-1810-5714-88a6-be4e8b1f487e",
@@ -1895,6 +1944,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = MCVISADBTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "6e3d7c70-6015-545a-a9dc-7b53cd7a405e",
@@ -1933,6 +1983,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = MISC_EXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "da59a33c-fe12-57b5-9ac2-a2c36c9715f5",
@@ -1971,6 +2022,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = MISC_INCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "81e2a479-ebcd-5343-af26-24707deeac88",
@@ -2009,6 +2061,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = OCOLLPLCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "efc96e5d-406c-538d-83d5-62024b888654",
@@ -2047,6 +2100,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = OUTLTCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "78d9e7cb-ac8e-59a8-8f9f-24d326bb2a23",
@@ -2085,6 +2139,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = PAY_ADVP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5019140f-b3d7-53cd-94ba-4bcf9a843970",
@@ -2123,6 +2178,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = PAYADPYBKP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b11fea63-3316-551d-b1a8-1feb9c60f942",
@@ -2161,6 +2217,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = PAYPALP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0f8b0661-d0e4-51c4-a2fb-be7207c8fb10",
@@ -2199,6 +2256,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = POSTAGEP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "293bdd02-f9aa-5a00-862d-82de4bbb1bb9",
@@ -2237,6 +2295,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = POSTAGEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "69966c99-86ac-5ec5-b29b-ad1b59899d67",
@@ -2275,6 +2334,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = PROEXPLCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "d6d669cf-1031-555b-b545-455a1dd75b69",
@@ -2313,6 +2373,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = PROPSTEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7f9af67a-25d1-5cd7-8b0d-f0bd1a98447c",
@@ -2351,6 +2412,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = REMSLESCLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "8b760dbf-9040-5e75-a87a-6981f24b8127",
@@ -2389,6 +2451,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SALESCLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b08ba268-445c-5f35-bf24-5cc038dd3514",
@@ -2427,6 +2490,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SHIPAMZNP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a4c16017-419a-5fa6-b806-85c022dc709e",
@@ -2465,6 +2529,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SHIPEBAYP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ad4b20bd-4912-56bb-af22-c9bee92f6276",
@@ -2503,6 +2568,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SHIPWLMTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5d9edaf7-32fe-527a-8046-e5d3f840eeb8",
@@ -2541,6 +2607,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SLSTAXACCO",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "eb4a06a1-54ad-5933-9823-76fc18004cc4",
@@ -2579,6 +2646,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SLSTXAMZNP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "cf8faa04-f10c-5438-b1b8-95501205eff7",
@@ -2617,6 +2685,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SLSTXEBAYP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "f3a56170-0dad-54a8-9b63-fd6e354d90fe",
@@ -2655,6 +2724,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = SOSPSTEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "8928168d-cb02-50c1-97dd-1a76bf019195",
@@ -2693,6 +2763,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = STRCASHP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "af061986-716d-5652-adc6-643e1c8db1ae",
@@ -2731,6 +2802,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = STRTRAVELP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5a7bd54c-cace-5dfd-a39a-f6e8005ae5ab",
@@ -2769,6 +2841,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = VIRTGCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a7f04561-5ffc-53bf-9d4c-59e6e3fffce9",
@@ -2807,6 +2880,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = VISAP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ffa0fa60-f807-5525-bb39-41539714ae04",
@@ -2845,6 +2919,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = WALMARTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "aed19979-39d0-5b4e-883b-a33521d56510",
@@ -2883,6 +2958,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = MALLCERTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "f1408dee-9b16-53e7-b314-5ba49e6336a7",
@@ -2921,6 +2997,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = MCRCASHEDP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "91bd6633-604c-58e1-bd6b-ca8ef32e154c",
@@ -2952,6 +3029,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ AGNCYVOU\n- AGNCYVOUP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "f8cf72b1-ffa6-5efd-acfe-7832e3a84228",
@@ -2983,6 +3061,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ AMAZON\n- AMAZONP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ff269996-c9f0-52b7-a367-20b497f66ecf",
@@ -3014,6 +3093,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ AMEX\n- AMEXP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a53783a9-a58c-5c6c-a46e-944907797a32",
@@ -3045,6 +3125,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+BCOLLPLCC\n-BCOLLPLCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e390d8c0-48b7-5867-bcf4-87fc7d48ceeb",
@@ -3076,6 +3157,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ BEALLSCC\n- BEALLSCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0e1cb07a-563e-5e62-9e9d-c592013813e1",
@@ -3107,6 +3189,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+BLSPRDEXP\n-BLSPRDEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e70e87f3-8848-5133-bce7-ddbe1db59b4a",
@@ -3138,6 +3221,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ CASH\n- CASHP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5d3e657d-eda6-5ec3-a49d-3cdc6e4fe091",
@@ -3169,6 +3253,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ TTLCASH\n- TTLCASHP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "65e1d9c6-3616-57c7-95e5-921b25b3c9b9",
@@ -3200,6 +3285,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ CHECK\n- CHECKP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "1821c2a3-95be-53bd-9574-17f10a538009",
@@ -3231,6 +3317,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+CRPCHKREQ\n-CRPCHKREQP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b9fa4037-cd64-5d1d-921e-9c3b95eb4d1f",
@@ -3262,6 +3349,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+CTSYMTRSL\n-CTSYMTRSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7fbd648c-1c41-5787-801d-5bb7d5ae3749",
@@ -3293,6 +3381,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+CTSYSTPSL\n-CTSYSTPSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "c3e6612c-3ff4-530e-bc06-574011f855ed",
@@ -3324,6 +3413,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+CRTSYSTPRE\n-CTSYSTREPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "21f249ed-c0b0-5514-ac02-5ad0cacf470a",
@@ -3355,6 +3445,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+CUSTGDWL\n-CUSTGDWLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ced04eda-b866-5bb5-b75d-54159c2ff6b5",
@@ -3386,6 +3477,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ DISCOVER\n- DISCOVERP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "671af272-e75e-5959-90c5-a77a788504a0",
@@ -3417,6 +3509,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+DISP_SUP\n-DISP_SUPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "3f725146-10e3-549e-8632-50ed67ae8e6f",
@@ -3448,6 +3541,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+DONATCOLL\n-DONATCOLLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "997fdc7a-6849-5666-a303-bf95a34a5e4d",
@@ -3479,6 +3573,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+DONATE\n-DONATEP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "fb0eacd4-95d3-5a0e-bd82-3cbb4163d848",
@@ -3510,6 +3605,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ EBAY\n- EBAYP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a6dc93e9-23fc-5a51-8082-43f543788d3a",
@@ -3541,6 +3637,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+FCLTYRPR\n-FCLTYRPRP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "96087c14-ae87-588a-aa47-72356693f999",
@@ -3572,6 +3669,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+GFTCRDSL\n-GFTCRDSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "f5414687-5280-5082-a157-8386eff7e33f",
@@ -3603,6 +3701,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+GFTWRPSL\n-GFTWRPSLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ff821e3a-3a4e-595a-81fb-780feb68a0d3",
@@ -3634,6 +3733,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ GIFTCRDU\n- GIFTCRDUP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0135cb49-b8ed-521d-b111-8b4654ea677f",
@@ -3665,6 +3765,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+HURCANDON\n-HURCANDONP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "85ce7115-7cf1-5dfd-942f-99f86405da0a",
@@ -3696,6 +3797,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+INVENEXPE\n-INVENEXPEP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "828b7a4e-b8a3-53e8-bd8b-98558a00fc41",
@@ -3727,6 +3829,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ MASTERCD\n- MASTERCDP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "48319094-bcca-5e3e-98bb-673a81ccf603",
@@ -3758,6 +3861,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+MCVISADBT\n- MCVISADBTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "4648e2e2-7c75-58bf-99db-451069681bd7",
@@ -3789,6 +3893,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+MISC_EXP\n-MISC_EXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "1a1d602d-83e2-5ca0-9ec3-8b15defac766",
@@ -3820,6 +3925,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+MISC_INC\n-MISC_INCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "9f9cdcd9-7d7e-5371-9a9f-a56e8b3c4979",
@@ -3851,6 +3957,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+OCOLLPLCC\n-OCOLLPLCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ef4fdec7-4754-5ba0-a023-d5b922567fc5",
@@ -3882,6 +3989,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ OUTLTCC\n- OUTLTCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "50dbc0f8-3faa-5a10-b2ad-45835be6f546",
@@ -3914,6 +4022,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["+", "+"],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a87c627e-cab7-5dff-ae65-c2853095e38e",
@@ -3947,6 +4056,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["+", "+"],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "cc28770b-f483-5d06-9cd8-b4cd1ecf4478",
@@ -3978,6 +4088,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+PAY_ADV\n-PAY_ADVP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7f6ac859-dc8b-578e-9678-70e20a9e82bd",
@@ -4009,6 +4120,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+PAY_ADVPYB\n-PAYADPYBKP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "01bbe2cf-a9ad-5a5d-8116-1ce4fd6698e1",
@@ -4040,6 +4152,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ PAYPAL\n- PAYPALP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "dfa9d573-9495-59ff-85f3-f6a36cd3444d",
@@ -4071,6 +4184,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+POSTAGE\n-POSTAGEP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "eccace71-bc12-507b-a0ee-a09c4544dacc",
@@ -4103,6 +4217,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+POSTAGEXP\n-POSTAGEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a65c815a-ff36-51b6-8d7e-b5d67bba8c11",
@@ -4134,6 +4249,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+PROEXPPLCC\n-PROEXPLCCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "d9ef18c6-3495-5bc0-8652-82277a934e44",
@@ -4165,6 +4281,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+PROPSTEXP\n-PROPSTEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b04f6c0f-c4aa-509a-a44b-8e24df0c9e7e",
@@ -4196,6 +4313,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+REMSALESCL\n-REMSLESCLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b246ce25-33ae-51ad-bd62-ca2e411c08be",
@@ -4227,6 +4345,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SALESCLAS\n-SALESCLP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "c7d252f2-196e-596d-ab43-bba886d6a1a5",
@@ -4258,6 +4377,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SHIPAMZN\n-SHIPAMZNP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "265d2d95-eee2-5f5d-9da0-1189d0bb48cd",
@@ -4289,6 +4409,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SHIPEBAY\n-SHIPEBAYP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "9e9ceaa3-b0e4-54f0-bd70-3f24382531e1",
@@ -4320,6 +4441,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SHIPWLMT\n-SHIPWLMTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "4026becb-0e52-59fe-a045-adcd64381285",
@@ -4351,6 +4473,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SLSTAXACC\n-SLSTAXACCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a87a3bb0-73a7-5998-b988-07b2dc73e518",
@@ -4382,6 +4505,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SLSTXAMZN\n-SLSTXAMZNP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "6511d1ae-3a65-5fd1-a109-ca3c0066794c",
@@ -4413,6 +4537,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SLSTXEBAY\n-SLSTXEBAYP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b10aaf87-7485-5a65-a1a3-d49a1830045a",
@@ -4444,6 +4569,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+SOSPSTEXP\n-SOSPSTEXPP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "aee0fd82-4e95-518f-8ba6-15d1986d41ca",
@@ -4475,6 +4601,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+STRTRAVEL\n-STRTRAVELP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "262cea5d-c1a5-50fe-88a3-f255dbf15fb2",
@@ -4506,6 +4633,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ VIRTGC\n- VIRTGCP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "67dbd5c1-8d67-5729-b334-bd9c8f98d4e7",
@@ -4537,6 +4665,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ VISA\n- VISAP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "60a6957d-3023-553a-b7b9-7d614003dfe9",
@@ -4568,6 +4697,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ WALMART\n- WALMARTP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "14e96706-dfc6-51f8-82ef-9d33add5af88",
@@ -4599,6 +4729,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+MCRCASHED\n-MCRCASHEDP",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e37956bd-0067-5e91-a4bc-00a6fc5ce2a1",
@@ -4630,6 +4761,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+GFTCRDSL\n- MCRISSUE",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "2717421c-44ff-5d1a-a4a2-a0fa6e3efbf7",
@@ -4668,6 +4800,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM_TYPE = GCN and\n"
         "SA_TRAN_ITEM.VOUCHER_NO between '100000000000' and '299999999999'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "c4f90814-d718-5fb7-bd3a-86ab944c6ada",
@@ -4710,6 +4843,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_ID  in 4040,4050\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N' and SA_TRAN_TENDER.TENDER_AMT <0",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5f90e619-de8a-5f13-910b-286323977714",
@@ -4757,6 +4891,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM_STATUS in  'S','R' and  and SA_TRAN_ITEM.ITEM in (see below)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e6f96805-9e31-542a-876e-5b4c2c089a88",
@@ -4804,6 +4939,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM_STATUS in  'S','R' and  and SA_TRAN_ITEM.ITEM in (see below)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0053c174-3cfd-5768-a22b-59d5d313307b",
@@ -4853,6 +4989,7 @@ CLIENT_TOTALS = [
         "2999  and\n"
         " SA_TRAN_ITEM.ITEM not in (see below) SA_TRAN_ITEM.ITEM_TYPE IN (ITEM, REF) and",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "d0b06cfa-b290-5064-af13-5c1da3fd3b2a",
@@ -4884,6 +5021,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["+"],
         "sql_statement": "See below in comments",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "12d26da6-db6a-539e-a190-c9ef9f0ea341",
@@ -4933,6 +5071,7 @@ CLIENT_TOTALS = [
         "3999  and\n"
         " SA_TRAN_ITEM.ITEM not in (see below) SA_TRAN_ITEM.ITEM_TYPE IN (ITEM, REF) and",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a8e56cbd-ec5e-5ab0-b5a7-8d15cb721cb0",
@@ -4964,6 +5103,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-"],
         "sql_statement": "+ SLSCLBSI\n- SLSCLOUT",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0b35321c-e83b-5105-8784-b3bc9a9ca765",
@@ -5013,6 +5153,7 @@ CLIENT_TOTALS = [
         "2999  and\n"
         "SA_TRAN_ITEM.ITEM_TYPE IN (ITEM, REF) and  SA_TRAN_ITEM.ITEM not in (see below)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ef30fc0c-f541-548c-b250-629ff383725e",
@@ -5062,6 +5203,7 @@ CLIENT_TOTALS = [
         "3999  and\n"
         " SA_TRAN_ITEM.ITEM not in (see below) SA_TRAN_ITEM.ITEM_TYPE IN (ITEM, REF) and",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "9e1d6933-67f0-582e-a183-b71daab2978e",
@@ -5100,6 +5242,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM_TYPE = GCN and\n"
         "SA_TRAN_ITEM.VOUCHER_NO between '300000000000' and '399999999999'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ce544790-16d4-5de8-9999-d0ee4eea3e5e",
@@ -5137,6 +5280,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM_TYPE = GCN and \n"
         "SA_TRAN_ITEM.ITEM between '100000000000' and '299999999999'",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "56340f8b-7dc8-5892-bb80-462ec6d8e87b",
@@ -5179,6 +5323,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM_STATUS in  'S','R' and\n"
         "SA_TRAN_ITEM.ITEM_TYPE in (ITEM,REF)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "dba778ef-d7ba-5c6e-a665-e44bc0092d04",
@@ -5226,6 +5371,7 @@ CLIENT_TOTALS = [
         "Sa_Tran_Item.Item_Status in'S','R' and\n"
         "Sa_Tran_Head.Register not in ('892','895','896','897')",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "2548f6e1-ccca-5b17-82a0-4d5e7f77ec79",
@@ -5268,6 +5414,7 @@ CLIENT_TOTALS = [
         "Sa_Tran_Item.Item_Status in'S','R' and\n"
         "SA_TRAN_HEAD.REGISTER  in (892,897)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "520bc408-62ec-5773-9ad6-ebf9db0261d1",
@@ -5310,6 +5457,7 @@ CLIENT_TOTALS = [
         "Sa_Tran_Item.Item_Status in'S','R' and\n"
         "SA_TRAN_HEAD.REGISTER  in (895,896)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5a09a9ad-849f-5993-8859-d48d21e2e11f",
@@ -5350,6 +5498,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM050OUT,NM050BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "4d05a6f9-8b4b-5fbd-8e14-cd5885b09bdc",
@@ -5390,6 +5539,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM842OUT, NM842BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ba482f3f-3eee-5410-b115-18f2eb2847e4",
@@ -5430,6 +5580,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM857OUT,NM857BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "9960fd9f-414e-54ac-81e1-7ca86ba16a42",
@@ -5475,6 +5626,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM971OUT, NM984OUT, NM971BSI, NM984BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0cb58e1c-afc3-55e0-bacc-4bd9cf784166",
@@ -5516,6 +5668,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM in (NM981OUT, NM981BSI) and \n"
         "STORE_HIERARCHY.AREA between  2000 and 2999",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e525c649-1981-5617-96b1-58a7b6e23aa8",
@@ -5561,6 +5714,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM972BSI, NM991BSI, NM972OUT, NM991OUT)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "3ffb82a2-7ee8-5064-9db0-4b39ada5d454",
@@ -5601,6 +5755,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM895OUT, NM895BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "2aebd5b0-58a5-52fa-b684-40fa8bb429f0",
@@ -5641,6 +5796,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM846OUT, NM846BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7274c6f9-398e-5bc1-b22d-3ed68342d23a",
@@ -5681,6 +5837,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM831OUT, NM831BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b61d6e10-174e-57b4-8dd1-caf3ba3527e3",
@@ -5721,6 +5878,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM (NM840OUT, NM840BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "0c700e1a-0f03-5b27-8d96-2932d932d2a7",
@@ -5761,6 +5919,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM841OUT, NM841BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "abd0278b-e883-5d88-a290-4a73f2f659ee",
@@ -5802,6 +5961,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM  in (NM832OUT, NM832BSI) and SA_TRAN_HEAD.REGISTER not in "
         "(880,881,892,897,895,896)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "a6f7bad6-8276-537d-b675-a66bfce465ab",
@@ -5842,6 +6002,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM858OUT, NM858BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "c73e034e-373a-50c3-a33a-6defb4031e59",
@@ -5882,6 +6043,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM847OUT, NM847BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "5906f952-a8de-5311-b296-ef0786523380",
@@ -5922,6 +6084,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM849OUT, NM849BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "6812c4a5-0629-5244-9108-e8fe635b3e6f",
@@ -5962,6 +6125,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM835OUT, NM835BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "3e68b96f-a5f7-56c8-9aea-7a202b36693a",
@@ -6007,6 +6171,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM051OUT, NM052OUT, NM051BSI, NM052BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "3258b163-fc87-5b2c-8cf8-2d000c63ad0d",
@@ -6047,6 +6212,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM853OUT, NM853BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "e7d1d8f1-b923-5651-a4d6-e2e11636f4f7",
@@ -6087,6 +6253,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM854OUT, NM854BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "c694a369-b2bc-5f29-9707-dcaff3de976b",
@@ -6133,6 +6300,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM in (NM877OUT, NM887OUT,NM877BSI, NM887BSI) and \n"
         "SA_TRAN_HEAD.REGISTER not in (880,881,892,897,895,896)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "afc74f6e-5a35-5ea1-99a8-d757cdc75b3c",
@@ -6173,6 +6341,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM848OUT, NM848BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "f4984d4c-eba4-57bc-af2e-780a99a30f8a",
@@ -6218,6 +6387,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM894OUT, NM977OUT, NM978OUT, NM894BSI, NM977BSI, NM978BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "39b09c2d-bf0c-52eb-87c0-2448bcca0989",
@@ -6258,6 +6428,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM893OUT, NM893BSI)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "b1120079-3edb-5b7d-9b83-d3b50caacb35",
@@ -6298,6 +6469,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM in (NM845BSI, NM845OUT)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "ec1093a4-d37a-5fdf-9a3f-fc03dbced72c",
@@ -6344,6 +6516,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM  IN (NM877BSI, NM877OUT, NM887BSI, NM887OUT, NM832BSI, NM832OUT)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "bb22c957-2767-59db-be19-cd68a14a710b",
@@ -6390,6 +6563,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM  IN (NM877BSI, NM877OUT, NM887BSI, NM887OUT, NM832BSI, NM832OUT)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "393c5095-be3f-58fd-8902-46252f96dccb",
@@ -6436,6 +6610,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ERROR_IND = 'N' and\n"
         "SA_TRAN_ITEM.ITEM  IN (NM877BSI, NM877OUT, NM887BSI, NM887OUT, NM832BSI, NM832OUT)",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "bc9a8efe-f0ae-5b24-83d3-5b09b7934d9b",
@@ -6477,6 +6652,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM in (NM981BSI, NM981OUT) and\n"
         "STORE_HIERARCHY.AREA between  3000 and 3999",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "f1e96eab-2e0b-5137-9983-81b17435c477",
@@ -6511,6 +6687,7 @@ CLIENT_TOTALS = [
         "NVL(substr(SA_TRAN_ITEM.REF_NO7, 1, 4),0) not in ('3901', '3902') and (ITEM_MASTER.DEPT, "
         "ITEM_MASTER.CLASS) not in ((120,1023),(120,1068),(120,1009),(120,1053),(120,1022))",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "bf2fb45b-72be-5706-8f20-093abbfc9ad3",
@@ -6543,6 +6720,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_ITEM.ITEM_STATUS = 'R' and\n"
         "substr(SA_TRAN_ITEM.REF_NO7, 1, 4) in ('3901', '3902')",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "b02c89cc-e5b8-5cab-b73b-02a456424044",
@@ -6571,6 +6749,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": [],
         "sql_statement": None,
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "1fdd590d-7a47-5ede-8d6e-f258e5c551d4",
@@ -6602,6 +6781,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and "
         "SA_TRAN_DISC.RMS_PROMO_TYPE in (9999, 1004)",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "f47f7453-7237-5771-b07d-97d727e317cc",
@@ -6633,6 +6813,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and SA_TRAN_DISC.DISC_TYPE "
         "= 'EMPDSC'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "042e22a9-6466-5c9f-8f98-6b191750851d",
@@ -6661,6 +6842,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": [],
         "sql_statement": None,
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "a093ed86-7eb3-50c4-aaa7-9e1571a88263",
@@ -6693,6 +6875,7 @@ CLIENT_TOTALS = [
         "= 'OPRALL'\n"
         "and nvl(substr(SA_TRAN_DISC.REF_NO14, 1, 3),0) not in ('BRL')",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "31aea852-4eb4-5ae4-be09-8e3b277d7c92",
@@ -6724,6 +6907,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and "
         "SA_TRAN_DISC.DISC_TYPE  in ('PROALL', 'SCOUP')",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "cde86ad2-0b11-5962-be05-6c09c3ff7d84",
@@ -6755,6 +6939,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and SA_TRAN_DISC.DISC_TYPE "
         "= 'LOYPRO'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "ab2ece03-0c55-53cb-9b3e-f6ffa1e79593",
@@ -6786,6 +6971,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and SA_TRAN_DISC.DISC_TYPE "
         "= 'RETPRD'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "5c9b1aff-ed73-589e-bfce-3eae7eae37fb",
@@ -6817,6 +7003,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and SA_TRAN_DISC.DISC_TYPE "
         "= 'PLCCD'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "4aec1d67-377a-53da-b246-7ef500c3156c",
@@ -6848,6 +7035,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and SA_TRAN_DISC.DISC_TYPE "
         "= 'SHPPOP'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "6cddc117-eb33-5174-9306-ca75e0d1c6b5",
@@ -6879,6 +7067,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and SA_TRAN_DISC.DISC_TYPE "
         "= 'SHPPPR'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "b2dc879b-bc5d-5ed7-8799-b290ba3aebc9",
@@ -6910,6 +7099,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = 'N' and SA_TRAN_DISC.ERROR_IND = 'N' and SA_TRAN_DISC.DISC_TYPE "
         "= 'TELEAL'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "82d771ca-454a-5bb6-bab8-1c65469e155f",
@@ -6941,6 +7131,7 @@ CLIENT_TOTALS = [
         "and SA_TRAN_HEAD.ERROR_IND = 'N'\n"
         "and SA_TRAN_HEAD.SUB_TRAN_TYPE = 'CANCEL'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "d44f82c4-abd8-5769-b36b-ee44e37c979a",
@@ -6972,6 +7163,7 @@ CLIENT_TOTALS = [
         "and SA_TRAN_HEAD.ERROR_IND = 'N'\n"
         "and SA_TRAN_HEAD.SUB_TRAN_TYPE = 'ORPHAN'",
         "active": False,
+        "location_traits": [],
     },
     {
         "id": "dc02aa97-81c8-5717-bd6a-584788eec509",
@@ -7041,6 +7233,7 @@ CLIENT_TOTALS = [
         ],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "3c2b2cd2-81d7-58f0-bf99-3411f1e766e8",
@@ -7110,6 +7303,7 @@ CLIENT_TOTALS = [
         ],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "16ce547c-f80e-5b9d-8b15-d3a59df50808",
@@ -7149,6 +7343,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["+", "+", "+", "+", "+", "+", "+", "+", "+"],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "cf599ede-7e1e-550c-b7c9-946995a33097",
@@ -7219,6 +7414,7 @@ CLIENT_TOTALS = [
         ],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "51edb7ea-64b2-5cea-a065-16e038ae61c1",
@@ -7289,6 +7485,7 @@ CLIENT_TOTALS = [
         ],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "4b174bb6-effa-5d97-9a23-70cf50e64e04",
@@ -7329,6 +7526,7 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-", "-", "-", "-", "-", "-", "-", "-", "-"],
         "sql_statement": "See below",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "7b3f3b62-39bd-5b94-89be-de8a241a8bb2",
@@ -7398,6 +7596,7 @@ CLIENT_TOTALS = [
         ],
         "sql_statement": "See below in comments",
         "active": True,
+        "location_traits": [],
     },
     {
         "id": "860ad41b-c2f8-5b2c-81d8-effea018e0aa",
@@ -7433,5 +7632,6 @@ CLIENT_TOTALS = [
         "combined_total_operators": ["-", "-", "-", "-", "-"],
         "sql_statement": "See below in comments",
         "active": True,
+        "location_traits": [],
     },
 ]

@@ -196,3 +196,32 @@ def test_item_lists_are_exact_on_sales_and_paid_in_out_totals():
         for t in CLIENT_TOTALS
         for r in t["restrictions"]
     )
+
+
+def test_a_trait_excluded_operand_counts_as_zero_inside_a_combined_total():
+    from decimal import Decimal
+
+    from models import AuditTotalDefinition
+
+    from apps.totals.calculation import keep_trait_applicable, trait_excluded
+    from apps.totals.combined import calculate_combined
+
+    by_name = {t["name"]: t for t in CLIENT_TOTALS}
+    # The workbook limits these by store area; operators opt in by setting the trait on the total.
+    limited = {"SLSCLBSI": ["BSI"], "SLSCLOUT": ["OUTLET"]}
+    definitions = [
+        AuditTotalDefinition(**{**t, "revision": 1, "location_traits": limited.get(t["name"], [])})
+        for t in CLIENT_TOTALS
+    ]
+    assert by_name["SALESCLAS"]["combined_total_ids"]
+    live = keep_trait_applicable(definitions, {"BSI"})
+    names = {d.name: d for d in live}
+    assert trait_excluded(names["SLSCLOUT"]) and not trait_excluded(names["SLSCLBSI"])
+    values = {d.id: {} for d in live if d.calculation_basis != "Combined"}
+    values[names["SLSCLBSI"].id] = {None: Decimal("40")}
+    calculate_combined(live, values)  # would raise if SLSCLOUT were missing
+    assert values[names["SALESCLAS"].id] == {None: Decimal("40")}
+    unrestricted = keep_trait_applicable(
+        [AuditTotalDefinition(**{**t, "revision": 1}) for t in CLIENT_TOTALS], set()
+    )
+    assert not any(trait_excluded(d) for d in unrestricted)
