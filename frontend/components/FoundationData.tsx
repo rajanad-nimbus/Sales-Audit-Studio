@@ -128,7 +128,6 @@ export function FoundationData() {
   const [page, setPage] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<string>(GROUPS[0].id);
   const [query, setQuery] = useState('');
@@ -302,20 +301,6 @@ export function FoundationData() {
     anchor.click();
     URL.revokeObjectURL(url);
   };
-  const downloadFilteredCsv = async () => {
-    setExporting(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ categories: group.cats.join(','), format: 'csv' });
-      if (query.trim()) params.set('q', query.trim());
-      const { data } = await api.get(`/api/foundation?${params}`, { responseType: 'blob' });
-      downloadBlob(`foundation-${group.id}.csv`, data);
-    } catch (e) {
-      setError(apiError(e, 'Could not download foundation data.'));
-    } finally {
-      setExporting(false);
-    }
-  };
   const downloadImportRuns = async () => {
     setImportRunsExporting(true);
     setError(null);
@@ -464,13 +449,6 @@ export function FoundationData() {
         <div className="foundation-body">
           <p className="hint">{group.blurb}</p>
           <div className="form-row">
-            <Button
-              variant="secondary"
-              disabled={!total || exporting}
-              onClick={() => void downloadFilteredCsv()}
-            >
-              {exporting ? 'Preparing CSV…' : 'Download all matching CSV'}
-            </Button>
             <span className="hint">
               {query.trim()
                 ? `${total} records match this search.`

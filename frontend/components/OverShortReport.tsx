@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { useToast } from '@/components/Feedback';
-import { downloadBlob } from '@/lib/csv';
 import { StoreSelect } from '@/components/StoreSelect';
 import {
   Alert,
@@ -75,7 +74,6 @@ export function OverShortReport() {
   const [storeId, setStoreId] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [exporting, setExporting] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [failed, setFailed] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -85,13 +83,20 @@ export function OverShortReport() {
     const initialGroup = params.get('over_short_group');
     const initialPage = Number(params.get('over_short_page'));
     const initialPageSize = Number(params.get('over_short_page_size'));
-    if (initialGroup === 'store' || initialGroup === 'register' || initialGroup === 'cashier' || initialGroup === 'date') setGroup(initialGroup);
+    if (
+      initialGroup === 'store' ||
+      initialGroup === 'register' ||
+      initialGroup === 'cashier' ||
+      initialGroup === 'date'
+    )
+      setGroup(initialGroup);
     const initialStart = validDate(params.get('over_short_start'));
     const initialEnd = validDate(params.get('over_short_end'));
     setStart(initialStart && initialEnd && initialStart > initialEnd ? initialEnd : initialStart);
     setEnd(initialStart && initialEnd && initialStart > initialEnd ? initialStart : initialEnd);
     setStoreId(params.get('over_short_store') ?? '');
-    if (Number.isInteger(initialPage) && initialPage > 0 && initialPage <= 100_000) setPage(initialPage);
+    if (Number.isInteger(initialPage) && initialPage > 0 && initialPage <= 100_000)
+      setPage(initialPage);
     if ([25, 50, 100, 200].includes(initialPageSize)) setPageSize(initialPageSize);
   }, []);
 
@@ -157,31 +162,6 @@ export function OverShortReport() {
       .catch(() => setFailed(true));
   }, [group, start, end, storeId, page, pageSize]);
 
-  const exportReport = async () => {
-    setExporting(true);
-    try {
-      const { data, headers } = await api.get('/api/cash-controls/over-short/export.csv', {
-        params: {
-          group_by: group,
-          start: start || undefined,
-          end: end || undefined,
-          ...(storeId ? { store_id: storeId } : {}),
-        },
-        responseType: 'blob',
-      });
-      downloadBlob(`over-short-${storeId || 'all-stores'}-${group}-${start || 'start'}-${end || 'now'}.csv`, data);
-      if (headers?.['x-over-short-truncated'] === 'true') {
-        toast('The CSV reached 50,000 rows. Narrow the date range before exporting again.', 'info');
-      } else {
-        toast('Over / short report downloaded.', 'success');
-      }
-    } catch {
-      toast('Could not export the over / short report.', 'error');
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <div className="cc-card">
       <h3>Over / short</h3>
@@ -240,13 +220,6 @@ export function OverShortReport() {
             setPage(1);
           }}
         />
-        <Button
-          variant="secondary"
-          disabled={!report?.totals.declarations || exporting}
-          onClick={() => void exportReport()}
-        >
-          {exporting ? 'Preparing CSV…' : 'Export matching CSV'}
-        </Button>
       </Toolbar>
       <DataTable
         rows={report ? report.rows : null}
@@ -257,7 +230,9 @@ export function OverShortReport() {
             key: 'who',
             header: 'Group',
             primary: true,
-            render: (r) => <Link href={cashHistoryHref(r, group, storeId, start, end)}>{label(r, group)}</Link>,
+            render: (r) => (
+              <Link href={cashHistoryHref(r, group, storeId, start, end)}>{label(r, group)}</Link>
+            ),
           },
           { key: 'n', header: 'Declarations', numeric: true, render: (r) => r.declarations },
           { key: 'oob', header: 'Out of balance', numeric: true, render: (r) => r.out_of_balance },

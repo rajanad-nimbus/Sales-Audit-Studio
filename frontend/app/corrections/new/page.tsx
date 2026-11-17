@@ -812,7 +812,7 @@ export default function NewCorrectionPage() {
                         ? !!userReferenceField && (clearUserReference || !!value.trim())
                         : kind === 'PaidOutDetail'
                           ? !!paidOutField && !!value.trim()
-                        : missing || !!value.trim());
+                          : missing || !!value.trim());
 
   const pickKind = (k: Kind) => {
     setKind(k);
@@ -1124,7 +1124,6 @@ export default function NewCorrectionPage() {
                     rowKey={(tx) => tx.id}
                     onRowClick={selectTransaction}
                     csvFileName="correction-transaction-search-visible.csv"
-                    detachTitle={`Correction transaction search · ${search.trim() || kind}`}
                   />
                 )}
                 <details className="cfg-details">

@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, caseMoney } from '@/lib/api';
 import type { CurrencyAmount } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { StatusBadge } from '@/components/CaseTable';
 import { CaseLink, useCanOpen, useMe } from '@/components/MeProvider';
 import { Alert, Button, Card, DataTable, PageNav, Segmented, Toolbar } from '@/components/ui';
@@ -109,8 +108,6 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
   const [destinationLoadAttempt, setDestinationLoadAttempt] = useState(0);
   const [cases, setCases] = useState<ErrorCases | null>(null);
   const [failed, setFailed] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportMessage, setExportMessage] = useState('');
   // An error with open cases opens on them; one with none (or only closed ones) shows every case.
   const [status, setStatus] = useState<'open' | 'closed' | 'all'>(
     error.open_count > 0 ? 'open' : 'all'
@@ -192,30 +189,6 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
 
   const narrowed = status !== 'all' || debouncedStore.trim() !== '';
   const fixIn = [error.form, error.tab].filter(Boolean).join(' › ');
-  const exportCases = async () => {
-    setExporting(true);
-    setExportMessage('');
-    try {
-      const response = await api.get(`/api/audit-errors/${encodeURIComponent(error.code)}/cases`, {
-        params: {
-          status,
-          store: debouncedStore.trim() || undefined,
-          format: 'csv',
-        },
-        responseType: 'blob',
-      });
-      downloadBlob(`audit-error-${error.code}-cases.csv`, response.data);
-    } catch (error) {
-      const statusCode = (error as { response?: { status?: number } }).response?.status;
-      setExportMessage(
-        statusCode === 413
-          ? 'This export exceeds 50,000 cases. Narrow the status or store filter and try again.'
-          : 'Could not download the filtered cases.'
-      );
-    } finally {
-      setExporting(false);
-    }
-  };
   return (
     <>
       <Card title="About this error">
@@ -352,11 +325,7 @@ export function ErrorDetail({ error }: { error: ErrorType }) {
             placeholder="Filter by store"
             aria-label="Filter cases by store"
           />
-          <Button size="sm" disabled={exporting || !cases?.items.length} onClick={exportCases}>
-            {exporting ? 'Preparing…' : 'Download filtered CSV'}
-          </Button>
         </Toolbar>
-        {exportMessage && <Alert tone="error">{exportMessage}</Alert>}
         {failed ? (
           <Alert tone="error">Could not load the cases for this error.</Alert>
         ) : (

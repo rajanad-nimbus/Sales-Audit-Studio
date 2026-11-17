@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, AuditEvent } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { formatDateTime, formatNumber } from '@/lib/preferences';
 import {
   Alert,
@@ -86,7 +85,6 @@ export default function ActivityPage() {
   const [live, setLive] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const [, setNow] = useState(0);
 
   useEffect(() => {
@@ -292,26 +290,6 @@ export default function ActivityPage() {
   }, [shown]);
 
   const last = events[0];
-  const downloadActivityCsv = async () => {
-    setExporting(true);
-    setExportError(null);
-    try {
-      const { data } = await api.get('/api/audit/activity/export', {
-        params: { agent, q: q.trim() || undefined, alerts_only: onlyAlerts },
-        responseType: 'blob',
-      });
-      downloadBlob('filtered-agent-activity.csv', data);
-    } catch (cause) {
-      const statusCode = (cause as { response?: { status?: number } })?.response?.status;
-      setExportError(
-        statusCode === 413
-          ? 'The filtered audit trail exceeds 100,000 events. Add a search term or narrow the actor filter.'
-          : 'Could not export the filtered audit trail.'
-      );
-    } finally {
-      setExporting(false);
-    }
-  };
   return (
     <div className="page-container">
       {viewNameDialog}
@@ -329,17 +307,6 @@ export default function ActivityPage() {
               <Link className="btn-secondary btn-sm" href="/settings/agents">
                 Agent settings
               </Link>
-            )}
-            {canOpen('/audit') && (
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={exporting}
-                title="Exports all matching events, up to 100,000, including events not loaded on this page."
-                onClick={() => void downloadActivityCsv()}
-              >
-                {exporting ? 'Preparing CSV…' : 'Export filtered activity'}
-              </Button>
             )}
             <Button size="sm" onClick={() => setLive((v) => !v)}>
               {live ? 'Pause' : 'Resume'}
@@ -563,7 +530,6 @@ export default function ActivityPage() {
                 ]}
                 rows={g.items}
                 csvFileName={`agent-activity-${g.day.replace(/[^a-zA-Z0-9_-]/g, '-')}-visible.csv`}
-                detachTitle={`Agent Activity · ${g.day}`}
                 rowKey={(e) => String(e.id)}
                 onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
                 rowClassName={(e) =>

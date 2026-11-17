@@ -773,8 +773,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 key: 'c7',
                 header: 'Line total',
                 numeric: true,
-                csvValue: (l) =>
-                  num(l.gross_amount) - num(l.discount_amount) + num(l.tax_amount),
+                csvValue: (l) => num(l.gross_amount) - num(l.discount_amount) + num(l.tax_amount),
                 render: (l) =>
                   money(num(l.gross_amount) - num(l.discount_amount) + num(l.tax_amount)),
               },
@@ -782,7 +781,6 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             rows={det.lines}
             rowKey={(l) => String(l.line_no)}
             csvFileName={`transaction-${id}-items-visible.csv`}
-            detachTitle={`Transaction ${d.source_record_id ?? id} · Items`}
           />
         )}
       </Card>
@@ -1100,7 +1098,6 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   rows={det.taxes}
                   rowKey={(x) => x.id}
                   csvFileName={`transaction-${id}-taxes-visible.csv`}
-                  detachTitle={`Transaction ${d.source_record_id ?? id} · Taxes`}
                 />
               )}
             </Card>
@@ -1198,7 +1195,6 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               rows={d.returns.items}
               rowKey={(i) => String(i.item_code)}
               csvFileName={`transaction-${id}-return-comparison-visible.csv`}
-              detachTitle={`Transaction ${d.source_record_id ?? id} · Return comparison`}
             />
           )}
           {d.returns.items_truncated && (
@@ -1262,7 +1258,6 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             rows={d.returns.returns}
             rowKey={(x) => String(x.id)}
             csvFileName={`transaction-${id}-returns-visible.csv`}
-            detachTitle={`Transaction ${d.source_record_id ?? id} · Returns`}
           />
         </Card>
       )}
@@ -1393,8 +1388,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             </div>
             {relatedCasesHasMore && (
               <p className="hint">
-                Showing {relatedCases.length} matches so far, with cases raised from this transaction
-                first.
+                Showing {relatedCases.length} matches so far, with cases raised from this
+                transaction first.
               </p>
             )}
             {relatedCases.length === 0 ? (
@@ -1474,7 +1469,6 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 rows={d.linked_transactions}
                 rowKey={(t) => String(t.id)}
                 csvFileName={`transaction-${id}-linked-transactions-visible.csv`}
-                detachTitle={`Transaction ${d.source_record_id ?? id} · Linked transactions`}
               />
             )}
           </Card>
@@ -1556,7 +1550,6 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   },
                 ]}
                 csvFileName={`transaction-${id}-correction-history-visible.csv`}
-                detachTitle={`Transaction ${d.source_record_id ?? id} · Correction history`}
               />
             </Card>
           )}

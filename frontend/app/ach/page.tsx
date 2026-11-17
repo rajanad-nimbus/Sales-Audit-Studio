@@ -2,7 +2,6 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { useMe } from '@/components/MeProvider';
 import { StoreSelect } from '@/components/StoreSelect';
 import { Alert, Button, Card, PageHeader, Tabs } from '@/components/ui';
@@ -70,8 +69,6 @@ export default function ACHPage() {
   const [settlementRows, setSettlementRows] = useState<SettlementRow[]>([]);
   const [settlementDate, setSettlementDate] = useState('');
   const [busy, setBusy] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const canWrite = me?.role === 'admin' || me?.role === 'finance';
@@ -133,34 +130,6 @@ export default function ACHPage() {
   useEffect(() => {
     void load(0);
   }, [load]);
-
-  async function exportAdjustments() {
-    setExporting(true);
-    setExportError('');
-    try {
-      const { data } = await api.get('/api/ach/adjustments', {
-        params: {
-          record_type: recordType,
-          store_id: recordType === 'Store' ? filterStore || undefined : undefined,
-          bank_id: recordType === 'Bank' ? filterBank || undefined : undefined,
-          business_date: filterDate || undefined,
-          status: filterStatus || undefined,
-          format: 'csv',
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('ach-adjustments.csv', data);
-    } catch (e: unknown) {
-      const response = (e as { response?: { status?: number } }).response;
-      setExportError(
-        response?.status === 413
-          ? 'This export exceeds 50,000 rows. Filter by store, date, or status and try again.'
-          : 'ACH adjustments could not be exported.'
-      );
-    } finally {
-      setExporting(false);
-    }
-  }
 
   async function addAdjustment(event: FormEvent) {
     event.preventDefault();
@@ -372,16 +341,8 @@ export default function ACHPage() {
             <Button size="sm" disabled={busy} onClick={() => void load(0)}>
               Refresh
             </Button>
-            <Button
-              size="sm"
-              disabled={busy || exporting || !result?.items.length}
-              onClick={exportAdjustments}
-            >
-              {exporting ? 'Preparing…' : 'Download matching CSV'}
-            </Button>
           </div>
         </div>
-        {exportError && <Alert tone="error">{exportError}</Alert>}
         {filterDate && (
           <section aria-label="Next-day settlement summary" className="ac-settlement-summary">
             <h3>Next-day manual adjustment · settlement {settlementDate || '—'}</h3>

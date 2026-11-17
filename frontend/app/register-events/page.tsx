@@ -1,7 +1,6 @@
 'use client';
 
 import { formatNumber } from '@/lib/preferences';
-import { downloadBlob } from '@/lib/csv';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
@@ -198,7 +197,6 @@ export default function RegisterEventsPage() {
   const [data, setData] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const [ready, setReady] = useState(false);
   const seq = useRef(0);
 
@@ -289,31 +287,6 @@ export default function RegisterEventsPage() {
   });
 
   const set = (patch: Partial<F>) => setF((x) => ({ ...x, ...patch }));
-  const downloadFilteredCsv = async () => {
-    setExporting(true);
-    setExportNotice(null);
-    try {
-      const params = new URLSearchParams({ ...sort, format: 'csv' });
-      (Object.keys(f) as (keyof F)[]).forEach((key) => {
-        const value = key === 'q' ? qd : f[key];
-        if (value) params.set(key, key === 'flagged' ? 'true' : value);
-      });
-      const response = await api.get(`/api/register-events?${params}`, { responseType: 'blob' });
-      downloadBlob(
-        `register_events_${f.date_from || 'all'}_${f.date_to || 'current'}.csv`,
-        response.data
-      );
-      if (response.headers?.['x-report-truncated'] === 'true') {
-        setExportNotice(
-          'The export includes the first 100,000 matching events. Narrow the filters to download a smaller range.'
-        );
-      }
-    } catch {
-      setError('Could not download filtered register events.');
-    } finally {
-      setExporting(false);
-    }
-  };
   const filtered =
     !!requestedEventId || (Object.keys(f) as (keyof F)[]).some((k) => (k === 'q' ? qd : f[k]));
   const clear = () => {
@@ -329,30 +302,12 @@ export default function RegisterEventsPage() {
     );
   const types = data ? Object.entries(data.by_type).sort((a, b) => b[1] - a[1]) : [];
   const typeTotal = types.reduce((n, [, c]) => n + c, 0);
-  const detachTitle = [
-    'Register Events',
-    f.store_id && `Store ${f.store_id}`,
-    f.event_type && typeLabel(f.event_type),
-    f.date_from && f.date_to ? `${f.date_from} to ${f.date_to}` : f.date_from || f.date_to,
-    f.flagged && 'Flagged only',
-  ]
-    .filter(Boolean)
-    .join(' · ');
 
   return (
     <div className="page-container">
       <PageHeader
         title="Register Events"
         subtitle="Till and drawer activity with no sale behind it: voids, no-sales, paid-in and paid-out, pulls and loans, and till, register and store opens and closes."
-        actions={
-          <Button
-            variant="secondary"
-            disabled={!data?.total || exporting}
-            onClick={() => void downloadFilteredCsv()}
-          >
-            {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-          </Button>
-        }
       />
       {exportNotice && (
         <Alert tone="warning" onDismiss={() => setExportNotice(null)}>
@@ -479,7 +434,6 @@ export default function RegisterEventsPage() {
         <DataTable
           columns={COLUMNS}
           csvFileName="register-events-visible.csv"
-          detachTitle={detachTitle}
           rows={data.items}
           rowKey={(r) => r.id}
           onRowClick={(r) => {

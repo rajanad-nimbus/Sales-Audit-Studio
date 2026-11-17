@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, currencyBreakdown } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { useDataChanged } from '@/lib/sync';
 import {
   Alert,
@@ -108,8 +107,6 @@ export default function AuditErrorsPage() {
   const [filtersReady, setFiltersReady] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedAuditErrorsView[]>([]);
   const [savedViewsError, setSavedViewsError] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportNotice, setExportNotice] = useState('');
   const savedViewSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const overviewRequestId = useRef(0);
 
@@ -189,9 +186,7 @@ export default function AuditErrorsPage() {
   // The raised-in totals are tied to this window. Do not show a prior window's
   // counts under the newly selected filter while its overview is still loading.
   const currentData = data?.window_days === Number(days) ? data : null;
-  const families = currentData
-    ? [...new Set(currentData.items.map((i) => i.family))].sort()
-    : [];
+  const families = currentData ? [...new Set(currentData.items.map((i) => i.family))].sort() : [];
   const term = q.trim().toLowerCase();
   const rows = currentData
     ? currentData.items.filter(
@@ -201,33 +196,6 @@ export default function AuditErrorsPage() {
           (!term || `${i.label} ${i.code}`.toLowerCase().includes(term))
       )
     : null;
-
-  const downloadMatching = async () => {
-    setExporting(true);
-    setExportNotice('');
-    try {
-      const { data: blob, headers } = await api.get('/api/audit-errors', {
-        params: {
-          days,
-          format: 'csv',
-          show,
-          family: family || undefined,
-          q: q.trim() || undefined,
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('audit-error-types.csv', blob);
-      if (headers?.['x-audit-error-types-truncated'] === 'true') {
-        setExportNotice(
-          'The export reached 100,000 rows. Narrow the filters to download the rest.'
-        );
-      }
-    } catch {
-      setError('Audit error type CSV could not be downloaded.');
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const persistSavedViews = (next: SavedAuditErrorsView[]) => {
     setSavedViews(next);
@@ -367,22 +335,11 @@ export default function AuditErrorsPage() {
                 <option key={f}>{f}</option>
               ))}
             </select>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!rows?.length || exporting}
-              onClick={() => void downloadMatching()}
-            >
-              {exporting ? 'Preparing CSV…' : 'Download matching CSV'}
-            </Button>
           </Toolbar>
-
-          {exportNotice && <Alert tone="warning">{exportNotice}</Alert>}
 
           <DataTable
             columns={columnsFor(Number(days))}
             csvFileName="audit-errors-visible.csv"
-            detachTitle={`Audit Errors · ${show} · ${windowLabel(Number(days))}${family ? ` · ${family}` : ''}`}
             rows={rows}
             rowKey={(r) => r.code}
             onRowClick={(r) => router.push(errorPath(r.code))}

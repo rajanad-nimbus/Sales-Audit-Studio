@@ -1,7 +1,6 @@
 'use client';
 
 import { formatNumber } from '@/lib/preferences';
-import { downloadBlob } from '@/lib/csv';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ACRow, Case } from '@/lib/api';
 import { CaseTable, SortKey, SortState } from '@/components/CaseTable';
@@ -68,7 +67,6 @@ export default function CasesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [status, setStatus] = useState('');
@@ -258,31 +256,6 @@ export default function CasesPage() {
     load();
   });
 
-  const downloadFilteredCsv = async () => {
-    setExporting(true);
-    setExportError(null);
-    try {
-      const params = new URLSearchParams({ snoozed: 'all', stage: '' });
-      if (debouncedQ) params.set('q', debouncedQ);
-      if (status) params.set('status', status);
-      if (priority) params.set('priority', priority);
-      params.set('sort', sort ? SORT_PARAM[sort.key] : 'exposure');
-      params.set('dir', sort?.dir ?? 'desc');
-      const { data } = await api.get(`/api/action-center/export.csv?${params}`, {
-        responseType: 'blob',
-      });
-      downloadBlob('cases.csv', data);
-    } catch (cause) {
-      const statusCode = (cause as { response?: { status?: number } })?.response?.status;
-      setExportError(
-        statusCode === 413
-          ? 'This export is limited to 50,000 matching cases. Narrow the filters and try again.'
-          : 'Could not download filtered cases.'
-      );
-    } finally {
-      setExporting(false);
-    }
-  };
   const onSort = (k: SortKey) =>
     setSort((s) =>
       s?.key === k ? (s.dir === 'asc' ? { key: k, dir: 'desc' } : null) : { key: k, dir: 'asc' }
@@ -300,19 +273,6 @@ export default function CasesPage() {
           sort
             ? 'Sorted by your chosen column. Click it again to reverse, then to reset.'
             : 'Sorted by exposure, highest first. Click a column to sort.'
-        }
-        actions={
-          <>
-            {total > 0 && (
-              <Button
-                variant="secondary"
-                disabled={loading || exporting}
-                onClick={() => void downloadFilteredCsv()}
-              >
-                {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-              </Button>
-            )}
-          </>
         }
       />
       {exportError && (
@@ -406,7 +366,6 @@ export default function CasesPage() {
         <CaseTable
           cases={rows}
           failed={loadFailed}
-          detachTitle={`Cases · ${status || 'all statuses'} · ${priority || 'all priorities'}`}
           sort={sort ?? undefined}
           onSort={onSort}
           footer={

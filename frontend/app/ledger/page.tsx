@@ -285,7 +285,6 @@ export default function LedgerPage() {
               columns={columns}
               rows={loading ? null : preview.lines}
               csvFileName="journal-preview-visible.csv"
-              detachTitle={['GL Journal View', store, dateFrom, dateTo].join(' · ')}
               rowKey={(row) => row.transaction_id}
               emptyTitle={
                 preview.total_transactions

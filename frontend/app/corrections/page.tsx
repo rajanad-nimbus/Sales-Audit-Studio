@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/preferences';
-import { downloadBlob } from '@/lib/csv';
 import { useToast } from '@/components/Feedback';
 import {
   Alert,
@@ -34,9 +33,6 @@ export default function CorrectionsPage() {
   const [pages, setPages] = useState(1);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const [filter, setFilter] = useState<Filter>('All');
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -120,31 +116,6 @@ export default function CorrectionsPage() {
     }
   };
 
-  const downloadFilteredCsv = async () => {
-    setExporting(true);
-    setExportError(null);
-    setExportNotice(null);
-    try {
-      const params = new URLSearchParams({ format: 'csv' });
-      if (filter !== 'All') params.set('status', filter);
-      if (debouncedQ) params.set('q', debouncedQ);
-      if (adjustmentId) params.set('adjustment_id', adjustmentId);
-      const { data, headers } = await api.get(`/api/transaction-adjustments?${params}`, {
-        responseType: 'blob',
-      });
-      downloadBlob('transaction-corrections.csv', data);
-      if (headers?.['x-corrections-truncated'] === 'true') {
-        setExportNotice(
-          'The export reached its 50,000 row limit. Narrow the status or search filters to export the remaining corrections.'
-        );
-      }
-    } catch {
-      setExportError('Could not download filtered corrections.');
-    } finally {
-      setExporting(false);
-    }
-  };
-
   const all = rows ?? [];
   const count = (s: Filter) =>
     s === 'All' ? Object.values(statusCounts).reduce((a, b) => a + b, 0) : (statusCounts[s] ?? 0);
@@ -157,31 +128,12 @@ export default function CorrectionsPage() {
         subtitle="Review governed transaction corrections and paid-out detail repairs while preserving original source records."
         actions={
           <>
-            {total > 0 && (
-              <Button
-                variant="secondary"
-                disabled={exporting || rows === null}
-                onClick={() => void downloadFilteredCsv()}
-              >
-                {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-              </Button>
-            )}
             <Button variant="primary" onClick={() => router.push('/corrections/new')}>
               New correction
             </Button>
           </>
         }
       />
-      {exportError && (
-        <Alert tone="error" onDismiss={() => setExportError(null)}>
-          {exportError}
-        </Alert>
-      )}
-      {exportNotice && (
-        <Alert tone="warning" onDismiss={() => setExportNotice(null)}>
-          {exportNotice}
-        </Alert>
-      )}
       {error && (
         <Alert tone="error" onDismiss={() => setError(null)}>
           {error}
@@ -314,7 +266,6 @@ export default function CorrectionsPage() {
           rows={rows === null ? null : shown}
           rowKey={(r) => r.id}
           csvFileName="corrections-visible.csv"
-          detachTitle={`Corrections · ${filter === 'Proposed' ? 'awaiting review' : filter.toLowerCase()}${adjustmentId ? ' · selected proposal' : ''}`}
           onRowClick={(r) => {
             const next = openId === r.id ? null : r.id;
             setOpenId(next);

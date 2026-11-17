@@ -4,7 +4,7 @@ import { Fragment, use, useCallback, useEffect, useMemo, useRef, useState } from
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/preferences';
-import { downloadBlob, downloadCsv } from '@/lib/csv';
+import { downloadCsv } from '@/lib/csv';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { CaseLink, useMe } from '@/components/MeProvider';
@@ -48,14 +48,7 @@ import type {
 } from '@/lib/storeDays';
 
 type DetailTab =
-  | 'totals'
-  | 'analysis'
-  | 'closure'
-  | 'cases'
-  | 'errors'
-  | 'history'
-  | 'io'
-  | 'missing';
+  'totals' | 'analysis' | 'closure' | 'cases' | 'errors' | 'history' | 'io' | 'missing';
 
 interface DayIoLog {
   controls: {
@@ -269,7 +262,6 @@ export default function StoreDayDetailPage({
   const [dayErrorsQuery, setDayErrorsQuery] = useState('');
   const [dayErrorsPage, setDayErrorsPage] = useState(1);
   const [dayErrorsLoading, setDayErrorsLoading] = useState(false);
-  const [dayErrorsExporting, setDayErrorsExporting] = useState(false);
   const [dayErrorsError, setDayErrorsError] = useState('');
   const dayErrorsSequence = useRef(0);
   const [explaining, setExplaining] = useState<Total | null>(null);
@@ -471,16 +463,9 @@ export default function StoreDayDetailPage({
       const requestedTab = new URLSearchParams(window.location.search).get('tab');
       if (
         requestedTab &&
-        [
-          'totals',
-          'analysis',
-          'closure',
-          'cases',
-          'errors',
-          'history',
-          'io',
-          'missing',
-        ].includes(requestedTab)
+        ['totals', 'analysis', 'closure', 'cases', 'errors', 'history', 'io', 'missing'].includes(
+          requestedTab
+        )
       ) {
         setTab(requestedTab as DetailTab);
       }
@@ -513,12 +498,7 @@ export default function StoreDayDetailPage({
     downloadCsv(
       `${storeId}-${date}-audit-history-loaded.csv`,
       ['Recorded at', 'Event', 'Description', 'Actor'],
-      history.map((item) => [
-        item.created_at,
-        item.event_type,
-        item.description,
-        item.actor,
-      ])
+      history.map((item) => [item.created_at, item.event_type, item.description, item.actor])
     );
   };
 
@@ -561,29 +541,6 @@ export default function StoreDayDetailPage({
       ['Register', 'Transaction number', 'Status', 'Reason', 'Decided by', 'Decided at'],
       rows
     );
-  };
-
-  const exportDayErrors = async () => {
-    setDayErrorsExporting(true);
-    setDayErrorsError('');
-    try {
-      const { data } = await api.get(
-        `${dayApi({ store_id: storeId, business_date: date })}/errors`,
-        {
-          params: {
-            status: dayErrorsView,
-            q: dayErrorsQuery.trim() || undefined,
-            format: 'csv',
-          },
-          responseType: 'blob',
-        }
-      );
-      downloadBlob(`${storeId}-${date}-audit-errors.csv`, data);
-    } catch (e) {
-      setDayErrorsError(apiError(e, 'Could not download the matching audit errors.'));
-    } finally {
-      setDayErrorsExporting(false);
-    }
   };
 
   const act = async (path: string, body?: object, done?: () => void, message?: string) => {
@@ -1475,7 +1432,6 @@ export default function StoreDayDetailPage({
                         rowKey={(t) => t.id}
                         rowClassName={(t) => (hasVariance(t) ? 'sd-row-bad' : '')}
                         csvFileName={`${storeId}-${date}-totals-${g.key}-v${version ?? day.audit_version}.csv`}
-                        detachTitle={`${storeId} ${date} · ${g.title}`}
                       />
                     </section>
                   ))
@@ -1685,7 +1641,6 @@ export default function StoreDayDetailPage({
                       rows={reopens}
                       rowKey={(r: Reopen) => r.id}
                       csvFileName={`${storeId}-${date}-reopen-history.csv`}
-                      detachTitle={`${storeId} ${date} · Reopen history`}
                     />
                   )}
                 </div>
@@ -1786,7 +1741,6 @@ export default function StoreDayDetailPage({
                   rowKey={(c) => c.id}
                   emptyTitle="No cases for this Store Day"
                   csvFileName={`${storeId}-${date}-cases.csv`}
-                  detachTitle={`${storeId} ${date} · Cases`}
                 />
               </div>
             )}
@@ -1826,14 +1780,6 @@ export default function StoreDayDetailPage({
                     <option value="open">Open cases</option>
                     <option value="all">All cases</option>
                   </select>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={dayErrorsLoading || dayErrorsExporting || !dayErrors?.total}
-                    onClick={() => void exportDayErrors()}
-                  >
-                    {dayErrorsExporting ? 'Preparing CSV…' : 'Export matching CSV'}
-                  </Button>
                 </Toolbar>
                 {dayErrorsError && (
                   <Alert
@@ -2001,7 +1947,6 @@ export default function StoreDayDetailPage({
                   emptyHint="Try All cases to include errors in closed cases."
                   failed={!!dayErrorsError}
                   csvFileName={`${storeId}-${date}-audit-errors-visible.csv`}
-                  detachTitle={`${storeId} ${date} · Error List`}
                   footer={
                     dayErrors && (
                       <Pager
@@ -2211,7 +2156,6 @@ export default function StoreDayDetailPage({
                     rowKey={(row) => `${row.source_system}:${row.source_record_id}`}
                     emptyTitle="No source control totals for this day"
                     csvFileName={`${storeId}-${date}-source-controls.csv`}
-                    detachTitle={`${storeId} ${date} · Source control totals`}
                   />
                 </section>
                 <section>
@@ -2274,7 +2218,6 @@ export default function StoreDayDetailPage({
                     rowKey={(row) => `${row.source_system}:${row.delivery_id}`}
                     emptyTitle="No imported transactions linked to this day"
                     csvFileName={`${storeId}-${date}-import-log.csv`}
-                    detachTitle={`${storeId} ${date} · Import log`}
                   />
                 </section>
                 <section>
@@ -2356,7 +2299,7 @@ export default function StoreDayDetailPage({
                         key: 'sent',
                         header: 'Sent',
                         csvValue: (row) => row.sent_at ?? '',
-                        render: (row) => row.sent_at ? formatDateTime(row.sent_at) : '—',
+                        render: (row) => (row.sent_at ? formatDateTime(row.sent_at) : '—'),
                       },
                       {
                         key: 'retries',
@@ -2370,7 +2313,6 @@ export default function StoreDayDetailPage({
                     rowKey={(row) => row.batch_id}
                     emptyTitle="No exports for this store day"
                     csvFileName={`${storeId}-${date}-export-log.csv`}
-                    detachTitle={`${storeId} ${date} · Export log`}
                   />
                 </section>
               </div>

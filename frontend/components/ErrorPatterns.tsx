@@ -208,7 +208,6 @@ export function ErrorPatterns() {
           },
         ]}
         csvFileName={`audit-error-patterns-${view}-${onlyRepeating ? 'repeating' : 'all'}-${days}d-min${minDays}.csv`}
-        detachTitle={`Audit error patterns · ${view} · ${onlyRepeating ? 'repeating' : 'all'} · ${days} days`}
       />
       {data && data.store_summary.length > 0 && (
         <>
@@ -253,7 +252,6 @@ export function ErrorPatterns() {
               },
             ]}
             csvFileName={`audit-error-pattern-store-summary-${days}d-min${minDays}.csv`}
-            detachTitle={`Audit error store summary · ${days} days`}
           />
         </>
       )}

@@ -253,13 +253,6 @@ export default function TenderSummaryPage() {
             columns={columns(applied)}
             rows={busy ? null : result.items}
             csvFileName="tender-summary-visible.csv"
-            detachTitle={
-              [
-                'Tender Summary',
-                applied.store || 'All stores',
-                `${applied.dateFrom || 'all dates'} to ${applied.dateTo || 'all dates'}`,
-              ].join(' · ')
-            }
             rowKey={(row) => `${row.tender_type}:${row.currency}`}
             emptyTitle="No tender activity found"
             emptyHint="Change the store, date range, or search and try again."

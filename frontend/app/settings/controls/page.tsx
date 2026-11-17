@@ -453,7 +453,9 @@ export default function ControlsPage() {
           ? money(row.observed, row.currency)
           : `${row.observed} count`,
       csvValue: (row) =>
-        previewRule?.threshold_currency ? `${row.observed} ${row.currency}` : `${row.observed} count`,
+        previewRule?.threshold_currency
+          ? `${row.observed} ${row.currency}`
+          : `${row.observed} count`,
     },
     {
       key: 'outcome',
@@ -933,7 +935,6 @@ export default function ControlsPage() {
                     emptyTitle="No current totals in this range"
                     emptyHint="Recalculate the selected Store Days, then run the preview again."
                     csvFileName="variance-rule-preview-visible.csv"
-                    detachTitle={`Rule preview · ${previewData.rule_name} · ${previewData.date_from} to ${previewData.date_to}`}
                   />
                 </>
               )}
@@ -1034,7 +1035,6 @@ export default function ControlsPage() {
                   },
                 ]}
                 csvFileName="gl-mapping-import-preview-visible.csv"
-                detachTitle={`GL mapping import preview · ${glPackagePreview.fileName}`}
               />
               <Field
                 label="Reason for import"
@@ -1198,7 +1198,6 @@ export default function ControlsPage() {
             rows={maps}
             rowKey={(row) => row.id}
             csvFileName="gl-mappings-visible.csv"
-            detachTitle="GL cross-reference mappings"
           />
           <h3 style={{ marginTop: '1.25rem' }}>Journal preview</h3>
           <p>

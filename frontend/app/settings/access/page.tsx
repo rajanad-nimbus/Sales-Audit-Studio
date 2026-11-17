@@ -65,7 +65,6 @@ export default function AccessPage() {
   const [assignmentPages, setAssignmentPages] = useState(1);
   const [assignmentPage, setAssignmentPage] = useState(1);
   const [assignmentLoading, setAssignmentLoading] = useState(false);
-  const [assignmentExporting, setAssignmentExporting] = useState(false);
   const [assignmentRefresh, setAssignmentRefresh] = useState(0);
   const [verifiedUsers, setVerifiedUsers] = useState<VerifiedStoreUser[]>([]);
   const [stores, setStores] = useState<string[]>([]);
@@ -350,28 +349,6 @@ export default function AccessPage() {
     setClearReason('');
     setAssignmentError(null);
     setAssignmentNotice(null);
-  };
-  const downloadAssignments = async () => {
-    setAssignmentExporting(true);
-    try {
-      const params = new URLSearchParams({ format: 'csv' });
-      if (assignmentQuery.trim()) params.set('q', assignmentQuery.trim());
-      if (assignmentActivity !== 'all') params.set('activity', assignmentActivity);
-      const { data, headers } = await api.get(
-        `/api/access/store-assignments?${params.toString()}`,
-        { responseType: 'blob' }
-      );
-      downloadBlob('store-assignments.csv', data);
-      if (headers?.['x-store-assignments-truncated'] === 'true') {
-        setAssignmentError(
-          'The assignment export reached 50,000 rows. Narrow the search or activity filter to export the remaining assignments.'
-        );
-      }
-    } catch (e: any) {
-      setAssignmentError(e?.response?.data?.detail ?? 'Could not export store assignments.');
-    } finally {
-      setAssignmentExporting(false);
-    }
   };
   const downloadVerifiedUsers = async () => {
     setDirectoryExporting(true);
@@ -828,7 +805,8 @@ export default function AccessPage() {
                         ? 'Updating preview…'
                         : portfolioPreview
                           ? `${portfolioPreview.total} stores · ${portfolioPreview.explicit_count} explicit · ${portfolioPreview.trait_count} from traits${portfolioPreview.overlap_count ? ` · ${portfolioPreview.overlap_count} overlap` : ''}`
-                          : portfolioPreviewError ?? 'Resolving selected stores and current trait memberships…'}
+                          : (portfolioPreviewError ??
+                            'Resolving selected stores and current trait memberships…')}
                     </div>
                   </div>
                   {portfolioPreview?.total === 0 && !portfolioPreviewLoading && (
@@ -940,14 +918,6 @@ export default function AccessPage() {
                   <span className="toolbar-count">
                     {assignmentTotal} matching assignment{assignmentTotal === 1 ? '' : 's'}
                   </span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={!assignmentTotal || assignmentExporting}
-                    onClick={() => void downloadAssignments()}
-                  >
-                    {assignmentExporting ? 'Preparing CSV…' : 'Download matching CSV'}
-                  </Button>
                 </div>
                 {assignmentTotal === 0 ? (
                   <p className="hint">

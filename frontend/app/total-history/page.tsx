@@ -7,7 +7,6 @@ import { Alert, Button, Card, DataTable, Pager, PageHeader } from '@/components/
 import type { Column } from '@/components/ui';
 import { api, money } from '@/lib/api';
 import { formatRollupKey } from '@/lib/storeDays';
-import { downloadBlob } from '@/lib/csv';
 import { formatNumber } from '@/lib/preferences';
 
 interface TotalHistoryRow {
@@ -171,7 +170,6 @@ export default function TotalHistoryPage() {
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
   const [linkNotice, setLinkNotice] = useState('');
@@ -258,47 +256,6 @@ export default function TotalHistoryPage() {
     }
   }
 
-  async function exportHistory() {
-    setExportBusy(true);
-    setExportError('');
-    try {
-      const { data } = await api.get('/api/total-history/export.csv', {
-        params: {
-          store_id: applied.store || undefined,
-          date_from: applied.dateFrom || undefined,
-          date_to: applied.dateTo || undefined,
-          total_name: applied.name || undefined,
-          level: applied.level || undefined,
-          dimension: applied.dimension || undefined,
-          min_version: applied.minVersion || undefined,
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('total-audit-history.csv', data);
-    } catch (cause) {
-      const statusCode = (cause as { response?: { status?: number } })?.response?.status;
-      setExportError(
-        statusCode === 413
-          ? 'The matching history exceeds 50,000 rows. Add a store, date, total, or version filter and try again.'
-          : 'Could not export the filtered total history.'
-      );
-    } finally {
-      setExportBusy(false);
-    }
-  }
-
-  const detachTitle = [
-    'Total Audit Trail',
-    applied.store ? `Store ${applied.store}` : 'All stores',
-    applied.dateFrom || applied.dateTo
-      ? `${applied.dateFrom || 'any date'} → ${applied.dateTo || 'latest'}`
-      : '',
-    applied.name || 'All totals',
-    applied.level || 'All levels',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
   return (
     <main className="page-container">
       <PageHeader
@@ -309,18 +266,6 @@ export default function TotalHistoryPage() {
             <div className="row-actions">
               <Button size="sm" variant="secondary" onClick={() => void copyHistoryLink()}>
                 {linkCopied ? 'Link copied' : 'Copy report link'}
-              </Button>
-              <Button
-                size="sm"
-                disabled={busy || exportBusy || result.total > 50_000}
-                title={
-                  result.total > 50_000
-                    ? 'Narrow the search to export up to 50,000 matching revisions.'
-                    : 'Export every row matching the applied search filters.'
-                }
-                onClick={() => void exportHistory()}
-              >
-                {exportBusy ? 'Preparing CSV…' : 'Export matching CSV'}
               </Button>
             </div>
           )
@@ -398,7 +343,6 @@ export default function TotalHistoryPage() {
             columns={columns}
             rows={busy ? null : result.items}
             csvFileName="total-history-visible.csv"
-            detachTitle={detachTitle}
             rowKey={(row) =>
               `${row.store_id}:${row.business_date}:${row.total_name}:${row.level}:${row.dimension ?? ''}:${row.version}`
             }

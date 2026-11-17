@@ -43,7 +43,10 @@ interface Run {
   store_day_open_error: string | null;
   source_counts?: Record<string, number> | null;
 }
-type BatchRunDetail = Run & { heartbeat_at: string | null; source_counts: Record<string, number> | null };
+type BatchRunDetail = Run & {
+  heartbeat_at: string | null;
+  source_counts: Record<string, number> | null;
+};
 interface Recon {
   transactions_examined: number;
   matched_pairs: number;
@@ -246,9 +249,7 @@ export default function ImportsPage() {
   const [runPageSize, setRunPageSize] = useState(50);
   const [runHasMore, setRunHasMore] = useState(false);
   const [runHistoryLoading, setRunHistoryLoading] = useState(false);
-  const [runHistoryExporting, setRunHistoryExporting] = useState(false);
   const [runHistoryError, setRunHistoryError] = useState('');
-  const [runHistoryNotice, setRunHistoryNotice] = useState('');
   const batchRunRequest = useRef(0);
   const runHistoryRequest = useRef(0);
   const runDetailRef = useRef<HTMLDivElement>(null);
@@ -263,9 +264,7 @@ export default function ImportsPage() {
   const [quarantinePageSize, setQuarantinePageSize] = useState(50);
   const [quarantineHasMore, setQuarantineHasMore] = useState(false);
   const [quarantineLoading, setQuarantineLoading] = useState(false);
-  const [quarantineExporting, setQuarantineExporting] = useState(false);
   const [quarantineError, setQuarantineError] = useState('');
-  const [quarantineNotice, setQuarantineNotice] = useState('');
   const [bstatus, setBstatus] = useState<BatchStatus | null>(null);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [deliverySource, setDeliverySource] = useState('');
@@ -277,9 +276,7 @@ export default function ImportsPage() {
   const [deliveryPageSize, setDeliveryPageSize] = useState(50);
   const [deliveryHasMore, setDeliveryHasMore] = useState(false);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
-  const [deliveryExporting, setDeliveryExporting] = useState(false);
   const [deliveryError, setDeliveryError] = useState('');
-  const [deliveryNotice, setDeliveryNotice] = useState('');
   const [feedHealth, setFeedHealth] = useState<FeedHealth[]>([]);
   const [ingestRes, setIngestRes] = useState<Record<string, Record<string, number>> | null>(null);
   const [recon, setRecon] = useState<Recon | null>(null);
@@ -535,84 +532,6 @@ export default function ImportsPage() {
   useEffect(() => {
     if (tab === 'feeds') loadDeliveryHistory();
   }, [tab, loadDeliveryHistory]);
-  const downloadDeliveryHistory = async () => {
-    setDeliveryExporting(true);
-    setDeliveryError('');
-    setDeliveryNotice('');
-    try {
-      const { data, headers } = await api.get('/api/ingest/deliveries/history.csv', {
-        params: {
-          source_system: deliverySource || undefined,
-          query: deliveryQuery || undefined,
-          start: deliveryStart || undefined,
-          end: deliveryEnd || undefined,
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('source-deliveries.csv', data);
-      if (headers?.['x-delivery-history-truncated'] === 'true') {
-        setDeliveryNotice(
-          'The CSV reached 50,000 deliveries. Narrow the source, delivery ID, or date filters to export the full result.'
-        );
-      }
-    } catch (e) {
-      setDeliveryError(apiError(e, 'Could not export source delivery history.'));
-    } finally {
-      setDeliveryExporting(false);
-    }
-  };
-  const downloadQuarantine = async () => {
-    setQuarantineExporting(true);
-    setQuarantineError('');
-    setQuarantineNotice('');
-    try {
-      const { data, headers } = await api.get('/api/ingest/quarantine.csv', {
-        params: {
-          source_system: quarantineSource || undefined,
-          delivery_id: quarantineDeliveryId || undefined,
-          query: quarantineQuery || undefined,
-          start: quarantineStart || undefined,
-          end: quarantineEnd || undefined,
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('quarantine-records.csv', data);
-      if (headers?.['x-quarantine-truncated'] === 'true') {
-        setQuarantineNotice(
-          'The CSV reached 50,000 rows. Narrow the source, delivery, search, or date filters to export the full result.'
-        );
-      }
-    } catch (e) {
-      setQuarantineError(apiError(e, 'Could not export quarantined records.'));
-    } finally {
-      setQuarantineExporting(false);
-    }
-  };
-  const downloadRunHistory = async () => {
-    setRunHistoryExporting(true);
-    setRunHistoryError('');
-    setRunHistoryNotice('');
-    try {
-      const { data, headers } = await api.get('/api/batch/runs/history.csv', {
-        params: {
-          start: runStart || undefined,
-          end: runEnd || undefined,
-          status: runStatus || undefined,
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('batch-runs.csv', data);
-      if (headers?.['x-batch-history-truncated'] === 'true') {
-        setRunHistoryNotice(
-          'The CSV reached 50,000 rows. Narrow the date or status filters to export the full history.'
-        );
-      }
-    } catch (e) {
-      setRunHistoryError(apiError(e, 'Could not export batch run history.'));
-    } finally {
-      setRunHistoryExporting(false);
-    }
-  };
   useEffect(() => {
     if (tab !== 'upload' || !canManage) return;
     let current = true;
@@ -929,7 +848,9 @@ export default function ImportsPage() {
     ['runs', 'Batch runs', null, false],
     ['feeds', 'Source feeds', feedHealth.length, overdue > 0],
     ['quarantine', 'Quarantine', quarantineCount, quarantineCount > 0],
-    ...(canManage ? ([['demo', 'Demo tools', null, false]] as [Tab, string, number | null, boolean][]) : []),
+    ...(canManage
+      ? ([['demo', 'Demo tools', null, false]] as [Tab, string, number | null, boolean][])
+      : []),
   ];
 
   return (
@@ -1129,7 +1050,6 @@ export default function ImportsPage() {
                   rows={sources}
                   rowKey={(s) => s.source_system}
                   csvFileName="ingest-sources-visible.csv"
-                  detachTitle="Ingestion source settings"
                 />
               </Card>
               {sources
@@ -1321,8 +1241,8 @@ export default function ImportsPage() {
                         )}
                         {uploadPreview.blockers.length > 0 && (
                           <Alert tone="error">
-                            RTLOG cannot be ingested yet: {uploadPreview.blockers.join(' · ')}
-                            {' '}Resolve the file or mapping issues and preview again; ask IT to map
+                            RTLOG cannot be ingested yet: {uploadPreview.blockers.join(' · ')}{' '}
+                            Resolve the file or mapping issues and preview again; ask IT to map
                             unsupported RTLOG types.
                           </Alert>
                         )}
@@ -1534,16 +1454,8 @@ export default function ImportsPage() {
                   <option value="Succeeded">Succeeded</option>
                   <option value="Failed">Failed</option>
                 </select>
-                <Button
-                  size="sm"
-                  onClick={() => void downloadRunHistory()}
-                  disabled={runHistoryExporting || runs.length === 0}
-                >
-                  {runHistoryExporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-                </Button>
               </Toolbar>
               {runHistoryError && <Alert tone="error">{runHistoryError}</Alert>}
-              {runHistoryNotice && <Alert tone="warning">{runHistoryNotice}</Alert>}
               {!runHistoryLoading && runs.length === 0 ? (
                 <EmptyState title="No batch runs yet">
                   <p>
@@ -1649,7 +1561,6 @@ export default function ImportsPage() {
                   rows={runHistoryLoading ? null : runs}
                   rowKey={(r) => String(r.id)}
                   csvFileName="batch-runs-visible.csv"
-                  detachTitle={`Batch runs · ${runStart || 'all dates'} to ${runEnd || 'today'}`}
                   footer={
                     <PageNav
                       page={runPage}
@@ -1694,8 +1605,10 @@ export default function ImportsPage() {
                         </div>
                         <p className="hint" style={{ margin: 0 }}>
                           Started {when(selectedRun.started_at)}
-                          {selectedRun.finished_at && ` · Finished ${when(selectedRun.finished_at)}`}
-                          {selectedRun.heartbeat_at && ` · Last progress ${when(selectedRun.heartbeat_at)}`}
+                          {selectedRun.finished_at &&
+                            ` · Finished ${when(selectedRun.finished_at)}`}
+                          {selectedRun.heartbeat_at &&
+                            ` · Last progress ${when(selectedRun.heartbeat_at)}`}
                         </p>
                         {selectedRun.error && <Alert tone="error">{selectedRun.error}</Alert>}
                         {selectedRun.store_day_open_status && (
@@ -1812,7 +1725,6 @@ export default function ImportsPage() {
                     rows={feedHealth}
                     rowKey={(f) => String(f.profile_id)}
                     csvFileName="source-feed-freshness-visible.csv"
-                    detachTitle="Source feed freshness"
                   />
                 )}
               </section>
@@ -1880,16 +1792,8 @@ export default function ImportsPage() {
                   >
                     Search
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => void downloadDeliveryHistory()}
-                    disabled={deliveryExporting || deliveries.length === 0}
-                  >
-                    {deliveryExporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-                  </Button>
                 </Toolbar>
                 {deliveryError && <Alert tone="error">{deliveryError}</Alert>}
-                {deliveryNotice && <Alert tone="warning">{deliveryNotice}</Alert>}
                 {!deliveryLoading && deliveries.length === 0 ? (
                   <EmptyState title="No source deliveries match">
                     <p>Change the source, date range, or delivery ID search.</p>
@@ -1960,7 +1864,6 @@ export default function ImportsPage() {
                     rows={deliveryLoading ? null : deliveries}
                     rowKey={(delivery) => `${delivery.source_system}-${delivery.delivery_id}`}
                     csvFileName="source-deliveries-visible.csv"
-                    detachTitle={`Source deliveries · ${deliverySource || 'all sources'}`}
                     footer={
                       <PageNav
                         page={deliveryPage}
@@ -2053,16 +1956,8 @@ export default function ImportsPage() {
                 >
                   Search
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={() => void downloadQuarantine()}
-                  disabled={quarantineExporting || quarantineRows.length === 0}
-                >
-                  {quarantineExporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-                </Button>
               </Toolbar>
               {quarantineError && <Alert tone="error">{quarantineError}</Alert>}
-              {quarantineNotice && <Alert tone="warning">{quarantineNotice}</Alert>}
               {!quarantineLoading && quarantineRows.length === 0 ? (
                 <EmptyState title="Nothing in quarantine">
                   <p>Try changing the source, delivery ID, date range, or search phrase.</p>
@@ -2106,7 +2001,6 @@ export default function ImportsPage() {
                   rows={quarantineLoading ? null : quarantineRows}
                   rowKey={(q) => String(q.id)}
                   csvFileName="quarantined-source-records-visible.csv"
-                  detachTitle={`Quarantined records · ${quarantineSource || 'all sources'}`}
                   footer={
                     <PageNav
                       page={quarantinePage}

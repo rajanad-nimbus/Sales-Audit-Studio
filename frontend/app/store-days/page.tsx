@@ -112,8 +112,6 @@ export default function StoreDaysPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const [showOpen, setShowOpen] = useState(false);
   const [openStore, setOpenStore] = useState('');
@@ -385,37 +383,6 @@ export default function StoreDaysPage() {
     load();
   }, [load]);
 
-  const exportStoreDays = async () => {
-    setExporting(true);
-    setExportError(null);
-    try {
-      const { data } = await api.get('/api/store-days', {
-        params: {
-          store_id: storeFilter || undefined,
-          date_from: dateFrom || undefined,
-          date_to: dateTo || undefined,
-          q: debouncedQ.trim() || undefined,
-          status: statusFilter || undefined,
-          data_status: dataStatus || undefined,
-          audit_status: auditStatus || undefined,
-          overall_status: overallStatus || undefined,
-          format: 'csv',
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('store-days.csv', data);
-    } catch (e) {
-      const statusCode = (e as { response?: { status?: number } }).response?.status;
-      setExportError(
-        statusCode === 413
-          ? 'This export or readiness filter is too large to process. Narrow the date, store, or search filters and try again.'
-          : 'Could not download the filtered Store Days.'
-      );
-    } finally {
-      setExporting(false);
-    }
-  };
-
   const persistSavedViews = (next: SavedStoreDaysView[]) => {
     setSavedViews(next);
     try {
@@ -464,9 +431,7 @@ export default function StoreDaysPage() {
     const nextOverallStatus = params.overall_status ?? '';
     setDataStatus(DATA_STATUSES.includes(nextDataStatus) ? nextDataStatus : '');
     setAuditStatus(AUDIT_STATUSES.includes(nextAuditStatus) ? nextAuditStatus : '');
-    setOverallStatus(
-      OVERALL_STATUSES.includes(nextOverallStatus) ? nextOverallStatus : ''
-    );
+    setOverallStatus(OVERALL_STATUSES.includes(nextOverallStatus) ? nextOverallStatus : '');
     setTab(['days', 'late', 'stuck'].includes(params.tab) ? (params.tab as ListTab) : 'days');
     setPageSize(
       [25, 50, 100, 200].includes(Number(params.page_size)) ? Number(params.page_size) : 50
@@ -540,17 +505,6 @@ export default function StoreDaysPage() {
   };
 
   const statuses = summary ? Object.keys(summary.by_status).sort() : [];
-  const storeDaysDetachTitle = [
-    'Store Days',
-    storeFilter && `Store ${storeFilter}`,
-    dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : dateFrom ? `From ${dateFrom}` : '',
-    statusFilter,
-    dataStatus && `Data: ${dataStatus}`,
-    auditStatus && `Audit: ${auditStatus}`,
-    overallStatus && `Overall: ${overallStatus}`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
   const onThisPage = useMemo(
     () => ({
       ready: days.filter((d) => d.readiness?.ready_to_close).length,
@@ -799,7 +753,6 @@ export default function StoreDaysPage() {
               rowKey={(r: LateStore) => r.store_id}
               failed={!!attentionError}
               csvFileName="store-days-late-visible.csv"
-              detachTitle={`Store Days · Late · ${lateDate}`}
               emptyTitle="Every active store's data is complete for this date"
               footer={
                 attention &&
@@ -886,7 +839,6 @@ export default function StoreDaysPage() {
               rowKey={dayKey}
               failed={!!attentionError}
               csvFileName="store-days-stuck-visible.csv"
-              detachTitle={`Store Days · Stuck · ${stuckAfter === 1 ? 'all open' : `open over ${stuckAfter} days`}`}
               onRowClick={(d: StuckDay) =>
                 setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))
               }
@@ -971,15 +923,7 @@ export default function StoreDaysPage() {
                   </option>
                 ))}
               </select>
-              <Button
-                size="sm"
-                disabled={exporting || loading || days.length === 0}
-                onClick={exportStoreDays}
-              >
-                {exporting ? 'Preparing…' : 'Download filtered CSV'}
-              </Button>
             </Toolbar>
-            {exportError && <Alert tone="error">{exportError}</Alert>}
             {summary && (
               <Segmented
                 value={statusFilter}
@@ -1053,7 +997,6 @@ export default function StoreDaysPage() {
             failed={loadFailed}
             rowKey={dayKey}
             csvFileName="store-days-visible.csv"
-            detachTitle={storeDaysDetachTitle}
             onRowClick={(d) => setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))}
             expandedKey={expanded}
             renderDetail={(d) => (

@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/preferences';
-import { downloadBlob } from '@/lib/csv';
 import { useToast } from '@/components/Feedback';
 import {
   Alert,
@@ -64,7 +63,6 @@ export function PaidOutCorrectionQueue() {
   const [pageSize, setPageSize] = useState(25);
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
 
@@ -105,7 +103,10 @@ export function PaidOutCorrectionQueue() {
           reason: reason.trim(),
         });
       }
-      toast(action === 'approve' ? 'Paid-out details corrected.' : 'Correction rejected.', 'success');
+      toast(
+        action === 'approve' ? 'Paid-out details corrected.' : 'Correction rejected.',
+        'success'
+      );
       await load();
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? `Could not ${action} this correction.`);
@@ -118,27 +119,6 @@ export function PaidOutCorrectionQueue() {
     value === 'All'
       ? Object.values(result?.status_counts ?? {}).reduce((sum, n) => sum + n, 0)
       : (result?.status_counts[value] ?? 0);
-
-  const downloadFiltered = async () => {
-    setExporting(true);
-    setExportNotice(null);
-    try {
-      const params = new URLSearchParams({ format: 'csv' });
-      if (status !== 'All') params.set('status', status);
-      if (query) params.set('q', query);
-      const response = await api.get(`/api/register-events/detail-corrections?${params}`, {
-        responseType: 'blob',
-      });
-      downloadBlob('paid-out-corrections.csv', response.data);
-      if (response.headers?.['x-report-truncated'] === 'true') {
-        setExportNotice('The export is limited to the first 50,000 matching corrections. Narrow your filters to download fewer rows.');
-      }
-    } catch {
-      setError('Could not download the filtered paid-out correction queue.');
-    } finally {
-      setExporting(false);
-    }
-  };
 
   return (
     <Card title={`Paid-out detail review (${formatNumber(result?.total ?? 0)})`}>
@@ -173,13 +153,6 @@ export function PaidOutCorrectionQueue() {
             label: `${value === 'Proposed' ? 'Awaiting review' : value} ${count(value)}`,
           }))}
         />
-        <Button
-          variant="secondary"
-          disabled={!result?.total || exporting}
-          onClick={() => void downloadFiltered()}
-        >
-          {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-        </Button>
       </Toolbar>
       <DataTable
         columns={[
@@ -206,8 +179,8 @@ export function PaidOutCorrectionQueue() {
               <div className="stack stack-xs">
                 {Object.entries(row.proposed_values.after).map(([field, value]) => (
                   <span key={field}>
-                    <b>{LABELS[field] ?? field}:</b>{' '}
-                    {row.proposed_values.before[field] || '—'} → {value || '—'}
+                    <b>{LABELS[field] ?? field}:</b> {row.proposed_values.before[field] || '—'} →{' '}
+                    {value || '—'}
                   </span>
                 ))}
               </div>
@@ -239,7 +212,13 @@ export function PaidOutCorrectionQueue() {
             header: 'Status',
             render: (row: PaidOutCorrection) => (
               <Badge
-                variant={row.status === 'Approved' ? 'success' : row.status === 'Rejected' ? 'error' : 'warning'}
+                variant={
+                  row.status === 'Approved'
+                    ? 'success'
+                    : row.status === 'Rejected'
+                      ? 'error'
+                      : 'warning'
+                }
                 size="sm"
               >
                 {row.status === 'Proposed' ? 'Awaiting review' : row.status}
@@ -264,7 +243,10 @@ export function PaidOutCorrectionQueue() {
                       value={rejectionReasons[row.id] ?? ''}
                       maxLength={2000}
                       onChange={(event) =>
-                        setRejectionReasons((values) => ({ ...values, [row.id]: event.target.value }))
+                        setRejectionReasons((values) => ({
+                          ...values,
+                          [row.id]: event.target.value,
+                        }))
                       }
                     />
                   </Field>
@@ -283,7 +265,6 @@ export function PaidOutCorrectionQueue() {
         rows={result?.items ?? null}
         rowKey={(row: PaidOutCorrection) => row.id}
         csvFileName={`paid-out-corrections-${status.toLowerCase()}.csv`}
-        detachTitle={`Paid-out detail review · ${status === 'Proposed' ? 'awaiting review' : status.toLowerCase()}${query ? ` · search: ${query}` : ''}`}
         emptyTitle={count('All') === 0 ? 'No paid-out corrections yet' : 'No corrections match'}
         emptyHint="Corrections proposed from a paid-out event appear here for review."
       />

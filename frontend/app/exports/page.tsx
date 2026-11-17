@@ -99,7 +99,6 @@ export default function ExportsPage() {
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const batchRequestId = useRef(0);
-  const [batchExporting, setBatchExporting] = useState(false);
   const [destId, setDestId] = useState('');
   const [dataset, setDataset] = useState('resolutions');
   const [preview, setPreview] = useState<{
@@ -188,31 +187,6 @@ export default function ExportsPage() {
   useEffect(() => {
     loadBatchHistory();
   }, [loadBatchHistory]);
-  const downloadBatchHistory = async () => {
-    setBatchExporting(true);
-    setErr(null);
-    try {
-      const { data, headers } = await api.get('/api/exports/batches/history.csv', {
-        params: {
-          destination_id: batchDestination || undefined,
-          dataset: batchDataset || undefined,
-          status: batchStatus || undefined,
-          start: batchStart || undefined,
-          end: batchEnd || undefined,
-          q: batchQuery || undefined,
-        },
-        responseType: 'blob',
-      });
-      downloadBlob('export-history.csv', data);
-      if (headers?.['x-export-history-truncated'] === 'true') {
-        setErr('The CSV reached 50,000 batches. Narrow the filters to export the full history.');
-      }
-    } catch (e: any) {
-      setErr(e?.response?.data?.detail ?? 'Could not export batch history.');
-    } finally {
-      setBatchExporting(false);
-    }
-  };
   const loadTrack = useCallback(async () => {
     const requestId = ++trackRequestId.current;
     if (!destId) {
@@ -572,13 +546,6 @@ export default function ExportsPage() {
                 </button>
               )}
               <span className="toolbar-count">{formatNumber(track.total)} record(s)</span>
-              <Button
-                size="sm"
-                onClick={() => void downloadTracking()}
-                disabled={trackExporting || track.total === 0}
-              >
-                {trackExporting ? 'Preparing CSV…' : 'Download matching CSV'}
-              </Button>
             </div>
             {track.items.length === 0 ? (
               <p className="cc-empty">No records match.</p>
@@ -770,13 +737,6 @@ export default function ExportsPage() {
             }}
           >
             Search
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => void downloadBatchHistory()}
-            disabled={batchExporting || batches.length === 0}
-          >
-            {batchExporting ? 'Preparing CSV…' : 'Download filtered CSV'}
           </Button>
         </Toolbar>
         {!loaded ? (

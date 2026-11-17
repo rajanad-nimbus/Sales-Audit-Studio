@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
-import { downloadBlob, downloadCsv } from '@/lib/csv';
+import { downloadCsv } from '@/lib/csv';
 import { formatDateTime } from '@/lib/preferences';
 import { SkeletonRows } from '@/components/Feedback';
 import { Alert, Button, Card, Field } from '@/components/ui';
@@ -68,8 +68,6 @@ export function RoleAssignments() {
   const roleImportFile = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -96,29 +94,6 @@ export function RoleAssignments() {
 
   const label = (key: string | null) =>
     data?.roles.find((item) => item.key === key)?.label ?? key ?? '—';
-
-  const exportMatching = async () => {
-    setExporting(true);
-    setExportNotice(null);
-    try {
-      const params = new URLSearchParams({ format: 'csv' });
-      if (q.trim()) params.set('q', q.trim());
-      if (assigned !== 'all') params.set('assigned', assigned);
-      if (assignedRole) params.set('assigned_role', assignedRole);
-      if (inactiveDays) params.set('inactive_days', inactiveDays);
-      const response = await api.get<Blob>(`/api/access/role-assignments?${params}`, {
-        responseType: 'blob',
-      });
-      downloadBlob('business-role-assignments.csv', response.data);
-      if (response.headers?.['x-role-assignments-truncated'] === 'true') {
-        setExportNotice('Export includes the first 50,000 matching role assignments.');
-      }
-    } catch (cause) {
-      setError(errorMessage(cause, 'Could not export the role assignments.'));
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const edit = (person: Person) => {
     setEditing(person);
@@ -284,14 +259,6 @@ export function RoleAssignments() {
             <Button
               size="sm"
               variant="secondary"
-              disabled={exporting || !data?.pagination.total}
-              onClick={() => void exportMatching()}
-            >
-              {exporting ? 'Exporting…' : 'Export matching CSV'}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
               onClick={() =>
                 downloadCsv(
                   'business-role-template.csv',
@@ -328,7 +295,6 @@ export function RoleAssignments() {
             before removing an assigned business role.
           </p>
         )}
-        {exportNotice && <Alert tone="warning">{exportNotice}</Alert>}
         {!data ? (
           <SkeletonRows rows={4} />
         ) : data.items.length === 0 ? (

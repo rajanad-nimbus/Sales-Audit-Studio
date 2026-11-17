@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { formatDateTime } from '@/lib/preferences';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { Alert, Button, Card, DataTable, Pager, Toolbar } from '@/components/ui';
@@ -49,7 +48,6 @@ export default function RetentionPage() {
   const [runDataset, setRunDataset] = useState('');
   const [runStatus, setRunStatus] = useState('');
   const [runsLoading, setRunsLoading] = useState(true);
-  const [runsExporting, setRunsExporting] = useState(false);
   const [runsNotice, setRunsNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -93,31 +91,6 @@ export default function RetentionPage() {
       window.clearTimeout(timer);
     };
   }, [load]);
-
-  const exportRuns = async () => {
-    setRunsExporting(true);
-    setRunsNotice(null);
-    try {
-      const params = new URLSearchParams({ format: 'csv' });
-      if (runQuery.trim()) params.set('q', runQuery.trim());
-      if (runDataset) params.set('dataset', runDataset);
-      if (runStatus) params.set('status', runStatus);
-      const { data, headers } = await api.get(
-        `/api/operations/retention/runs?${params.toString()}`,
-        { responseType: 'blob' }
-      );
-      downloadBlob('retention-runs.csv', data);
-      if (headers?.['x-retention-runs-truncated'] === 'true') {
-        setRunsNotice(
-          'The export reached 50,000 runs. Narrow the dataset or search filter to export more.'
-        );
-      }
-    } catch (e) {
-      setError(apiError(e, 'Could not export retention run history.'));
-    } finally {
-      setRunsExporting(false);
-    }
-  };
 
   const preview = async (dataset: string) => {
     try {
@@ -257,7 +230,6 @@ export default function RetentionPage() {
             rows={policies}
             rowKey={(p) => p.id}
             csvFileName="retention-policies-visible.csv"
-            detachTitle="Data retention policies"
           />
         )}
       </Card>
@@ -302,14 +274,6 @@ export default function RetentionPage() {
             <option value="Succeeded">Succeeded</option>
             <option value="Failed">Failed</option>
           </select>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={!runTotal || runsExporting}
-            onClick={() => void exportRuns()}
-          >
-            {runsExporting ? 'Preparing CSV…' : 'Download matching CSV'}
-          </Button>
         </Toolbar>
         {runsNotice && (
           <Alert tone="warning" onDismiss={() => setRunsNotice(null)}>
@@ -408,7 +372,6 @@ export default function RetentionPage() {
             rows={runs}
             rowKey={(r) => String(r.id)}
             csvFileName="retention-runs-visible.csv"
-            detachTitle={`Retention run history · ${runDataset || 'all datasets'} · ${runStatus || 'all statuses'}`}
             footer={
               <Pager
                 page={runPage}

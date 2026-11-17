@@ -265,7 +265,6 @@ export default function AuditPage() {
           ]}
           rows={rows}
           csvFileName="audit-trail-visible.csv"
-          detachTitle="Audit Trail · Visible events"
           rowKey={(e) => String(e.id)}
           onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
           rowClassName={(e) => `ac-row ${open === e.id ? 'open' : ''}`}

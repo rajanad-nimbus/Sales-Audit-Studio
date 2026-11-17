@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { formatBusinessDate as formatDate } from '@/lib/preferences';
 import { useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
@@ -93,7 +92,6 @@ export function VoucherLedger() {
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [form, setForm] = useState({
     number: '',
     store: '',
@@ -211,40 +209,6 @@ export function VoucherLedger() {
       setError(apiError(e, 'That did not work.'));
     } finally {
       setBusy(false);
-    }
-  };
-
-  const exportLedger = async () => {
-    setExporting(true);
-    try {
-      const retired = status === 'Retired';
-      const { data, headers } = await api.get(
-        retired ? '/api/vouchers/retired/export.csv' : '/api/vouchers/export.csv',
-        {
-          params: {
-            status: !retired ? status || undefined : undefined,
-            q: q.trim() || undefined,
-            store_id: issuingStoreId || undefined,
-          },
-          responseType: 'blob',
-        }
-      );
-      downloadBlob(retired ? 'retired-vouchers.csv' : 'vouchers.csv', data);
-      const truncatedHeader = retired
-        ? 'x-retired-voucher-export-truncated'
-        : 'x-voucher-export-truncated';
-      if (headers?.[truncatedHeader] === 'true') {
-        toast(
-          'The export reached 50,000 rows. Narrow the voucher search and export again.',
-          'info'
-        );
-      } else {
-        toast('Voucher export downloaded.', 'success');
-      }
-    } catch (e) {
-      setError(apiError(e, 'Could not export vouchers.'));
-    } finally {
-      setExporting(false);
     }
   };
 
@@ -394,9 +358,6 @@ export function VoucherLedger() {
           }}
           emptyLabel="All issuing stores"
         />
-        <Button variant="secondary" disabled={exporting} onClick={() => void exportLedger()}>
-          {exporting ? 'Preparing CSV…' : 'Export matching CSV'}
-        </Button>
         {canWrite && (
           <StoreSelect value={redeemStore} onChange={setRedeemStore} emptyLabel="Redeem at…" />
         )}
@@ -415,17 +376,13 @@ export function VoucherLedger() {
         )}
       </Toolbar>
       {status === 'Retired' ? (
-        <RetiredVouchers
-          rows={retiredRows}
-          detachTitle={`Retired vouchers${issuingStoreId ? ` · Store ${issuingStoreId}` : ''}`}
-        />
+        <RetiredVouchers rows={retiredRows} />
       ) : (
         <DataTable
           rows={rows}
           rowKey={(v) => v.voucher_number}
           emptyTitle="No vouchers"
           csvFileName="vouchers-visible.csv"
-          detachTitle={`Vouchers · ${status || 'all statuses'}${issuingStoreId ? ` · Store ${issuingStoreId}` : ''}`}
           columns={[
             {
               key: 'n',
@@ -434,7 +391,12 @@ export function VoucherLedger() {
               render: (v) => v.voucher_number,
               csvValue: (v) => v.voucher_number,
             },
-            { key: 't', header: 'Tender', render: (v) => v.tender_type, csvValue: (v) => v.tender_type },
+            {
+              key: 't',
+              header: 'Tender',
+              render: (v) => v.tender_type,
+              csvValue: (v) => v.tender_type,
+            },
             {
               key: 's',
               header: 'Issued at',

@@ -4,7 +4,6 @@ import { formatNumber } from '@/lib/preferences';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { StoreSelect } from '@/components/StoreSelect';
 import { Alert, Button, Card, DataTable, PageHeader, Pager, Segmented } from '@/components/ui';
 import type { Column } from '@/components/ui';
@@ -229,7 +228,6 @@ export default function RegisterSummaryPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState('');
   const [exportNotice, setExportNotice] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
@@ -312,34 +310,6 @@ export default function RegisterSummaryPage() {
     }
   }
 
-  async function download() {
-    if (!result) return;
-    setExportBusy(true);
-    setExportError('');
-    setExportNotice('');
-    try {
-      const { data, headers } = await api.get('/api/register-summary', {
-        params: {
-          store_id: store,
-          business_date: businessDate,
-          group_by: groupBy,
-          format: 'csv',
-        },
-        responseType: 'blob',
-      });
-      downloadBlob(`register-summary-${store}-${businessDate}-${groupBy}.csv`, data);
-      if (headers?.['x-report-truncated'] === 'true') {
-        setExportNotice(
-          'The export reached 100,000 rows. Narrow the store-day scope to download all rows.'
-        );
-      }
-    } catch {
-      setExportError('Could not download the complete cashier/register summary.');
-    } finally {
-      setExportBusy(false);
-    }
-  }
-
   return (
     <main className="page-container">
       {initialQuery.source === 'store-day' &&
@@ -366,15 +336,6 @@ export default function RegisterSummaryPage() {
                 title="Copy a link to these store-day filters and grouping."
               >
                 {linkCopied ? 'Link copied' : 'Copy summary link'}
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy || exportBusy || result.total === 0}
-                title="Export every cashier or register row for the selected store day."
-                onClick={() => void download()}
-              >
-                {exportBusy ? 'Preparing CSV…' : 'Export matching CSV'}
               </Button>
             </>
           )
@@ -450,7 +411,6 @@ export default function RegisterSummaryPage() {
             columns={columns(groupBy, store, businessDate)}
             rows={busy ? null : result.items}
             csvFileName="register-summary-visible.csv"
-            detachTitle={['Cashier / Register Summary', store, businessDate, groupBy].join(' · ')}
             rowKey={(row) => `${row.dimension ?? 'unassigned'}:${row.currency}`}
             emptyTitle="No cashier or register activity found"
             emptyHint="Choose another store day to review its transaction and register-event activity."

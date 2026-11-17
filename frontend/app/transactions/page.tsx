@@ -1,7 +1,6 @@
 'use client';
 
 import { formatNumber } from '@/lib/preferences';
-import { downloadBlob } from '@/lib/csv';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
@@ -246,7 +245,6 @@ export default function TransactionsPage() {
   const [data, setData] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const [ready, setReady] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [views, setViews] = useState<SavedTransactionView[]>([]);
@@ -409,42 +407,7 @@ export default function TransactionsPage() {
       { name, f: savedFilters, sort, pageSize: pageSize as SavedTransactionView['pageSize'] },
     ]);
   };
-  const downloadFilteredCsv = async () => {
-    setExporting(true);
-    setExportNotice(null);
-    try {
-      const params = new URLSearchParams({ ...sort, format: 'csv' });
-      (Object.keys(f) as (keyof F)[]).forEach((key) => {
-        const value = key === 'q' ? qd : f[key];
-        if (value) params.set(key, value);
-      });
-      const response = await api.get(`/api/transactions?${params}`, { responseType: 'blob' });
-      downloadBlob(
-        `transactions_${f.date_from || 'all'}_${f.date_to || 'current'}.csv`,
-        response.data
-      );
-      if (response.headers?.['x-report-truncated'] === 'true') {
-        setExportNotice(
-          'The export includes the first 100,000 matching transactions. Narrow the filters to download a smaller range.'
-        );
-      }
-    } catch {
-      setError('Could not download filtered transactions.');
-    } finally {
-      setExporting(false);
-    }
-  };
   const filtered = (Object.keys(f) as (keyof F)[]).some((k) => (k === 'q' ? qd : f[k]));
-  const detachTitle = [
-    'Transactions',
-    f.store_id && `Store ${f.store_id}`,
-    f.date_from && f.date_to ? `${f.date_from} to ${f.date_to}` : f.date_from || f.date_to,
-    f.status,
-    f.source_system,
-    f.transaction_type,
-  ]
-    .filter(Boolean)
-    .join(' · ');
   const advancedCount = ADVANCED_FILTERS.filter((key) => !!f[key]).length;
   const toggleSort = (k: string) =>
     setSort((s) =>
@@ -461,15 +424,6 @@ export default function TransactionsPage() {
       <PageHeader
         title="Transactions"
         subtitle="Find a transaction, review its details, and investigate related cases."
-        actions={
-          <Button
-            variant="secondary"
-            disabled={!data?.total || exporting}
-            onClick={() => void downloadFilteredCsv()}
-          >
-            {exporting ? 'Preparing CSV…' : 'Download filtered CSV'}
-          </Button>
-        }
       />
       {exportNotice && (
         <Alert tone="warning" onDismiss={() => setExportNotice(null)}>
@@ -751,7 +705,6 @@ export default function TransactionsPage() {
         <DataTable
           columns={COLUMNS}
           csvFileName="transactions-visible.csv"
-          detachTitle={detachTitle}
           rows={data.items}
           rowKey={(r) => r.id}
           onRowClick={(r) => setExpanded((open) => (open === r.id ? null : r.id))}

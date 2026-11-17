@@ -1,7 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, money } from '@/lib/api';
-import { downloadBlob } from '@/lib/csv';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { useMe } from '@/components/MeProvider';
 import { Alert, Button, DataTable, PageNav } from '@/components/ui';
@@ -57,8 +56,6 @@ export default function CashOfficePage() {
   const [depositLoadError, setDepositLoadError] = useState<string | null>(null);
   const historyRequestId = useRef(0);
   const retryRequestIds = useRef({ controls: 0, deposits: 0 });
-  const [exporting, setExporting] = useState<'controls' | 'deposits' | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [store, setStore] = useState(''),
     [date, setDate] = useState(new Date().toISOString().slice(0, 10)),
     [register, setRegister] = useState(''),
@@ -76,12 +73,18 @@ export default function CashOfficePage() {
     const legacyDate = validDate(params.get('cash_date'));
     const restoredStart = validDate(params.get('cash_start')) || legacyDate;
     const restoredEnd = validDate(params.get('cash_end')) || legacyDate;
-    setHistoryStart(restoredStart && restoredEnd && restoredStart > restoredEnd ? restoredEnd : restoredStart);
-    setHistoryEnd(restoredStart && restoredEnd && restoredStart > restoredEnd ? restoredStart : restoredEnd);
+    setHistoryStart(
+      restoredStart && restoredEnd && restoredStart > restoredEnd ? restoredEnd : restoredStart
+    );
+    setHistoryEnd(
+      restoredStart && restoredEnd && restoredStart > restoredEnd ? restoredStart : restoredEnd
+    );
     const controls = Number(params.get('cash_controls_page'));
     const deposits = Number(params.get('cash_deposits_page'));
-    if (Number.isInteger(controls) && controls > 0 && controls <= 100_000) setControlsPage(controls);
-    if (Number.isInteger(deposits) && deposits > 0 && deposits <= 100_000) setDepositsPage(deposits);
+    if (Number.isInteger(controls) && controls > 0 && controls <= 100_000)
+      setControlsPage(controls);
+    if (Number.isInteger(deposits) && deposits > 0 && deposits <= 100_000)
+      setDepositsPage(deposits);
     setHistoryReady(true);
   }, []);
   useEffect(() => {
@@ -122,7 +125,9 @@ export default function CashOfficePage() {
         end_date: historyEnd || undefined,
       };
       const [controlsResult, depositsResult] = await Promise.allSettled([
-        api.get('/api/cash-controls', { params: { ...filters, skip: (controlsPage - 1) * 100, limit: 100 } }),
+        api.get('/api/cash-controls', {
+          params: { ...filters, skip: (controlsPage - 1) * 100, limit: 100 },
+        }),
         api.get('/api/cash-controls/deposits', {
           params: { ...filters, skip: (depositsPage - 1) * 100, limit: 100 },
         }),
@@ -130,13 +135,17 @@ export default function CashOfficePage() {
       if (requestId !== historyRequestId.current) return;
       if (controlsResult.status === 'fulfilled') {
         setRows(controlsResult.value.data);
-        setControlTotal(Number(controlsResult.value.headers['x-total-count'] ?? controlsResult.value.data.length));
+        setControlTotal(
+          Number(controlsResult.value.headers['x-total-count'] ?? controlsResult.value.data.length)
+        );
       } else {
         setControlLoadError('Unable to load cash controls. Try again or check your access.');
       }
       if (depositsResult.status === 'fulfilled') {
         setDeposits(depositsResult.value.data);
-        setDepositTotal(Number(depositsResult.value.headers['x-total-count'] ?? depositsResult.value.data.length));
+        setDepositTotal(
+          Number(depositsResult.value.headers['x-total-count'] ?? depositsResult.value.data.length)
+        );
       } else {
         setDepositLoadError('Unable to load banked deposits. Try again or check your access.');
       }
@@ -163,7 +172,8 @@ export default function CashOfficePage() {
           limit: 100,
         },
       });
-      if (requestId !== historyRequestId.current || retryId !== retryRequestIds.current[kind]) return;
+      if (requestId !== historyRequestId.current || retryId !== retryRequestIds.current[kind])
+        return;
       if (kind === 'controls') {
         setRows(data);
         setControlTotal(Number(headers['x-total-count'] ?? data.length));
@@ -174,8 +184,10 @@ export default function CashOfficePage() {
         setDepositLoadError(null);
       }
     } catch {
-      if (requestId !== historyRequestId.current || retryId !== retryRequestIds.current[kind]) return;
-      if (kind === 'controls') setControlLoadError('Unable to load cash controls. Try again or check your access.');
+      if (requestId !== historyRequestId.current || retryId !== retryRequestIds.current[kind])
+        return;
+      if (kind === 'controls')
+        setControlLoadError('Unable to load cash controls. Try again or check your access.');
       else setDepositLoadError('Unable to load banked deposits. Try again or check your access.');
     }
   };
@@ -183,32 +195,6 @@ export default function CashOfficePage() {
     if (!historyReady) return;
     load();
   }, [load, historyReady]);
-  const exportHistory = async (kind: 'controls' | 'deposits') => {
-    setExporting(kind);
-    setExportError(null);
-    try {
-      const path = kind === 'controls' ? '/api/cash-controls' : '/api/cash-controls/deposits';
-      const { data } = await api.get(path, {
-        params: {
-          store_id: historyStore || undefined,
-          start_date: historyStart || undefined,
-          end_date: historyEnd || undefined,
-          format: 'csv',
-        },
-        responseType: 'blob',
-      });
-      downloadBlob(kind === 'controls' ? 'cash-controls.csv' : 'cash-deposits.csv', data);
-    } catch (e) {
-      const statusCode = (e as { response?: { status?: number } }).response?.status;
-      setExportError(
-        statusCode === 413
-          ? 'This export exceeds 50,000 rows. Filter by store or business date and try again.'
-          : 'Could not download the filtered Cash Office history.'
-      );
-    } finally {
-      setExporting(null);
-    }
-  };
   const copyHistoryLink = async () => {
     try {
       const url = new URL(window.location.href);
@@ -342,7 +328,9 @@ export default function CashOfficePage() {
       </div>
       <div className="cc-card">
         <h3>History filters</h3>
-        <p className="page-sub">Apply the same store and business date range to both cash histories.</p>
+        <p className="page-sub">
+          Apply the same store and business date range to both cash histories.
+        </p>
         <Button variant="secondary" size="sm" onClick={() => void copyHistoryLink()}>
           Copy history link
         </Button>
@@ -379,21 +367,20 @@ export default function CashOfficePage() {
             }}
           />
         </div>
-        {exportError && <Alert tone="error">{exportError}</Alert>}
       </div>
       <div className="cc-card">
         <div className="cc-history-heading">
           <h3>Cash controls</h3>
-          <Button
-            size="sm"
-            disabled={historyLoading || controlTotal === 0 || exporting !== null}
-            onClick={() => exportHistory('controls')}
-          >
-            {exporting === 'controls' ? 'Preparing…' : 'Download matching CSV'}
-          </Button>
         </div>
         {controlLoadError && (
-          <Alert tone="error" action={<Button size="sm" onClick={() => void retryHistory('controls')}>Retry</Button>}>
+          <Alert
+            tone="error"
+            action={
+              <Button size="sm" onClick={() => void retryHistory('controls')}>
+                Retry
+              </Button>
+            }
+          >
             {controlLoadError}
           </Alert>
         )}
@@ -417,10 +404,10 @@ export default function CashOfficePage() {
             r.status,
           ])}
           csvFileName="cash-controls-visible.csv"
-          detachTitle={`Cash controls · ${historyStore || 'all stores'} · ${historyStart || 'any date'} to ${historyEnd || 'latest'} · page ${controlsPage}`}
         />
         <p className="page-sub">
-          Showing {rows.length ? (controlsPage - 1) * 100 + 1 : 0}–{(controlsPage - 1) * 100 + rows.length} of {controlTotal} cash controls.
+          Showing {rows.length ? (controlsPage - 1) * 100 + 1 : 0}–
+          {(controlsPage - 1) * 100 + rows.length} of {controlTotal} cash controls.
         </p>
         {controlTotal > 100 && (
           <PageNav
@@ -435,16 +422,16 @@ export default function CashOfficePage() {
       <div className="cc-card">
         <div className="cc-history-heading">
           <h3>Banked deposits</h3>
-          <Button
-            size="sm"
-            disabled={historyLoading || depositTotal === 0 || exporting !== null}
-            onClick={() => exportHistory('deposits')}
-          >
-            {exporting === 'deposits' ? 'Preparing…' : 'Download matching CSV'}
-          </Button>
         </div>
         {depositLoadError && (
-          <Alert tone="error" action={<Button size="sm" onClick={() => void retryHistory('deposits')}>Retry</Button>}>
+          <Alert
+            tone="error"
+            action={
+              <Button size="sm" onClick={() => void retryHistory('deposits')}>
+                Retry
+              </Button>
+            }
+          >
             {depositLoadError}
           </Alert>
         )}
@@ -466,10 +453,10 @@ export default function CashOfficePage() {
             d.status,
           ])}
           csvFileName="cash-deposits-visible.csv"
-          detachTitle={`Banked deposits · ${historyStore || 'all stores'} · ${historyStart || 'any date'} to ${historyEnd || 'latest'} · page ${depositsPage}`}
         />
         <p className="page-sub">
-          Showing {deposits.length ? (depositsPage - 1) * 100 + 1 : 0}–{(depositsPage - 1) * 100 + deposits.length} of {depositTotal} deposits.
+          Showing {deposits.length ? (depositsPage - 1) * 100 + 1 : 0}–
+          {(depositsPage - 1) * 100 + deposits.length} of {depositTotal} deposits.
         </p>
         {depositTotal > 100 && (
           <PageNav
@@ -486,12 +473,10 @@ function Data({
   headers,
   rows,
   csvFileName,
-  detachTitle,
 }: {
   headers: string[];
   rows: string[][];
   csvFileName: string;
-  detachTitle: string;
 }) {
   return (
     <DataTable
@@ -505,7 +490,6 @@ function Data({
       rowKey={(r) => r.join('|')}
       emptyTitle="No records yet."
       csvFileName={csvFileName}
-      detachTitle={detachTitle}
     />
   );
 }

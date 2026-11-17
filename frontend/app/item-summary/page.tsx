@@ -196,10 +196,7 @@ export default function ItemSummaryPage() {
   }
 
   useEffect(() => {
-    if (
-      autoLoaded.current ||
-      !Object.values(initialQuery).some(Boolean)
-    ) return;
+    if (autoLoaded.current || !Object.values(initialQuery).some(Boolean)) return;
     autoLoaded.current = true;
     void load(1, initialQuery);
   }, [initialQuery, load]);
@@ -360,13 +357,6 @@ export default function ItemSummaryPage() {
               columns={columns(applied)}
               rows={busy ? null : result.items}
               csvFileName="item-summary-visible.csv"
-              detachTitle={
-                [
-                  'Item Summary',
-                  applied.store || 'All stores',
-                  `${applied.dateFrom || 'all dates'} to ${applied.dateTo || 'all dates'}`,
-                ].join(' · ')
-              }
               rowKey={(row) => `${row.item_code}:${row.description ?? ''}:${row.currency}`}
               emptyTitle="No item activity found"
               emptyHint="Change the store, date range, or item search and try again."

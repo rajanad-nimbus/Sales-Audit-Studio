@@ -15,13 +15,7 @@ export interface RetiredVoucher {
   retention_run_id: string;
 }
 
-export function RetiredVouchers({
-  rows,
-  detachTitle = 'Retired vouchers',
-}: {
-  rows: RetiredVoucher[] | null;
-  detachTitle?: string;
-}) {
+export function RetiredVouchers({ rows }: { rows: RetiredVoucher[] | null }) {
   return (
     <>
       <p className="hint">
@@ -33,7 +27,6 @@ export function RetiredVouchers({
         rowKey={(row) => row.voucher_number}
         emptyTitle="No retired vouchers"
         csvFileName="retired-vouchers-visible.csv"
-        detachTitle={detachTitle}
         columns={[
           {
             key: 'number',

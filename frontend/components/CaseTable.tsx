@@ -126,14 +126,12 @@ export function CaseTable({
   onSort,
   footer,
   failed,
-  detachTitle,
 }: {
   cases: Case[];
   sort?: SortState;
   onSort?: (k: SortKey) => void;
   footer?: React.ReactNode;
   failed?: boolean;
-  detachTitle?: string;
 }) {
   const router = useRouter();
   return (
@@ -142,7 +140,6 @@ export function CaseTable({
       rows={cases}
       rowKey={(c) => c.id}
       csvFileName="cases-visible.csv"
-      detachTitle={detachTitle ?? 'Cases'}
       onRowClick={(c) => router.push(`/cases/${c.id}`)}
       sort={sort}
       onSort={onSort && ((k) => onSort(k as SortKey))}

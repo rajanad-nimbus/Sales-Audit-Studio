@@ -293,13 +293,6 @@ export default function MiscellaneousTotalsPage() {
               columns={columns}
               rows={busy ? null : result.items}
               csvFileName="misc-totals-visible.csv"
-              detachTitle={
-                [
-                  'Miscellaneous Totals',
-                  applied.store || 'All stores',
-                  `${applied.dateFrom || 'all dates'} to ${applied.dateTo || 'all dates'}`,
-                ].join(' · ')
-              }
               rowKey={(row) =>
                 `${row.store_id}:${row.business_date}:${row.total_name}:${row.level}:${row.dimension ?? ''}:${row.rollup_key ?? ''}:${row.currency}`
               }

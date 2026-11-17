@@ -3,7 +3,16 @@ import Link from 'next/link';
 import { formatNumber } from '@/lib/preferences';
 import { useCallback, useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
-import { Alert, Button, Card, DataTable, Field, PageHeader, PageNav, Toolbar } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  Card,
+  DataTable,
+  Field,
+  PageHeader,
+  PageNav,
+  Toolbar,
+} from '@/components/ui';
 import { apiError } from '@/lib/storeDays';
 import type { ReportPage } from '@/lib/reports';
 
@@ -48,11 +57,7 @@ function initialReportState(yearToDate = false) {
   const reportEnd = params.get('end') || today;
   const yearStart = `${reportEnd.slice(0, 4)}-01-01`;
   return {
-    start: params.has('start')
-      ? params.get('start') || ''
-      : yearToDate
-        ? yearStart
-        : daysAgo(7),
+    start: params.has('start') ? params.get('start') || '' : yearToDate ? yearStart : daysAgo(7),
     end: params.has('end') ? params.get('end') || '' : yearToDate ? today : '',
     storeId: (params.get('store_id') || '').slice(0, 50),
     page:
@@ -248,15 +253,13 @@ export function ReportView({ report }: { report: ReportPage }) {
     ? trendCurrency
     : (trendCurrencies[0] ?? '');
   const selectedTrendRows = trendRows.filter((row) => row.currency === activeTrendCurrency);
-  const months = monthsBetween(start || ytdStart || '', end || new Date().toISOString().slice(0, 10));
+  const months = monthsBetween(
+    start || ytdStart || '',
+    end || new Date().toISOString().slice(0, 10)
+  );
   const amountByMonth = new Map(selectedTrendRows.map((row) => [row.month, Number(row.amount)]));
   const monthValues = months.map((month) => ({ month, amount: amountByMonth.get(month) ?? 0 }));
   const trendMaximum = Math.max(...monthValues.map((item) => Math.abs(item.amount)), 0);
-  const detachTitle = [
-    report.title,
-    storeId ? `Store ${storeId}` : 'All assigned stores',
-    `${start || ytdStart || 'any date'} → ${end || 'latest'}`,
-  ].join(' · ');
 
   return (
     <div className="page-container">
@@ -331,7 +334,9 @@ export function ReportView({ report }: { report: ReportPage }) {
           {trendError ? (
             <Alert tone="error">{trendError}</Alert>
           ) : trendLoading ? (
-            <p className="hint" role="status">Loading monthly trend…</p>
+            <p className="hint" role="status">
+              Loading monthly trend…
+            </p>
           ) : monthlyTrend.length === 0 ? (
             <p className="hint">
               No current, non-stale totals are assigned to Flash Sales for this range.
@@ -344,7 +349,10 @@ export function ReportView({ report }: { report: ReportPage }) {
               </p>
               <div className="cluster flash-trend-controls">
                 <Field label="Total">
-                  <select value={activeTrendTotal} onChange={(event) => setTrendTotal(event.target.value)}>
+                  <select
+                    value={activeTrendTotal}
+                    onChange={(event) => setTrendTotal(event.target.value)}
+                  >
                     {trendTotals.map((item) => (
                       <option key={item.key} value={item.key}>
                         {item.name} · {item.level}
@@ -392,7 +400,9 @@ export function ReportView({ report }: { report: ReportPage }) {
                   })}
                 </div>
               ) : (
-                <p className="hint">No sales values are available for the selected total and currency.</p>
+                <p className="hint">
+                  No sales values are available for the selected total and currency.
+                </p>
               )}
             </>
           )}
@@ -436,7 +446,6 @@ export function ReportView({ report }: { report: ReportPage }) {
         rows={data ? data.rows : null}
         rowKey={(r) => r.join('|')}
         csvFileName={`${report.name}-visible.csv`}
-        detachTitle={detachTitle}
         emptyTitle="Nothing to report for this range"
         emptyHint={page > 1 ? 'There are no more rows. Go back a page.' : 'Try a wider date range.'}
         footer={data && <PageNav page={data.page} hasMore={data.has_more} onPage={setPage} />}

@@ -988,7 +988,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 rows={exceptions}
                 rowKey={(x) => String(x.id)}
                 csvFileName="case-exceptions-visible.csv"
-                detachTitle={`${c.case_number} · Exceptions`}
               />
             )}
             {exceptions.length > 0 && (
