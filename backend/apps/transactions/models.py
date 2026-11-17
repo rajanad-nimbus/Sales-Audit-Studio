@@ -140,6 +140,8 @@ class TransactionTender(Base):
         String(36), ForeignKey("canonical_transactions.id"), index=True
     )
     tender_type: Mapped[str] = mapped_column(String(30), index=True)
+    # The client's own tender code (VISA, AMEX, MCRISSUE...) that the per-tender totals separate.
+    client_tender_code: Mapped[str | None] = mapped_column(String(20))
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     reference: Mapped[str | None] = mapped_column(String(255))
     authorization: Mapped[str | None] = mapped_column(String(100))

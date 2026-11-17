@@ -67,6 +67,40 @@ def tender_type(group: str) -> str:
     return TENDER_TYPES.get(group.strip().upper(), "Other")
 
 
+# RMS (group, tender type id) pairs the client totals separate (documents/System_ReSA Total setup.xlsx).
+CLIENT_TENDERS = {
+    ("CASH", "1000"): "CASH",
+    ("VOUCH", "4000"): "AGNCYVOU",
+    ("VOUCH", "4040"): "GIFTCRDU",
+    ("VOUCH", "4050"): "GIFTCRDU",
+    ("VOUCH", "4060"): "MALLCERT",
+    ("VOUCH", "4120"): "VIRTGC",
+    ("CCARD", "3000"): "VISA",
+    ("CCARD", "3010"): "MASTERCD",
+    ("CCARD", "3020"): "AMEX",
+    ("CCARD", "3030"): "DISCOVER",
+    ("CCARD", "3120"): "BEALLSCC",
+    ("CCARD", "3130"): "OUTLTCC",
+    ("OTHERS", "9011"): "EBAY",
+    ("OTHERS", "9012"): "AMAZON",
+    ("OTHERS", "9013"): "WALMART",
+    ("PAYPAL", "9010"): "PAYPAL",
+}
+CLIENT_TENDER_GROUPS = {"CHECK": "CHECK", "DCARD": "MCVISADBT"}
+
+
+def client_tender_code(group: str, type_id: str, amount: Decimal) -> str | None:
+    """The client's tender code for an RMS tender, or None when the totals do not separate it.
+
+    Gift card and MCR share type ids 4040/4050: a negative tender is the MCR issued on a return.
+    """
+    key = (group.strip().upper(), str(type_id).strip().lstrip("0") or "0")
+    code = CLIENT_TENDERS.get(key) or CLIENT_TENDER_GROUPS.get(key[0])
+    if code == "GIFTCRDU" and amount < 0:
+        return "MCRISSUE"
+    return code
+
+
 def line_total(line: dict) -> Decimal:
     """Signed value of a line: quantity x unit price, negative for a returned item."""
     return Decimal(line["quantity"]) * Decimal(line["unit_price"])

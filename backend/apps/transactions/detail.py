@@ -18,7 +18,7 @@ MAX_QUANTITY = Decimal("999999999.999")
 MAX_DETAIL_ITEMS_PER_TRANSACTION = 10_000
 DISCOUNT_KINDS = ("Promotion", "Coupon", "Voucher", "Manual")
 BASE_TENDER_TYPES = ("Card", "Cash", "Voucher", "GiftCard", "StoreCredit", "Other")
-# Client tender codes the per-tender totals match on (documents/System_ReSA Total setup.xlsx).
+# Client tender codes carried in client_tender_code, which the per-tender totals match on (documents/System_ReSA Total setup.xlsx).
 CLIENT_TENDER_CODES = (
     "AGNCYVOU",
     "AMAZON",
@@ -39,7 +39,7 @@ CLIENT_TENDER_CODES = (
     "VISA",
     "WALMART",
 )
-TENDER_TYPES = (*BASE_TENDER_TYPES, *CLIENT_TENDER_CODES)
+TENDER_TYPES = BASE_TENDER_TYPES
 DETAIL_KEYS = ("lines", "discounts", "taxes", "tenders")
 TEXT_LIMITS = {
     "item_code": 100,
@@ -284,8 +284,14 @@ def parse_tender(tender: dict, number: int, sign: int) -> dict:
         raise ValueError(f"tender {number} must be an object")
     if tender.get("tender_type") not in TENDER_TYPES:
         raise ValueError(f"tender {number} tender_type must be one of {', '.join(TENDER_TYPES)}")
+    client_code = tender.get("client_tender_code")
+    if client_code is not None and client_code not in CLIENT_TENDER_CODES:
+        raise ValueError(
+            f"tender {number} client_tender_code must be one of {', '.join(CLIENT_TENDER_CODES)}"
+        )
     return {
         "tender_type": tender["tender_type"],
+        "client_tender_code": client_code,
         "reference": optional_text(tender.get("reference"), "tender reference"),
         "authorization": optional_text(tender.get("authorization"), "tender authorization"),
         "source_attributes": parse_scalar_attributes(

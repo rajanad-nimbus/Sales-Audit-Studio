@@ -256,9 +256,7 @@ def parse_item(f: dict[str, str]) -> dict:
     if f["taxable"] in {"Y", "N"}:
         source_attributes["taxable"] = f["taxable"] == "Y"
     original_unit_retail = (
-        signed("P", f["original_unit_retail"])
-        if f["original_unit_retail"].strip()
-        else None
+        signed("P", f["original_unit_retail"]) if f["original_unit_retail"].strip() else None
     )
     return {
         "item_code": f["item"]
@@ -314,11 +312,15 @@ def parse_tender(f: dict[str, str]) -> dict:
         )
         if value
     }
+    amount = clean(signed(f["sign"] or "P", f["amount"]))
     return {
         "tender_type": standard.tender_type(f["group"]),
+        "client_tender_code": standard.client_tender_code(
+            f["group"], f["type_id"], Decimal(amount or "0")
+        ),
         "group": f["group"],
         "type_id": f["type_id"],
-        "amount": clean(signed(f["sign"] or "P", f["amount"])),
+        "amount": amount,
         "reference": f["voucher"] or f["coupon"] or f["coupon_reference"] or None,
         "authorization": f["authorization"] or None,
         "source_attributes": source_attributes or None,

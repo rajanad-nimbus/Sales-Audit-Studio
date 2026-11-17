@@ -44,6 +44,7 @@ REALM_FIELDS = {
     },
     "Tender": {
         "tender_type": "text",
+        "client_tender_code": "text",
         "amount": "number",
         "reference": "text",
         "authorization": "text",
