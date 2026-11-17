@@ -1,7 +1,19 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { api, money } from '@/lib/api';
-import { Alert, DataTable, MetricGrid, MetricTile, Segmented, Toolbar } from '@/components/ui';
+import { useToast } from '@/components/Feedback';
+import { downloadBlob } from '@/lib/csv';
+import { StoreSelect } from '@/components/StoreSelect';
+import {
+  Alert,
+  Button,
+  DataTable,
+  MetricGrid,
+  MetricTile,
+  PageNav,
+  Segmented,
+  Toolbar,
+} from '@/components/ui';
 
 type Group = 'store' | 'register' | 'cashier' | 'date';
 interface Row {
@@ -16,7 +28,9 @@ interface Row {
   net_short: string;
 }
 interface Report {
-  truncated: boolean;
+  has_more: boolean;
+  page: number;
+  page_size: number;
   rows: Row[];
   totals: { declarations: number; short: string; over: string };
 }
@@ -30,23 +44,62 @@ const label = (r: Row, group: Group) =>
 
 /** Cash over and short, with short and over kept apart so one till cannot hide another. */
 export function OverShortReport() {
+  const toast = useToast();
   const [group, setGroup] = useState<Group>('store');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [storeId, setStoreId] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [exporting, setExporting] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    setReport(null);
+    setFailed(false);
     api
       .get<Report>('/api/cash-controls/over-short', {
-        params: { group_by: group, start: start || undefined, end: end || undefined },
+        params: {
+          group_by: group,
+          start: start || undefined,
+          end: end || undefined,
+          ...(storeId ? { store_id: storeId } : {}),
+          ...(page > 1 ? { page } : {}),
+          ...(pageSize !== 50 ? { page_size: pageSize } : {}),
+        },
       })
       .then(({ data }) => {
         setReport(data);
         setFailed(false);
       })
       .catch(() => setFailed(true));
-  }, [group, start, end]);
+  }, [group, start, end, storeId, page, pageSize]);
+
+  const exportReport = async () => {
+    setExporting(true);
+    try {
+      const { data, headers } = await api.get('/api/cash-controls/over-short/export.csv', {
+        params: {
+          group_by: group,
+          start: start || undefined,
+          end: end || undefined,
+          ...(storeId ? { store_id: storeId } : {}),
+        },
+        responseType: 'blob',
+      });
+      downloadBlob(`over-short-${storeId || 'all-stores'}-${group}-${start || 'start'}-${end || 'now'}.csv`, data);
+      if (headers?.['x-over-short-truncated'] === 'true') {
+        toast('The CSV reached 50,000 rows. Narrow the date range before exporting again.', 'info');
+      } else {
+        toast('Over / short report downloaded.', 'success');
+      }
+    } catch {
+      toast('Could not export the over / short report.', 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="cc-card">
@@ -61,10 +114,13 @@ export function OverShortReport() {
         <MetricTile label="Short" value={report ? money(report.totals.short) : '—'} />
         <MetricTile label="Over" value={report ? money(report.totals.over) : '—'} />
       </MetricGrid>
-      <Toolbar count={report?.truncated ? 'Showing the largest 500' : undefined}>
+      <Toolbar count={report?.has_more ? 'More matching groups' : undefined}>
         <Segmented
           value={group}
-          onChange={(v) => setGroup(v as Group)}
+          onChange={(v) => {
+            setGroup(v as Group);
+            setPage(1);
+          }}
           options={[
             { value: 'store', label: 'By store' },
             { value: 'register', label: 'By register' },
@@ -72,20 +128,41 @@ export function OverShortReport() {
             { value: 'date', label: 'By day' },
           ]}
         />
+        <StoreSelect
+          value={storeId}
+          emptyLabel="All stores"
+          onChange={(value) => {
+            setStoreId(value);
+            setPage(1);
+          }}
+        />
         <input
           type="date"
           aria-label="From"
           value={start}
           max={end || undefined}
-          onChange={(e) => setStart(e.target.value)}
+          onChange={(e) => {
+            setStart(e.target.value);
+            setPage(1);
+          }}
         />
         <input
           type="date"
           aria-label="To"
           value={end}
           min={start || undefined}
-          onChange={(e) => setEnd(e.target.value)}
+          onChange={(e) => {
+            setEnd(e.target.value);
+            setPage(1);
+          }}
         />
+        <Button
+          variant="secondary"
+          disabled={!report?.totals.declarations || exporting}
+          onClick={() => void exportReport()}
+        >
+          {exporting ? 'Preparing CSV…' : 'Export matching CSV'}
+        </Button>
       </Toolbar>
       <DataTable
         rows={report ? report.rows : null}
@@ -99,6 +176,20 @@ export function OverShortReport() {
           { key: 'over', header: 'Over', numeric: true, render: (r) => money(r.over) },
           { key: 'net', header: 'Net short', numeric: true, render: (r) => money(r.net_short) },
         ]}
+        footer={
+          report && (
+            <PageNav
+              page={page}
+              hasMore={report.has_more}
+              pageSize={pageSize}
+              onPageSize={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+              onPage={setPage}
+            />
+          )
+        }
       />
     </div>
   );

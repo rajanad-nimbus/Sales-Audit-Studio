@@ -61,6 +61,13 @@ interface Attention {
   };
 }
 type ListTab = 'days' | 'late' | 'stuck';
+const DATA_STATUSES = ['Complete', 'Incomplete', 'Not reconciled', 'No control total', 'No data'];
+const AUDIT_STATUSES = [
+  'Re-Totalling/Auditing Required',
+  'Store Errors Pending',
+  'Totaled',
+  'Audited',
+];
 interface SavedStoreDaysView {
   name: string;
   params: Record<string, string>;
@@ -113,6 +120,8 @@ export default function StoreDaysPage() {
   const [busy, setBusy] = useState(false);
   // Every filter is sent to the server; the browser never holds more than one page.
   const [statusFilter, setStatusFilter] = useState('');
+  const [dataStatus, setDataStatus] = useState('');
+  const [auditStatus, setAuditStatus] = useState('');
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [filtersReady, setFiltersReady] = useState(false);
@@ -126,6 +135,7 @@ export default function StoreDaysPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState<ListTab>('days');
   const [attention, setAttention] = useState<Attention | null>(null);
+  const [attentionError, setAttentionError] = useState<string | null>(null);
   const [attentionExporting, setAttentionExporting] = useState(false);
   const [attentionExportError, setAttentionExportError] = useState<string | null>(null);
   const yesterday = daysAgo(1);
@@ -157,6 +167,10 @@ export default function StoreDaysPage() {
         : ''
     );
     setStatusFilter((params.get('status') ?? '').slice(0, 32));
+    const requestedDataStatus = params.get('data_status') ?? '';
+    const requestedAuditStatus = params.get('audit_status') ?? '';
+    setDataStatus(DATA_STATUSES.includes(requestedDataStatus) ? requestedDataStatus : '');
+    setAuditStatus(AUDIT_STATUSES.includes(requestedAuditStatus) ? requestedAuditStatus : '');
     const requestedTab = params.get('tab');
     if (requestedTab === 'days' || requestedTab === 'late' || requestedTab === 'stuck')
       setTab(requestedTab);
@@ -213,6 +227,8 @@ export default function StoreDaysPage() {
       'date_from',
       'date_to',
       'status',
+      'data_status',
+      'audit_status',
       'tab',
       'page_size',
       'page',
@@ -227,6 +243,8 @@ export default function StoreDaysPage() {
     params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
     if (statusFilter) params.set('status', statusFilter);
+    if (dataStatus) params.set('data_status', dataStatus);
+    if (auditStatus) params.set('audit_status', auditStatus);
     if (tab !== 'days') params.set('tab', tab);
     if (pageSize !== 50) params.set('page_size', String(pageSize));
     if (page > 1) params.set('page', String(page));
@@ -247,6 +265,8 @@ export default function StoreDaysPage() {
     dateFrom,
     dateTo,
     statusFilter,
+    dataStatus,
+    auditStatus,
     tab,
     pageSize,
     page,
@@ -265,6 +285,7 @@ export default function StoreDaysPage() {
   const loadAttention = useCallback(async () => {
     if (!filtersReady) return;
     const request = ++attentionRequest.current;
+    setAttentionError(null);
     try {
       const { data } = await api.get('/api/store-days/attention', {
         params: {
@@ -274,9 +295,15 @@ export default function StoreDaysPage() {
           late_page_size: lateSize,
         },
       });
-      if (request === attentionRequest.current) setAttention(data);
+      if (request === attentionRequest.current) {
+        setAttention(data);
+        setAttentionError(null);
+      }
     } catch {
-      if (request === attentionRequest.current) setAttention(null);
+      if (request === attentionRequest.current) {
+        setAttention(null);
+        setAttentionError('Could not load store review queues. Check your connection and retry.');
+      }
     }
   }, [filtersReady, lateDate, stuckAfter, latePage, lateSize]);
   useEffect(() => {
@@ -296,9 +323,22 @@ export default function StoreDaysPage() {
     try {
       const [list, counts] = await Promise.all([
         api.get('/api/store-days', {
-          params: { ...scope, status: statusFilter || undefined, limit: pageSize, page },
+          params: {
+            ...scope,
+            status: statusFilter || undefined,
+            data_status: dataStatus || undefined,
+            audit_status: auditStatus || undefined,
+            limit: pageSize,
+            page,
+          },
         }),
-        api.get('/api/store-days/summary', { params: scope }),
+        api.get('/api/store-days/summary', {
+          params: {
+            ...scope,
+            data_status: dataStatus || undefined,
+            audit_status: auditStatus || undefined,
+          },
+        }),
       ]);
       if (request === listRequest.current) {
         setDays(list.data);
@@ -307,15 +347,28 @@ export default function StoreDaysPage() {
         setError(null);
         setLoadFailed(false);
       }
-    } catch {
+    } catch (cause) {
       if (request === listRequest.current) {
         setLoadFailed(true);
-        setError('Unable to load Store Days. Sign in with a Finance or IT role.');
+        setError(
+          apiError(cause, 'Could not load Store Days. Check your access or connection and retry.')
+        );
       }
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
-  }, [filtersReady, storeFilter, dateFrom, dateTo, debouncedQ, statusFilter, pageSize, page]);
+  }, [
+    filtersReady,
+    storeFilter,
+    dateFrom,
+    dateTo,
+    debouncedQ,
+    statusFilter,
+    dataStatus,
+    auditStatus,
+    pageSize,
+    page,
+  ]);
   useEffect(() => {
     load();
   }, [load]);
@@ -331,6 +384,8 @@ export default function StoreDaysPage() {
           date_to: dateTo || undefined,
           q: debouncedQ.trim() || undefined,
           status: statusFilter || undefined,
+          data_status: dataStatus || undefined,
+          audit_status: auditStatus || undefined,
           format: 'csv',
         },
         responseType: 'blob',
@@ -340,7 +395,7 @@ export default function StoreDaysPage() {
       const statusCode = (e as { response?: { status?: number } }).response?.status;
       setExportError(
         statusCode === 413
-          ? 'This export exceeds 50,000 store days. Narrow the status, date, or store filters and try again.'
+          ? 'This export or readiness filter is too large to process. Narrow the date, store, or search filters and try again.'
           : 'Could not download the filtered Store Days.'
       );
     } finally {
@@ -372,6 +427,8 @@ export default function StoreDaysPage() {
     if (storeFilter) params.store_id = storeFilter;
     if (dateTo) params.date_to = dateTo;
     if (statusFilter) params.status = statusFilter;
+    if (dataStatus) params.data_status = dataStatus;
+    if (auditStatus) params.audit_status = auditStatus;
     if (pageSize !== 50) params.page_size = String(pageSize);
     if (page > 1) params.page = String(page);
     if (tab === 'late' || lateDate !== yesterday) params.late_date = lateDate;
@@ -388,6 +445,10 @@ export default function StoreDaysPage() {
     setDateFrom(Object.hasOwn(params, 'date_from') ? params.date_from : daysAgo(30));
     setDateTo(params.date_to ?? '');
     setStatusFilter(params.status ?? '');
+    const nextDataStatus = params.data_status ?? '';
+    const nextAuditStatus = params.audit_status ?? '';
+    setDataStatus(DATA_STATUSES.includes(nextDataStatus) ? nextDataStatus : '');
+    setAuditStatus(AUDIT_STATUSES.includes(nextAuditStatus) ? nextAuditStatus : '');
     setTab(['days', 'late', 'stuck'].includes(params.tab) ? (params.tab as ListTab) : 'days');
     setPageSize(
       [25, 50, 100, 200].includes(Number(params.page_size)) ? Number(params.page_size) : 50
@@ -620,6 +681,18 @@ export default function StoreDaysPage() {
             + Save current view
           </button>
         </div>
+        {tab !== 'days' && attentionError && (
+          <Alert
+            tone="error"
+            action={
+              <Button size="sm" onClick={() => void loadAttention()}>
+                Retry
+              </Button>
+            }
+          >
+            {attentionError}
+          </Alert>
+        )}
         {tab === 'late' && (
           <>
             <Toolbar
@@ -693,8 +766,9 @@ export default function StoreDaysPage() {
                   csvValue: (r: LateStore) => (r.store_day_open ? 'Open' : 'Not opened'),
                 },
               ]}
-              rows={attention ? attention.late_stores : null}
+              rows={attention ? attention.late_stores : attentionError ? [] : null}
               rowKey={(r: LateStore) => r.store_id}
+              failed={!!attentionError}
               csvFileName="store-days-late-visible.csv"
               emptyTitle="Every active store's data is complete for this date"
               footer={
@@ -778,8 +852,9 @@ export default function StoreDaysPage() {
                   csvValue: (d: StuckDay) => d.holding_back.join('; '),
                 },
               ]}
-              rows={attention ? attention.stuck_store_days : null}
+              rows={attention ? attention.stuck_store_days : attentionError ? [] : null}
               rowKey={dayKey}
+              failed={!!attentionError}
               csvFileName="store-days-stuck-visible.csv"
               onRowClick={(d: StuckDay) =>
                 setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))
@@ -829,6 +904,30 @@ export default function StoreDaysPage() {
                 min={dateFrom || undefined}
                 onChange={(e) => refilter(() => setDateTo(e.target.value))}
               />
+              <select
+                aria-label="Data status"
+                value={dataStatus}
+                onChange={(e) => refilter(() => setDataStatus(e.target.value))}
+              >
+                <option value="">All data statuses</option>
+                {DATA_STATUSES.map((value) => (
+                  <option key={value} value={value}>
+                    Data: {value}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Audit status"
+                value={auditStatus}
+                onChange={(e) => refilter(() => setAuditStatus(e.target.value))}
+              >
+                <option value="">All audit statuses</option>
+                {AUDIT_STATUSES.map((value) => (
+                  <option key={value} value={value}>
+                    Audit: {value}
+                  </option>
+                ))}
+              </select>
               <Button
                 size="sm"
                 disabled={exporting || loading || days.length === 0}

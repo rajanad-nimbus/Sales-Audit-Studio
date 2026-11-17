@@ -20,7 +20,7 @@ import { useMe } from '@/components/MeProvider';
 import { ShopifySyncCard } from '@/components/ShopifySyncCard';
 import type { Source } from '@/lib/sources';
 import { formatDateTime, formatNumber } from '@/lib/preferences';
-import { downloadBlob } from '@/lib/csv';
+import { downloadBlob, downloadCsv } from '@/lib/csv';
 
 interface Stats {
   source_records: Record<string, number>;
@@ -41,7 +41,9 @@ interface Run {
   store_days_opened: number;
   store_days_already_open: number;
   store_day_open_error: string | null;
+  source_counts?: Record<string, number> | null;
 }
+type BatchRunDetail = Run & { heartbeat_at: string | null; source_counts: Record<string, number> | null };
 interface Recon {
   transactions_examined: number;
   matched_pairs: number;
@@ -226,6 +228,11 @@ export default function ImportsPage() {
   const [sources, setSources] = useState<Source[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState('');
+  const [selectedRun, setSelectedRun] = useState<BatchRunDetail | null>(null);
+  const [runDetailLoading, setRunDetailLoading] = useState(false);
+  const [runExporting, setRunExporting] = useState(false);
+  const [runDetailError, setRunDetailError] = useState('');
   const [runStart, setRunStart] = useState('');
   const [runEnd, setRunEnd] = useState('');
   const [runStatus, setRunStatus] = useState('');
@@ -236,6 +243,8 @@ export default function ImportsPage() {
   const [runHistoryExporting, setRunHistoryExporting] = useState(false);
   const [runHistoryError, setRunHistoryError] = useState('');
   const [runHistoryNotice, setRunHistoryNotice] = useState('');
+  const batchRunRequest = useRef(0);
+  const runDetailRef = useRef<HTMLDivElement>(null);
   const [quarantineRows, setQuarantineRows] = useState<QuarantineRecord[]>([]);
   const [quarantineSource, setQuarantineSource] = useState('');
   const [quarantineDeliveryId, setQuarantineDeliveryId] = useState('');
@@ -293,6 +302,33 @@ export default function ImportsPage() {
   const [reconcileBusy, setReconcileBusy] = useState(false);
   const [reconcileError, setReconcileError] = useState('');
 
+  const selectedUploadProfile = uploadProfiles.find((profile) => profile.id === uploadProfileId);
+  const uploadCanonicalColumns =
+    uploadSource === 'POSControl'
+      ? (ingestContract?.pos_control_columns ?? [])
+      : (ingestContract?.transaction_columns ?? []);
+  const uploadTemplateColumns =
+    selectedUploadProfile && Object.keys(selectedUploadProfile.column_mapping).length > 0
+      ? Array.from(
+          new Set(
+            uploadCanonicalColumns
+              .map((column) => selectedUploadProfile.column_mapping[column])
+              .filter((column): column is string => Boolean(column))
+          )
+        )
+      : uploadCanonicalColumns;
+  const uploadTemplateDescription =
+    uploadTemplateColumns.length === 0
+      ? 'The selected profile has no mapped headers for this upload contract.'
+      : selectedUploadProfile
+        ? `Expected source headers for ${selectedUploadProfile.name}: `
+        : `Expected canonical columns for ${uploadSource}: `;
+
+  const downloadUploadTemplate = () => {
+    if (uploadTemplateColumns.length === 0) return;
+    downloadCsv(`${uploadSource.toLowerCase()}-upload-template.csv`, uploadTemplateColumns, []);
+  };
+
   const load = useCallback(async () => {
     try {
       const [st, b, f, src] = await Promise.all([
@@ -312,6 +348,24 @@ export default function ImportsPage() {
       );
     } finally {
       setLoaded(true);
+    }
+  }, []);
+  const loadBatchRun = useCallback(async (runId: string) => {
+    const requestId = ++batchRunRequest.current;
+    setRunDetailLoading(true);
+    setRunDetailError('');
+    try {
+      const { data } = await api.get<BatchRunDetail>(
+        `/api/batch/runs/${encodeURIComponent(runId)}`
+      );
+      if (requestId === batchRunRequest.current) setSelectedRun(data);
+    } catch (e) {
+      if (requestId === batchRunRequest.current) {
+        setSelectedRun(null);
+        setRunDetailError(apiError(e, 'Could not load this batch run.'));
+      }
+    } finally {
+      if (requestId === batchRunRequest.current) setRunDetailLoading(false);
     }
   }, []);
   useEffect(() => {
@@ -338,9 +392,78 @@ export default function ImportsPage() {
       setRunHistoryLoading(false);
     }
   }, [runStart, runEnd, runStatus, runPage, runPageSize]);
+  const openBatchRun = (run: Run) => {
+    setSelectedRunId(run.id);
+    setTab('runs');
+    void loadBatchRun(run.id);
+    const url = new URL(window.location.href);
+    url.searchParams.set('batch_run_id', run.id);
+    window.history.pushState({}, '', url);
+  };
+  const closeBatchRun = () => {
+    setSelectedRunId('');
+    setSelectedRun(null);
+    setRunDetailError('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('batch_run_id');
+    window.history.pushState({}, '', url);
+  };
+  const clearBatchRunLink = () => {
+    if (!selectedRunId) return;
+    setSelectedRunId('');
+    setSelectedRun(null);
+    setRunDetailError('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('batch_run_id');
+    window.history.replaceState(null, '', url);
+  };
+  const copyBatchRunLink = async () => {
+    if (!selectedRunId) return;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast('Batch run link copied.', 'success');
+    } catch {
+      setRunDetailError('Could not copy the batch run link. You can copy it from the address bar.');
+    }
+  };
+  const downloadBatchRun = async () => {
+    if (!selectedRunId) return;
+    setRunExporting(true);
+    setRunDetailError('');
+    try {
+      const { data } = await api.get(
+        `/api/batch/runs/${encodeURIComponent(selectedRunId)}/export.csv`,
+        { responseType: 'blob' }
+      );
+      downloadBlob(`batch-run-${selectedRunId}.csv`, data);
+    } catch (e) {
+      setRunDetailError(apiError(e, 'Could not export this batch run.'));
+    } finally {
+      setRunExporting(false);
+    }
+  };
+  useEffect(() => {
+    const syncBatchRunFromUrl = () => {
+      const runId = new URLSearchParams(window.location.search).get('batch_run_id')?.trim() ?? '';
+      setSelectedRunId(runId);
+      if (runId) {
+        setTab('runs');
+        void loadBatchRun(runId);
+      } else {
+        setSelectedRun(null);
+        setRunDetailError('');
+      }
+    };
+    syncBatchRunFromUrl();
+    window.addEventListener('popstate', syncBatchRunFromUrl);
+    return () => window.removeEventListener('popstate', syncBatchRunFromUrl);
+  }, [loadBatchRun]);
   useEffect(() => {
     if (tab === 'runs') loadRunHistory();
   }, [tab, loadRunHistory]);
+  useEffect(() => {
+    if (selectedRun) runDetailRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selectedRun]);
   const loadQuarantine = useCallback(async () => {
     setQuarantineLoading(true);
     setQuarantineError('');
@@ -887,6 +1010,7 @@ export default function ImportsPage() {
                           </small>
                         </>
                       ),
+                      csvValue: (s) => s.source_system,
                     },
                     {
                       key: 'state',
@@ -905,6 +1029,8 @@ export default function ImportsPage() {
                             On
                           </Badge>
                         ),
+                      csvValue: (s) =>
+                        !s.enabled ? 'Off' : s.configured === false ? 'Not connected' : 'On',
                     },
                     ...(
                       [
@@ -925,6 +1051,7 @@ export default function ImportsPage() {
                           onChange={(e) => setSwitch(s, field, e.target.checked)}
                         />
                       ),
+                      csvValue: (s: Source) => s[field],
                     })),
                     {
                       key: 'day-close',
@@ -942,22 +1069,27 @@ export default function ImportsPage() {
                         ) : (
                           '—'
                         ),
+                      csvValue: (s) => (s.source_system === 'POS' ? s.require_day_close : '—'),
                     },
                     {
                       key: 'last',
                       header: 'Last delivery',
                       nowrap: true,
                       render: (s) => (s.last_received_at ? when(s.last_received_at) : 'Never'),
+                      csvValue: (s) => s.last_received_at || 'Never',
                     },
                     {
                       key: 'held',
                       header: 'Quarantined',
                       numeric: true,
                       render: (s) => n(s.quarantined),
+                      csvValue: (s) => s.quarantined,
                     },
                   ]}
                   rows={sources}
                   rowKey={(s) => s.source_system}
+                  csvFileName="ingest-sources-visible.csv"
+                  detachTitle="Ingestion source settings"
                 />
               </Card>
               {sources
@@ -1095,16 +1227,26 @@ export default function ImportsPage() {
                       </label>
                     </div>
                     {uploadFormat === 'csv' && ingestContract && (
-                      <p className="hint">
-                        Expected canonical columns for {uploadSource}:{' '}
-                        <code>
-                          {(uploadSource === 'POSControl'
-                            ? ingestContract.pos_control_columns
-                            : ingestContract.transaction_columns
-                          ).join(', ')}
-                        </code>
-                        . A feed profile maps source headers to these fields.
-                      </p>
+                      <div className="cluster">
+                        <p className="hint">
+                          {uploadTemplateDescription}
+                          {uploadTemplateColumns.length > 0 && (
+                            <>
+                              <code>{uploadTemplateColumns.join(', ')}</code>
+                              {selectedUploadProfile
+                                ? '. Add at least one data row before uploading.'
+                                : '. A feed profile maps source headers to these fields; add at least one data row before uploading.'}
+                            </>
+                          )}
+                        </p>
+                        <Button
+                          variant="secondary"
+                          onClick={downloadUploadTemplate}
+                          disabled={uploadTemplateColumns.length === 0}
+                        >
+                          Download CSV template
+                        </Button>
+                      </div>
                     )}
                     {sources.find((source) => source.source_system === uploadSource)?.enabled ===
                       false && (
@@ -1308,6 +1450,7 @@ export default function ImportsPage() {
                   value={runStart}
                   max={runEnd || undefined}
                   onChange={(event) => {
+                    clearBatchRunLink();
                     setRunStart(event.target.value);
                     setRunPage(1);
                   }}
@@ -1318,6 +1461,7 @@ export default function ImportsPage() {
                   value={runEnd}
                   min={runStart || undefined}
                   onChange={(event) => {
+                    clearBatchRunLink();
                     setRunEnd(event.target.value);
                     setRunPage(1);
                   }}
@@ -1326,6 +1470,7 @@ export default function ImportsPage() {
                   aria-label="Batch run status"
                   value={runStatus}
                   onChange={(event) => {
+                    clearBatchRunLink();
                     setRunStatus(event.target.value);
                     setRunPage(1);
                   }}
@@ -1357,6 +1502,7 @@ export default function ImportsPage() {
                       header: 'Business date',
                       primary: true,
                       render: (r) => r.business_date,
+                      csvValue: (r) => r.business_date,
                     },
                     {
                       key: 'c1',
@@ -1367,32 +1513,42 @@ export default function ImportsPage() {
                           {r.error && <small className="pl-err">{r.error}</small>}
                         </>
                       ),
+                      csvValue: (r) => `${r.status}${r.error ? ` · ${r.error}` : ''}`,
                     },
                     {
                       key: 'c2',
                       header: 'Started',
                       nowrap: true,
                       render: (r) => when(r.started_at),
+                      csvValue: (r) => r.started_at,
                     },
                     {
                       key: 'c3',
                       header: 'Loaded',
                       numeric: true,
                       render: (r) => n(r.transactions_loaded),
+                      csvValue: (r) => r.transactions_loaded,
                     },
                     {
                       key: 'c4',
                       header: 'Matched',
                       numeric: true,
                       render: (r) => n(r.matched_pairs),
+                      csvValue: (r) => r.matched_pairs,
                     },
                     {
                       key: 'c5',
                       header: 'Cases',
                       numeric: true,
                       render: (r) => n(r.cases_created),
+                      csvValue: (r) => r.cases_created,
                     },
-                    { key: 'c6', header: 'Trigger', render: (r) => r.trigger },
+                    {
+                      key: 'c6',
+                      header: 'Trigger',
+                      render: (r) => r.trigger,
+                      csvValue: (r) => r.trigger,
+                    },
                     {
                       key: 'c7',
                       header: 'Today’s Store Days',
@@ -1411,10 +1567,31 @@ export default function ImportsPage() {
                         ) : (
                           'Not run'
                         ),
+                      csvValue: (r) =>
+                        r.store_day_open_status
+                          ? `${r.store_day_open_status}: ${r.store_day_open_status === 'Succeeded' ? `${r.store_days_opened} opened · ${r.store_days_already_open} already open` : r.store_day_open_error || ''}`
+                          : 'Not run',
+                    },
+                    {
+                      key: 'detail',
+                      header: 'Process detail',
+                      csvSkip: true,
+                      render: (r) => (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label={`Open batch run ${r.business_date} ${r.id}`}
+                          onClick={() => openBatchRun(r)}
+                        >
+                          Open run
+                        </Button>
+                      ),
                     },
                   ]}
                   rows={runHistoryLoading ? null : runs}
                   rowKey={(r) => String(r.id)}
+                  csvFileName="batch-runs-visible.csv"
+                  detachTitle={`Batch runs · ${runStart || 'all dates'} to ${runEnd || 'today'}`}
                   footer={
                     <PageNav
                       page={runPage}
@@ -1428,6 +1605,79 @@ export default function ImportsPage() {
                     />
                   }
                 />
+              )}
+              {selectedRunId && (
+                <div ref={runDetailRef} id="batch-run-detail">
+                  <Card title="Batch process detail">
+                    {runDetailLoading && <p className="hint">Loading batch run…</p>}
+                    {runDetailError && <Alert tone="error">{runDetailError}</Alert>}
+                    {selectedRun && (
+                      <div className="stack-sm">
+                        <div className="cluster">
+                          <Badge
+                            variant={
+                              selectedRun.status === 'Succeeded'
+                                ? 'success'
+                                : selectedRun.status === 'Failed'
+                                  ? 'error'
+                                  : 'warning'
+                            }
+                          >
+                            {selectedRun.status}
+                          </Badge>
+                          <span className="hint">Run ID: {selectedRun.id}</span>
+                          <span className="hint">Business date: {selectedRun.business_date}</span>
+                          <span className="hint">Trigger: {selectedRun.trigger}</span>
+                        </div>
+                        <div className="cluster">
+                          <span>{n(selectedRun.transactions_loaded)} transactions loaded</span>
+                          <span>{n(selectedRun.matched_pairs)} matched pairs</span>
+                          <span>{n(selectedRun.cases_created)} cases created</span>
+                        </div>
+                        <p className="hint" style={{ margin: 0 }}>
+                          Started {when(selectedRun.started_at)}
+                          {selectedRun.finished_at && ` · Finished ${when(selectedRun.finished_at)}`}
+                          {selectedRun.heartbeat_at && ` · Last progress ${when(selectedRun.heartbeat_at)}`}
+                        </p>
+                        {selectedRun.error && <Alert tone="error">{selectedRun.error}</Alert>}
+                        {selectedRun.store_day_open_status && (
+                          <div>
+                            <b>Store-day opening: {selectedRun.store_day_open_status}</b>
+                            <p className="hint" style={{ margin: 'var(--space-xs) 0' }}>
+                              {selectedRun.store_day_open_status === 'Succeeded'
+                                ? `${n(selectedRun.store_days_opened)} opened · ${n(selectedRun.store_days_already_open)} already open`
+                                : selectedRun.store_day_open_error || 'No additional detail.'}
+                            </p>
+                          </div>
+                        )}
+                        {!!selectedRun.source_counts && (
+                          <div className="cluster">
+                            {Object.entries(selectedRun.source_counts).map(([source, count]) => (
+                              <span key={source}>
+                                {source}: {n(count)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="row-actions">
+                          <Button variant="secondary" onClick={() => void copyBatchRunLink()}>
+                            Copy run link
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            disabled={runExporting || !selectedRun}
+                            onClick={() => void downloadBatchRun()}
+                          >
+                            {runExporting ? 'Preparing CSV…' : 'Download run report'}
+                          </Button>
+                          <Button variant="secondary" onClick={closeBatchRun}>
+                            Close detail
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+                </div>
               )}
             </section>
           )}
@@ -1455,8 +1705,14 @@ export default function ImportsPage() {
                             <small className="act-sub"> {f.source_system}</small>
                           </>
                         ),
+                        csvValue: (f) => `${f.name} · ${f.source_system}`,
                       },
-                      { key: 'c1', header: 'Schedule', render: (f) => f.schedule || 'Not set' },
+                      {
+                        key: 'c1',
+                        header: 'Schedule',
+                        render: (f) => f.schedule || 'Not set',
+                        csvValue: (f) => f.schedule || 'Not set',
+                      },
                       {
                         key: 'c2',
                         header: 'Last receipt',
@@ -1472,6 +1728,10 @@ export default function ImportsPage() {
                             )}
                           </>
                         ),
+                        csvValue: (f) =>
+                          f.last_received_at
+                            ? `${f.last_received_at}${f.age_hours == null ? '' : ` · ${f.age_hours} hours ago`}`
+                            : '—',
                       },
                       {
                         key: 'c3',
@@ -1481,10 +1741,13 @@ export default function ImportsPage() {
                             <span className={`badge badge-sm ${feedTone(f.state)}`}>{f.state}</span>
                           </>
                         ),
+                        csvValue: (f) => f.state,
                       },
                     ]}
                     rows={feedHealth}
                     rowKey={(f) => String(f.profile_id)}
+                    csvFileName="source-feed-freshness-visible.csv"
+                    detachTitle="Source feed freshness"
                   />
                 )}
               </section>
@@ -1574,29 +1837,34 @@ export default function ImportsPage() {
                         header: 'Source',
                         primary: true,
                         render: (delivery) => delivery.source_system,
+                        csvValue: (delivery) => delivery.source_system,
                       },
                       {
                         key: 'delivery',
                         header: 'Delivery',
                         render: (delivery) => delivery.delivery_id,
+                        csvValue: (delivery) => delivery.delivery_id,
                       },
                       {
                         key: 'received',
                         header: 'Received',
                         nowrap: true,
                         render: (delivery) => when(delivery.received_at),
+                        csvValue: (delivery) => delivery.received_at,
                       },
                       {
                         key: 'records',
                         header: 'Records',
                         numeric: true,
                         render: (delivery) => n(delivery.records),
+                        csvValue: (delivery) => delivery.records,
                       },
                       {
                         key: 'processed',
                         header: 'Processed',
                         numeric: true,
                         render: (delivery) => n(delivery.processed),
+                        csvValue: (delivery) => delivery.processed,
                       },
                       {
                         key: 'quarantined',
@@ -1615,15 +1883,19 @@ export default function ImportsPage() {
                           ) : (
                             0
                           ),
+                        csvValue: (delivery) => delivery.quarantined,
                       },
                       {
                         key: 'error',
                         header: 'Latest error',
                         render: (delivery) => delivery.last_error || '—',
+                        csvValue: (delivery) => delivery.last_error || '—',
                       },
                     ]}
                     rows={deliveryLoading ? null : deliveries}
                     rowKey={(delivery) => `${delivery.source_system}-${delivery.delivery_id}`}
+                    csvFileName="source-deliveries-visible.csv"
+                    detachTitle={`Source deliveries · ${deliverySource || 'all sources'}`}
                     footer={
                       <PageNav
                         page={deliveryPage}
@@ -1738,19 +2010,38 @@ export default function ImportsPage() {
                       header: 'Source',
                       primary: true,
                       render: (q) => q.source_system,
+                      csvValue: (q) => q.source_system,
                     },
-                    { key: 'c1', header: 'Delivery', render: (q) => q.delivery_id },
-                    { key: 'c2', header: 'Record', render: (q) => q.source_record_id },
+                    {
+                      key: 'c1',
+                      header: 'Delivery',
+                      render: (q) => q.delivery_id,
+                      csvValue: (q) => q.delivery_id,
+                    },
+                    {
+                      key: 'c2',
+                      header: 'Record',
+                      render: (q) => q.source_record_id,
+                      csvValue: (q) => q.source_record_id,
+                    },
                     {
                       key: 'c3',
                       header: 'Received',
                       nowrap: true,
                       render: (q) => when(q.received_at),
+                      csvValue: (q) => q.received_at,
                     },
-                    { key: 'c4', header: 'Reason', render: (q) => q.reason },
+                    {
+                      key: 'c4',
+                      header: 'Reason',
+                      render: (q) => q.reason,
+                      csvValue: (q) => q.reason,
+                    },
                   ]}
                   rows={quarantineLoading ? null : quarantineRows}
                   rowKey={(q) => String(q.id)}
+                  csvFileName="quarantined-source-records-visible.csv"
+                  detachTitle={`Quarantined records · ${quarantineSource || 'all sources'}`}
                   footer={
                     <PageNav
                       page={quarantinePage}

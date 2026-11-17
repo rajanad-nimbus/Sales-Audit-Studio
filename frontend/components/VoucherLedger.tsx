@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
+import { downloadBlob } from '@/lib/csv';
 import { formatBusinessDate as formatDate } from '@/lib/preferences';
 import { useToast } from '@/components/Feedback';
 import { useMe } from '@/components/MeProvider';
@@ -86,10 +87,13 @@ export function VoucherLedger() {
   const [rows, setRows] = useState<Voucher[] | null>(null);
   const [retiredRows, setRetiredRows] = useState<RetiredVoucher[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
   const [status, setStatus] = useState('');
+  const [issuingStoreId, setIssuingStoreId] = useState('');
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [form, setForm] = useState({
     number: '',
     store: '',
@@ -125,7 +129,7 @@ export function VoucherLedger() {
       if (status === 'Retired') {
         const [list, totals] = await Promise.all([
           api.get<RetiredVoucher[]>('/api/vouchers/retired', {
-            params: { q: q.trim() || undefined },
+            params: { q: q.trim() || undefined, store_id: issuingStoreId || undefined },
           }),
           api.get<Summary>('/api/vouchers/summary'),
         ]);
@@ -136,7 +140,11 @@ export function VoucherLedger() {
       }
       const [list, totals] = await Promise.all([
         api.get<Voucher[]>('/api/vouchers', {
-          params: { status: status || undefined, q: q.trim() || undefined },
+          params: {
+            status: status || undefined,
+            q: q.trim() || undefined,
+            store_id: issuingStoreId || undefined,
+          },
         }),
         api.get<Summary>('/api/vouchers/summary'),
       ]);
@@ -146,17 +154,18 @@ export function VoucherLedger() {
     } catch (e) {
       setError(apiError(e, 'Could not load vouchers.'));
     }
-  }, [status, q]);
+  }, [status, q, issuingStoreId]);
   useEffect(() => {
-    load();
-  }, [load]);
-  useEffect(() => {
-    const voucherNumber = new URLSearchParams(window.location.search).get('voucher');
-    if (voucherNumber) {
-      setStatus('');
-      setQ(voucherNumber);
-    }
+    const params = new URLSearchParams(window.location.search);
+    const voucherNumber = params.get('voucher');
+    setStatus(params.get('status') ?? '');
+    setIssuingStoreId(params.get('issued_store_id') ?? '');
+    setQ(voucherNumber ?? params.get('q') ?? '');
+    setFiltersInitialized(true);
   }, []);
+  useEffect(() => {
+    if (filtersInitialized) void load();
+  }, [filtersInitialized, load]);
   useEffect(() => {
     if (!redemptionEditor || !redeemStore) {
       setRedemptionCandidates(null);
@@ -203,6 +212,48 @@ export function VoucherLedger() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const exportLedger = async () => {
+    setExporting(true);
+    try {
+      const retired = status === 'Retired';
+      const { data, headers } = await api.get(
+        retired ? '/api/vouchers/retired/export.csv' : '/api/vouchers/export.csv',
+        {
+          params: {
+            status: !retired ? status || undefined : undefined,
+            q: q.trim() || undefined,
+            store_id: issuingStoreId || undefined,
+          },
+          responseType: 'blob',
+        }
+      );
+      downloadBlob(retired ? 'retired-vouchers.csv' : 'vouchers.csv', data);
+      const truncatedHeader = retired
+        ? 'x-retired-voucher-export-truncated'
+        : 'x-voucher-export-truncated';
+      if (headers?.[truncatedHeader] === 'true') {
+        toast(
+          'The export reached 50,000 rows. Narrow the voucher search and export again.',
+          'info'
+        );
+      } else {
+        toast('Voucher export downloaded.', 'success');
+      }
+    } catch (e) {
+      setError(apiError(e, 'Could not export vouchers.'));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const updateFilterUrl = (key: string, value: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('voucher');
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+    window.history.replaceState(null, '', url);
   };
 
   const eligible = status === 'Retired' ? [] : (rows ?? []).filter((v) => v.escheat_eligible);
@@ -310,7 +361,10 @@ export function VoucherLedger() {
       <Toolbar>
         <Segmented
           value={status}
-          onChange={setStatus}
+          onChange={(value) => {
+            setStatus(value);
+            updateFilterUrl('status', value);
+          }}
           options={[
             { value: '', label: 'All' },
             { value: 'Issued', label: 'Outstanding' },
@@ -327,8 +381,22 @@ export function VoucherLedger() {
           placeholder="Search voucher number"
           aria-label="Search vouchers"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            updateFilterUrl('q', e.target.value);
+          }}
         />
+        <StoreSelect
+          value={issuingStoreId}
+          onChange={(value) => {
+            setIssuingStoreId(value);
+            updateFilterUrl('issued_store_id', value);
+          }}
+          emptyLabel="All issuing stores"
+        />
+        <Button variant="secondary" disabled={exporting} onClick={() => void exportLedger()}>
+          {exporting ? 'Preparing CSV…' : 'Export matching CSV'}
+        </Button>
         {canWrite && (
           <StoreSelect value={redeemStore} onChange={setRedeemStore} emptyLabel="Redeem at…" />
         )}

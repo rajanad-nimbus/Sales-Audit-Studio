@@ -12,6 +12,7 @@ import type { Counter, Seen } from '@/lib/commandCenterSeen';
 import { StatusBadge } from '@/components/CaseTable';
 import { CaseLink, useCanOpen, useMe } from '@/components/MeProvider';
 import { useToast } from '@/components/Feedback';
+import { StoreScopeNote } from '@/components/StoreScope';
 import {
   Alert,
   Badge,
@@ -89,6 +90,12 @@ interface StoreDays {
     days_open: number;
     holding_back: string[];
   }[];
+  missing_transactions: {
+    store_days: number;
+    numbers: number;
+    top: { store_id: string; missing: number }[];
+    top_truncated: boolean;
+  };
 }
 
 interface AuditErrors {
@@ -118,6 +125,25 @@ interface Close {
   blocked_reasons: { reason: string; store_days: number }[];
   blocked_examples: { store_id: string; reasons: string[] }[];
   export: Record<string, number>;
+}
+
+interface Balancing {
+  business_date: string;
+  by_currency: {
+    currency: string;
+    store_days: number;
+    stale_store_days: number;
+    out_of_balance: number;
+    short: string;
+    over: string;
+  }[];
+  top: {
+    store_id: string;
+    status: string;
+    currency: string;
+    variance_amount: string;
+  }[];
+  top_truncated: boolean;
 }
 
 /** The batch status, with the latest run (successful or not) that a rerun would repeat. */
@@ -212,6 +238,7 @@ interface Overview {
   exports: Exports | Failed | null;
   health: Health | Failed | null;
   close: Close | Failed | null;
+  balancing: Balancing | Failed | null;
   feeds: Feeds | Failed | null;
   cash: Cash | Failed | null;
   activity: Activity | Failed | null;
@@ -936,6 +963,151 @@ function CloseStrip({ data }: { data: Close | Failed }) {
   );
 }
 
+function BalancingStrip({ data }: { data: Balancing | Failed }) {
+  if (failed(data)) {
+    return (
+      <Panel title="Store-day Over/Short" href="/store-days" linkLabel="Open Store Days">
+        <p className="page-sub">{data.error}</p>
+      </Panel>
+    );
+  }
+  const storeDays = data.by_currency.reduce((total, row) => total + row.store_days, 0);
+  const staleDays = data.by_currency.reduce((total, row) => total + row.stale_store_days, 0);
+  const outOfBalance = data.by_currency.reduce((total, row) => total + row.out_of_balance, 0);
+  const topCurrencies = Array.from(new Set(data.top.map((row) => row.currency)));
+  return (
+    <Panel
+      title={`Over/Short for ${day(data.business_date)}`}
+      href="/store-days"
+      linkLabel="Open Store Days"
+    >
+      {data.by_currency.length === 0 ? (
+        <p className="page-sub">No current Over/Short totals are available for this business date.</p>
+      ) : (
+        <div className="stack">
+          {data.by_currency.map((row) => (
+            <div
+              className="cluster"
+              key={row.currency}
+              style={{ justifyContent: 'space-between', fontSize: 'var(--text-sm)' }}
+            >
+              <b>{row.currency}</b>
+              <span>
+                Short {caseMoney(row.short, row.currency)} · Over{' '}
+                {caseMoney(row.over, row.currency)}
+              </span>
+            </div>
+          ))}
+          <p className="page-sub" style={{ margin: 0 }}>
+            {num(outOfBalance)} of {num(storeDays)} current store-day totals have a difference.
+            {staleDays > 0 && ` ${num(staleDays)} more have stale totals and need recalculation.`}
+          </p>
+          {data.top.length > 0 && (
+            <div>
+              {topCurrencies.map((currency) => (
+                <div key={currency}>
+                  <p className="page-sub" style={{ margin: 'var(--space-sm) 0 var(--space-xs)' }}>
+                    Largest {currency} differences
+                  </p>
+                  {data.top
+                    .filter((row) => row.currency === currency)
+                    .map((row) => {
+                      const variance = Number(row.variance_amount);
+                      const amount = Math.abs(variance).toFixed(2);
+                      const href = [
+                        '/store-days',
+                        encodeURIComponent(row.store_id),
+                        encodeURIComponent(data.business_date),
+                      ].join('/');
+                      const registerHref =
+                        `/register-summary?store_id=${encodeURIComponent(row.store_id)}` +
+                        `&business_date=${encodeURIComponent(data.business_date)}` +
+                        '&group_by=register&source=store-day';
+                      return (
+                        <Row
+                          key={`${currency}:${row.store_id}`}
+                          label={
+                            <span
+                              className="cluster"
+                              style={{ gap: 'var(--space-xs)', alignItems: 'baseline' }}
+                            >
+                              <span>
+                                <Link href={`${href}?tab=analysis`}>{row.store_id}</Link>{' '}
+                                <small className="page-sub">{row.status}</small>
+                              </span>
+                              <Link className="page-sub" href={registerHref}>
+                                Registers
+                              </Link>
+                            </span>
+                          }
+                          value={`${variance > 0 ? 'Short' : 'Over'} ${caseMoney(amount, row.currency)}`}
+                          tone="warning"
+                        />
+                      );
+                    })}
+                </div>
+              ))}
+              {data.top_truncated && (
+                <p className="page-sub" style={{ margin: 'var(--space-xs) 0 0' }}>
+                  More differences are available in Store Days.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function MissingTransactionsStrip({ data }: { data: StoreDays | Failed }) {
+  if (failed(data)) {
+    return (
+      <Panel title="Missing transaction numbers" href="/store-days" linkLabel="Open Store Days">
+        <p className="page-sub">{data.error}</p>
+      </Panel>
+    );
+  }
+  const summary = data.missing_transactions;
+  return (
+    <Panel
+      title={`Missing transaction numbers for ${day(data.business_date)}`}
+      href="/store-days"
+      linkLabel="Open Store Days"
+    >
+      {summary.numbers === 0 ? (
+        <p className="page-sub">No unresolved transaction number gaps were found.</p>
+      ) : (
+        <div className="stack-sm">
+          <p className="page-sub" style={{ margin: 0 }}>
+            {num(summary.numbers)} unresolved transaction number{summary.numbers === 1 ? '' : 's'}
+            {' across '}{num(summary.store_days)} store day{summary.store_days === 1 ? '' : 's'}.
+          </p>
+          {summary.top.map((row) => (
+            <Row
+              key={row.store_id}
+              label={
+                <Link
+                  href={`/store-days/${encodeURIComponent(row.store_id)}/${encodeURIComponent(data.business_date)}?tab=missing`}
+                >
+                  Review {row.store_id}
+                </Link>
+              }
+              value={plural(row.missing, 'missing number')}
+              tone="warning"
+            />
+          ))}
+          {summary.top_truncated && (
+            <p className="page-sub" style={{ margin: 0 }}>
+              More affected stores are listed in Store Days.
+            </p>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 /* ---------- Trends ---------- */
 
 /** Cases raised per business day, on one scale. The busiest day is drawn in full navy. */
@@ -1131,6 +1303,7 @@ export function CommandCenter() {
   const router = useRouter();
   const canOpen = useCanOpen();
   const [data, setData] = useState<Overview | null>(null);
+  const [businessDate, setBusinessDate] = useState('');
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -1206,6 +1379,7 @@ export function CommandCenter() {
 
   // What this person may do from here. The server checks every action again.
   const role = me?.role ?? '';
+  const prioritizeStoreAudit = role === 'analyst' || role === 'auditor';
   const may = {
     assign: ['finance', 'it', 'sales_audit_manager', 'admin'].includes(role) && canOpen('/actions'),
     approve: ['finance', 'admin'].includes(role) && canOpen('/actions'),
@@ -1213,10 +1387,19 @@ export function CommandCenter() {
     rerun: ['it', 'admin'].includes(role) && canOpen('/imports'),
   };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestedDate?: string) => {
     setRefreshing(true);
     try {
-      setData((await api.get<Overview>('/api/command-center')).data);
+      const queryDate = new URLSearchParams(window.location.search).get('business_date') || '';
+      const selectedDate =
+        requestedDate !== undefined ? requestedDate : businessDate || queryDate;
+      setData(
+        (
+          await api.get<Overview>('/api/command-center', {
+            params: selectedDate ? { business_date: selectedDate } : undefined,
+          })
+        ).data
+      );
       setUpdatedAt(new Date());
       setError('');
     } catch {
@@ -1224,8 +1407,17 @@ export function CommandCenter() {
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [businessDate]);
   useLive(load, REFRESH_MS);
+
+  const chooseBusinessDate = (value: string) => {
+    setBusinessDate(value);
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set('business_date', value);
+    else url.searchParams.delete('business_date');
+    window.history.replaceState(null, '', url);
+    void load(value);
+  };
 
   // One-click approvals are a Finance feature; anyone else never asks for them.
   const loadEligible = useCallback(async () => {
@@ -1478,6 +1670,12 @@ export function CommandCenter() {
   const lines = data ? statusLines(data, may.retry ? confirmRetry : undefined) : [];
   const fresh = ok(data?.freshness);
   const rerunDate = fresh?.last_failed ? fresh.last_run?.business_date : undefined;
+  const shownBusinessDate =
+    businessDate ||
+    ok(data?.close)?.business_date ||
+    ok(data?.balancing)?.business_date ||
+    ok(data?.store_days)?.business_date ||
+    '';
 
   return (
     <div className="stack stack-lg command-center">
@@ -1490,6 +1688,19 @@ export function CommandCenter() {
           }
           actions={
             <>
+              <label className="field" style={{ margin: 0, minWidth: '10rem' }}>
+                <span>Audit business date</span>
+                <input
+                  type="date"
+                  value={shownBusinessDate}
+                  onChange={(event) => chooseBusinessDate(event.target.value)}
+                  aria-label="Audit business date"
+                  aria-describedby="command-center-date-help"
+                />
+                <small id="command-center-date-help" className="page-sub">
+                  Daily audit panels
+                </small>
+              </label>
               {fresh && <Freshness data={fresh} />}
               {updatedAt && (
                 <span
@@ -1502,12 +1713,13 @@ export function CommandCenter() {
               {rerunDate && may.rerun && (
                 <Button onClick={() => confirmRerun(rerunDate)}>Rerun {day(rerunDate)}</Button>
               )}
-              <Button onClick={load} disabled={refreshing}>
+              <Button onClick={() => load()} disabled={refreshing}>
                 {refreshing ? 'Refreshing' : 'Refresh'}
               </Button>
             </>
           }
         />
+        <StoreScopeNote />
         {baseline && (changed.length > 0 || fromLastVisit) && (
           <div
             className="cluster"
@@ -1552,7 +1764,7 @@ export function CommandCenter() {
       </div>
 
       {error && (
-        <Alert tone="error" action={<Button onClick={load}>Retry</Button>}>
+        <Alert tone="error" action={<Button onClick={() => load()}>Retry</Button>}>
           {error}
         </Alert>
       )}
@@ -1560,6 +1772,13 @@ export function CommandCenter() {
       {data && failed(data.work) && (
         <Alert tone="error">Case counts could not be loaded. {data.work.error}</Alert>
       )}
+
+      {prioritizeStoreAudit && data && lines.length > 0 && <StatusBoard lines={lines} />}
+      {prioritizeStoreAudit && data?.store_days && (
+        <MissingTransactionsStrip data={data.store_days} />
+      )}
+      {prioritizeStoreAudit && data?.balancing && <BalancingStrip data={data.balancing} />}
+      {prioritizeStoreAudit && data?.close && <CloseStrip data={data.close} />}
 
       {c && (
         <div className="stack-sm" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1669,14 +1888,14 @@ export function CommandCenter() {
           )}
           {(lines.length > 0 || data.activity) && (
             <div className="stack cc-operations">
-              <StatusBoard lines={lines} />
+              {!prioritizeStoreAudit && <StatusBoard lines={lines} />}
               {data.activity && <ActivityFeed data={data.activity} />}
             </div>
           )}
         </div>
       )}
 
-      {data?.close && <CloseStrip data={data.close} />}
+      {!prioritizeStoreAudit && data?.close && <CloseStrip data={data.close} />}
 
       {data?.kpis && <KpiStrip data={data.kpis} />}
 

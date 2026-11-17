@@ -27,6 +27,7 @@ const CONFIGURATION = 'Configuration';
 
 const ICONS: Record<string, string> = {
   '/': 'home',
+  '/tasks': 'tasks',
   '/actions': 'actions',
   '/cases': 'cases',
   '/activity': 'agent',

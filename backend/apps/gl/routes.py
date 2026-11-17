@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import uuid
+from datetime import date
 from typing import Annotated, Literal
 
 from database import get_db
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/api/gl", tags=["General ledger"])
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
 JOURNAL_EXPORT_PAGE_SIZE = 500
+MAX_JOURNAL_DATE_RANGE_DAYS = 366
 
 
 class GLMapBody(BaseModel):
@@ -403,24 +405,61 @@ async def update_map(
     return view(row)
 
 
+def journal_date_bounds(
+    business_date: str | None, date_from: str | None, date_to: str | None
+) -> tuple[str, str]:
+    """Resolve the legacy single-day filter or a bounded inclusive business-date range."""
+    if business_date is not None:
+        if date_from is not None or date_to is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="Use business_date or date_from/date_to, not both",
+            )
+        try:
+            validate_business_date(business_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return business_date, business_date
+
+    if date_from is None or date_to is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide business_date or both date_from and date_to",
+        )
+    try:
+        validate_business_date(date_from)
+        validate_business_date(date_to)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must be on or before date_to")
+    range_days = (date.fromisoformat(date_to) - date.fromisoformat(date_from)).days
+    if range_days >= MAX_JOURNAL_DATE_RANGE_DAYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Journal date ranges are limited to {MAX_JOURNAL_DATE_RANGE_DAYS} days",
+        )
+    return date_from, date_to
+
+
 @router.get("/journal-preview")
 async def journal_preview(
     store_id: Annotated[str, Query(min_length=1, max_length=50)],
-    business_date: str,
+    business_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
 ):
     scope.require_store(user, store_id)
-    try:
-        validate_business_date(business_date)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    date_from, date_to = journal_date_bounds(business_date, date_from, date_to)
 
     conditions = (
         CanonicalTransaction.store_id == store_id,
-        CanonicalTransaction.business_date == business_date,
+        CanonicalTransaction.business_date >= date_from,
+        CanonicalTransaction.business_date <= date_to,
     )
     total = (
         await db.execute(select(func.count()).select_from(CanonicalTransaction).where(*conditions))
@@ -475,6 +514,8 @@ async def journal_preview(
         lines.append(
             {
                 "transaction_id": transaction.id,
+                "store_id": transaction.store_id,
+                "business_date": transaction.business_date,
                 "debit_account": debit,
                 "credit_account": credit,
                 "amount": abs(amount),
@@ -485,6 +526,8 @@ async def journal_preview(
     return {
         "store_id": store_id,
         "business_date": business_date,
+        "date_from": date_from,
+        "date_to": date_to,
         "lines": lines,
         "unmapped_transaction_ids": unmapped,
         "total_transactions": total,
@@ -497,20 +540,20 @@ async def journal_preview(
 @router.get("/journal-preview/export.csv")
 async def export_journal_preview(
     store_id: Annotated[str, Query(min_length=1, max_length=50)],
-    business_date: str,
+    business_date: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
 ):
-    """Stream all store-day journal lines, retaining unmapped transactions for reconciliation."""
+    """Stream all matching journal lines, retaining unmapped transactions for reconciliation."""
     scope.require_store(user, store_id)
-    try:
-        validate_business_date(business_date)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    date_from, date_to = journal_date_bounds(business_date, date_from, date_to)
 
     conditions = (
         CanonicalTransaction.store_id == store_id,
-        CanonicalTransaction.business_date == business_date,
+        CanonicalTransaction.business_date >= date_from,
+        CanonicalTransaction.business_date <= date_to,
     )
     maps = (
         (await db.execute(select(GLCrossReference).where(GLCrossReference.active.is_(True))))
@@ -529,6 +572,8 @@ async def export_journal_preview(
 
     async def rows():
         columns = (
+            "Store",
+            "Business date",
             "Transaction ID",
             "Transaction type",
             "Journal status",
@@ -574,6 +619,8 @@ async def export_journal_preview(
                 if mapping is None:
                     yield csv_row(
                         (
+                            transaction.store_id,
+                            transaction.business_date,
                             transaction.id,
                             transaction.transaction_type,
                             "Unmapped",
@@ -591,6 +638,8 @@ async def export_journal_preview(
                 )
                 yield csv_row(
                     (
+                        transaction.store_id,
+                        transaction.business_date,
                         transaction.id,
                         transaction.transaction_type,
                         "Mapped",

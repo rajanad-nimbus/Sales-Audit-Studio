@@ -24,7 +24,9 @@ export interface Me {
   screens: Screen[];
   store_scoped?: boolean;
   stores?: string[] | null;
-} // stores: null = every store; a list (maybe empty) = only those
+  store_location_traits?: string[];
+  store_assignment_source?: 'local' | 'identity' | 'unassigned';
+} // `stores` is the explicit list; assigned location traits add their current stores on the server.
 
 interface Ctx {
   me: Me | null | undefined;
@@ -95,7 +97,8 @@ export function AccessGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const screen = me ? screenFor(me.screens, pathname) : undefined;
   const firstAllowed =
-    me?.screens.find((s) => s.allowed && s.group !== 'Configuration') ??
+    me?.screens.find((s) => s.allowed && s.group === 'Workspace') ??
+    me?.screens.find((s) => s.allowed && !['Configuration', 'Your Account'].includes(s.group)) ??
     me?.screens.find((s) => s.allowed);
   const blocked = !!me && !!screen && !screen.allowed;
 

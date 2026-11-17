@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { HELP_TOPICS } from '@/lib/help';
+import { HELP_TOPICS, HELP_WORKFLOWS } from '@/lib/help';
 import { screenFor, useMe } from '@/components/MeProvider';
 
 export function HelpCenter() {
@@ -21,6 +21,10 @@ export function HelpCenter() {
       ),
     [me?.screens]
   );
+  const canOpenPath = (path: string) => !!screenFor(me?.screens, path.split('#')[0])?.allowed;
+  const permittedWorkflows = HELP_WORKFLOWS.filter((workflow) =>
+    workflow.steps.every((step) => canOpenPath(step.path))
+  );
   const currentTopic = permittedTopics.find((topic) => topic.path === currentScreen?.path) ?? {
     path: currentScreen?.path ?? pathname,
     title: currentScreen?.label ?? 'Using the workspace',
@@ -34,6 +38,13 @@ export function HelpCenter() {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matchingTopics = permittedTopics.filter((topic) =>
     `${topic.title} ${topic.summary} ${topic.steps.join(' ')} ${topic.notes?.join(' ') ?? ''}`
+      .toLocaleLowerCase()
+      .includes(normalizedQuery)
+  );
+  const matchingWorkflows = permittedWorkflows.filter((workflow) =>
+    `${workflow.title} ${workflow.summary} ${workflow.steps
+      .map((step) => `${step.title} ${step.detail}`)
+      .join(' ')}`
       .toLocaleLowerCase()
       .includes(normalizedQuery)
   );
@@ -117,9 +128,14 @@ export function HelpCenter() {
               <span className="help-center-kicker">ReSA workflow guide</span>
               <h2>Help and guidance</h2>
             </div>
-            <button className="command-palette-close" type="button" onClick={close}>
-              Close
-            </button>
+            <div className="cluster">
+              <Link className="btn-secondary btn-sm" href="/tasks" onClick={close}>
+                Browse tasks
+              </Link>
+              <button className="command-palette-close" type="button" onClick={close}>
+                Close
+              </button>
+            </div>
           </header>
           <section className="help-current" aria-labelledby="help-current-title">
             <div className="help-current-mark" aria-hidden="true">
@@ -151,29 +167,63 @@ export function HelpCenter() {
               placeholder="Try “close a store day”"
             />
           </div>
-          <section className="help-topic-list" aria-label="Help topics">
-            <h3>{normalizedQuery ? 'Matching topics' : 'More workflows'}</h3>
-            {matchingTopics.length ? (
-              topicSections.map(([section, topics]) => (
-                <div className="help-topic-section" key={section}>
-                  <h4>{section}</h4>
-                  {topics.map((topic) => (
-                    <Link className="help-topic" href={topic.path} key={topic.path} onClick={close}>
+          <div className="help-topic-list">
+            {matchingWorkflows.length > 0 && (
+              <section className="help-guide-list" aria-label="Guided workflows">
+                <h3>{normalizedQuery ? 'Matching guided workflows' : 'Guided workflows'}</h3>
+                {matchingWorkflows.map((workflow) => (
+                  <details className="help-guide" key={workflow.id}>
+                    <summary>
                       <span>
-                        <strong>{topic.title}</strong>
-                        <small>{topic.summary}</small>
+                        <strong>{workflow.title}</strong>
+                        <small>{workflow.summary}</small>
                       </span>
-                      <span aria-hidden="true">↗</span>
-                    </Link>
-                  ))}
-                </div>
-              ))
-            ) : (
+                      <span className="help-guide-count">{workflow.steps.length} steps</span>
+                    </summary>
+                    <ol>
+                      {workflow.steps.map((step) => (
+                        <li key={`${workflow.id}-${step.title}`}>
+                          <Link href={step.path} onClick={close}>
+                            {step.title}
+                          </Link>
+                          <p>{step.detail}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                ))}
+              </section>
+            )}
+            {matchingTopics.length > 0 && (
+              <section className="help-screen-guides" aria-label="Screen guides">
+                <h3>{normalizedQuery ? 'Matching screen guides' : 'Screen guides'}</h3>
+                {topicSections.map(([section, topics]) => (
+                  <div className="help-topic-section" key={section}>
+                    <h4>{section}</h4>
+                    {topics.map((topic) => (
+                      <Link
+                        className="help-topic"
+                        href={topic.path}
+                        key={topic.path}
+                        onClick={close}
+                      >
+                        <span>
+                          <strong>{topic.title}</strong>
+                          <small>{topic.summary}</small>
+                        </span>
+                        <span aria-hidden="true">↗</span>
+                      </Link>
+                    ))}
+                  </div>
+                ))}
+              </section>
+            )}
+            {matchingTopics.length === 0 && matchingWorkflows.length === 0 && (
               <p className="help-empty">
                 No matching help topics. Try a store-day or transaction task.
               </p>
             )}
-          </section>
+          </div>
           <footer className="help-center-footer">
             <span>
               Press <kbd>?</kbd> to open help from any page.

@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui';
 
 const HINTS: Record<string, string> = {
   settings: 'Theme and your account',
+  'settings-exchange': 'Find governed configuration and foundation data packages',
   'settings-integrations': 'Shopify, source feeds, matching tolerance, go-live checks',
   'settings-controls': 'Totals, audit rules and GL mapping',
   'settings-close': 'Variance tolerances, store-day order and period close',
@@ -15,6 +16,7 @@ const HINTS: Record<string, string> = {
   'settings-agents': 'The AI investigator and what each agent may do',
   'settings-destinations': 'Where exports are delivered',
   'settings-access': 'Which role can open which screen',
+  'settings-admin': 'Switch pages and modules on or off',
 };
 
 export default function ConfigurationLayout({ children }: { children: React.ReactNode }) {
@@ -28,11 +30,11 @@ export default function ConfigurationLayout({ children }: { children: React.Reac
   return (
     <div className="page-container">
       <PageHeader
-        title="Configuration"
+        title="Admin"
         subtitle="Everything that sets how Nimbus behaves. You see the sections your role may open."
       />
       <div className="cfg-layout">
-        <nav className="cfg-nav" aria-label="Configuration sections">
+        <nav className="cfg-nav" aria-label="Admin sections">
           {items.map((s) => (
             <Link
               key={s.key}

@@ -9,9 +9,10 @@ import logging
 import os
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
+from typing import Annotated
 
 from database import get_db
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +30,7 @@ from apps.exports.models import ExportBatch, ExportDestination
 from apps.operations.batch_routes import status as batch_status
 from apps.security import scope
 from apps.security.authentication import require_role
-from apps.store_days.models import StoreDay
+from apps.store_days.models import AuditTotal, StoreDay
 from apps.store_days.readiness import (
     CLEAN,
     COMPLETE,
@@ -38,8 +39,10 @@ from apps.store_days.readiness import (
     holding_back,
     late_stores,
     readiness,
+    unresolved_sequence_gap_counts,
 )
 from apps.store_days.routes import store_days_needing_attention
+from apps.totals.over_short import TOTAL_NAME as OVER_SHORT_TOTAL
 from apps.transactions.models import CanonicalTransaction
 from apps.vouchers.routes import voucher_summary
 
@@ -151,15 +154,38 @@ async def work(db: AsyncSession, user: dict) -> dict:
     }
 
 
-async def store_days(db: AsyncSession, user: dict) -> dict:
+async def store_days(db: AsyncSession, user: dict, business_date: str | None = None) -> dict:
+    selected_date = business_date or (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
     data = await store_days_needing_attention(
-        business_date=None,
+        business_date=selected_date,
         stuck_after_days=3,
         limit=200,
         db=db,
         user=user,
         late_page=1,
         late_page_size=ATTENTION_ROWS * 2,
+    )
+    gap_days = (
+        (
+            await db.execute(
+                scope.restrict(
+                    select(StoreDay).where(StoreDay.business_date == selected_date),
+                    user,
+                    StoreDay.store_id,
+                ).order_by(StoreDay.store_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    gap_counts = await unresolved_sequence_gap_counts(db, gap_days)
+    gap_rows = sorted(
+        (
+            {"store_id": day.store_id, "missing": gap_counts.get((day.store_id, selected_date), 0)}
+            for day in gap_days
+            if gap_counts.get((day.store_id, selected_date), 0) > 0
+        ),
+        key=lambda row: (-row["missing"], row["store_id"]),
     )
     return {
         "business_date": data["business_date"],
@@ -178,6 +204,12 @@ async def store_days(db: AsyncSession, user: dict) -> dict:
             }
             for d in data["stuck_store_days"][:ATTENTION_ROWS]
         ],
+        "missing_transactions": {
+            "store_days": len(gap_rows),
+            "numbers": sum(row["missing"] for row in gap_rows),
+            "top": gap_rows[:ATTENTION_ROWS],
+            "top_truncated": len(gap_rows) > ATTENTION_ROWS,
+        },
     }
 
 
@@ -249,9 +281,11 @@ async def exports(db: AsyncSession, _user: dict) -> dict:
     }
 
 
-async def close(db: AsyncSession, user: dict) -> dict:
-    """How far yesterday's business date is from closed: closed, ready, blocked and why, and export."""
-    business_date = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
+async def close(
+    db: AsyncSession, user: dict, business_date: str | None = None
+) -> dict:
+    """How far a business date is from closed: closed, ready, blocked and why, and export."""
+    business_date = business_date or (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
     expected, _late = await late_stores(db, user, business_date)
     days = (
         (
@@ -299,6 +333,109 @@ async def close(db: AsyncSession, user: dict) -> dict:
             for d in blocked[:ATTENTION_ROWS]
         ],
         "export": dict(export_counts),
+    }
+
+
+async def balancing(db: AsyncSession, user: dict, business_date: str | None = None) -> dict:
+    """Current store-level ReSA Over/Short totals, kept separate by currency."""
+    business_date = business_date or (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
+    filters = [
+        StoreDay.business_date == business_date,
+        StoreDay.audit_version >= 1,
+        AuditTotal.audit_version == StoreDay.audit_version,
+        AuditTotal.total_name == OVER_SHORT_TOTAL,
+        AuditTotal.level == "Store",
+        AuditTotal.variance_amount.is_not(None),
+    ]
+    stale = StoreDay.totals_stale.is_(True)
+    current = StoreDay.totals_stale.is_(False)
+    summary = (
+        select(
+            AuditTotal.currency,
+            func.count(func.distinct(case((current, StoreDay.id), else_=None))).label(
+                "store_days"
+            ),
+            func.count(func.distinct(case((stale, StoreDay.id), else_=None))).label(
+                "stale_store_days"
+            ),
+            func.count(
+                func.distinct(
+                    case(
+                        (and_(current, AuditTotal.variance_amount != 0), StoreDay.id),
+                        else_=None,
+                    )
+                )
+            ).label("out_of_balance"),
+            func.sum(
+                case(
+                    (and_(current, AuditTotal.variance_amount > 0), AuditTotal.variance_amount),
+                    else_=0,
+                )
+            ).label("short"),
+            func.sum(
+                case(
+                    (and_(current, AuditTotal.variance_amount < 0), -AuditTotal.variance_amount),
+                    else_=0,
+                )
+            ).label("over"),
+        )
+        .join(StoreDay, StoreDay.id == AuditTotal.store_day_id)
+        .where(*filters)
+        .group_by(AuditTotal.currency)
+    )
+    summary_rows = (
+        await db.execute(
+            scope.restrict(summary, user, StoreDay.store_id).order_by(AuditTotal.currency)
+        )
+    ).all()
+    detail = (
+        select(
+            StoreDay.store_id,
+            StoreDay.status,
+            AuditTotal.currency,
+            AuditTotal.variance_amount,
+            func.row_number()
+            .over(
+                partition_by=AuditTotal.currency,
+                order_by=(func.abs(AuditTotal.variance_amount).desc(), StoreDay.store_id),
+            )
+            .label("rank"),
+        )
+        .join(StoreDay, StoreDay.id == AuditTotal.store_day_id)
+        .where(*filters, current, AuditTotal.variance_amount != 0)
+    )
+    ranked = scope.restrict(detail, user, StoreDay.store_id).subquery()
+    detail_rows = (
+        await db.execute(
+            select(ranked)
+            .where(ranked.c.rank <= ATTENTION_ROWS + 1)
+            .order_by(ranked.c.currency, ranked.c.rank)
+        )
+    ).all()
+    top_rows = [row for row in detail_rows if row.rank <= ATTENTION_ROWS]
+    return {
+        "business_date": business_date,
+        "by_currency": [
+            {
+                "currency": row.currency,
+                "store_days": row.store_days,
+                "stale_store_days": row.stale_store_days,
+                "out_of_balance": row.out_of_balance,
+                "short": str(row.short or 0),
+                "over": str(row.over or 0),
+            }
+            for row in summary_rows
+        ],
+        "top": [
+            {
+                "store_id": row.store_id,
+                "status": row.status,
+                "currency": row.currency,
+                "variance_amount": str(row.variance_amount),
+            }
+            for row in top_rows
+        ],
+        "top_truncated": any(row.rank > ATTENTION_ROWS for row in detail_rows),
     }
 
 
@@ -472,16 +609,30 @@ async def section(db: AsyncSession, user: dict, roles: tuple[str, ...], build, s
 
 @router.get("")
 async def command_center(
+    business_date: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role(*WORK_ROLES)),
 ):
+    if business_date:
+        try:
+            if date.fromisoformat(business_date).isoformat() != business_date:
+                raise ValueError
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="business_date must be YYYY-MM-DD") from exc
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "role": user["role"],
         "freshness": await section(db, user, WORK_ROLES, lambda d, _u: batch_status(d)),
         "work": await section(db, user, WORK_ROLES, work),
-        "store_days": await section(db, user, STORE_DAY_ROLES, store_days),
-        "close": await section(db, user, STORE_DAY_ROLES, close),
+        "store_days": await section(
+            db, user, STORE_DAY_ROLES, lambda d, u: store_days(d, u, business_date)
+        ),
+        "close": await section(
+            db, user, STORE_DAY_ROLES, lambda d, u: close(d, u, business_date)
+        ),
+        "balancing": await section(
+            db, user, STORE_DAY_ROLES, lambda d, u: balancing(d, u, business_date)
+        ),
         "audit_errors": await section(db, user, ERROR_ROLES, audit_errors),
         "exports": await section(db, user, EXPORT_ROLES, exports),
         "health": await section(db, user, HEALTH_ROLES, health, system_wide=True),

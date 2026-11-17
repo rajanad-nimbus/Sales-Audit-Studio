@@ -56,12 +56,24 @@ interface SummaryFilters {
 const quantity = (value: string) => formatNumber(Number(value), { maximumFractionDigits: 3 });
 
 const columns = (filters: SummaryFilters): Column<ItemRow>[] => [
-  { key: 'item', header: 'Item', primary: true, render: (row) => <code>{row.item_code}</code> },
-  { key: 'description', header: 'Description', render: (row) => row.description || '—' },
+  {
+    key: 'item',
+    header: 'Item',
+    primary: true,
+    csvValue: (row) => row.item_code,
+    render: (row) => <code>{row.item_code}</code>,
+  },
+  {
+    key: 'description',
+    header: 'Description',
+    csvValue: (row) => row.description || '—',
+    render: (row) => row.description || '—',
+  },
   {
     key: 'transactions',
     header: 'Transactions',
     numeric: true,
+    csvValue: (row) => row.transaction_count,
     render: (row) => {
       const params = new URLSearchParams({ item_code: row.item_code });
       if (filters.store) params.set('store_id', filters.store);
@@ -78,42 +90,49 @@ const columns = (filters: SummaryFilters): Column<ItemRow>[] => [
     key: 'sold',
     header: 'Units sold',
     numeric: true,
+    csvValue: (row) => row.sold_quantity,
     render: (row) => quantity(row.sold_quantity),
   },
   {
     key: 'returned',
     header: 'Units returned',
     numeric: true,
+    csvValue: (row) => row.returned_quantity,
     render: (row) => quantity(row.returned_quantity),
   },
   {
     key: 'net-qty',
     header: 'Net units',
     numeric: true,
+    csvValue: (row) => row.net_quantity,
     render: (row) => quantity(row.net_quantity),
   },
   {
     key: 'sales',
     header: 'Sales',
     numeric: true,
+    csvValue: (row) => `${row.sold_amount} ${row.currency}`,
     render: (row) => money(row.sold_amount, row.currency),
   },
   {
     key: 'returns',
     header: 'Returns',
     numeric: true,
+    csvValue: (row) => `${row.returned_amount} ${row.currency}`,
     render: (row) => money(row.returned_amount, row.currency),
   },
   {
     key: 'net',
     header: 'Net sales',
     numeric: true,
+    csvValue: (row) => `${row.net_sales} ${row.currency}`,
     render: (row) => money(row.net_sales, row.currency),
   },
   {
     key: 'tax',
     header: 'Net tax',
     numeric: true,
+    csvValue: (row) => `${row.net_tax} ${row.currency}`,
     render: (row) => money(row.net_tax, row.currency),
   },
 ];
@@ -321,6 +340,14 @@ export default function ItemSummaryPage() {
             <DataTable
               columns={columns(applied)}
               rows={busy ? null : result.items}
+              csvFileName="item-summary-visible.csv"
+              detachTitle={
+                [
+                  'Item Summary',
+                  applied.store || 'All stores',
+                  `${applied.dateFrom || 'all dates'} to ${applied.dateTo || 'all dates'}`,
+                ].join(' · ')
+              }
               rowKey={(row) => `${row.item_code}:${row.description ?? ''}:${row.currency}`}
               emptyTitle="No item activity found"
               emptyHint="Change the store, date range, or item search and try again."

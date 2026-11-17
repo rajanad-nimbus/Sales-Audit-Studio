@@ -130,6 +130,21 @@ def _skip(case: Case, reason: str, skipped: list[dict[str, str]]) -> None:
     skipped.append({"case_number": case.case_number, "reason": reason})
 
 
+def _simple_action_state(case: Case, action: str) -> dict:
+    fields = {
+        "assign": ("assigned_to",),
+        "unassign": ("assigned_to",),
+        "priority": ("priority", "sla_due_at"),
+        "snooze": ("snoozed_until",),
+        "unsnooze": ("snoozed_until",),
+    }.get(action, ())
+    state = {}
+    for field in fields:
+        value = getattr(case, field)
+        state[field] = value.isoformat() if isinstance(value, datetime) else value
+    return state
+
+
 def _apply_simple_action(
     case: Case, action: str, params: dict, actor: str, now: datetime, skipped: list[dict[str, str]]
 ) -> bool:
@@ -288,9 +303,24 @@ async def execute_bulk_action(
     skipped: list[dict[str, str]] = []
     succeeded = 0
     for case in cases:
-        succeeded += await _apply_case_action(
+        before = _simple_action_state(case, action)
+        applied = await _apply_case_action(
             db, case, action, params, user, actor, data, now, skipped
         )
+        if applied:
+            succeeded += 1
+            if before:
+                nimbus.audit(
+                    db,
+                    "CASE_UPDATED",
+                    case.id,
+                    "Case",
+                    case.id,
+                    f"{action.replace('_', ' ').capitalize()} case {case.case_number}",
+                    actor=actor,
+                    before=before,
+                    after=_simple_action_state(case, action),
+                )
 
     nimbus.audit(
         db,

@@ -7,13 +7,14 @@ from decimal import Decimal
 from typing import Annotated
 
 from database import get_db
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from integrations.ontology.nimbus import audit
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.csv_export import csv_table
 from apps.ingest.manifests import validate_business_date
 from apps.security import scope
 from apps.security.authentication import require_role
@@ -40,6 +41,7 @@ router.include_router(jurisdiction_router)
 router.include_router(voucher_policy_package_router)
 router.include_router(voucher_retention_router)
 MAX_PAGE = 500
+VOUCHER_EXPORT_MAX_ROWS = 50_000
 READ_ROLES = ("analyst", "finance", "it", "auditor", "store_manager")
 
 
@@ -396,6 +398,99 @@ async def list_vouchers(
     )
     context = await routing_context(db, {row.issued_store_id for row in rows})
     return [eligibility_view(row, now, options, context) for row in rows]
+
+
+@router.get("/export.csv")
+async def export_vouchers(
+    status: Annotated[
+        str | None, Query(pattern="^(Issued|Expired|Redeemed|Escheated|Eligible)$")
+    ] = None,
+    store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role(*READ_ROLES)),
+):
+    """Export the full matching voucher ledger, bounded to protect the service."""
+    now = today()
+    options = await voucher_options_by_tender(db)
+    query = scope.restrict(select(Voucher), user, Voucher.issued_store_id)
+    if status == "Eligible":
+        query = query.where(escheat_eligibility_filter(now, options))
+    elif status == "Expired":
+        query = query.where(Voucher.status == "Issued", Voucher.expires_on < now)
+    elif status == "Issued":
+        query = query.where(
+            Voucher.status == "Issued",
+            (Voucher.expires_on.is_(None)) | (Voucher.expires_on >= now),
+        )
+    elif status:
+        query = query.where(Voucher.status == status)
+    if store_id:
+        query = query.where(Voucher.issued_store_id == store_id)
+    if q:
+        query = query.where(Voucher.voucher_number.contains(q, autoescape=True))
+    found = list(
+        (
+            await db.execute(
+                query.order_by(Voucher.created_at.desc(), Voucher.id).limit(
+                    VOUCHER_EXPORT_MAX_ROWS + 1
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    truncated = len(found) > VOUCHER_EXPORT_MAX_ROWS
+    rows = found[:VOUCHER_EXPORT_MAX_ROWS]
+    context = await routing_context(db, {row.issued_store_id for row in rows})
+    views = [eligibility_view(row, now, options, context) for row in rows]
+    columns = [
+        "Voucher number",
+        "Status",
+        "Issued store",
+        "Issued on",
+        "Expires on",
+        "Amount",
+        "Currency",
+        "Tender type",
+        "Escheat eligible",
+        "Eligible on",
+        "Eligibility basis",
+        "Redeemed store",
+        "Redeemed on",
+        "Redeemed transaction ID",
+        "Escheat routing",
+    ]
+    csv_rows = [
+        [
+            item.get("voucher_number"),
+            item.get("status"),
+            item.get("issued_store_id"),
+            item.get("issued_on"),
+            item.get("expires_on"),
+            item.get("amount"),
+            item.get("currency"),
+            item.get("tender_type"),
+            item.get("escheat_eligible"),
+            item.get("eligible_on"),
+            item.get("eligibility_basis"),
+            item.get("redeemed_store_id"),
+            item.get("redeemed_on"),
+            item.get("redeemed_transaction_id"),
+            json.dumps(item.get("routing"), sort_keys=True, separators=(",", ":"))
+            if item.get("routing")
+            else None,
+        ]
+        for item in views
+    ]
+    return Response(
+        csv_table(columns, csv_rows),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="vouchers.csv"',
+            "X-Voucher-Export-Truncated": "true" if truncated else "false",
+        },
+    )
 
 
 @router.post("")

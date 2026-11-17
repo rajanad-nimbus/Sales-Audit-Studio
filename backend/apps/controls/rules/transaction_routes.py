@@ -594,6 +594,28 @@ async def preview_transaction_rule_package(
     }
 
 
+@router.get("/package")
+async def export_transaction_rule_package(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("finance", "it", "analyst", "auditor", "admin")),
+):
+    """Export transaction audit definitions as a portable, versioned package."""
+    rows = (
+        await db.execute(
+            select(ConfiguredTransactionAuditRule).order_by(
+                ConfiguredTransactionAuditRule.execution_order,
+                ConfiguredTransactionAuditRule.name,
+            )
+        )
+    ).scalars()
+    return {
+        "format": "zetsa.transaction-audit-rules",
+        "version": 1,
+        "exported_at": utcnow().isoformat(),
+        "rules": [view(row) for row in rows],
+    }
+
+
 @router.post("/import/apply")
 async def import_transaction_rule_package(
     body: TransactionRulePackageApplyBody,

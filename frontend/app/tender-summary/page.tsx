@@ -26,36 +26,52 @@ interface Result {
 }
 
 const columns: Column<TenderRow>[] = [
-  { key: 'tender', header: 'Tender type', primary: true, render: (row) => row.tender_type },
-  { key: 'currency', header: 'Currency', render: (row) => row.currency },
+  {
+    key: 'tender',
+    header: 'Tender type',
+    primary: true,
+    csvValue: (row) => row.tender_type,
+    render: (row) => row.tender_type,
+  },
+  {
+    key: 'currency',
+    header: 'Currency',
+    csvValue: (row) => row.currency,
+    render: (row) => row.currency,
+  },
   {
     key: 'transactions',
     header: 'Transactions',
     numeric: true,
+    csvValue: (row) => row.transaction_count,
     render: (row) => formatNumber(row.transaction_count),
   },
   {
     key: 'tenders',
     header: 'Tender entries',
     numeric: true,
+    csvValue: (row) => row.tender_count,
     render: (row) => formatNumber(row.tender_count),
   },
   {
     key: 'received',
     header: 'Received',
     numeric: true,
+    csvValue: (row) => `${row.received_amount} ${row.currency}`,
     render: (row) => money(row.received_amount, row.currency),
   },
   {
     key: 'refunds',
     header: 'Refunds',
     numeric: true,
+    csvValue: (row) => `${row.refunded_amount} ${row.currency}`,
     render: (row) => money(row.refunded_amount, row.currency),
   },
   {
     key: 'net',
     header: 'Net',
     numeric: true,
+    csvValue: (row) => `${row.net_amount} ${row.currency}`,
     render: (row) => money(row.net_amount, row.currency),
   },
 ];
@@ -221,6 +237,14 @@ export default function TenderSummaryPage() {
           <DataTable
             columns={columns}
             rows={busy ? null : result.items}
+            csvFileName="tender-summary-visible.csv"
+            detachTitle={
+              [
+                'Tender Summary',
+                applied.store || 'All stores',
+                `${applied.dateFrom || 'all dates'} to ${applied.dateTo || 'all dates'}`,
+              ].join(' · ')
+            }
             rowKey={(row) => `${row.tender_type}:${row.currency}`}
             emptyTitle="No tender activity found"
             emptyHint="Change the store, date range, or search and try again."

@@ -1,7 +1,7 @@
-"""Row-level security by store. A scoped user (a store manager) sees and changes only the stores assigned to them.
+"""Row-level security by store for assigned auditors and store employees.
 
-Assignments are maintained in Ontology Studio and arrive with the identity (see auth.stores_from_identity). Scope is
-fail-closed: a scoped user with no assigned stores can reach none. Everyone else is unrestricted here.
+Assignments are maintained in ZeTSA or arrive with the identity provider. Scope is fail-closed: a scoped user with no
+assigned stores can reach none. Everyone else is unrestricted here.
 """
 
 import re

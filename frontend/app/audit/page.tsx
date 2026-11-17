@@ -218,15 +218,22 @@ export default function AuditPage() {
       ) : (
         <DataTable
           columns={[
-            { key: 'seq', header: '#', render: (e) => <span className="text-sm">{e.seq}</span> },
+            {
+              key: 'seq',
+              header: '#',
+              csvValue: (e) => e.seq,
+              render: (e) => <span className="text-sm">{e.seq}</span>,
+            },
             {
               key: 'time',
               header: 'Time',
+              csvValue: (e) => e.created_at,
               render: (e) => <span className="text-sm nowrap">{formatDateTime(e.created_at)}</span>,
             },
             {
               key: 'event',
               header: 'Event',
+              csvValue: (e) => e.event_type.replace(/_/g, ' ').toLowerCase(),
               render: (e) => (
                 <span
                   className={`badge badge-sm ${/FAIL|ERROR|REJECT|BREACH|QUARANTIN/i.test(e.event_type) ? 'badge-error' : /APPROV|CLOSED|COMPLETE|VALIDAT|RESOLV/i.test(e.event_type) ? 'badge-success' : /CREATED|RAISED|RECEIVED|EXPORT/i.test(e.event_type) ? 'badge-info' : 'badge-secondary'}`}
@@ -235,17 +242,30 @@ export default function AuditPage() {
                 </span>
               ),
             },
-            { key: 'actor', header: 'Actor', render: (e) => e.actor },
-            { key: 'what', header: 'What happened', render: (e) => e.description },
+            { key: 'actor', header: 'Actor', csvValue: (e) => e.actor, render: (e) => e.actor },
+            {
+              key: 'what',
+              header: 'What happened',
+              csvValue: (e) => e.description,
+              render: (e) => e.description,
+            },
             {
               key: 'case',
               header: 'Case',
               stopRowClick: true,
+              csvValue: (e) => e.case_id ?? '',
               render: (e) => (e.case_id ? <CaseLink id={e.case_id}>Open</CaseLink> : '-'),
             },
-            { key: 'hash', header: 'Hash', render: (e) => <code>{e.hash?.slice(0, 8)}</code> },
+            {
+              key: 'hash',
+              header: 'Hash',
+              csvValue: (e) => e.hash?.slice(0, 8) ?? '',
+              render: (e) => <code>{e.hash?.slice(0, 8)}</code>,
+            },
           ]}
           rows={rows}
+          csvFileName="audit-trail-visible.csv"
+          detachTitle="Audit Trail · Visible events"
           rowKey={(e) => String(e.id)}
           onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
           rowClassName={(e) => `ac-row ${open === e.id ? 'open' : ''}`}

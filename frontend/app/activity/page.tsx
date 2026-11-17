@@ -505,6 +505,7 @@ export default function ActivityPage() {
                     key: 'when',
                     header: 'When',
                     width: '7rem',
+                    csvValue: (e) => e.created_at,
                     render: (e) => (
                       <span className="text-sm nowrap" title={formatDateTime(e.created_at)}>
                         {ago(e.created_at)}
@@ -515,6 +516,7 @@ export default function ActivityPage() {
                     key: 'actor',
                     header: 'Actor',
                     width: '14rem',
+                    csvValue: (e) => `${pretty(e.actor)} · ${groupLabel(e.actor)}`,
                     render: (e) => (
                       <span className="act-actor">
                         <i
@@ -535,6 +537,7 @@ export default function ActivityPage() {
                   {
                     key: 'what',
                     header: 'What happened',
+                    csvValue: (e) => `${pretty(e.event_type)} · ${e.action_description}`,
                     render: (e) => (
                       <>
                         <span className={`badge badge-sm ${tone(e.event_type)}`}>
@@ -549,6 +552,7 @@ export default function ActivityPage() {
                     header: 'Case',
                     width: '5rem',
                     stopRowClick: true,
+                    csvValue: (e) => e.case_id ?? '',
                     render: (e) =>
                       e.case_id ? (
                         <CaseLink id={e.case_id}>Open</CaseLink>
@@ -558,6 +562,8 @@ export default function ActivityPage() {
                   },
                 ]}
                 rows={g.items}
+                csvFileName={`agent-activity-${g.day.replace(/[^a-zA-Z0-9_-]/g, '-')}-visible.csv`}
+                detachTitle={`Agent Activity · ${g.day}`}
                 rowKey={(e) => String(e.id)}
                 onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
                 rowClassName={(e) =>

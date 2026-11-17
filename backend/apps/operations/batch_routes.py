@@ -1,5 +1,6 @@
 """HTTP routes and request contracts for daily batch operations."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -230,6 +231,76 @@ async def export_run_history(
             "Content-Disposition": f"attachment; filename=batch-runs_{start or 'start'}_{end or 'now'}.csv",
             "X-Batch-History-Truncated": "true" if truncated else "false",
         },
+    )
+
+
+@router.get("/runs/{run_id}")
+async def batch_run_detail(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("finance", "it")),
+):
+    """Read one batch process by its stable ID for direct operational handoffs."""
+    run = (
+        await db.execute(select(BatchRun).where(BatchRun.id == run_id))
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Batch run not found")
+    return view(run)
+
+
+@router.get("/runs/{run_id}/export.csv")
+async def export_batch_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("finance", "it")),
+):
+    """Download one complete, sanitized batch outcome for an operational handoff."""
+    run = (
+        await db.execute(select(BatchRun).where(BatchRun.id == run_id))
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Batch run not found")
+    columns = [
+        "Run ID",
+        "Business date",
+        "Status",
+        "Trigger",
+        "Started at",
+        "Last progress at",
+        "Finished at",
+        "Transactions loaded",
+        "Matched pairs",
+        "Cases created",
+        "Source counts",
+        "Run error",
+        "Store-day opening status",
+        "Store days opened",
+        "Store days already open",
+        "Store-day opening error",
+    ]
+    row = [
+        run.id,
+        run.business_date,
+        run.status,
+        run.trigger,
+        run.started_at,
+        run.heartbeat_at,
+        run.finished_at,
+        run.transactions_loaded,
+        run.matched_pairs,
+        run.cases_created,
+        json.dumps(run.source_counts or {}, sort_keys=True, separators=(",", ":")),
+        run.error,
+        run.store_day_open_status,
+        run.store_days_opened,
+        run.store_days_already_open,
+        run.store_day_open_error,
+    ]
+    return Response(
+        csv_table(columns, [row]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="batch-run_{run.id}.csv"'},
     )
 
 

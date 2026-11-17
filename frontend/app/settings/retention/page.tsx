@@ -195,6 +195,8 @@ export default function RetentionPage() {
                 primary: true,
                 render: (p) =>
                   p.dataset === 'audit_events' ? 'audit_events (append-only)' : p.dataset,
+                csvValue: (p) =>
+                  p.dataset === 'audit_events' ? 'audit_events (append-only)' : p.dataset,
               },
               {
                 key: 'days',
@@ -214,6 +216,7 @@ export default function RetentionPage() {
                     }}
                   />
                 ),
+                csvValue: (p) => p.retain_days,
               },
               {
                 key: 'archive',
@@ -224,10 +227,17 @@ export default function RetentionPage() {
                     : p.archive_before_purge
                       ? 'Yes'
                       : 'No',
+                csvValue: (p) =>
+                  p.dataset === 'audit_events'
+                    ? 'Not applicable'
+                    : p.archive_before_purge
+                      ? 'Yes'
+                      : 'No',
               },
               {
                 key: 'actions',
                 header: '',
+                csvSkip: true,
                 render: (p) => (
                   <div className="action-buttons">
                     <Button size="sm" onClick={() => preview(p.dataset)}>
@@ -246,6 +256,8 @@ export default function RetentionPage() {
             ]}
             rows={policies}
             rowKey={(p) => p.id}
+            csvFileName="retention-policies-visible.csv"
+            detachTitle="Data retention policies"
           />
         )}
       </Card>
@@ -315,25 +327,45 @@ export default function RetentionPage() {
         ) : (
           <DataTable
             columns={[
-              { key: 'dataset', header: 'Dataset', primary: true, render: (r) => r.dataset },
-              { key: 'status', header: 'Status', render: (r) => r.status },
+              {
+                key: 'dataset',
+                header: 'Dataset',
+                primary: true,
+                render: (r) => r.dataset,
+                csvValue: (r) => r.dataset,
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                render: (r) => r.status,
+                csvValue: (r) => r.status,
+              },
               {
                 key: 'eligible',
                 header: 'Eligible',
                 numeric: true,
                 render: (r) => r.eligible_records,
+                csvValue: (r) => r.eligible_records,
               },
               {
                 key: 'archived',
                 header: 'Archived',
                 numeric: true,
                 render: (r) => r.archived_records,
+                csvValue: (r) => r.archived_records,
               },
-              { key: 'purged', header: 'Purged', numeric: true, render: (r) => r.purged_records },
+              {
+                key: 'purged',
+                header: 'Purged',
+                numeric: true,
+                render: (r) => r.purged_records,
+                csvValue: (r) => r.purged_records,
+              },
               {
                 key: 'archive',
                 header: 'Archive',
                 render: (r) => r.archive_location || '—',
+                csvValue: (r) => r.archive_location || '—',
               },
               {
                 key: 'hash',
@@ -344,6 +376,7 @@ export default function RetentionPage() {
                   ) : (
                     '—'
                   ),
+                csvValue: (r) => r.archive_hash || '—',
               },
               {
                 key: 'error',
@@ -356,17 +389,26 @@ export default function RetentionPage() {
                   ) : (
                     'Completed'
                   ),
+                csvValue: (r) => r.error || 'Completed',
               },
-              { key: 'operator', header: 'Performed by', render: (r) => r.performed_by },
+              {
+                key: 'operator',
+                header: 'Performed by',
+                render: (r) => r.performed_by,
+                csvValue: (r) => r.performed_by,
+              },
               {
                 key: 'when',
                 header: 'When',
                 nowrap: true,
                 render: (r) => formatDateTime(r.created_at),
+                csvValue: (r) => r.created_at,
               },
             ]}
             rows={runs}
             rowKey={(r) => String(r.id)}
+            csvFileName="retention-runs-visible.csv"
+            detachTitle={`Retention run history · ${runDataset || 'all datasets'} · ${runStatus || 'all statuses'}`}
             footer={
               <Pager
                 page={runPage}

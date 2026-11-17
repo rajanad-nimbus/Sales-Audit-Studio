@@ -131,6 +131,10 @@ export default function ControlsPage() {
   const toast = useToast();
   const { me } = useMe();
   const [tab, setTab] = useState<Tab>('Totals & rules');
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (requested && tabs.includes(requested as Tab)) setTab(requested as Tab);
+  }, []);
   const [ruleDraft, setRuleDraft] = useState({
     name: '',
     total_name: '',
@@ -421,12 +425,24 @@ export default function ControlsPage() {
     }
   };
   const previewColumns: Column<RulePreview['samples'][number]>[] = [
-    { key: 'store', header: 'Store', primary: true, render: (row) => row.store_id },
-    { key: 'date', header: 'Business date', render: (row) => row.business_date },
+    {
+      key: 'store',
+      header: 'Store',
+      primary: true,
+      render: (row) => row.store_id,
+      csvValue: (row) => row.store_id,
+    },
+    {
+      key: 'date',
+      header: 'Business date',
+      render: (row) => row.business_date,
+      csvValue: (row) => row.business_date,
+    },
     {
       key: 'dimension',
       header: previewRule?.balance_level ?? 'Balance level',
       render: (row) => row.dimension ?? 'Whole store',
+      csvValue: (row) => row.dimension ?? 'Whole store',
     },
     {
       key: 'observed',
@@ -436,6 +452,8 @@ export default function ControlsPage() {
         previewRule?.threshold_currency
           ? money(row.observed, row.currency)
           : `${row.observed} count`,
+      csvValue: (row) =>
+        previewRule?.threshold_currency ? `${row.observed} ${row.currency}` : `${row.observed} count`,
     },
     {
       key: 'outcome',
@@ -445,6 +463,7 @@ export default function ControlsPage() {
           {row.would_breach ? 'Would trigger' : 'Within threshold'}
         </Badge>
       ),
+      csvValue: (row) => (row.would_breach ? 'Would trigger' : 'Within threshold'),
     },
   ];
   const isConfiguredTarget = ruleDraft.total_name.startsWith('Configured: ');
@@ -913,6 +932,8 @@ export default function ControlsPage() {
                     }
                     emptyTitle="No current totals in this range"
                     emptyHint="Recalculate the selected Store Days, then run the preview again."
+                    csvFileName="variance-rule-preview-visible.csv"
+                    detachTitle={`Rule preview · ${previewData.rule_name} · ${previewData.date_from} to ${previewData.date_to}`}
                   />
                 </>
               )}
@@ -979,17 +1000,41 @@ export default function ControlsPage() {
                     header: 'Transaction',
                     primary: true,
                     render: (row) => row.transaction_type,
+                    csvValue: (row) => row.transaction_type,
                   },
-                  { key: 'tender', header: 'Tender', render: (row) => row.tender_type || 'All' },
-                  { key: 'debit', header: 'Debit', render: (row) => row.debit_account },
-                  { key: 'credit', header: 'Credit', render: (row) => row.credit_account },
+                  {
+                    key: 'tender',
+                    header: 'Tender',
+                    render: (row) => row.tender_type || 'All',
+                    csvValue: (row) => row.tender_type || 'All',
+                  },
+                  {
+                    key: 'debit',
+                    header: 'Debit',
+                    render: (row) => row.debit_account,
+                    csvValue: (row) => row.debit_account,
+                  },
+                  {
+                    key: 'credit',
+                    header: 'Credit',
+                    render: (row) => row.credit_account,
+                    csvValue: (row) => row.credit_account,
+                  },
                   {
                     key: 'status',
                     header: 'Status',
                     render: (row) => (row.active ? 'Active' : 'Inactive'),
+                    csvValue: (row) => (row.active ? 'Active' : 'Inactive'),
                   },
-                  { key: 'action', header: 'Action', render: (row) => row.action },
+                  {
+                    key: 'action',
+                    header: 'Action',
+                    render: (row) => row.action,
+                    csvValue: (row) => row.action,
+                  },
                 ]}
+                csvFileName="gl-mapping-import-preview-visible.csv"
+                detachTitle={`GL mapping import preview · ${glPackagePreview.fileName}`}
               />
               <Field
                 label="Reason for import"
@@ -1110,14 +1155,31 @@ export default function ControlsPage() {
                 header: 'Transaction',
                 primary: true,
                 render: (row) => row.transaction_type,
+                csvValue: (row) => row.transaction_type,
               },
-              { key: 'tender', header: 'Tender', render: (row) => row.tender_type || 'All' },
-              { key: 'debit', header: 'Debit', render: (row) => row.debit_account },
-              { key: 'credit', header: 'Credit', render: (row) => row.credit_account },
+              {
+                key: 'tender',
+                header: 'Tender',
+                render: (row) => row.tender_type || 'All',
+                csvValue: (row) => row.tender_type || 'All',
+              },
+              {
+                key: 'debit',
+                header: 'Debit',
+                render: (row) => row.debit_account,
+                csvValue: (row) => row.debit_account,
+              },
+              {
+                key: 'credit',
+                header: 'Credit',
+                render: (row) => row.credit_account,
+                csvValue: (row) => row.credit_account,
+              },
               {
                 key: 'status',
                 header: 'Status',
                 render: (row) => (row.active ? 'Active' : 'Inactive'),
+                csvValue: (row) => (row.active ? 'Active' : 'Inactive'),
               },
               {
                 key: 'action',
@@ -1130,10 +1192,13 @@ export default function ControlsPage() {
                   ) : (
                     '—'
                   ),
+                csvSkip: true,
               },
             ]}
             rows={maps}
             rowKey={(row) => row.id}
+            csvFileName="gl-mappings-visible.csv"
+            detachTitle="GL cross-reference mappings"
           />
           <h3 style={{ marginTop: '1.25rem' }}>Journal preview</h3>
           <p>

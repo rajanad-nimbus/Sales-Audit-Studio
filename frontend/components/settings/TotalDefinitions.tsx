@@ -31,7 +31,11 @@ export type TotalRevision = {
   measure: string;
   parameters?: { realm: RestrictionRealm; field: string }[];
   rollups?: { realm: RestrictionRealm; field: string }[];
+  realms?: RestrictionRealm[];
+  joins?: { parent_realm: 'Transaction'; child_realm: Exclude<RestrictionRealm, 'Transaction'> }[];
+  restrictions?: Restriction[];
   usages?: { destination_id: string }[];
+  report_usages?: ('flash_totals' | 'flash_sales_ytd')[];
   source_system: string | null;
   transaction_types: string[];
   tender_type: string | null;
@@ -122,6 +126,10 @@ type Restriction = {
   operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'is_empty' | 'not_empty';
   value: string;
 };
+type TotalRealmJoin = {
+  parent_realm: 'Transaction';
+  child_realm: Exclude<RestrictionRealm, 'Transaction'>;
+};
 const restrictionFields: Record<
   RestrictionRealm,
   { key: string; label: string; numeric?: boolean }[]
@@ -171,6 +179,57 @@ const restrictionFields: Record<
     { key: 'description', label: 'Description' },
     { key: 'amount', label: 'Amount', numeric: true },
   ],
+};
+const totalRealmRelationships: {
+  realm: RestrictionRealm;
+  label: string;
+  relationship: string;
+}[] = [
+  {
+    realm: 'Transaction',
+    label: 'Transaction header',
+    relationship: 'Base record: one header for each transaction.',
+  },
+  {
+    realm: 'Line',
+    label: 'Item lines',
+    relationship: 'Each line belongs to one transaction; a transaction can have many lines.',
+  },
+  {
+    realm: 'Tax',
+    label: 'Tax details',
+    relationship: 'Each tax row belongs to one transaction; a transaction can have many tax rows.',
+  },
+  {
+    realm: 'Tender',
+    label: 'Tender details',
+    relationship: 'Each tender belongs to one transaction; a transaction can have many tenders.',
+  },
+  {
+    realm: 'Discount',
+    label: 'Discount details',
+    relationship:
+      'Each discount belongs to one transaction; a transaction can have many discounts.',
+  },
+];
+const totalRealmOrder = totalRealmRelationships.map((item) => item.realm);
+const totalRealmJoins = (realms: RestrictionRealm[]): TotalRealmJoin[] =>
+  totalRealmOrder
+    .filter((realm): realm is Exclude<RestrictionRealm, 'Transaction'> =>
+      realm !== 'Transaction' && realms.includes(realm)
+    )
+    .map((realm) => ({ parent_realm: 'Transaction', child_realm: realm }));
+const realmsForTotal = (total: TotalRevision | null): RestrictionRealm[] => {
+  const referenced = [
+    ...(total?.parameters ?? []).map((item) => item.realm),
+    ...(total?.rollups ?? []).map((item) => item.realm),
+    ...(total?.restrictions ?? []).map((item) => item.realm),
+  ];
+  const stored = total?.realms ?? [];
+  return totalRealmOrder.filter(
+    (realm) =>
+      realm === 'Transaction' || stored.includes(realm) || referenced.includes(realm)
+  );
 };
 // Fields the server owns; everything else is carried into the next revision unchanged.
 const SERVER_FIELDS = [
@@ -504,6 +563,20 @@ export function TotalDefinitions({
                 return usages.length
                   ? `${usages.length} destination${usages.length === 1 ? '' : 's'}`
                   : 'All destinations';
+              },
+            },
+            {
+              key: 'report_usage',
+              header: 'Flash reports',
+              render: (g) => {
+                const usages = (g.draft ?? g.live)!.report_usages ?? [];
+                return usages.length
+                  ? usages
+                      .map((usage) =>
+                        usage === 'flash_totals' ? 'Flash Totals' : 'Flash Sales YTD'
+                      )
+                      .join(', ')
+                  : 'None';
               },
             },
             { key: 'level', header: 'Level', render: (g) => (g.draft ?? g.live)!.level },
@@ -1164,7 +1237,13 @@ function DraftForm({
       realm: RestrictionRealm;
       field: string;
     }[],
+    realms: realmsForTotal(base),
+    joins: totalRealmJoins(realmsForTotal(base)),
     usages: (Array.isArray(base?.usages) ? base.usages : []) as { destination_id: string }[],
+    report_usages: (Array.isArray(base?.report_usages) ? base.report_usages : []) as (
+      | 'flash_totals'
+      | 'flash_sales_ytd'
+    )[],
     restrictions: (Array.isArray(base?.restrictions) ? base.restrictions : []) as Restriction[],
   });
   const [destinations, setDestinations] = useState<ExportDestination[]>([]);
@@ -1183,6 +1262,17 @@ function DraftForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const combined = form.calculation_basis === 'Combined';
+  const realmIsReferenced = (realm: RestrictionRealm) =>
+    form.parameters.some((item) => item.realm === realm) ||
+    form.rollups.some((item) => item.realm === realm) ||
+    form.restrictions.some((item) => item.realm === realm);
+  const setRealmSelected = (realm: RestrictionRealm, selected: boolean) => {
+    if (realm === 'Transaction') return;
+    const realms = selected
+      ? totalRealmOrder.filter((item) => form.realms.includes(item) || item === realm)
+      : form.realms.filter((item) => item !== realm);
+    setForm({ ...form, realms, joins: totalRealmJoins(realms) });
+  };
   const expectedTraits = JSON.stringify(locationTraits(base));
   const componentChoices = availableTotals.filter(
     (total) =>
@@ -1218,14 +1308,17 @@ function DraftForm({
   const parameterField = parameterFields.find((field) => field.key === parameter?.field);
   const parameterValid =
     !parameter || form.aggregation === 'Count' || parameterField?.numeric === true;
-  const parameterOptions = Object.entries(restrictionFields).flatMap(([realm, fields]) =>
-    fields
-      .filter((field) => form.aggregation === 'Count' || field.numeric)
-      .map((field) => ({
-        value: `${realm}.${field.key}`,
-        label: `${realm} · ${field.label}`,
-      }))
-  );
+  const configuredRealms = new Set<RestrictionRealm>(form.realms);
+  const parameterOptions = Object.entries(restrictionFields)
+    .filter(([realm]) => form.realms.includes(realm as RestrictionRealm))
+    .flatMap(([realm, fields]) =>
+      fields
+        .filter((field) => form.aggregation === 'Count' || field.numeric)
+        .map((field) => ({
+          value: `${realm}.${field.key}`,
+          label: `${realm} · ${field.label}`,
+        }))
+    );
   const addComponent = () => {
     const next = componentChoices.find((total) => !form.combined_total_ids.includes(total.id));
     if (!next || form.combined_total_ids.length >= 20) return;
@@ -1270,8 +1363,11 @@ function DraftForm({
       end_date: form.end_date || null,
       calculation_basis: form.calculation_basis,
       parameters: combined ? [] : form.parameters,
+      realms: combined ? [] : form.realms,
+      joins: combined ? [] : form.joins,
       rollups: form.rollups,
       usages: form.usages,
+      report_usages: form.report_usages,
       combined_total_ids: combined ? form.combined_total_ids : [],
       combined_total_operators: combined ? form.combined_total_operators : [],
       restrictions: combined
@@ -1325,8 +1421,12 @@ function DraftForm({
               ...form,
               calculation_basis: event.target.value,
               ...(event.target.value === 'Combined'
-                ? { parameters: [], restrictions: [] }
-                : { rollups: form.rollups.filter((item) => item.realm === 'Transaction') }),
+                ? { parameters: [], restrictions: [], realms: [], joins: [] }
+                : {
+                    realms: ['Transaction'],
+                    joins: [],
+                    rollups: form.rollups.filter((item) => item.realm === 'Transaction'),
+                  }),
             })
           }
         >
@@ -1425,6 +1525,64 @@ function DraftForm({
         </fieldset>
       ) : (
         <>
+          <fieldset className="stack stack-sm">
+            <legend>Data realms and joins</legend>
+            <p className="hint">
+              Transaction is the base realm. Detail realms link back to that transaction. Conditions
+              in separate detail realms are checked independently, so matching lines and tenders do
+              not multiply one another or the transaction amount.
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 15rem), 1fr))',
+                gap: 'var(--space-sm)',
+              }}
+            >
+              {totalRealmRelationships.map((item) => {
+                const selected = configuredRealms.has(item.realm);
+                const referenced = realmIsReferenced(item.realm);
+                return (
+                  <div
+                    key={item.realm}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-xs)',
+                      padding: 'var(--space-sm)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--bg-secondary)',
+                    }}
+                  >
+                    <div className="cluster" style={{ justifyContent: 'space-between' }}>
+                      <label className="cluster" style={{ cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={item.realm === 'Transaction' || (selected && referenced)}
+                          onChange={(event) => setRealmSelected(item.realm, event.target.checked)}
+                        />
+                        <strong>{item.label}</strong>
+                      </label>
+                      <Badge variant={selected ? 'primary' : 'secondary'} size="sm">
+                        {item.realm === 'Transaction' ? 'Base' : selected ? 'Selected' : 'Available'}
+                      </Badge>
+                    </div>
+                    <small className="page-sub">{item.relationship}</small>
+                    {item.realm !== 'Transaction' && selected && (
+                      <small className="act-sub">Join path: {item.realm} → Transaction</small>
+                    )}
+                    {selected && referenced && item.realm !== 'Transaction' && (
+                      <small className="act-sub">
+                        Remove its selected fields before deselecting this realm.
+                      </small>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
           <div className="form-row">
             <Field label="Aggregation">
               <select
@@ -1497,8 +1655,9 @@ function DraftForm({
           <fieldset className="stack stack-sm">
             <legend>Dataset restrictions</legend>
             <p className="hint">
-              Conditions in each realm use AND. Each related realm must have at least one matching
-              record; line, tender, and discount records are not multiplied into the total.
+              Conditions in each selected realm use AND. Each related realm must have at least one
+              matching record; detail records from separate realms are not multiplied into the
+              total.
             </p>
             {form.restrictions.map((restriction, index) => {
               const realmFields = restrictionFields[restriction.realm];
@@ -1523,7 +1682,7 @@ function DraftForm({
                         setForm({ ...form, restrictions: next });
                       }}
                     >
-                      {Object.keys(restrictionFields).map((realm) => (
+                      {form.realms.map((realm) => (
                         <option key={realm}>{realm}</option>
                       ))}
                     </select>
@@ -1604,13 +1763,22 @@ function DraftForm({
               variant="secondary"
               disabled={form.restrictions.length >= 100}
               onClick={() =>
-                setForm({
-                  ...form,
-                  restrictions: [
-                    ...form.restrictions,
-                    { realm: 'Line', field: 'item_code', operator: 'eq', value: '' },
-                  ],
-                })
+                (() => {
+                  const realm = form.realms.find((item) => item !== 'Transaction') ?? 'Transaction';
+                  const field = restrictionFields[realm][0];
+                  setForm({
+                    ...form,
+                    restrictions: [
+                      ...form.restrictions,
+                      {
+                        realm,
+                        field: field.key,
+                        operator: field.numeric ? 'gt' : 'eq',
+                        value: '',
+                      },
+                    ],
+                  });
+                })()
               }
             >
               Add restriction
@@ -1727,6 +1895,33 @@ function DraftForm({
                 saving this revision.
               </Alert>
             ))}
+      </fieldset>
+      <fieldset className="stack stack-sm">
+        <legend>Flash report usage</legend>
+        <p className="hint">
+          Include this calculated total in the selected Flash reports. Only current, non-stale
+          store-day totals are reported.
+        </p>
+        {([
+          ['flash_totals', 'Flash Totals'],
+          ['flash_sales_ytd', 'Flash Sales Year to Date'],
+        ] as const).map(([usage, label]) => (
+          <label className="cluster" key={usage}>
+            <input
+              type="checkbox"
+              checked={form.report_usages.includes(usage)}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  report_usages: event.target.checked
+                    ? [...form.report_usages, usage]
+                    : form.report_usages.filter((item) => item !== usage),
+                })
+              }
+            />
+            {label}
+          </label>
+        ))}
       </fieldset>
       <Field label="Balancing level">
         <select value={form.level} onChange={set('level')}>

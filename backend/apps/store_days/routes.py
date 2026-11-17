@@ -16,7 +16,7 @@ from sqlalchemy import case, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.audit.models import AuditEvent
-from apps.cases.models import Case, EvidenceRequest
+from apps.cases.models import Case, EvidenceRequest, Exception as ExceptionRow
 from apps.cash.models import ACHAdjustment, CashControl, CashDeposit
 from apps.controls.foundation.models import FoundationReference
 from apps.csv_export import csv_row
@@ -71,6 +71,7 @@ router = APIRouter(prefix="/api/store-days", tags=["Store days"])
 MAX_STORE_DAY_EXPORT = 50_000
 STORE_DAY_EXPORT_CHUNK = 250
 MAX_STORE_DAY_HISTORY_ITEMS = 200
+MAX_STORE_DAY_ERROR_EXPORT = 50_000
 STORE_DAY_HISTORY_PAGE_SIZE = 100
 __all__ = [
     "ClosureRequestBody",
@@ -308,6 +309,72 @@ def day_filters(store_id, status, date_from, date_to, q, stale=None) -> list:
     return filters
 
 
+MAX_READINESS_FILTER_SCAN = 100_000
+READINESS_FILTER_CHUNK = 250
+
+
+def readiness_matches(view: dict, data_status: str | None, audit_status: str | None) -> bool:
+    return (data_status is None or view["ingest"]["state"] == data_status) and (
+        audit_status is None or view["audit"]["resa_status"] == audit_status
+    )
+
+
+async def iter_readiness_filtered_days(db: AsyncSession, base, data_status, audit_status):
+    """Yield matching days in list order; only used when a derived readiness filter is active."""
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    if total > MAX_READINESS_FILTER_SCAN:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Readiness filtering would scan {total:,} store days; limit is "
+                f"{MAX_READINESS_FILTER_SCAN:,}. Narrow the date, store, or search filters."
+            ),
+        )
+    for offset in range(0, total, READINESS_FILTER_CHUNK):
+        query = (
+            base.order_by(StoreDay.business_date.desc(), StoreDay.store_id)
+            .offset(offset)
+            .limit(READINESS_FILTER_CHUNK)
+        )
+        days = (await db.execute(query)).scalars().all()
+        views = await readiness(db, days)
+        for day in days:
+            view = views[day.id]
+            if readiness_matches(view, data_status, audit_status):
+                yield day, view
+
+
+def readiness_csv_row(day: StoreDay, view: dict) -> str:
+    ingest, audit_view, export_view = view["ingest"], view["audit"], view["export"]
+    return csv_row(
+        (
+            day.store_id,
+            day.business_date,
+            day.status,
+            ingest["state"],
+            ingest["detail"],
+            ingest["transactions"],
+            ingest["day_close"]["state"],
+            audit_view["resa_status"],
+            audit_view["detail"],
+            audit_view["open_cases"],
+            audit_view["unexplained_variances"],
+            audit_view["missing_transactions"],
+            day.audit_version,
+            str(audit_view["signed_off"]).lower(),
+            audit_view["signed_by"],
+            audit_view["signed_at"],
+            str(view["ready_to_close"]).lower(),
+            export_view["state"],
+            export_view["records"],
+            export_view["pending"],
+            str(day.totals_stale).lower(),
+            day.closed_at,
+            day.closed_by,
+        )
+    )
+
+
 @router.get("")
 async def list_store_days(
     store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
@@ -315,6 +382,20 @@ async def list_store_days(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
     status: Annotated[str | None, Query(max_length=32)] = None,
+    data_status: Annotated[
+        Literal["Complete", "Incomplete", "Not reconciled", "No control total", "No data"] | None,
+        Query(),
+    ] = None,
+    audit_status: Annotated[
+        Literal[
+            "Re-Totalling/Auditing Required",
+            "Store Errors Pending",
+            "Totaled",
+            "Audited",
+        ]
+        | None,
+        Query(),
+    ] = None,
     date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     q: Annotated[str | None, Query(max_length=50)] = None,
@@ -329,8 +410,18 @@ async def list_store_days(
     """
     filters = day_filters(store_id, status, date_from, date_to, q)
     base = scope.restrict(select(StoreDay).where(*filters), user, StoreDay.store_id)
+    readiness_filter = data_status is not None or audit_status is not None
     if format == "csv":
-        total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+        total = (
+            sum(
+                1
+                async for _day, _view in iter_readiness_filtered_days(
+                    db, base, data_status, audit_status
+                )
+            )
+            if readiness_filter
+            else (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+        )
         if total > MAX_STORE_DAY_EXPORT:
             raise HTTPException(
                 status_code=413,
@@ -367,6 +458,12 @@ async def list_store_days(
 
         async def generate():
             yield csv_row(columns)
+            if readiness_filter:
+                async for day, view in iter_readiness_filtered_days(
+                    db, base, data_status, audit_status
+                ):
+                    yield readiness_csv_row(day, view)
+                return
             for offset in range(0, total, STORE_DAY_EXPORT_CHUNK):
                 query = (
                     base.order_by(StoreDay.business_date.desc(), StoreDay.store_id)
@@ -377,36 +474,7 @@ async def list_store_days(
                 views = await readiness(db, days)
                 for day in days:
                     view = views[day.id]
-                    ingest = view["ingest"]
-                    audit_view = view["audit"]
-                    export_view = view["export"]
-                    yield csv_row(
-                        (
-                            day.store_id,
-                            day.business_date,
-                            day.status,
-                            ingest["state"],
-                            ingest["detail"],
-                            ingest["transactions"],
-                            ingest["day_close"]["state"],
-                            audit_view["resa_status"],
-                            audit_view["detail"],
-                            audit_view["open_cases"],
-                            audit_view["unexplained_variances"],
-                            audit_view["missing_transactions"],
-                            day.audit_version,
-                            str(audit_view["signed_off"]).lower(),
-                            audit_view["signed_by"],
-                            audit_view["signed_at"],
-                            str(view["ready_to_close"]).lower(),
-                            export_view["state"],
-                            export_view["records"],
-                            export_view["pending"],
-                            str(day.totals_stale).lower(),
-                            day.closed_at,
-                            day.closed_by,
-                        )
-                    )
+                    yield readiness_csv_row(day, view)
 
         return StreamingResponse(
             generate(),
@@ -414,16 +482,31 @@ async def list_store_days(
             headers={"Content-Disposition": 'attachment; filename="store-days.csv"'},
         )
 
-    query = (
-        base.order_by(StoreDay.business_date.desc(), StoreDay.store_id)
-        .offset((page - 1) * limit)
-        .limit(limit + 1)
-    )
-    found = list((await db.execute(query)).scalars().all())
-    rows = found[:limit]
+    if readiness_filter:
+        start = (page - 1) * limit
+        found = []
+        async for day, view in iter_readiness_filtered_days(db, base, data_status, audit_status):
+            if len(found) < start:
+                continue
+            found.append((day, view))
+            if len(found) >= limit + 1:
+                break
+        rows = found[:limit]
+        filtered_views = {day.id: view for day, view in rows}
+        has_more = len(found) > limit
+    else:
+        query = (
+            base.order_by(StoreDay.business_date.desc(), StoreDay.store_id)
+            .offset((page - 1) * limit)
+            .limit(limit + 1)
+        )
+        found = list((await db.execute(query)).scalars().all())
+        rows = found[:limit]
+        has_more = len(found) > limit
+        filtered_views = {}
     if response is not None:
-        response.headers["X-Has-More"] = "true" if len(found) > limit else "false"
-    views = await readiness(db, rows)
+        response.headers["X-Has-More"] = "true" if has_more else "false"
+    views = filtered_views or await readiness(db, rows)
     return [{**store_day_view(row), "readiness": views[row.id]} for row in rows]
 
 
@@ -433,11 +516,50 @@ async def store_day_summary(
     date_from: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     date_to: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
     q: Annotated[str | None, Query(max_length=50)] = None,
+    data_status: Annotated[
+        Literal["Complete", "Incomplete", "Not reconciled", "No control total", "No data"] | None,
+        Query(),
+    ] = None,
+    audit_status: Annotated[
+        Literal[
+            "Re-Totalling/Auditing Required",
+            "Store Errors Pending",
+            "Totaled",
+            "Audited",
+        ]
+        | None,
+        Query(),
+    ] = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("finance", "it")),
 ):
     """Exact counts for the same filters as the list: by lifecycle status, and totals out of date."""
     base = day_filters(store_id, None, date_from, date_to, q)
+    if data_status is not None or audit_status is not None:
+        query = scope.restrict(select(StoreDay).where(*base), user, StoreDay.store_id)
+        by_status: dict[str, int] = {}
+        total = stale = unsigned = 0
+        async for day, _view in iter_readiness_filtered_days(
+            db, query, data_status, audit_status
+        ):
+            total += 1
+            by_status[day.status] = by_status.get(day.status, 0) + 1
+            stale += int(day.totals_stale)
+            unsigned += int(
+                day.audit_version > 0
+                and not day.totals_stale
+                and (
+                    day.audit_signed_version != day.audit_version
+                    or day.audit_signed_by is None
+                    or day.audit_signed_at is None
+                )
+            )
+        return {
+            "total": total,
+            "by_status": by_status,
+            "totals_stale": stale,
+            "unsigned_audit_versions": unsigned,
+        }
     by_status = (
         await db.execute(
             scope.restrict(
@@ -1229,6 +1351,146 @@ async def get_store_day(
             "pages": max(1, -(-history_total // history_page_size)),
         },
         "history_event_types": history_types,
+    }
+
+
+@router.get("/{store_id}/{business_date}/errors")
+async def store_day_errors(
+    store_id: str,
+    business_date: str,
+    status: Literal["open", "all"] = "open",
+    q: Annotated[str | None, Query(max_length=255)] = None,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    format: Literal["json", "csv"] = "json",
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it")),
+):
+    """List transaction audit exceptions tied to one store day, newest first."""
+    scope.require_store(user, store_id)
+    try:
+        validate_business_date(business_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    filters = [Case.store_id == store_id, Case.business_date == business_date]
+    if status == "open":
+        filters.append(Case.status != "Closed")
+    term = (q or "").strip()
+    if term:
+        filters.append(
+            contains_literal(ExceptionRow.exception_type, term)
+            | contains_literal(ExceptionRow.exception_family, term)
+            | contains_literal(ExceptionRow.detection_rule_name, term)
+            | contains_literal(Case.case_number, term)
+            | contains_literal(Case.status, term)
+        )
+    query = (
+        select(ExceptionRow, Case)
+        .join(Case, Case.id == ExceptionRow.case_id)
+        .where(*filters)
+    )
+    total = (
+        await db.execute(select(func.count()).select_from(query.subquery()))
+    ).scalar_one()
+
+    def item_view(exception: ExceptionRow, case: Case) -> dict:
+        return {
+            "id": exception.id,
+            "code": exception.exception_type,
+            "family": exception.exception_family,
+            "detection_origin": exception.detection_origin,
+            "detection_rule_id": exception.detection_rule_id,
+            "detection_rule_name": exception.detection_rule_name,
+            "severity": exception.severity,
+            "confidence": exception.confidence,
+            "close_impact": exception.close_impact,
+            "close_blocker_reason": exception.close_blocker_reason,
+            "status": exception.status,
+            "amount": str(exception.exception_amount),
+            "exposure": str(exception.estimated_exposure),
+            "currency": case.currency,
+            "created_at": exception.created_at.isoformat(),
+            "case_id": case.id,
+            "case_number": case.case_number,
+            "case_status": case.status,
+        }
+
+    ordered = query.order_by(ExceptionRow.created_at.desc(), ExceptionRow.id)
+    if format == "csv":
+        if total > MAX_STORE_DAY_ERROR_EXPORT:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Export contains {total:,} errors; limit is "
+                    f"{MAX_STORE_DAY_ERROR_EXPORT:,}. Narrow the filters."
+                ),
+            )
+
+        async def generate():
+            columns = (
+                "error_id",
+                "code",
+                "family",
+                "detection_origin",
+                "detection_rule_id",
+                "detection_rule_name",
+                "severity",
+                "confidence",
+                "status",
+                "close_impact",
+                "close_blocker_reason",
+                "amount",
+                "exposure",
+                "currency",
+                "created_at",
+                "case_number",
+                "case_status",
+            )
+            yield csv_row(columns)
+            result = await db.stream(ordered.execution_options(yield_per=1000))
+            try:
+                async for exception, case in result:
+                    item = item_view(exception, case)
+                    yield csv_row(
+                        (
+                            item["id"],
+                            item["code"],
+                            item["family"],
+                            item["detection_origin"],
+                            item["detection_rule_id"],
+                            item["detection_rule_name"],
+                            item["severity"],
+                            item["confidence"],
+                            item["status"],
+                            item["close_impact"],
+                            item["close_blocker_reason"],
+                            item["amount"],
+                            item["exposure"],
+                            item["currency"],
+                            item["created_at"],
+                            item["case_number"],
+                            item["case_status"],
+                        )
+                    )
+            finally:
+                await result.close()
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="store-day-audit-errors.csv"'},
+        )
+
+    rows = (
+        await db.execute(ordered.offset((page - 1) * page_size).limit(page_size))
+    ).all()
+    return {
+        "items": [item_view(exception, case) for exception, case in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
     }
 
 

@@ -50,7 +50,7 @@ export function WorkspaceSwitcher() {
           <small>Workspace</small>
           <b>
             {activeSection?.title ??
-              (activeScreen?.group === 'Configuration' ? 'Settings' : 'Choose')}
+              (activeScreen?.group === 'Configuration' ? 'Admin' : 'Choose')}
           </b>
         </span>
         <span className="workspace-switcher-chevron" aria-hidden="true">

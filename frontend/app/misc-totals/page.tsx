@@ -50,6 +50,10 @@ const columns: Column<MiscTotalRow>[] = [
     key: 'total',
     header: 'Miscellaneous total',
     primary: true,
+    csvValue: (row) =>
+      [row.total_name, row.level, row.dimension, row.rollup_key && formatRollupKey(row.rollup_key)]
+        .filter(Boolean)
+        .join(' · '),
     render: (row) => (
       <>
         {row.total_name}
@@ -64,6 +68,7 @@ const columns: Column<MiscTotalRow>[] = [
   {
     key: 'store-day',
     header: 'Store day',
+    csvValue: (row) => `${row.store_id} · ${row.business_date}`,
     render: (row) => (
       <Link href={`/store-days/${encodeURIComponent(row.store_id)}/${row.business_date}`}>
         {row.store_id} · {row.business_date}
@@ -73,20 +78,30 @@ const columns: Column<MiscTotalRow>[] = [
   {
     key: 'status',
     header: 'Day status',
+    csvValue: (row) =>
+      `${row.store_day_status} · v${row.version}${row.totals_stale ? ' · stale' : ''}`,
     render: (row) =>
       `${row.store_day_status} · v${row.version}${row.totals_stale ? ' · stale' : ''}`,
   },
-  { key: 'currency', header: 'Currency', render: (row) => row.currency },
+  {
+    key: 'currency',
+    header: 'Currency',
+    csvValue: (row) => row.currency,
+    render: (row) => row.currency,
+  },
   {
     key: 'calculated',
     header: 'Calculated',
     numeric: true,
+    csvValue: (row) => `${row.calculated_amount} ${row.currency}`,
     render: (row) => money(row.calculated_amount, row.currency),
   },
   {
     key: 'declared',
     header: 'Declared',
     numeric: true,
+    csvValue: (row) =>
+      row.declared_amount === null ? '—' : `${row.declared_amount} ${row.currency}`,
     render: (row) =>
       row.declared_amount === null ? '—' : money(row.declared_amount, row.currency),
   },
@@ -94,12 +109,15 @@ const columns: Column<MiscTotalRow>[] = [
     key: 'variance',
     header: 'Variance',
     numeric: true,
+    csvValue: (row) =>
+      row.variance_amount === null ? '—' : `${row.variance_amount} ${row.currency}`,
     render: (row) =>
       row.variance_amount === null ? '—' : money(row.variance_amount, row.currency),
   },
   {
     key: 'definition',
     header: 'Definition',
+    csvValue: (row) => `Revision ${row.definition_revision ?? '—'}`,
     render: (row) => `Revision ${row.definition_revision ?? '—'}`,
   },
 ];
@@ -271,6 +289,14 @@ export default function MiscellaneousTotalsPage() {
             <DataTable
               columns={columns}
               rows={busy ? null : result.items}
+              csvFileName="misc-totals-visible.csv"
+              detachTitle={
+                [
+                  'Miscellaneous Totals',
+                  applied.store || 'All stores',
+                  `${applied.dateFrom || 'all dates'} to ${applied.dateTo || 'all dates'}`,
+                ].join(' · ')
+              }
               rowKey={(row) =>
                 `${row.store_id}:${row.business_date}:${row.total_name}:${row.level}:${row.dimension ?? ''}:${row.rollup_key ?? ''}:${row.currency}`
               }

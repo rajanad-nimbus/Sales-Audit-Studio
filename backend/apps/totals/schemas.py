@@ -55,6 +55,8 @@ REALM_FIELDS = {
         "amount": "number",
     },
 }
+TOTAL_REALMS = ("Transaction", "Line", "Tax", "Tender", "Discount")
+TOTAL_DETAIL_REALMS = TOTAL_REALMS[1:]
 
 
 class ActivationBody(BaseModel):
@@ -133,6 +135,13 @@ class TotalRollupBody(BaseModel):
         return self
 
 
+class TotalRealmJoinBody(BaseModel):
+    """One approved detail-to-transaction relationship in a raw total."""
+
+    parent_realm: Literal["Transaction"] = "Transaction"
+    child_realm: Literal["Line", "Tax", "Tender", "Discount"]
+
+
 class TotalUsageBody(BaseModel):
     """Destination that consumes a calculated total."""
 
@@ -162,8 +171,10 @@ class TotalDefinitionBody(BaseModel):
     created_with_wizard: bool = True
     required_by_system: bool = False
     display_group: int = Field(default=0, ge=0, le=2**31 - 1)
-    realms: list[dict] = Field(default_factory=list, max_length=100)
-    joins: list[dict] = Field(default_factory=list, max_length=100)
+    realms: list[Literal["Transaction", "Line", "Tax", "Tender", "Discount"]] = Field(
+        default_factory=list, max_length=5
+    )
+    joins: list[TotalRealmJoinBody] = Field(default_factory=list, max_length=4)
     parameters: list[TotalParameterBody] = Field(default_factory=list, max_length=1)
     rollups: list[TotalRollupBody] = Field(default_factory=list, max_length=3)
     restrictions: list[TotalRestrictionBody] = Field(default_factory=list, max_length=100)
@@ -172,6 +183,9 @@ class TotalDefinitionBody(BaseModel):
     combined_operator: str | None = Field(default=None, max_length=1)
     location_traits: list[str] = Field(default_factory=list, max_length=100)
     usages: list[TotalUsageBody] = Field(default_factory=list, max_length=100)
+    report_usages: list[Literal["flash_totals", "flash_sales_ytd"]] = Field(
+        default_factory=list, max_length=2
+    )
     sql_statement: str | None = Field(default=None, max_length=10000)
 
     @field_validator("source_system")
@@ -200,8 +214,34 @@ class TotalDefinitionBody(BaseModel):
 
     @model_validator(mode="after")
     def enforce_metadata_size(self):
-        if self.calculation_basis == "Combined" and (self.restrictions or self.parameters):
-            raise ValueError("Combined totals use components and cannot define realm parameters")
+        if self.calculation_basis == "Combined":
+            if self.restrictions or self.parameters or self.realms or self.joins:
+                raise ValueError("Combined totals use components and cannot define data realms")
+        else:
+            referenced_realms = {
+                "Transaction",
+                *(item.realm for item in self.parameters),
+                *(item.realm for item in self.restrictions),
+                *(item.realm for item in self.rollups),
+            }
+            if len(set(self.realms)) != len(self.realms):
+                raise ValueError("Data realms must be unique")
+            if self.realms and not referenced_realms.issubset(self.realms):
+                missing = sorted(referenced_realms - set(self.realms))
+                raise ValueError(f"Select each realm used by a parameter, restriction, or roll-up: {', '.join(missing)}")
+            selected_realms = set(self.realms) or referenced_realms
+            if "Transaction" not in selected_realms:
+                raise ValueError("The Transaction realm is required as the base realm")
+            self.realms = [realm for realm in TOTAL_REALMS if realm in selected_realms]
+            expected_joins = [
+                {"parent_realm": "Transaction", "child_realm": realm}
+                for realm in TOTAL_DETAIL_REALMS
+                if realm in selected_realms
+            ]
+            provided_joins = [item.model_dump() for item in self.joins]
+            if provided_joins and provided_joins != expected_joins:
+                raise ValueError("Detail realms must use their approved Transaction join paths")
+            self.joins = [TotalRealmJoinBody.model_validate(item) for item in expected_joins]
         if self.parameters and self.measure != "Amount":
             raise ValueError("Select Amount measure when choosing a realm parameter")
         rollup_fields = [(item.realm, item.field) for item in self.rollups]
@@ -210,6 +250,8 @@ class TotalDefinitionBody(BaseModel):
         usage_destinations = [item.destination_id for item in self.usages]
         if len(set(usage_destinations)) != len(usage_destinations):
             raise ValueError("Export destinations must be unique in total usages")
+        if len(set(self.report_usages)) != len(self.report_usages):
+            raise ValueError("Report usages must be unique")
         if self.calculation_basis != "Combined":
             measure_realm = self.parameters[0].realm if self.parameters else "Transaction"
             if any(item.realm not in {"Transaction", measure_realm} for item in self.rollups):
@@ -225,6 +267,7 @@ class TotalDefinitionBody(BaseModel):
             "parameters": [parameter.model_dump() for parameter in self.parameters],
             "rollups": [rollup.model_dump() for rollup in self.rollups],
             "usages": [usage.model_dump() for usage in self.usages],
+            "report_usages": self.report_usages,
             "restrictions": [restriction.model_dump() for restriction in self.restrictions],
             "combined_total_ids": self.combined_total_ids,
             "combined_total_operators": self.combined_total_operators,

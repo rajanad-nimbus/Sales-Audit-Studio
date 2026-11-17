@@ -9,6 +9,7 @@ A CSV download reads the same pages in turn, up to CSV_MAX_ROWS, and says when i
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated
 
@@ -31,6 +32,7 @@ from apps.store_days.models import AuditTotal, StoreDay
 from apps.store_days.readiness import readiness
 from apps.transactions.detail import cent_value
 from apps.transactions.models import CanonicalTransaction, TransactionTax
+from apps.totals.models import AuditTotalDefinition
 
 router = APIRouter(prefix="/api/reports", tags=["Reports"])
 ROLES = ("analyst", "finance", "it", "auditor")
@@ -417,6 +419,195 @@ async def tax_correction_report(
     }
 
 
+async def report_definition_ids(db: AsyncSession, usage: str) -> list[str]:
+    definitions = (
+        await db.execute(
+            select(AuditTotalDefinition.id, AuditTotalDefinition.report_usages).where(
+                AuditTotalDefinition.report_usages.is_not(None)
+            )
+        )
+    ).all()
+    return [
+        identifier
+        for identifier, usages in definitions
+        if isinstance(usages, list) and usage in usages
+    ]
+
+
+async def flash_totals_report(
+    db: AsyncSession, user: dict, start, end, offset, limit, store_id=None
+) -> Report:
+    """Current, non-stale store-day total values assigned to the Flash Totals report."""
+    definition_ids = await report_definition_ids(db, "flash_totals")
+    columns = [
+        "Store",
+        "Business date",
+        "Total",
+        "Level",
+        "Dimension",
+        "Roll-up",
+        "Calculated amount",
+        "Declared amount",
+        "Variance",
+        "Currency",
+    ]
+    if not definition_ids:
+        return {"columns": columns, "rows": [], "has_more": False}
+    query = (
+        select(StoreDay, AuditTotal)
+        .join(
+            AuditTotal,
+            (AuditTotal.store_day_id == StoreDay.id)
+            & (AuditTotal.audit_version == StoreDay.audit_version),
+        )
+        .where(
+            StoreDay.audit_version >= 1,
+            StoreDay.totals_stale.is_(False),
+            AuditTotal.definition_id.in_(definition_ids),
+            *date_filters(StoreDay.business_date, start, end),
+            *store_filters(StoreDay.store_id, store_id),
+        )
+        .order_by(
+            StoreDay.business_date.desc(), StoreDay.store_id, AuditTotal.total_name,
+            AuditTotal.level, AuditTotal.dimension_key, AuditTotal.id,
+        )
+        .offset(offset)
+        .limit(limit + 1)
+    )
+    found, more = page_of(
+        (await db.execute(scope.restrict(query, user, StoreDay.store_id))).all(), limit
+    )
+    rows = [
+        [
+            day.store_id,
+            day.business_date,
+            total.total_name,
+            total.level,
+            total.dimension_key or "",
+            total.rollup_key or "",
+            total.calculated_amount,
+            total.declared_amount,
+            total.variance_amount,
+            total.currency,
+        ]
+        for day, total in found
+    ]
+    return {"columns": columns, "rows": rows, "has_more": more}
+
+
+async def flash_sales_ytd_report(
+    db: AsyncSession, user: dict, start, end, offset, limit, store_id=None
+) -> Report:
+    """Year-to-date sums of current, non-stale totals assigned to Flash Sales YTD."""
+    definition_ids = await report_definition_ids(db, "flash_sales_ytd")
+    columns = ["Store", "Total", "Level", "Currency", "Sales YTD", "Store days"]
+    if not definition_ids:
+        return {"columns": columns, "rows": [], "has_more": False}
+    query = (
+        select(
+            StoreDay.store_id,
+            AuditTotal.total_name,
+            AuditTotal.level,
+            AuditTotal.currency,
+            func.sum(AuditTotal.calculated_amount),
+            func.count(func.distinct(StoreDay.business_date)),
+        )
+        .join(
+            AuditTotal,
+            (AuditTotal.store_day_id == StoreDay.id)
+            & (AuditTotal.audit_version == StoreDay.audit_version),
+        )
+        .where(
+            StoreDay.audit_version >= 1,
+            StoreDay.totals_stale.is_(False),
+            AuditTotal.definition_id.in_(definition_ids),
+            *date_filters(StoreDay.business_date, start, end),
+            *store_filters(StoreDay.store_id, store_id),
+        )
+        .group_by(StoreDay.store_id, AuditTotal.total_name, AuditTotal.level, AuditTotal.currency)
+        .order_by(StoreDay.store_id, AuditTotal.total_name, AuditTotal.level, AuditTotal.currency)
+        .offset(offset)
+        .limit(limit + 1)
+    )
+    found, more = page_of(
+        (await db.execute(scope.restrict(query, user, StoreDay.store_id))).all(), limit
+    )
+    return {"columns": columns, "rows": [list(row) for row in found], "has_more": more}
+
+
+async def flash_sales_ytd_trend(db: AsyncSession, user, start, end, store_id=None) -> list[dict]:
+    """Monthly YTD values for the same current definitions and authorized store scope."""
+    definition_ids = await report_definition_ids(db, "flash_sales_ytd")
+    if not definition_ids:
+        return []
+    month = func.substr(StoreDay.business_date, 1, 7)
+    query = (
+        select(
+            month.label("month"),
+            AuditTotal.total_name,
+            AuditTotal.level,
+            AuditTotal.currency,
+            func.sum(AuditTotal.calculated_amount).label("amount"),
+        )
+        .join(
+            AuditTotal,
+            (AuditTotal.store_day_id == StoreDay.id)
+            & (AuditTotal.audit_version == StoreDay.audit_version),
+        )
+        .where(
+            StoreDay.audit_version >= 1,
+            StoreDay.totals_stale.is_(False),
+            AuditTotal.definition_id.in_(definition_ids),
+            *date_filters(StoreDay.business_date, start, end),
+            *store_filters(StoreDay.store_id, store_id),
+        )
+        .group_by(month, AuditTotal.total_name, AuditTotal.level, AuditTotal.currency)
+        .order_by(month, AuditTotal.total_name, AuditTotal.level, AuditTotal.currency)
+    )
+    rows = (await db.execute(scope.restrict(query, user, StoreDay.store_id))).all()
+    return [
+        {
+            "month": row.month,
+            "total": row.total_name,
+            "level": row.level,
+            "currency": row.currency,
+            "amount": str(row.amount),
+        }
+        for row in rows
+    ]
+
+
+@router.get("/flash-sales-ytd/trend")
+async def flash_sales_ytd_trend_view(
+    start: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    end: Annotated[str | None, Query(min_length=10, max_length=10)] = None,
+    store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role(*ROLES)),
+):
+    """Monthly YTD trend, using the same date rules and store authorization as the report."""
+    try:
+        as_of = date.fromisoformat(end) if end else datetime.now(UTC).date()
+        if end and as_of.isoformat() != end:
+            raise ValueError
+        year_start = date(as_of.year, 1, 1).isoformat()
+        if start and validate_business_date(start) < year_start:
+            raise HTTPException(
+                status_code=422,
+                detail="Flash Sales Year to Date cannot start before January 1 of the selected year",
+            )
+        start = start or year_start
+        end = end or as_of.isoformat()
+        if start > end:
+            raise HTTPException(status_code=422, detail="The start date must not be after the as-of date")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Dates must use YYYY-MM-DD") from exc
+    store_id = store_id.strip() if store_id else None
+    if store_id:
+        scope.require_store(user, store_id)
+    return {"rows": await flash_sales_ytd_trend(db, user, start, end, store_id)}
+
+
 @dataclass(frozen=True)
 class ReportSpec:
     title: str
@@ -441,6 +632,16 @@ REPORTS: dict[str, ReportSpec] = {
     "tax": ReportSpec("Tax / VAT", "Tax collected by store, day and tax code.", tax_report),
     "tax-corrections": ReportSpec(
         "Tax corrections", "Approved corrections to a transaction's tax.", tax_correction_report
+    ),
+    "flash-totals": ReportSpec(
+        "Flash Totals",
+        "Current, non-stale calculated totals selected for the Flash Totals report.",
+        flash_totals_report,
+    ),
+    "flash-sales-ytd": ReportSpec(
+        "Flash Sales Year to Date",
+        "Year-to-date sums of current, non-stale totals selected for the Flash Sales report.",
+        flash_sales_ytd_report,
     ),
 }
 
@@ -469,6 +670,25 @@ async def run_report(
     spec = REPORTS.get(name)
     if spec is None:
         raise HTTPException(status_code=404, detail="Unknown report")
+    if name == "flash-sales-ytd":
+        try:
+            as_of = date.fromisoformat(end) if end else datetime.now(UTC).date()
+            if end and as_of.isoformat() != end:
+                raise ValueError
+            year_start = date(as_of.year, 1, 1).isoformat()
+            if start and validate_business_date(start) < year_start:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Flash Sales Year to Date cannot start before January 1 of the selected year",
+                )
+            start = start or year_start
+            end = end or as_of.isoformat()
+            if start > end:
+                raise HTTPException(
+                    status_code=422, detail="The start date must not be after the as-of date"
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Dates must use YYYY-MM-DD") from exc
     store_id = store_id.strip() if store_id else None
     if store_id:
         scope.require_store(user, store_id)

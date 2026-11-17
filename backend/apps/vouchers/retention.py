@@ -8,13 +8,14 @@ from datetime import timedelta
 from typing import Annotated
 
 from database import get_db
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from integrations.ontology.nimbus import audit
 from model_base import utcnow
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.csv_export import csv_table
 from apps.operations.models import RetentionRun
 from apps.operations.retention import (
     archive_retention_candidates,
@@ -30,6 +31,7 @@ from apps.vouchers.models import Voucher, VoucherIdentity, VoucherOption
 router = APIRouter()
 logger = logging.getLogger(__name__)
 BATCH_SIZE = 500
+RETIRED_VOUCHER_EXPORT_MAX_ROWS = 50_000
 READ_ROLES = ("analyst", "finance", "it", "auditor")
 
 
@@ -265,6 +267,7 @@ async def execute_voucher_retention(
 @router.get("/retired")
 async def list_retired_vouchers(
     q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("analyst", "finance", "it", "auditor", "store_manager")),
@@ -274,6 +277,8 @@ async def list_retired_vouchers(
         user,
         VoucherIdentity.issued_store_id,
     )
+    if store_id:
+        query = query.where(VoucherIdentity.issued_store_id == store_id)
     if q:
         query = query.where(VoucherIdentity.voucher_number.contains(q, autoescape=True))
     rows = (
@@ -302,3 +307,69 @@ async def list_retired_vouchers(
         }
         for row in rows
     ]
+
+
+@router.get("/retired/export.csv")
+async def export_retired_vouchers(
+    q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    store_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst", "finance", "it", "auditor", "store_manager")),
+):
+    """Export matching archived voucher identities without archived source payloads."""
+    query = scope.restrict(
+        select(VoucherIdentity).where(VoucherIdentity.retired_at.is_not(None)),
+        user,
+        VoucherIdentity.issued_store_id,
+    )
+    if store_id:
+        query = query.where(VoucherIdentity.issued_store_id == store_id)
+    if q:
+        query = query.where(VoucherIdentity.voucher_number.contains(q, autoescape=True))
+    found = list(
+        (
+            await db.execute(
+                query.order_by(
+                    VoucherIdentity.retired_at.desc(), VoucherIdentity.voucher_number
+                ).limit(RETIRED_VOUCHER_EXPORT_MAX_ROWS + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    truncated = len(found) > RETIRED_VOUCHER_EXPORT_MAX_ROWS
+    columns = [
+        "Voucher number",
+        "Issued store",
+        "Tender type",
+        "Issued on",
+        "Amount",
+        "Currency",
+        "Final status",
+        "Finalized on",
+        "Retired at",
+        "Retention run ID",
+    ]
+    rows = [
+        [
+            row.voucher_number,
+            row.issued_store_id,
+            row.tender_type,
+            row.issued_on,
+            row.amount,
+            row.currency,
+            row.final_status,
+            row.finalized_on,
+            row.retired_at,
+            row.retention_run_id,
+        ]
+        for row in found[:RETIRED_VOUCHER_EXPORT_MAX_ROWS]
+    ]
+    return Response(
+        csv_table(columns, rows),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="retired-vouchers.csv"',
+            "X-Retired-Voucher-Export-Truncated": "true" if truncated else "false",
+        },
+    )

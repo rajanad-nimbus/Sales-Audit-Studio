@@ -933,6 +933,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     key: 'c0',
                     header: 'Exception',
                     primary: true,
+                    csvValue: (x) => `${x.exception_type} · ${x.exception_family}`,
                     render: (x) => (
                       <>
                         {pretty(x.exception_type)}
@@ -940,15 +941,25 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </>
                     ),
                   },
-                  { key: 'c1', header: 'Source', render: (x) => x.source_system },
+                  {
+                    key: 'c1',
+                    header: 'Source',
+                    csvValue: (x) => x.source_system,
+                    render: (x) => x.source_system,
+                  },
                   {
                     key: 'c1b',
                     header: 'Rule',
+                    csvValue: (x) => x.detection_rule_name ?? x.detection_rule_id,
                     render: (x) => x.detection_rule_name ?? '—',
                   },
                   {
                     key: 'c1a',
                     header: 'Balance group',
+                    csvValue: (x) =>
+                      x.balance_level
+                        ? `${x.balance_level}${x.balance_dimension ? ` · ${x.balance_dimension}` : ''}`
+                        : '—',
                     render: (x) =>
                       x.balance_level
                         ? `${x.balance_level}${x.balance_dimension ? ` · ${x.balance_dimension}` : ''}`
@@ -958,11 +969,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     key: 'c2',
                     header: 'Amount',
                     numeric: true,
+                    csvValue: (x) => `${x.exception_amount} ${c.currency ?? ''}`.trim(),
                     render: (x) => caseMoney(x.exception_amount, c.currency),
                   },
                   {
                     key: 'c3',
                     header: 'Severity',
+                    csvValue: (x) => x.severity,
                     render: (x) => (
                       <>
                         <span className={`badge badge-sm ${sevTone(x.severity)}`}>
@@ -974,6 +987,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 ]}
                 rows={exceptions}
                 rowKey={(x) => String(x.id)}
+                csvFileName="case-exceptions-visible.csv"
+                detachTitle={`${c.case_number} · Exceptions`}
               />
             )}
             {exceptions.length > 0 && (

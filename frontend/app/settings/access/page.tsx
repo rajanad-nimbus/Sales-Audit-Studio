@@ -22,6 +22,7 @@ interface Assignment {
   location_traits: string[];
   updated_by: string;
   updated_at: string;
+  last_verified_at: string | null;
 }
 interface VerifiedStoreUser {
   assignment_identifier: string;
@@ -47,6 +48,13 @@ interface AssignmentImportPreview {
   errors: { row: number; message: string }[];
   errors_truncated: boolean;
 }
+interface AssignmentPortfolioPreview {
+  store_ids: string[];
+  total: number;
+  explicit_count: number;
+  trait_count: number;
+  overlap_count: number;
+}
 
 export default function AccessPage() {
   const { me } = useMe();
@@ -65,6 +73,9 @@ export default function AccessPage() {
   const [userIdentifier, setUserIdentifier] = useState('');
   const [selectedStores, setSelectedStores] = useState<string[]>([]);
   const [selectedTraits, setSelectedTraits] = useState<string[]>([]);
+  const [portfolioPreview, setPortfolioPreview] = useState<AssignmentPortfolioPreview | null>(null);
+  const [portfolioPreviewError, setPortfolioPreviewError] = useState<string | null>(null);
+  const [portfolioPreviewLoading, setPortfolioPreviewLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
@@ -73,10 +84,13 @@ export default function AccessPage() {
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [assignmentNotice, setAssignmentNotice] = useState<string | null>(null);
   const [assignmentQuery, setAssignmentQuery] = useState('');
+  const [assignmentActivity, setAssignmentActivity] = useState<
+    'all' | 'unverified' | 'inactive_90_days'
+  >('all');
   const [directoryQuery, setDirectoryQuery] = useState('');
-  const [directoryRole, setDirectoryRole] = useState<'all' | 'store_manager' | 'store_staff'>(
-    'all'
-  );
+  const [directoryRole, setDirectoryRole] = useState<
+    'all' | 'analyst' | 'store_manager' | 'store_staff'
+  >('all');
   const [directoryScope, setDirectoryScope] = useState<'all' | 'assigned' | 'unassigned'>('all');
   const [directoryInactiveDays, setDirectoryInactiveDays] = useState('');
   const [directoryPage, setDirectoryPage] = useState(1);
@@ -108,6 +122,40 @@ export default function AccessPage() {
   }, [me?.role]);
 
   useEffect(() => {
+    if (!editing) {
+      setPortfolioPreview(null);
+      setPortfolioPreviewError(null);
+      setPortfolioPreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setPortfolioPreviewLoading(true);
+      setPortfolioPreviewError(null);
+      try {
+        const { data } = await api.post('/api/access/store-assignments/preview', {
+          store_ids: selectedStores,
+          location_traits: selectedTraits,
+        });
+        if (!cancelled) setPortfolioPreview(data);
+      } catch (e: any) {
+        if (!cancelled) {
+          setPortfolioPreview(null);
+          setPortfolioPreviewError(
+            e?.response?.data?.detail ?? 'Could not resolve the selected store portfolio.'
+          );
+        }
+      } finally {
+        if (!cancelled) setPortfolioPreviewLoading(false);
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [editing, selectedStores, selectedTraits]);
+
+  useEffect(() => {
     if (me?.role !== 'admin') return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
@@ -116,6 +164,7 @@ export default function AccessPage() {
         const { data } = await api.get('/api/access/store-assignments', {
           params: {
             q: assignmentQuery.trim() || undefined,
+            activity: assignmentActivity,
             page: assignmentPage,
             page_size: 50,
           },
@@ -136,7 +185,7 @@ export default function AccessPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [me?.role, assignmentQuery, assignmentPage, assignmentRefresh]);
+  }, [me?.role, assignmentQuery, assignmentActivity, assignmentPage, assignmentRefresh]);
 
   useEffect(() => {
     if (me?.role !== 'admin') return;
@@ -240,7 +289,7 @@ export default function AccessPage() {
       setClearReason('');
       setAssignmentRefresh((current) => current + 1);
       setAssignmentNotice(
-        `Cleared the local store override for ${data.user_identifier}. Identity-provider store claims are now effective.`
+        `Cleared the local store assignment for ${data.user_identifier}. Sales Auditors now have no store access until a new local scope is assigned; store managers and staff fall back to identity-provider claims.`
       );
     } catch (e: any) {
       setAssignmentError(e?.response?.data?.detail ?? 'Could not clear this store assignment.');
@@ -253,7 +302,7 @@ export default function AccessPage() {
   const groups = Array.from(new Set(m.screens.map((s) => s.group)));
   const visibleAssignments = assignments ?? [];
   const eligibleVerifiedUsers = verifiedUsers.filter((user) =>
-    ['store_manager', 'store_staff'].includes(user.role)
+    ['analyst', 'store_manager', 'store_staff'].includes(user.role)
   );
   const visibleVerifiedUsers = eligibleVerifiedUsers;
   const assignmentByIdentifier = new Map(
@@ -307,6 +356,7 @@ export default function AccessPage() {
     try {
       const params = new URLSearchParams({ format: 'csv' });
       if (assignmentQuery.trim()) params.set('q', assignmentQuery.trim());
+      if (assignmentActivity !== 'all') params.set('activity', assignmentActivity);
       const { data, headers } = await api.get(
         `/api/access/store-assignments?${params.toString()}`,
         { responseType: 'blob' }
@@ -314,7 +364,7 @@ export default function AccessPage() {
       downloadBlob('store-assignments.csv', data);
       if (headers?.['x-store-assignments-truncated'] === 'true') {
         setAssignmentError(
-          'The assignment export reached 50,000 rows. Narrow the search to export the remaining assignments.'
+          'The assignment export reached 50,000 rows. Narrow the search or activity filter to export the remaining assignments.'
         );
       }
     } catch (e: any) {
@@ -422,11 +472,11 @@ export default function AccessPage() {
         description="Who can open each screen. The API enforces the same map, so a role without a screen cannot call its data either. Administrators can open everything and can act as another role from the user menu. Your role is highlighted."
       >
         <Alert tone="info">
-          <b>Store managers and store staff are limited to assigned stores.</b> Admin-managed
-          explicit stores and location traits take precedence over the store list in Ontology
-          Studio. Trait assignments follow active Foundation stores as traits change. Without a
-          local assignment, the verified identity's store claim applies. An empty assignment grants
-          no store access.
+          <b>Sales Auditors, store managers, and store staff are limited to assigned stores.</b>{' '}
+          Admin-managed explicit stores and location traits take precedence over the store list in
+          Ontology Studio. Trait assignments follow active Foundation stores as traits change. Sales
+          Auditors need a local assignment; store managers and staff can fall back to the verified
+          identity's store claim. An empty assignment grants no store access.
         </Alert>
         <Card flush>
           <div className="table-scroll">
@@ -487,21 +537,22 @@ export default function AccessPage() {
       {me?.role === 'admin' && (
         <SettingsSection
           title="Store assignments"
-          description="Assign verified store managers and store staff to the locations they may access. Assignments are audited and take effect on their next request."
+          description="Assign Sales Auditors, store managers, and store staff to the locations they may access. Assignments are audited and take effect on their next request."
         >
           {assignmentError && <Alert tone="error">{assignmentError}</Alert>}
           {assignmentNotice && <Alert tone="success">{assignmentNotice}</Alert>}
-          <Card flush title="Verified store employees">
+          <Card flush title="Verified employees">
             <p className="hint">
               Identity details come from Ontology Studio sign-ins. Use Manage scope to review or
               create a local store assignment. Search and filters apply to the full verified
-              directory, not only the employees on this page.
+              directory, not only the employees on this page. Sales Auditors without an assignment
+              cannot access store data.
             </p>
             <div className="toolbar">
               <input
                 className="grow"
                 type="search"
-                aria-label="Search verified store employees"
+                aria-label="Search verified employees"
                 placeholder="Search name, email, identity ID, or role"
                 value={directoryQuery}
                 onChange={(event) => {
@@ -517,7 +568,8 @@ export default function AccessPage() {
                     setDirectoryPage(1);
                   }}
                 >
-                  <option value="all">All store roles</option>
+                  <option value="all">All scoped roles</option>
+                  <option value="analyst">Sales Auditors</option>
                   <option value="store_manager">Store managers</option>
                   <option value="store_staff">Store staff</option>
                 </select>
@@ -532,7 +584,7 @@ export default function AccessPage() {
                 >
                   <option value="all">All employees</option>
                   <option value="assigned">Local assignment</option>
-                  <option value="unassigned">Identity claims only</option>
+                  <option value="unassigned">No local assignment</option>
                 </select>
               </Field>
               <Field label="Last seen">
@@ -575,12 +627,12 @@ export default function AccessPage() {
               </Alert>
             )}
             {assignments === null || directoryLoading ? (
-              <SkeletonRows rows={3} label="Loading verified store employees" />
+              <SkeletonRows rows={3} label="Loading verified employees" />
             ) : visibleVerifiedUsers.length === 0 ? (
               <p className="hint">
                 {directoryTotal === 0
                   ? 'No verified employees match these filters.'
-                  : 'No verified store employees match this search.'}
+                  : 'No verified employees match this search.'}
               </p>
             ) : (
               <div className="table-scroll">
@@ -607,7 +659,11 @@ export default function AccessPage() {
                             </small>
                           </td>
                           <td>
-                            {employee.role === 'store_manager' ? 'Store manager' : 'Store staff'}
+                            {employee.role === 'analyst'
+                              ? 'Sales Auditor'
+                              : employee.role === 'store_manager'
+                                ? 'Store manager'
+                                : 'Store staff'}
                           </td>
                           <td>
                             <code>{employee.identity_id ?? employee.assignment_identifier}</code>
@@ -618,7 +674,9 @@ export default function AccessPage() {
                               ? `${assignment.store_ids.length} stores · ${assignment.location_traits.length} traits`
                               : employee.has_local_scope
                                 ? 'Local assignment'
-                                : 'Identity claims'}
+                                : employee.role === 'analyst'
+                                  ? 'No portfolio assigned'
+                                  : 'Identity claims'}
                           </td>
                           <td>
                             <Button
@@ -757,6 +815,38 @@ export default function AccessPage() {
                   )}
                 </div>
               </Field>
+              <section
+                className="card"
+                aria-live="polite"
+                style={{ gridColumn: '1 / -1', padding: '1rem' }}
+              >
+                <div className="row-between" style={{ alignItems: 'flex-start', gap: '1rem' }}>
+                  <div>
+                    <strong>Resolved store portfolio</strong>
+                    <div className="hint">
+                      {portfolioPreviewLoading
+                        ? 'Updating preview…'
+                        : portfolioPreview
+                          ? `${portfolioPreview.total} stores · ${portfolioPreview.explicit_count} explicit · ${portfolioPreview.trait_count} from traits${portfolioPreview.overlap_count ? ` · ${portfolioPreview.overlap_count} overlap` : ''}`
+                          : portfolioPreviewError ?? 'Resolving selected stores and current trait memberships…'}
+                    </div>
+                  </div>
+                  {portfolioPreview?.total === 0 && !portfolioPreviewLoading && (
+                    <span className="badge badge-sm badge-warning">No stores selected</span>
+                  )}
+                </div>
+                {portfolioPreviewError && (
+                  <p role="alert" className="hint" style={{ color: 'var(--danger)' }}>
+                    {portfolioPreviewError}
+                  </p>
+                )}
+                {!portfolioPreviewLoading && !!portfolioPreview?.store_ids.length && (
+                  <div className="hint" style={{ marginTop: '.65rem' }}>
+                    {portfolioPreview.store_ids.slice(0, 24).join(', ')}
+                    {portfolioPreview.total > 24 ? ` and ${portfolioPreview.total - 24} more` : ''}
+                  </div>
+                )}
+              </section>
             </div>
             <div className="row-actions" style={{ marginTop: '1rem' }}>
               <Button disabled={saving || !userIdentifier.trim()} onClick={saveAssignment}>
@@ -819,6 +909,10 @@ export default function AccessPage() {
               <SkeletonRows rows={3} label="Loading store assignments" />
             ) : (
               <>
+                <p className="hint">
+                  Identity activity shows the last verified request recorded here. No activity or
+                  long inactivity is a review signal only and never removes access automatically.
+                </p>
                 <div className="toolbar">
                   <input
                     className="grow"
@@ -831,6 +925,18 @@ export default function AccessPage() {
                       setAssignmentPage(1);
                     }}
                   />
+                  <select
+                    aria-label="Filter assignments by identity activity"
+                    value={assignmentActivity}
+                    onChange={(event) => {
+                      setAssignmentActivity(event.target.value as typeof assignmentActivity);
+                      setAssignmentPage(1);
+                    }}
+                  >
+                    <option value="all">All identity activity</option>
+                    <option value="unverified">No verified activity</option>
+                    <option value="inactive_90_days">Inactive 90+ days</option>
+                  </select>
                   <span className="toolbar-count">
                     {assignmentTotal} matching assignment{assignmentTotal === 1 ? '' : 's'}
                   </span>
@@ -845,9 +951,9 @@ export default function AccessPage() {
                 </div>
                 {assignmentTotal === 0 ? (
                   <p className="hint">
-                    {assignmentQuery.trim()
-                      ? 'No assignments match this search.'
-                      : 'No local assignments. Store scope currently comes from identity claims.'}
+                    {assignmentQuery.trim() || assignmentActivity !== 'all'
+                      ? 'No assignments match these search and activity filters.'
+                      : 'No local assignments. Sales Auditors need a local portfolio; store managers and staff can use identity-provider claims.'}
                   </p>
                 ) : visibleAssignments.length === 0 ? (
                   <p className="hint">No assignments match this search.</p>
@@ -859,6 +965,7 @@ export default function AccessPage() {
                           <th>User identifier</th>
                           <th>Explicit stores</th>
                           <th>Location traits</th>
+                          <th>Identity activity</th>
                           <th>Updated</th>
                           <th>Updated by</th>
                           <th />
@@ -877,6 +984,21 @@ export default function AccessPage() {
                               {assignment.location_traits.length
                                 ? assignment.location_traits.join(', ')
                                 : 'None'}
+                            </td>
+                            <td>
+                              {assignment.last_verified_at ? (
+                                <>
+                                  {formatDateTime(assignment.last_verified_at)}
+                                  {Date.now() - Date.parse(assignment.last_verified_at) >=
+                                    90 * 24 * 60 * 60 * 1000 && (
+                                    <small className="act-sub" style={{ display: 'block' }}>
+                                      Review identity activity
+                                    </small>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="act-sub">No verified sign-in recorded</span>
+                              )}
                             </td>
                             <td>{formatDateTime(assignment.updated_at)}</td>
                             <td>{assignment.updated_by}</td>

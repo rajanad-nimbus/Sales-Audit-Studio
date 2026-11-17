@@ -196,6 +196,8 @@ export function PaidOutCorrectionQueue() {
                 </small>
               </Link>
             ),
+            csvValue: (row: PaidOutCorrection) =>
+              `${row.store_id} · ${row.business_date} · ${row.register_id || 'No register'} · Transaction ${row.transaction_number}`,
           },
           {
             key: 'change',
@@ -210,6 +212,13 @@ export function PaidOutCorrectionQueue() {
                 ))}
               </div>
             ),
+            csvValue: (row: PaidOutCorrection) =>
+              Object.entries(row.proposed_values.after)
+                .map(
+                  ([field, value]) =>
+                    `${LABELS[field] ?? field}: ${row.proposed_values.before[field] || '—'} → ${value || '—'}`
+                )
+                .join('; '),
           },
           {
             key: 'proposer',
@@ -222,6 +231,8 @@ export function PaidOutCorrectionQueue() {
                 </small>
               </>
             ),
+            csvValue: (row: PaidOutCorrection) =>
+              `${row.proposed_by} · ${formatDateTime(row.created_at, { dateStyle: 'medium' })}`,
           },
           {
             key: 'status',
@@ -234,6 +245,8 @@ export function PaidOutCorrectionQueue() {
                 {row.status === 'Proposed' ? 'Awaiting review' : row.status}
               </Badge>
             ),
+            csvValue: (row: PaidOutCorrection) =>
+              row.status === 'Proposed' ? 'Awaiting review' : row.status,
           },
           {
             key: 'actions',
@@ -269,6 +282,7 @@ export function PaidOutCorrectionQueue() {
         ]}
         rows={result?.items ?? null}
         rowKey={(row: PaidOutCorrection) => row.id}
+        csvFileName={`paid-out-corrections-${status.toLowerCase()}.csv`}
         emptyTitle={count('All') === 0 ? 'No paid-out corrections yet' : 'No corrections match'}
         emptyHint="Corrections proposed from a paid-out event appear here for review."
       />

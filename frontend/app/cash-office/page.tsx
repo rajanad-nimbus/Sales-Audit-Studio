@@ -295,6 +295,8 @@ export default function CashOfficePage() {
             r.variance_amount === null ? '—' : money(r.variance_amount),
             r.status,
           ])}
+          csvFileName="cash-controls-visible.csv"
+          detachTitle="Cash controls · Visible rows"
         />
         <p className="page-sub">
           Showing {rows.length} of {controlTotal} cash controls.
@@ -340,6 +342,8 @@ export default function CashOfficePage() {
             d.variance_amount === null ? '—' : money(d.variance_amount),
             d.status,
           ])}
+          csvFileName="cash-deposits-visible.csv"
+          detachTitle="Banked deposits · Visible rows"
         />
         <p className="page-sub">
           Showing {deposits.length} of {depositTotal} deposits.
@@ -358,13 +362,30 @@ export default function CashOfficePage() {
     </div>
   );
 }
-function Data({ headers, rows }: { headers: string[]; rows: string[][] }) {
+function Data({
+  headers,
+  rows,
+  csvFileName,
+  detachTitle,
+}: {
+  headers: string[];
+  rows: string[][];
+  csvFileName: string;
+  detachTitle: string;
+}) {
   return (
     <DataTable
-      columns={headers.map((header, i) => ({ key: header, header, render: (r: string[]) => r[i] }))}
+      columns={headers.map((header, i) => ({
+        key: header,
+        header,
+        csvValue: (row: string[]) => row[i],
+        render: (row: string[]) => row[i],
+      }))}
       rows={rows}
       rowKey={(r) => r.join('|')}
       emptyTitle="No records yet."
+      csvFileName={csvFileName}
+      detachTitle={detachTitle}
     />
   );
 }

@@ -7,8 +7,267 @@ export interface HelpTopic {
   notes?: string[];
 }
 
+export interface HelpWorkflowStep {
+  title: string;
+  path: string;
+  detail: string;
+}
+
+export interface HelpWorkflow {
+  id: string;
+  title: string;
+  summary: string;
+  steps: HelpWorkflowStep[];
+}
+
+/** Cross-screen procedures based on the ReSA guide's daily operating sequence. */
+export const HELP_WORKFLOWS: HelpWorkflow[] = [
+  {
+    id: 'audit-store-day',
+    title: 'Audit a store day',
+    summary: 'Review the day’s balances and resolve the exceptions before sign-off.',
+    steps: [
+      {
+        title: 'Check day readiness',
+        path: '/store-days',
+        detail: 'Confirm the store and business date have the expected transaction data.',
+      },
+      {
+        title: 'Review store-day totals and balances',
+        path: '/store-days',
+        detail: 'Compare calculated totals, declared values, variances, and over/short balances.',
+      },
+      {
+        title: 'Resolve audit errors and cases',
+        path: '/audit-errors',
+        detail: 'Trace each exception to its source and record the governed correction or decision.',
+      },
+      {
+        title: 'Reconcile declarations and deposits',
+        path: '/cash-office',
+        detail: 'Confirm cash office records explain the day’s register and cashier balances.',
+      },
+      {
+        title: 'Return to the day and sign off',
+        path: '/store-days',
+        detail: 'Confirm the remaining checks are clear, then sign off when the day is ready.',
+      },
+    ],
+  },
+  {
+    id: 'deliver-audited-day',
+    title: 'Deliver a closed store day',
+    summary: 'Confirm closure, export the audited records, and follow the acknowledgement.',
+    steps: [
+      {
+        title: 'Confirm the day is closed',
+        path: '/store-days',
+        detail: 'Review the final status and the audit version that will be delivered.',
+      },
+      {
+        title: 'Review the destination batch',
+        path: '/exports',
+        detail: 'Check the exported record count, receiver reference, and acknowledgement state.',
+      },
+      {
+        title: 'Resolve delivery failures',
+        path: '/exports',
+        detail: 'Inspect the destination response and retry only after resolving an uncertain prior attempt.',
+      },
+    ],
+  },
+  {
+    id: 'trace-and-correct-transaction',
+    title: 'Trace and correct a transaction',
+    summary: 'Move from an audit exception to a reviewed correction while preserving source history.',
+    steps: [
+      {
+        title: 'Find the exception',
+        path: '/audit-errors',
+        detail: 'Filter by date, store, error family, and status to locate the affected case.',
+      },
+      {
+        title: 'Inspect transaction evidence',
+        path: '/transactions',
+        detail: 'Compare the source record, items, tenders, references, and prior revisions.',
+      },
+      {
+        title: 'Prepare a correction proposal',
+        path: '/corrections/new',
+        detail: 'Choose the exact transaction or detail row and explain the evidence for the change.',
+      },
+      {
+        title: 'Review the Finance decision',
+        path: '/corrections',
+        detail: 'Confirm an independent approver accepted or rejected the proposal.',
+      },
+      {
+        title: 'Recheck totals and audit results',
+        path: '/store-days',
+        detail: 'Recalculate affected store days and confirm the exception is resolved.',
+      },
+    ],
+  },
+  {
+    id: 'review-and-promote-audit-control',
+    title: 'Review and promote an audit control',
+    summary: 'Preview rule or total changes, collect independent approval, and verify the result.',
+    steps: [
+      {
+        title: 'Draft the total or rule change',
+        path: '/settings/controls',
+        detail: 'Set the target, threshold, scope, effective dates, and rule order.',
+      },
+      {
+        title: 'Preview affected records',
+        path: '/settings/controls',
+        detail: 'Review the sample matches and impact counts before submitting the worksheet.',
+      },
+      {
+        title: 'Submit for independent approval',
+        path: '/settings/controls',
+        detail: 'A different authorized person approves activation; the author cannot approve their own change.',
+      },
+      {
+        title: 'Verify the active control',
+        path: '/store-days',
+        detail: 'Run the audit on a representative day and review resulting totals and exceptions.',
+      },
+    ],
+  },
+  {
+    id: 'define-total',
+    title: 'Define or revise a total',
+    summary: 'Build a governed store-day total and review its effect before activation.',
+    steps: [
+      {
+        title: 'Open Total Definitions and start a draft',
+        path: '/settings/controls',
+        detail: 'Choose the total category, balancing level, effective dates, and raw or combined basis.',
+      },
+      {
+        title: 'Choose data realms and total fields',
+        path: '/settings/controls',
+        detail: 'For raw totals, select the transaction and needed detail realms, review approved joins, and configure the measure, restrictions, and up to three roll-ups.',
+      },
+      {
+        title: 'Preview the change',
+        path: '/settings/controls',
+        detail: 'Review affected store days and compare current values with the proposed total.',
+      },
+      {
+        title: 'Submit for independent approval',
+        path: '/settings/controls',
+        detail: 'The author cannot approve their own revision; an authorized Finance user reviews and activates it.',
+      },
+      {
+        title: 'Recalculate a representative store day',
+        path: '/store-days',
+        detail: 'Confirm the active revision produced the expected amount and did not introduce unexplained variances.',
+      },
+    ],
+  },
+  {
+    id: 'resolve-transaction-gap',
+    title: 'Resolve a missing transaction number',
+    summary: 'Trace a register sequence gap and correct it only when the source evidence supports a change.',
+    steps: [
+      {
+        title: 'Find the affected store day',
+        path: '/store-days',
+        detail: 'Filter the business date and store, then identify unresolved transaction-number gaps.',
+      },
+      {
+        title: 'Review the register sequence and source context',
+        path: '/store-days',
+        detail: 'Confirm the missing number, register, and neighboring transactions before deciding whether it is truly absent.',
+      },
+      {
+        title: 'Submit a correction proposal with evidence',
+        path: '/store-days',
+        detail: 'Add the missing transaction only from verified source information, or dismiss the gap with a reason when the number was legitimately unused.',
+      },
+      {
+        title: 'Review the independent Finance decision',
+        path: '/corrections',
+        detail: 'A different authorized reviewer accepts or rejects the proposed correction.',
+      },
+      {
+        title: 'Re-total and verify the store day',
+        path: '/store-days',
+        detail: 'Confirm the gap is resolved and recheck totals and audit errors before sign-off.',
+      },
+    ],
+  },
+  {
+    id: 'reconcile-store-cash-bank',
+    title: 'Reconcile store cash and bank activity',
+    summary: 'Trace a store-day cash difference through declarations, deposits, and bank transactions.',
+    steps: [
+      {
+        title: 'Review store declarations and deposits',
+        path: '/cash-office',
+        detail: 'Compare declared cash, deposit records, and the store-day balances for the selected location and date.',
+      },
+      {
+        title: 'Find the corresponding bank activity',
+        path: '/ach',
+        detail: 'Match bank transactions to the expected deposit and settlement period.',
+      },
+      {
+        title: 'Record or review a governed adjustment',
+        path: '/ach',
+        detail: 'Use a reasoned adjustment when source evidence supports it; a separate reviewer approves the change.',
+      },
+      {
+        title: 'Return to the store day',
+        path: '/store-days',
+        detail: 'Recalculate and confirm that the cash difference is explained before sign-off and close.',
+      },
+    ],
+  },
+  {
+    id: 'trace-import-to-audit',
+    title: 'Trace an incoming feed',
+    summary: 'Follow a delivery from receipt and validation to the store-day audit.',
+    steps: [
+      {
+        title: 'Find the source delivery',
+        path: '/imports#feeds',
+        detail: 'Search by source, received date, or delivery ID and review the record counts.',
+      },
+      {
+        title: 'Review validation and quarantine',
+        path: '/imports#quarantine',
+        detail: 'Inspect quarantined record metadata and correct the source issue before reloading.',
+      },
+      {
+        title: 'Check batch and reconciliation status',
+        path: '/imports#runs',
+        detail: 'Confirm the batch completed and note any automatic reconciliation failures.',
+      },
+      {
+        title: 'Inspect the affected store day',
+        path: '/store-days',
+        detail: 'Review the latest totals, exceptions, and sign-off readiness for the business date.',
+      },
+    ],
+  },
+];
+
 /** Short, task-oriented help based on the ReSA 15.0.1 guide and ZeTSA workflows. */
 export const HELP_TOPICS: HelpTopic[] = [
+  {
+    path: '/tasks',
+    section: 'Workspace',
+    title: 'Follow guided tasks',
+    summary: 'Find common retail sales-audit procedures and follow the screens available to your role.',
+    steps: [
+      'Search by the business process, screen, or action you need to complete.',
+      'Expand a workflow to review its steps in order.',
+      'Open an available step to continue the task in that workspace.',
+    ],
+  },
   {
     path: '/',
     title: 'Sales audit workspace',
@@ -25,6 +284,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     summary: 'Use one business date and location as the unit of reconciliation and close.',
     steps: [
       'Confirm the expected POS and OMS feeds have arrived and reconciled.',
+      'Filter the Store Days queue by data status and audit status to focus on incomplete feeds, required re-totalling, pending errors, or audited days.',
       'Review totals, cash differences, and open audit errors for the day.',
       'Resolve or document outstanding work, then sign off and close when ready.',
       'Copy the workspace link to share the current Store Days queue and filters.',
@@ -40,7 +300,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     steps: [
       'Choose the configured source and submit a file that matches its feed contract.',
       'Review validation findings and reconcile accepted, duplicate, and rejected records.',
-      'Review batch history by date or status, then open the resulting store day to inspect totals and audit-rule findings.',
+      'Review batch history by date or status, open an exact run to inspect feed counts, errors and store-day outcomes, download its complete run report, and copy its link for a handoff.',
       'If automatic reconciliation fails after an upload, retry it for that business date from the upload result.',
       'Search source deliveries by source, received date, or delivery ID to trace record counts and quarantine outcomes.',
       'Search quarantined records by source, received date, record ID, or validation reason; export matching metadata when follow-up is needed.',
@@ -113,7 +373,7 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Select a data category and search by code or name.',
       'Download a template or export the filtered records for review.',
       'Validate an upload and resolve row-level errors before applying changes.',
-      'Find a named process by its name, file, uploader or ID; filter by status, inspect every recorded row issue, and export all matching history.',
+      'Find a named process by its name, file, uploader or ID; filter by status, inspect its recorded outcomes and row issues, copy a link to reopen the exact process, and export all matching history.',
     ],
   },
   {
@@ -131,7 +391,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Maintain totals and audit rules',
     summary: 'Use governed definitions to calculate totals and detect transaction exceptions.',
     steps: [
-      'Edit a draft definition and specify its parameters, restrictions, and rollups.',
+      'Select the transaction and detail realms, review their approved joins, then choose parameters, restrictions, and rollups from those realms.',
       'Review the impact preview and compare it with expected business totals.',
       'For transaction-rule worksheets, preview would-trigger rows and download the complete filtered match set for review.',
       'Submit for independent approval before the definition becomes active.',
@@ -145,6 +405,10 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Select the store day and review register or cashier balances.',
       'Trace over/short differences to declarations and register events.',
       'Record a reason for governed adjustments and confirm the updated balance.',
+      'Filter Over / Short to one store, then review by store, register, cashier, or day; summary totals cover the full filtered set while the table pages through groups.',
+      'Export the complete filtered Over / Short result to CSV when sharing or reconciling the report.',
+      'Filter vouchers by status, issuing store, or number; the URL preserves these filters for sharing.',
+      'Export the complete matching live or retired ledger for review.',
     ],
   },
   {
@@ -232,10 +496,11 @@ export const HELP_TOPICS: HelpTopic[] = [
     path: '/ledger',
     section: 'Store day audit',
     title: 'Review the general ledger view',
-    summary: 'Preview the financial journal mapping for audited sales and adjustments.',
+    summary: 'Preview mapped and unmapped financial journal lines across a store and date range.',
     steps: [
-      'Select the store-day scope and accounting period.',
+      'Select a store and business-date range of up to 366 days.',
       'Review debit and credit lines, account mappings, and balancing status.',
+      'Open a transaction ID to inspect its source detail, then use Back to return to the journal.',
       'Download the full journal preview; unmapped transactions remain in the file for reconciliation.',
       'Resolve missing mappings in configuration before preparing downstream delivery.',
     ],
@@ -333,6 +598,30 @@ export const HELP_TOPICS: HelpTopic[] = [
     ],
   },
   {
+    path: '/reports/flash-totals',
+    section: 'Reports',
+    title: 'Review Flash Totals',
+    summary: 'Review calculated total values selected for the Flash Totals report.',
+    steps: [
+      'Choose the business-date range and an optional store.',
+      'Review the current, non-stale total values and their balancing dimensions.',
+      'Use Total Definitions to choose which totals feed this report.',
+      'Download the matching rows or copy the report link to share this view.',
+    ],
+  },
+  {
+    path: '/reports/flash-sales-ytd',
+    section: 'Reports',
+    title: 'Review Flash Sales Year to Date',
+    summary: 'Compare year-to-date values from totals selected for the Flash Sales report.',
+    steps: [
+      'Choose the as-of date and optional store; the report starts at January 1 of that year.',
+      'Compare sales totals and the number of store days included.',
+      'Use Total Definitions to choose which totals feed this report.',
+      'Download the matching rows or copy the report link to share this view.',
+    ],
+  },
+  {
     path: '/activity',
     section: 'Diagnostics',
     title: 'Review agent activity',
@@ -399,6 +688,22 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Choose a light, dark, or system-matched theme.',
       'Use the configuration navigation to open the settings allowed for your role.',
       'Open My Preferences for regional formats, density, contrast, and motion settings.',
+    ],
+  },
+  {
+    path: '/settings/exchange',
+    section: 'Configuration',
+    title: 'Exchange configuration and foundation data',
+    summary:
+      'Transfer supported JSON packages from one role-aware workspace while preserving each domain’s safeguards.',
+    steps: [
+      'Download a package or select a supported package type and upload its JSON file.',
+      'Inspect the validation result and complete change details before applying a valid preview.',
+      'Enter an audit reason where required; imported rules remain worksheets until approved separately.',
+      'Use Foundation Data for validated CSV reference-data imports and exports.',
+    ],
+    notes: [
+      'The destination API enforces role checks, stale-preview checks, domain approvals, and audit records.',
     ],
   },
   {
@@ -485,16 +790,18 @@ export const HELP_TOPICS: HelpTopic[] = [
     section: 'Configuration',
     title: 'Manage roles and store access',
     summary:
-      'Review role capabilities and assign verified store users to stores or location traits.',
+      'Review role capabilities and assign Sales Auditors and store employees to stores or location traits.',
     steps: [
       'Review the role matrix and each screen’s access requirements.',
       'Filter the verified employee directory by time since last activity to find accounts for review; inactivity does not prove the identity was removed upstream.',
+      'Check each store assignment’s last verified identity request; missing or old activity is informational and does not revoke its scope.',
+      'Filter assignments with no verified activity or 90+ days of inactivity, then confirm the person’s status in Ontology Studio before changing access.',
       'Filter business-role assignments by time since last activity and export the full matching directory for access review.',
-      'Choose a verified store user, assign stores or active-store traits, and save the scope.',
+      'Choose a verified Sales Auditor or store employee, assign stores or active-store traits, and save the scope.',
       'For bulk changes, preview the CSV rows and validation results before applying them.',
     ],
     notes: [
-      'A store user must sign in through Ontology Studio once before a new assignment can be created.',
+      'A person must sign in through Ontology Studio once before a new role or store assignment can be created. Sales Auditors without a local portfolio cannot access store data.',
     ],
   },
 ];

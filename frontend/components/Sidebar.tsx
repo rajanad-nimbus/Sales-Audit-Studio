@@ -11,6 +11,7 @@ import { useMe } from './UserMenu';
 
 const icons: Record<string, React.ReactNode> = {
   home: <path d="M3 11.5 12 4l9 7.5M5 10v10h14V10" />,
+  tasks: <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />,
   cases: <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z" />,
   transactions: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
   ledger: <path d="M4 5h16v14H4zM8 9h3m2 0h3M8 13h3m2 0h3M8 17h3m2 0h3" />,

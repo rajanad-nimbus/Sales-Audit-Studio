@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 
+from apps.admin.routes import router as admin_router
 from apps.agents.action_center import router as action_router
 from apps.agents.routes import router as agent_router
 from apps.assistant.routes import router as assistant_router
@@ -93,6 +94,7 @@ ROUTERS = (
     assistant_router,
     ontology_router,
     security_router,
+    admin_router,
     system_router,
 )
 

@@ -79,13 +79,20 @@ const columns = (group: GroupBy, store: string, businessDate: string): Column<Su
     key: 'dimension',
     header: group === 'register' ? 'Register' : 'Cashier',
     primary: true,
+    csvValue: (row) => row.dimension || 'Unassigned',
     render: (row) => row.dimension || 'Unassigned',
   },
-  { key: 'currency', header: 'Currency', render: (row) => row.currency },
+  {
+    key: 'currency',
+    header: 'Currency',
+    csvValue: (row) => row.currency,
+    render: (row) => row.currency,
+  },
   {
     key: 'transactions',
     header: 'Transactions',
     numeric: true,
+    csvValue: (row) => row.transaction_count,
     render: (row) => {
       const href = transactionHref(row, group, store, businessDate);
       return href ? (
@@ -99,6 +106,7 @@ const columns = (group: GroupBy, store: string, businessDate: string): Column<Su
     key: 'exceptions',
     header: 'Exceptions',
     numeric: true,
+    csvValue: (row) => row.exception_count,
     render: (row) => {
       const href = transactionHref(row, group, store, businessDate, { status: 'Exception' });
       return href && row.exception_count > 0 ? (
@@ -112,6 +120,7 @@ const columns = (group: GroupBy, store: string, businessDate: string): Column<Su
     key: 'unbalanced',
     header: 'Unbalanced',
     numeric: true,
+    csvValue: (row) => row.unbalanced_count,
     render: (row) => {
       const href = transactionHref(row, group, store, businessDate, {
         detail_status: 'Unbalanced',
@@ -127,24 +136,28 @@ const columns = (group: GroupBy, store: string, businessDate: string): Column<Su
     key: 'sales',
     header: 'Sales',
     numeric: true,
+    csvValue: (row) => `${row.sales_amount} ${row.currency}`,
     render: (row) => money(row.sales_amount, row.currency),
   },
   {
     key: 'returns',
     header: 'Returns',
     numeric: true,
+    csvValue: (row) => `${row.return_amount} ${row.currency}`,
     render: (row) => money(row.return_amount, row.currency),
   },
   {
     key: 'net',
     header: 'Net sales',
     numeric: true,
+    csvValue: (row) => `${row.net_amount} ${row.currency}`,
     render: (row) => money(row.net_amount, row.currency),
   },
   {
     key: 'events',
     header: 'Register events',
     numeric: true,
+    csvValue: (row) => row.register_event_count,
     render: (row) => {
       const href = registerEventHref(row, group, store, businessDate);
       return href && row.register_event_count > 0 ? (
@@ -158,6 +171,7 @@ const columns = (group: GroupBy, store: string, businessDate: string): Column<Su
     key: 'flagged',
     header: 'Flagged events',
     numeric: true,
+    csvValue: (row) => row.flagged_event_count,
     render: (row) => {
       const href = registerEventHref(row, group, store, businessDate, true);
       return href && row.flagged_event_count > 0 ? (
@@ -171,24 +185,28 @@ const columns = (group: GroupBy, store: string, businessDate: string): Column<Su
     key: 'declarations',
     header: 'Cash declarations',
     numeric: true,
+    csvValue: (row) => row.cash_declaration_count,
     render: (row) => formatNumber(row.cash_declaration_count),
   },
   {
     key: 'cash-errors',
     header: 'Out of balance',
     numeric: true,
+    csvValue: (row) => row.out_of_balance_count,
     render: (row) => formatNumber(row.out_of_balance_count),
   },
   {
     key: 'short',
     header: 'Short',
     numeric: true,
+    csvValue: (row) => `${row.short_amount} ${row.currency}`,
     render: (row) => money(row.short_amount, row.currency),
   },
   {
     key: 'over',
     header: 'Over',
     numeric: true,
+    csvValue: (row) => `${row.over_amount} ${row.currency}`,
     render: (row) => money(row.over_amount, row.currency),
   },
 ];
@@ -201,6 +219,7 @@ export default function RegisterSummaryPage() {
       store: query?.get('store_id') ?? '',
       businessDate: query?.get('business_date') ?? new Date().toISOString().slice(0, 10),
       groupBy: (query?.get('group_by') === 'cashier' ? 'cashier' : 'register') as GroupBy,
+      source: query?.get('source') === 'store-day' ? 'store-day' : '',
     };
   });
   const [store, setStore] = useState(initialQuery.store);
@@ -213,6 +232,8 @@ export default function RegisterSummaryPage() {
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState('');
   const [exportNotice, setExportNotice] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
   const autoLoaded = useRef(false);
 
   async function load(
@@ -260,6 +281,7 @@ export default function RegisterSummaryPage() {
   function applyFilters(filters: SummaryFilters) {
     const nextGroupBy = filters.groupBy ?? 'register';
     const nextBusinessDate = filters.businessDate ?? filters.dateFrom;
+    setLinkCopied(false);
     setStore(filters.store);
     setBusinessDate(nextBusinessDate);
     setGroupBy(nextGroupBy);
@@ -268,8 +290,26 @@ export default function RegisterSummaryPage() {
       business_date: nextBusinessDate,
       group_by: nextGroupBy,
     });
+    if (
+      initialQuery.source === 'store-day' &&
+      filters.store === initialQuery.store &&
+      nextBusinessDate === initialQuery.businessDate
+    ) {
+      params.set('source', 'store-day');
+    }
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
     void load(1, { ...filters, businessDate: nextBusinessDate, groupBy: nextGroupBy });
+  }
+
+  async function copySummaryLink() {
+    setCopyError('');
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      setCopyError('Could not copy this summary link.');
+    }
   }
 
   async function download() {
@@ -302,20 +342,41 @@ export default function RegisterSummaryPage() {
 
   return (
     <main className="page-container">
+      {initialQuery.source === 'store-day' &&
+        store === initialQuery.store &&
+        businessDate === initialQuery.businessDate && (
+          <Link
+            href={`/store-days/${encodeURIComponent(store)}/${encodeURIComponent(businessDate)}?tab=analysis`}
+            className="back-link"
+          >
+            ← Store Day · {store} · {businessDate}
+          </Link>
+        )}
       <PageHeader
         title="Cashier / Register Summary"
         subtitle="Review transactions, exceptions, register events, and cash over/short by cashier or register."
         actions={
           result && (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy || exportBusy || result.total === 0}
-              title="Export every cashier or register row for the selected store day."
-              onClick={() => void download()}
-            >
-              {exportBusy ? 'Preparing CSV…' : 'Export matching CSV'}
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void copySummaryLink()}
+                title="Copy a link to these store-day filters and grouping."
+              >
+                {linkCopied ? 'Link copied' : 'Copy summary link'}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy || exportBusy || result.total === 0}
+                title="Export every cashier or register row for the selected store day."
+                onClick={() => void download()}
+              >
+                {exportBusy ? 'Preparing CSV…' : 'Export matching CSV'}
+              </Button>
+            </>
           )
         }
       />
@@ -375,6 +436,11 @@ export default function RegisterSummaryPage() {
           {exportNotice}
         </Alert>
       )}
+      {copyError && (
+        <Alert tone="error" onDismiss={() => setCopyError('')}>
+          {copyError}
+        </Alert>
+      )}
       {result && (
         <Card>
           <p className="hint">
@@ -383,6 +449,8 @@ export default function RegisterSummaryPage() {
           <DataTable
             columns={columns(groupBy, store, businessDate)}
             rows={busy ? null : result.items}
+            csvFileName="register-summary-visible.csv"
+            detachTitle={['Cashier / Register Summary', store, businessDate, groupBy].join(' · ')}
             rowKey={(row) => `${row.dimension ?? 'unassigned'}:${row.currency}`}
             emptyTitle="No cashier or register activity found"
             emptyHint="Choose another store day to review its transaction and register-event activity."

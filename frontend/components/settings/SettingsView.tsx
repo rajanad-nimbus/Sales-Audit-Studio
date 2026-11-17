@@ -81,6 +81,16 @@ export function SettingsView({ scope }: { scope: 'general' | 'integrations' }) {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>(TABS[0][0]);
   const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    const allowedTabs = SCOPES[scope] as readonly string[];
+    if (
+      requested &&
+      ALL_TABS.some(([key]) => key === requested && allowedTabs.includes(key))
+    ) {
+      setTab(requested as Tab);
+    }
+  }, [scope]);
   const [voucherPolicyVersion, setVoucherPolicyVersion] = useState(0);
   const [profiles, setProfiles] = useState<
     {

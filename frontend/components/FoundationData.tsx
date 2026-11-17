@@ -147,11 +147,13 @@ export function FoundationData() {
   const [importRunQuery, setImportRunQuery] = useState('');
   const [importRunStatus, setImportRunStatus] = useState('');
   const [importRunOffset, setImportRunOffset] = useState(0);
+  const [linkedProcessId, setLinkedProcessId] = useState('');
   const [importRunsLoading, setImportRunsLoading] = useState(false);
   const [importRunsExporting, setImportRunsExporting] = useState(false);
   const [selectedImportRun, setSelectedImportRun] = useState<ImportRun | null>(null);
   const [processName, setProcessName] = useState('');
   const importFile = useRef<HTMLInputElement>(null);
+  const selectedImportRunRef = useRef<HTMLDivElement>(null);
   const importRunsRequest = useRef(0);
 
   const group = GROUPS.find((g) => g.id === tab) ?? GROUPS[0];
@@ -182,6 +184,69 @@ export function FoundationData() {
       if (requestId === importRunsRequest.current) setImportRunsLoading(false);
     }
   }, [importRunOffset, importRunQuery, importRunStatus]);
+
+  useEffect(() => {
+    const syncProcessFromUrl = () => {
+      const processId =
+        new URLSearchParams(window.location.search).get('process_id')?.trim() ?? '';
+      setLinkedProcessId(processId);
+      setImportRunQuery(processId);
+      setImportRunOffset(0);
+      setSelectedImportRun(null);
+    };
+    syncProcessFromUrl();
+    window.addEventListener('popstate', syncProcessFromUrl);
+    return () => window.removeEventListener('popstate', syncProcessFromUrl);
+  }, []);
+
+  useEffect(() => {
+    if (!linkedProcessId || !importRuns) return;
+    const match = importRuns.find((run) => run.id === linkedProcessId);
+    if (match) setSelectedImportRun(match);
+  }, [linkedProcessId, importRuns]);
+
+  useEffect(() => {
+    if (selectedImportRun) selectedImportRunRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selectedImportRun]);
+
+  const openImportRun = (run: ImportRun) => {
+    setSelectedImportRun(run);
+    setLinkedProcessId(run.id);
+    setImportRunQuery(run.id);
+    setImportRunOffset(0);
+    const url = new URL(window.location.href);
+    url.searchParams.set('process_id', run.id);
+    window.history.pushState({}, '', url);
+  };
+
+  const clearLinkedProcess = () => {
+    if (!linkedProcessId) return;
+    setLinkedProcessId('');
+    setSelectedImportRun(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('process_id');
+    window.history.replaceState(null, '', url);
+  };
+
+  const closeImportRun = () => {
+    setSelectedImportRun(null);
+    setLinkedProcessId('');
+    setImportRunQuery('');
+    setImportRunOffset(0);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('process_id');
+    window.history.pushState({}, '', url);
+  };
+
+  const copyImportRunLink = async () => {
+    if (!selectedImportRun) return;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast('Process link copied.', 'success');
+    } catch {
+      setError('Could not copy the process link. You can copy it from the address bar.');
+    }
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadImportRuns(), 180);
@@ -639,6 +704,7 @@ export function FoundationData() {
                 maxLength={100}
                 placeholder="Process, file, uploader or process ID"
                 onChange={(event) => {
+                  clearLinkedProcess();
                   setImportRunQuery(event.target.value);
                   setImportRunOffset(0);
                 }}
@@ -648,6 +714,7 @@ export function FoundationData() {
               <select
                 value={importRunStatus}
                 onChange={(event) => {
+                  clearLinkedProcess();
                   setImportRunStatus(event.target.value);
                   setImportRunOffset(0);
                 }}
@@ -675,6 +742,9 @@ export function FoundationData() {
                 : `${importRunTotal} process(es) match.`}
             </span>
           </div>
+          {linkedProcessId && !importRunsLoading && importRunTotal === 0 && (
+            <Alert tone="warning">No import process matches this link.</Alert>
+          )}
           <DataTable
             columns={[
               { key: 'process', header: 'Process', primary: true, render: (r) => r.process_name },
@@ -720,7 +790,7 @@ export function FoundationData() {
                   <div className="stack stack-xs">
                     {r.error && <span>{r.error}</span>}
                     {r.errors.length > 0 && (
-                      <Button variant="secondary" onClick={() => setSelectedImportRun(r)}>
+                      <Button variant="secondary" onClick={() => openImportRun(r)}>
                         Review {r.errors.length} row issue{r.errors.length === 1 ? '' : 's'}
                       </Button>
                     )}
@@ -735,6 +805,19 @@ export function FoundationData() {
                 render: (r) => formatDateTime(r.started_at),
               },
               { key: 'by', header: 'Uploaded by', render: (r) => r.uploaded_by },
+              {
+                key: 'review',
+                header: 'Process detail',
+                render: (r) => (
+                  <Button
+                    variant="secondary"
+                    aria-label={`Open import process ${r.process_name}`}
+                    onClick={() => openImportRun(r)}
+                  >
+                    Open process
+                  </Button>
+                ),
+              },
             ]}
             rows={importRunsLoading ? null : importRuns}
             rowKey={(r) => r.id}
@@ -769,32 +852,77 @@ export function FoundationData() {
         </Card>
       )}
       {selectedImportRun && (
-        <Card title={`Validation issues · ${selectedImportRun.process_name}`}>
-          <p className="hint">
-            {selectedImportRun.file_name} · {selectedImportRun.errors.length} row issue(s)
-          </p>
-          <div className="table-scroll" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Row</th>
-                  <th>Issue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedImportRun.errors.map((issue, index) => (
-                  <tr key={`${issue.row}:${index}`}>
-                    <td>{issue.row}</td>
-                    <td>{issue.message}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Button variant="secondary" onClick={() => setSelectedImportRun(null)}>
-            Close issues
-          </Button>
-        </Card>
+        <div ref={selectedImportRunRef} id="import-process">
+          <Card title={`Import process · ${selectedImportRun.process_name}`}>
+            <p className="hint">
+              {selectedImportRun.file_name} ·{' '}
+              {selectedImportRun.categories.map((value) => LABELS[value] ?? value).join(', ')}
+            </p>
+            <div className="cluster" style={{ marginBlock: 'var(--space-sm)' }}>
+              <Badge
+                variant={
+                  selectedImportRun.status === 'Succeeded'
+                    ? 'success'
+                    : ['Failed', 'Validation failed'].includes(selectedImportRun.status)
+                      ? 'error'
+                      : selectedImportRun.status === 'Stale'
+                        ? 'warning'
+                        : 'secondary'
+                }
+              >
+                {selectedImportRun.status}
+              </Badge>
+              <span className="hint">Process ID: {selectedImportRun.id}</span>
+              <span className="hint">{selectedImportRun.rows_total} row(s) received</span>
+              <span className="hint">
+                Started {formatDateTime(selectedImportRun.started_at)} ·{' '}
+                {selectedImportRun.uploaded_by}
+              </span>
+              {selectedImportRun.finished_at && (
+                <span className="hint">
+                  Finished {formatDateTime(selectedImportRun.finished_at)}
+                </span>
+              )}
+              <span className="hint">
+                {selectedImportRun.created} created · {selectedImportRun.updated} updated ·{' '}
+                {selectedImportRun.unchanged} unchanged
+              </span>
+            </div>
+            {selectedImportRun.error && <Alert tone="error">{selectedImportRun.error}</Alert>}
+            {selectedImportRun.errors.length > 0 ? (
+              <div className="table-scroll" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Issue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedImportRun.errors.map((issue, index) => (
+                      <tr key={`${issue.row}:${index}`}>
+                        <td>{issue.row}</td>
+                        <td>{issue.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="hint">
+                No row-level validation issues were recorded for this process.
+              </p>
+            )}
+            <div className="row-actions">
+              <Button variant="secondary" onClick={() => void copyImportRunLink()}>
+                Copy process link
+              </Button>
+              <Button variant="secondary" onClick={closeImportRun}>
+                Close process
+              </Button>
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

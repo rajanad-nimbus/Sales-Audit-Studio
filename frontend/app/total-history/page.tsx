@@ -43,6 +43,10 @@ const columns: Column<TotalHistoryRow>[] = [
     key: 'total',
     header: 'Total',
     primary: true,
+    csvValue: (row) =>
+      [row.total_name, row.level, row.dimension, row.rollup_key && formatRollupKey(row.rollup_key)]
+        .filter(Boolean)
+        .join(' · '),
     render: (row) => (
       <>
         <strong>{row.total_name}</strong>
@@ -57,6 +61,7 @@ const columns: Column<TotalHistoryRow>[] = [
   {
     key: 'store_day',
     header: 'Store day',
+    csvValue: (row) => `${row.store_id} · ${row.business_date}`,
     render: (row) => (
       <Link href={`/store-days/${encodeURIComponent(row.store_id)}/${row.business_date}`}>
         {row.store_id} · {row.business_date}
@@ -66,6 +71,12 @@ const columns: Column<TotalHistoryRow>[] = [
   {
     key: 'version',
     header: 'Version',
+    csvValue: (row) =>
+      [
+        `v${row.version}${row.version === row.current_version ? ' · current' : ''}`,
+        row.store_day_status,
+        `definition r${row.definition_revision ?? '—'}`,
+      ].join(' · '),
     render: (row) => (
       <>
         v{row.version} {row.version === row.current_version ? '· current' : ''}
@@ -79,12 +90,15 @@ const columns: Column<TotalHistoryRow>[] = [
     key: 'calculated',
     header: 'Calculated',
     numeric: true,
+    csvValue: (row) => `${row.calculated_amount} ${row.currency}`,
     render: (row) => money(row.calculated_amount, row.currency),
   },
   {
     key: 'declared',
     header: 'Declared',
     numeric: true,
+    csvValue: (row) =>
+      row.declared_amount === null ? '—' : `${row.declared_amount} ${row.currency}`,
     render: (row) =>
       row.declared_amount === null ? '—' : money(row.declared_amount, row.currency),
   },
@@ -92,6 +106,8 @@ const columns: Column<TotalHistoryRow>[] = [
     key: 'variance',
     header: 'Variance',
     numeric: true,
+    csvValue: (row) =>
+      row.variance_amount === null ? '—' : `${row.variance_amount} ${row.currency}`,
     render: (row) =>
       row.variance_amount === null ? '—' : money(row.variance_amount, row.currency),
   },
@@ -99,6 +115,8 @@ const columns: Column<TotalHistoryRow>[] = [
     key: 'change',
     header: 'Change vs prior version',
     numeric: true,
+    csvValue: (row) =>
+      row.change_amount === null ? 'First version' : `${row.change_amount} ${row.currency}`,
     render: (row) =>
       row.change_amount === null ? 'First version' : money(row.change_amount, row.currency),
   },
@@ -286,6 +304,8 @@ export default function TotalHistoryPage() {
           <DataTable
             columns={columns}
             rows={busy ? null : result.items}
+            csvFileName="total-history-visible.csv"
+            detachTitle="Total Audit Trail · Visible revisions"
             rowKey={(row) =>
               `${row.store_id}:${row.business_date}:${row.total_name}:${row.level}:${row.dimension ?? ''}:${row.version}`
             }

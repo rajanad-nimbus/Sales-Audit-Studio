@@ -75,6 +75,13 @@ SCREENS: tuple[Screen, ...] = (
         ),
     ),
     Screen(
+        "guided-tasks",
+        "/tasks",
+        "Guided Tasks",
+        "Workspace",
+        EVERYONE,
+    ),
+    Screen(
         "actions",
         "/actions",
         "Action Center",
@@ -219,7 +226,7 @@ SCREENS: tuple[Screen, ...] = (
         "/audit",
         "Audit Trail",
         "Investigate & Correct",
-        ("analyst", "finance", "it", "auditor"),
+        ("finance", "it", "auditor"),
         ("/api/audit",),
     ),
     # Configuration. General (appearance, account) is personal, so everyone has it and it needs no data from the API.
@@ -264,11 +271,27 @@ SCREENS: tuple[Screen, ...] = (
         ("/api/reports",),
     ),
     Screen(
+        "reports-flash-totals",
+        "/reports/flash-totals",
+        "Flash Totals",
+        "Reports",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/reports",),
+    ),
+    Screen(
+        "reports-flash-sales-ytd",
+        "/reports/flash-sales-ytd",
+        "Flash Sales Year to Date",
+        "Reports",
+        ("analyst", "finance", "it", "auditor"),
+        ("/api/reports",),
+    ),
+    Screen(
         "imports",
         "/imports",
         "Imports",
         "Integrations",
-        ("analyst", "it", "auditor"),
+        ("it", "auditor"),
         ("/api/ingest", "/api/reconcile", "/api/batch/runs", "/api/batch/run"),
     ),
     Screen(
@@ -316,16 +339,23 @@ SCREENS: tuple[Screen, ...] = (
         "/activity",
         "Agent Activity",
         "Diagnostics",
-        ("analyst", "finance", "it", "auditor"),
+        ("finance", "it", "auditor"),
         ("/api/audit", "/api/agent/config", "/api/me/saved-views"),
     ),
     Screen("settings", "/settings", "General", "Configuration", EVERYONE),
+    Screen(
+        "settings-exchange",
+        "/settings/exchange",
+        "Data Exchange",
+        "Configuration",
+        ("analyst", "finance", "it", "auditor"),
+    ),
     Screen(
         "settings-integrations",
         "/settings/integrations",
         "Integrations & readiness",
         "Configuration",
-        ("analyst", "finance", "it", "auditor"),
+        ("finance", "it", "auditor"),
         (
             "/api/ingest/profiles",
             "/api/ingest/shopify",
@@ -345,7 +375,12 @@ SCREENS: tuple[Screen, ...] = (
         "Totals, rules & GL mapping",
         "Configuration",
         ("analyst", "finance", "it", "auditor"),
-        ("/api/total-definitions", "/api/audit-rules", "/api/gl"),
+        (
+            "/api/total-definitions",
+            "/api/audit-rules",
+            "/api/gl",
+            "/api/transaction-audit-rules",
+        ),
     ),
     Screen(
         "settings-close",
@@ -404,7 +439,27 @@ SCREENS: tuple[Screen, ...] = (
             "/api/foundation/location-traits",
         ),
     ),
+    Screen(
+        "settings-admin",
+        "/settings/admin",
+        "Admin",
+        "Configuration",
+        (),
+        ("/api/admin",),
+    ),
 )
+# Screens an administrator has switched off for every other role. Admins are never locked out, and the pages
+# that manage this setting (or every signed-in role's own preferences) can never be switched off.
+HIDDEN_SCREENS: frozenset[str] = frozenset()
+PROTECTED_SCREENS = frozenset({"my-preferences", "settings-admin", "settings-access"})
+
+
+def set_hidden_screens(keys) -> None:
+    global HIDDEN_SCREENS
+    known = {s.key for s in SCREENS} - PROTECTED_SCREENS
+    HIDDEN_SCREENS = frozenset(k for k in keys if k in known)
+
+
 # Needed by every signed-in role to render the page chrome (freshness banner, identity).
 OPEN_PATHS = {
     "/api/me",
@@ -417,6 +472,8 @@ OPEN_PATHS = {
 
 
 def can_open(role: str, screen: Screen) -> bool:
+    if role != "admin" and screen.key in HIDDEN_SCREENS:
+        return False
     return (
         role == "admin"
         or role in screen.roles

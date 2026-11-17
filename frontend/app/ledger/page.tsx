@@ -1,7 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import { formatNumber } from '@/lib/preferences';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, money } from '@/lib/api';
 import { downloadBlob } from '@/lib/csv';
 import { StoreSelect } from '@/components/StoreSelect';
@@ -19,6 +20,8 @@ import type { Column } from '@/components/ui';
 
 interface JournalLine {
   transaction_id: string;
+  store_id: string;
+  business_date: string;
   debit_account: string;
   credit_account: string;
   amount: string;
@@ -35,17 +38,39 @@ interface Preview {
 
 const columns: Column<JournalLine>[] = [
   {
+    key: 'business-date',
+    header: 'Business date',
+    csvValue: (row) => row.business_date,
+    render: (row) => row.business_date,
+  },
+  {
     key: 'transaction',
     header: 'Transaction',
     primary: true,
-    render: (row) => <code>{row.transaction_id}</code>,
+    csvValue: (row) => row.transaction_id,
+    render: (row) => (
+      <Link href={`/transactions/${encodeURIComponent(row.transaction_id)}`}>
+        <code>{row.transaction_id}</code>
+      </Link>
+    ),
   },
-  { key: 'debit', header: 'Debit account', render: (row) => row.debit_account },
-  { key: 'credit', header: 'Credit account', render: (row) => row.credit_account },
+  {
+    key: 'debit',
+    header: 'Debit account',
+    csvValue: (row) => row.debit_account,
+    render: (row) => row.debit_account,
+  },
+  {
+    key: 'credit',
+    header: 'Credit account',
+    csvValue: (row) => row.credit_account,
+    render: (row) => row.credit_account,
+  },
   {
     key: 'amount',
     header: 'Amount',
     numeric: true,
+    csvValue: (row) => `${row.amount} ${row.currency}`,
     render: (row) => money(row.amount, row.currency),
   },
 ];
@@ -54,29 +79,38 @@ export default function LedgerPage() {
   const [initialQuery] = useState(() => {
     const query =
       typeof window === 'undefined' ? null : new URLSearchParams(window.location.search);
+    const legacyDate = query?.get('business_date') ?? '';
     return {
       store: query?.get('store_id') ?? '',
-      businessDate: query?.get('business_date') ?? '',
+      dateFrom: query?.get('date_from') ?? legacyDate,
+      dateTo: query?.get('date_to') ?? query?.get('date_from') ?? legacyDate,
     };
   });
   const [store, setStore] = useState(initialQuery.store);
-  const [businessDate, setBusinessDate] = useState(
-    initialQuery.businessDate || new Date().toISOString().slice(0, 10)
-  );
+  const today = new Date().toISOString().slice(0, 10);
+  const [dateFrom, setDateFrom] = useState(initialQuery.dateFrom || today);
+  const [dateTo, setDateTo] = useState(initialQuery.dateTo || today);
   const [page, setPage] = useState(1);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
+  const initialLoadDone = useRef(false);
   const load = useCallback(
     async (nextPage = 1) => {
-      if (!store || !businessDate) return;
+      if (!store || !dateFrom || !dateTo || dateFrom > dateTo) return;
       setLoading(true);
       setError('');
       try {
         const { data } = await api.get<Preview>('/api/gl/journal-preview', {
-          params: { store_id: store, business_date: businessDate, page: nextPage, page_size: 100 },
+          params: {
+            store_id: store,
+            date_from: dateFrom,
+            date_to: dateTo,
+            page: nextPage,
+            page_size: 100,
+          },
         });
         setPreview(data);
         setPage(nextPage);
@@ -84,14 +118,14 @@ export default function LedgerPage() {
         const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
         setError(
           detail ||
-            'The journal preview could not be loaded. Check the store and business date, then try again.'
+            'The journal preview could not be loaded. Check the store and business-date range, then try again.'
         );
         setPreview(null);
       } finally {
         setLoading(false);
       }
     },
-    [businessDate, store]
+    [dateFrom, dateTo, store]
   );
   const downloadJournal = async () => {
     if (!preview) return;
@@ -99,10 +133,10 @@ export default function LedgerPage() {
     setExportError('');
     try {
       const { data } = await api.get('/api/gl/journal-preview/export.csv', {
-        params: { store_id: store, business_date: businessDate },
+        params: { store_id: store, date_from: dateFrom, date_to: dateTo },
         responseType: 'blob',
       });
-      downloadBlob(`journal-preview-${store}-${businessDate}.csv`, data);
+      downloadBlob(`journal-preview-${store}-${dateFrom}-${dateTo}.csv`, data);
     } catch {
       setExportError('The complete journal preview could not be downloaded.');
     } finally {
@@ -110,8 +144,28 @@ export default function LedgerPage() {
     }
   };
   useEffect(() => {
-    if (initialQuery.store && initialQuery.businessDate) void load(1);
+    if (
+      !initialLoadDone.current &&
+      initialQuery.store &&
+      initialQuery.dateFrom &&
+      initialQuery.dateTo
+    ) {
+      initialLoadDone.current = true;
+      void load(1);
+    }
   }, [initialQuery, load]);
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (store) params.set('store_id', store);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    const query = params.toString();
+    history.replaceState(
+      null,
+      '',
+      query ? `${window.location.pathname}?${query}` : window.location.pathname
+    );
+  }, [store, dateFrom, dateTo]);
   const pageTotals = new Map<string, number>();
   preview?.lines.forEach((line) =>
     pageTotals.set(line.currency, (pageTotals.get(line.currency) ?? 0) + Number(line.amount))
@@ -137,7 +191,7 @@ export default function LedgerPage() {
               size="sm"
               variant="secondary"
               disabled={loading || exporting}
-              title="Download all mapped and unmapped transactions for this store day."
+              title="Download all mapped and unmapped transactions for this store and date range."
               onClick={() => void downloadJournal()}
             >
               {exporting ? 'Preparing CSV…' : 'Download full journal CSV'}
@@ -155,19 +209,30 @@ export default function LedgerPage() {
             }}
           />
           <label className="field">
-            <span>Business date</span>
+            <span>From business date</span>
             <input
               type="date"
-              value={businessDate}
+              value={dateFrom}
               onChange={(event) => {
-                setBusinessDate(event.target.value);
+                setDateFrom(event.target.value);
+                setPreview(null);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Through business date</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => {
+                setDateTo(event.target.value);
                 setPreview(null);
               }}
             />
           </label>
           <Button
             variant="primary"
-            disabled={!store || !businessDate || loading}
+            disabled={!store || !dateFrom || !dateTo || dateFrom > dateTo || loading}
             onClick={() => void load(1)}
           >
             {loading ? 'Building preview…' : 'View journal'}
@@ -184,7 +249,7 @@ export default function LedgerPage() {
         <>
           <MetricGrid>
             <MetricTile
-              label="Transactions in store day"
+              label="Matching transactions"
               value={formatNumber(preview.total_transactions)}
             />
             <MetricTile label="Mapped on this page" value={formatNumber(mappedOnPage)} />
@@ -203,7 +268,9 @@ export default function LedgerPage() {
                 <ul>
                   {preview.unmapped_transaction_ids.map((id) => (
                     <li key={id}>
-                      <code>{id}</code>
+                      <Link href={`/transactions/${encodeURIComponent(id)}`}>
+                        <code>{id}</code>
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -212,16 +279,18 @@ export default function LedgerPage() {
           )}
           <Card>
             <h2>
-              {store} · {businessDate}
+              {store} · {dateFrom} to {dateTo}
             </h2>
             <DataTable
               columns={columns}
               rows={loading ? null : preview.lines}
+              csvFileName="journal-preview-visible.csv"
+              detachTitle={['GL Journal View', store, dateFrom, dateTo].join(' · ')}
               rowKey={(row) => row.transaction_id}
               emptyTitle={
                 preview.total_transactions
                   ? 'No mapped lines on this page'
-                  : 'No transactions for this store day'
+                  : 'No transactions for this store and date range'
               }
               emptyHint={
                 preview.total_transactions
@@ -246,8 +315,8 @@ export default function LedgerPage() {
       {!preview && !error && (
         <Card>
           <p>
-            Select a store and date to inspect its proposed journal. This view does not post to the
-            ledger.
+            Select a store and business-date range to inspect its proposed journal. This view does
+            not post to the ledger.
           </p>
         </Card>
       )}

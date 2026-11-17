@@ -85,7 +85,7 @@ async def ontology_authentication(
                     user["role_source"] = "assignment"
                 if user["role"] not in STORE_ROLES:
                     await record_verified_identity(db, user, key)
-    if user.get("role") in {"store_manager", "store_staff"} and not (
+    if user.get("role") in STORE_ROLES and not (
         user.get("real_role") == "admin" and user.get("impersonating")
     ):
         identifier = str(user.get("user") or "").strip().casefold()
@@ -142,6 +142,11 @@ async def ontology_authentication(
                 user["stores"] = assignment.store_ids or []
                 user["store_location_traits"] = assignment.location_traits or []
                 user["store_assignment_source"] = "local"
+            elif user.get("role") == "analyst":
+                # Sales Auditors need an explicit local portfolio. Unlike store employees, they
+                # never inherit a broad identity-provider store claim.
+                user["stores"] = []
+                user["store_assignment_source"] = "unassigned"
             else:
                 user["store_assignment_source"] = "identity"
         else:
@@ -165,6 +170,9 @@ async def ontology_authentication(
         else:
             user["store_scope_store_ids"] = []
 
+    from apps.admin.routes import refresh_hidden_screens
+
+    await refresh_hidden_screens()
     allowed, screens = access.api_allowed(user["role"], request.url.path)
     if not allowed:
         role = user["role"]

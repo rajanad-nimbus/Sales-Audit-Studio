@@ -215,7 +215,7 @@ export function RoleAssignments() {
   return (
     <SettingsSection
       title="Business roles"
-      description="Ontology Studio decides who someone is and whether they are an administrator, but it cannot express Finance, IT, auditor or store roles. Give each person who has signed in the role they hold here. Studio administrators keep their Studio role. Changes are audited and apply on the person's next request."
+      description="Ontology Studio decides who someone is and whether they are an administrator, but it cannot express Finance, IT, Sales Auditor, internal auditor, or store roles. Give each person who has signed in the role they hold here. Studio administrators keep their Studio role. Changes are audited and apply on the person's next request."
     >
       {error && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}

@@ -50,6 +50,7 @@ class AuditTotalDefinition(Base):
     combined_operator: Mapped[str | None] = mapped_column(String(1))
     location_traits: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     usages: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    report_usages: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     sql_statement: Mapped[str | None] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str | None] = mapped_column(String(255))

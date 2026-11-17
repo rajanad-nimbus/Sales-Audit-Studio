@@ -65,9 +65,14 @@ export function UserMenu() {
           ? `Acting as ${ROLE_LABEL[me!.role]}`
           : (ROLE_LABEL[me!.role] ?? me!.role) +
             (me!.store_scoped
-              ? me!.stores?.length
-                ? ` · ${me!.stores.join(', ')}`
-                : ' · no stores assigned'
+              ? me!.stores?.length || me!.store_location_traits?.length
+                ? ` · ${[
+                    ...(me!.stores ?? []),
+                    ...(me!.store_location_traits ?? []).map((trait) => `${trait} trait`),
+                  ].join(', ')}`
+                : me!.role === 'analyst'
+                  ? ' · no portfolio assigned'
+                  : ' · no stores assigned'
               : '');
   const canImpersonate = !signedOut && me !== undefined && me!.real_role === 'admin';
   const impersonate = (role: string | null, stores?: string) => {
@@ -75,7 +80,7 @@ export function UserMenu() {
       role
         ? localStorage.setItem('nimbus_impersonate', role)
         : localStorage.removeItem('nimbus_impersonate');
-      (role === 'store_manager' || role === 'store_staff') && stores
+      (role === 'analyst' || role === 'store_manager' || role === 'store_staff') && stores
         ? localStorage.setItem('nimbus_impersonate_stores', stores)
         : localStorage.removeItem('nimbus_impersonate_stores');
     } catch {
@@ -152,7 +157,7 @@ export function UserMenu() {
                   key={key}
                   className={me!.role === key ? 'on' : ''}
                   onClick={() =>
-                    key === 'store_manager' || key === 'store_staff'
+                    key === 'analyst' || key === 'store_manager' || key === 'store_staff'
                       ? setPickStores((v) => (v === key ? null : key))
                       : impersonate(key)
                   }
@@ -217,7 +222,7 @@ export function UserMenu() {
             </Link>
           )}
           <Link href="/settings" className="user-pop-link" onClick={() => setOpen(false)}>
-            Configuration
+            Admin
           </Link>
           {signedOut ? (
             <Link href="/login" className="user-pop-link" onClick={() => setOpen(false)}>

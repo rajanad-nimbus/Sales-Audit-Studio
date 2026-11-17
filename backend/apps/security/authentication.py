@@ -28,8 +28,8 @@ ASSIGNABLE_ROLES = (
     "store_manager",
     "store_staff",
 )
-# Both store roles see only the stores assigned to them.
-STORE_ROLES = ("store_manager", "store_staff")
+# Store managers, store staff, and Sales Auditors see only their assigned stores.
+STORE_ROLES = ("store_manager", "store_staff", "analyst")
 # store_manager is limited to these areas, and within them to the stores assigned to the person in Ontology Studio.
 STORE_MANAGER_CASH_PREFIXES = ("/api/cash", "/api/cash-controls")
 # A store manager also reads the store's own transactions, to review them before they are audited.
@@ -188,6 +188,10 @@ def resolve_identity_stores(
             for store in (request.headers.get("x-impersonate-stores") or "").split(",")
             if store.strip()
         ]
+    if role == "analyst":
+        # Sales Auditor portfolios are managed in ZeTSA; identity-provider store claims do not
+        # silently widen the audited local assignment.
+        return []
     return stores_from_identity(identity)
 
 

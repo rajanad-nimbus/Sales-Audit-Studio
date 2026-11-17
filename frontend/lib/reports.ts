@@ -5,13 +5,20 @@ export interface ReportPage {
   title: string;
   subtitle: string;
   path: string;
+  yearToDate?: boolean;
 }
 
-const page = (name: string, title: string, subtitle: string): ReportPage => ({
+const page = (
+  name: string,
+  title: string,
+  subtitle: string,
+  yearToDate = false
+): ReportPage => ({
   name,
   title,
   subtitle,
   path: `/reports/${name}`,
+  yearToDate,
 });
 
 export const REPORT_PAGES = {
@@ -35,5 +42,16 @@ export const REPORT_PAGES = {
     'tax-corrections',
     'Tax corrections',
     'Approved tax amount, summary row, and item line corrections, with before/after detail and reviewer.'
+  ),
+  flashTotals: page(
+    'flash-totals',
+    'Flash Totals',
+    'Current, non-stale store-day totals selected for Flash Totals.',
+  ),
+  flashSalesYtd: page(
+    'flash-sales-ytd',
+    'Flash Sales Year to Date',
+    'Year-to-date sums of current, non-stale totals selected for Flash Sales.',
+    true
   ),
 } satisfies Record<string, ReportPage>;

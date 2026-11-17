@@ -1080,24 +1080,40 @@ export default function NewCorrectionPage() {
                             </small>
                           </>
                         ),
+                        csvValue: (tx) =>
+                          `${tx.id} · ${tx.payment_reference || 'No payment reference'}`,
                       },
                       {
                         key: 'where',
                         header: 'Store / date',
                         render: (tx) => `${tx.store_id} · ${tx.business_date}`,
+                        csvValue: (tx) => `${tx.store_id} · ${tx.business_date}`,
                       },
-                      { key: 'type', header: 'Type', render: (tx) => tx.transaction_type },
+                      {
+                        key: 'type',
+                        header: 'Type',
+                        render: (tx) => tx.transaction_type,
+                        csvValue: (tx) => tx.transaction_type,
+                      },
                       {
                         key: 'amt',
                         header: 'Amount',
                         numeric: true,
                         render: (tx) => money(tx.signed_amount, tx.currency),
+                        csvValue: (tx) => `${tx.signed_amount} ${tx.currency}`,
                       },
-                      { key: 'tender', header: 'Tender', render: (tx) => tx.tender_type || '—' },
+                      {
+                        key: 'tender',
+                        header: 'Tender',
+                        render: (tx) => tx.tender_type || '—',
+                        csvValue: (tx) => tx.tender_type || '—',
+                      },
                     ]}
                     rows={results}
                     rowKey={(tx) => tx.id}
                     onRowClick={selectTransaction}
+                    csvFileName="correction-transaction-search-visible.csv"
+                    detachTitle={`Correction transaction search · ${search.trim() || kind}`}
                   />
                 )}
                 <details className="cfg-details">

@@ -610,6 +610,40 @@ class StoreAssignmentInput(BaseModel):
         return normalized
 
 
+class StoreAssignmentPreviewInput(BaseModel):
+    store_ids: list[str] = Field(default_factory=list, max_length=500)
+    location_traits: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("store_ids")
+    @classmethod
+    def validate_preview_store_ids(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(
+            not value or value != original
+            for value, original in zip(normalized, values, strict=True)
+        ):
+            raise ValueError(
+                "store_ids must contain nonblank store codes without surrounding whitespace"
+            )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("store_ids must not contain duplicates")
+        if any(len(value) > 50 for value in normalized):
+            raise ValueError("store codes must be at most 50 characters")
+        return normalized
+
+    @field_validator("location_traits")
+    @classmethod
+    def validate_preview_location_traits(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("location_traits must contain nonblank trait codes")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("location_traits must not contain duplicates")
+        if any(len(value) > 100 for value in normalized):
+            raise ValueError("location trait codes must be at most 100 characters")
+        return normalized
+
+
 class StoreAssignmentClearInput(BaseModel):
     user_identifier: str = Field(min_length=1, max_length=255)
     reason: str = Field(min_length=10, max_length=2000)
@@ -734,8 +768,14 @@ async def preview_store_assignment_rows(db: AsyncSession, rows: list[dict], *, l
                 await db.execute(
                     select(
                         VerifiedStoreUser.assignment_identifier,
-                        VerifiedStoreUser.role,
-                    ).where(VerifiedStoreUser.assignment_identifier.in_(identifiers))
+                        func.coalesce(UserRoleAssignment.role, VerifiedStoreUser.role),
+                    )
+                    .outerjoin(
+                        UserRoleAssignment,
+                        UserRoleAssignment.assignment_identifier
+                        == VerifiedStoreUser.assignment_identifier,
+                    )
+                    .where(VerifiedStoreUser.assignment_identifier.in_(identifiers))
                 )
             ).all()
         )
@@ -759,7 +799,7 @@ async def preview_store_assignment_rows(db: AsyncSession, rows: list[dict], *, l
                 errors.append(
                     {
                         "row": row["row"],
-                        "message": "Store assignments are only valid for store managers and store staff",
+                        "message": "Store assignments are only valid for Sales Auditors, store managers, and store staff",
                     }
                 )
         before = (
@@ -988,6 +1028,7 @@ async def access_matrix(user: dict = Depends(current_user)):
 @router.get("/api/access/store-assignments")
 async def list_store_assignments(
     q: str | None = Query(default=None, max_length=255),
+    activity: Literal["all", "unverified", "inactive_90_days"] = "all",
     page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=200),
     format: Literal["json", "csv"] = "json",
@@ -1000,6 +1041,22 @@ async def list_store_assignments(
         filters.append(
             func.lower(StoreAssignment.user_identifier).contains(normalized_query, autoescape=True)
         )
+    identity_last_seen = (
+        select(func.max(VerifiedStoreUser.last_seen_at))
+        .where(
+            or_(
+                VerifiedStoreUser.assignment_identifier == StoreAssignment.user_identifier,
+                func.lower(VerifiedStoreUser.user_identifier)
+                == func.lower(StoreAssignment.user_identifier),
+            )
+        )
+        .correlate(StoreAssignment)
+        .scalar_subquery()
+    )
+    if activity == "unverified":
+        filters.append(identity_last_seen.is_(None))
+    elif activity == "inactive_90_days":
+        filters.append(identity_last_seen < utcnow() - timedelta(days=90))
     total = await db.scalar(select(func.count()).select_from(StoreAssignment).where(*filters))
 
     if format == "csv":
@@ -1011,24 +1068,26 @@ async def list_store_assignments(
                     "assignment_identifier",
                     "store_ids",
                     "location_traits",
+                    "last_verified_at",
                     "updated_by",
                     "updated_at",
                 )
             )
             result = await db.stream(
-                select(StoreAssignment)
+                select(StoreAssignment, identity_last_seen.label("last_verified_at"))
                 .where(*filters)
                 .order_by(StoreAssignment.user_identifier)
                 .limit(row_limit)
                 .execution_options(yield_per=1000)
             )
             try:
-                async for (row,) in result:
+                async for row, last_verified_at in result:
                     yield csv_row(
                         (
                             row.user_identifier,
                             ";".join(row.store_ids),
                             ";".join(row.location_traits),
+                            last_verified_at.isoformat() if last_verified_at else "",
                             row.updated_by,
                             row.updated_at.isoformat(),
                         )
@@ -1048,18 +1107,23 @@ async def list_store_assignments(
     rows = (
         (
             await db.execute(
-                select(StoreAssignment)
+                select(StoreAssignment, identity_last_seen.label("last_verified_at"))
                 .where(*filters)
                 .order_by(StoreAssignment.user_identifier)
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
         )
-        .scalars()
         .all()
     )
     return {
-        "items": [store_assignment_view(row) for row in rows],
+        "items": [
+            {
+                **store_assignment_view(row),
+                "last_verified_at": last_verified_at.isoformat() if last_verified_at else None,
+            }
+            for row, last_verified_at in rows
+        ],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -1067,10 +1131,56 @@ async def list_store_assignments(
     }
 
 
+@router.post("/api/access/store-assignments/preview")
+async def preview_store_assignment(
+    body: StoreAssignmentPreviewInput,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_role("admin")),
+):
+    """Resolve explicit stores and live location traits before an assignment is saved."""
+    known_stores = set(await known_store_codes(db))
+    unknown_stores = sorted(set(body.store_ids) - known_stores)
+    if unknown_stores:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown store codes: {', '.join(unknown_stores)}",
+        )
+    known_traits = set(
+        (await db.execute(select(StoreLocationTrait.location_trait).distinct())).scalars().all()
+    )
+    unknown_traits = sorted(set(body.location_traits) - known_traits)
+    if unknown_traits:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown or unassigned location traits: {', '.join(unknown_traits)}",
+        )
+
+    trait_stores = set()
+    if body.location_traits:
+        trait_stores = set(
+            (
+                await db.execute(
+                    select(StoreLocationTrait.store_id).where(
+                        StoreLocationTrait.location_trait.in_(body.location_traits)
+                    )
+                )
+            ).scalars().all()
+        )
+    explicit_stores = set(body.store_ids)
+    resolved_stores = sorted(explicit_stores | trait_stores)
+    return {
+        "store_ids": resolved_stores,
+        "total": len(resolved_stores),
+        "explicit_count": len(explicit_stores),
+        "trait_count": len(trait_stores),
+        "overlap_count": len(explicit_stores & trait_stores),
+    }
+
+
 @router.get("/api/access/verified-store-users")
 async def list_verified_store_users(
     q: str | None = Query(default=None, max_length=100),
-    role: Literal["all", "store_manager", "store_staff"] = "all",
+    role: Literal["all", "analyst", "store_manager", "store_staff"] = "all",
     scope_status: Literal["all", "assigned", "unassigned"] = "all",
     inactive_days: int | None = Query(default=None, ge=1, le=3650),
     page: int = Query(default=1, ge=1, le=100_000),
@@ -1087,11 +1197,12 @@ async def list_verified_store_users(
             )
         )
     )
-    filters = [VerifiedStoreUser.role.in_(STORE_ROLES)]
+    effective_role = func.coalesce(UserRoleAssignment.role, VerifiedStoreUser.role)
+    filters = [effective_role.in_(STORE_ROLES)]
     if inactive_days is not None:
         filters.append(VerifiedStoreUser.last_seen_at < utcnow() - timedelta(days=inactive_days))
     if role != "all":
-        filters.append(VerifiedStoreUser.role == role)
+        filters.append(effective_role == role)
     normalized_query = (q or "").strip().lower()
     if normalized_query:
         filters.append(
@@ -1114,7 +1225,23 @@ async def list_verified_store_users(
         filters.append(has_local_scope)
     elif scope_status == "unassigned":
         filters.append(~has_local_scope)
-    total = await db.scalar(select(func.count()).select_from(VerifiedStoreUser).where(*filters))
+    base = select(
+        VerifiedStoreUser,
+        has_local_scope.label("has_local_scope"),
+        effective_role.label("effective_role"),
+    ).outerjoin(
+        UserRoleAssignment,
+        UserRoleAssignment.assignment_identifier == VerifiedStoreUser.assignment_identifier,
+    )
+    total = await db.scalar(
+        select(func.count())
+        .select_from(VerifiedStoreUser)
+        .outerjoin(
+            UserRoleAssignment,
+            UserRoleAssignment.assignment_identifier == VerifiedStoreUser.assignment_identifier,
+        )
+        .where(*filters)
+    )
     if format == "csv":
         row_limit = 50_000
 
@@ -1132,22 +1259,26 @@ async def list_verified_store_users(
                 )
             )
             result = await db.stream(
-                select(VerifiedStoreUser, has_local_scope.label("has_local_scope"))
+                base
                 .where(*filters)
                 .order_by(VerifiedStoreUser.display_name, VerifiedStoreUser.assignment_identifier)
                 .limit(row_limit)
                 .execution_options(yield_per=1000)
             )
             try:
-                async for row, assigned in result:
+                async for row, assigned, assigned_role in result:
                     yield csv_row(
                         (
                             row.assignment_identifier,
                             row.user_identifier,
                             row.display_name,
-                            row.role,
+                            assigned_role,
                             row.identity_id,
-                            "Assigned" if assigned else "Identity claims",
+                            "Assigned"
+                            if assigned
+                            else "No local portfolio"
+                            if assigned_role == "analyst"
+                            else "Identity claims",
                             row.first_seen_at.isoformat(),
                             row.last_seen_at.isoformat(),
                         )
@@ -1159,14 +1290,14 @@ async def list_verified_store_users(
             generate(),
             media_type="text/csv",
             headers={
-                "Content-Disposition": "attachment; filename=verified-store-employees.csv",
+                "Content-Disposition": "attachment; filename=verified-employees.csv",
                 "X-Verified-Users-Truncated": "true" if total > row_limit else "false",
             },
         )
 
     rows = (
         await db.execute(
-            select(VerifiedStoreUser, has_local_scope.label("has_local_scope"))
+            base
             .where(*filters)
             .order_by(VerifiedStoreUser.display_name, VerifiedStoreUser.assignment_identifier)
             .offset((page - 1) * page_size)
@@ -1180,12 +1311,12 @@ async def list_verified_store_users(
                 "user_identifier": row.user_identifier,
                 "identity_id": row.identity_id,
                 "display_name": row.display_name,
-                "role": row.role,
+                "role": assigned_role,
                 "first_seen_at": row.first_seen_at.isoformat(),
                 "last_seen_at": row.last_seen_at.isoformat(),
                 "has_local_scope": assigned,
             }
-            for row, assigned in rows
+            for row, assigned, assigned_role in rows
         ],
         "total": total,
         "page": page,
@@ -1330,16 +1461,25 @@ async def replace_store_assignment(
         )
     ).scalar_one_or_none()
     if row is None:
-        verified = await db.get(VerifiedStoreUser, body.user_identifier)
-        if verified is None:
+        verified_role = await db.scalar(
+            select(func.coalesce(UserRoleAssignment.role, VerifiedStoreUser.role))
+            .select_from(VerifiedStoreUser)
+            .outerjoin(
+                UserRoleAssignment,
+                UserRoleAssignment.assignment_identifier
+                == VerifiedStoreUser.assignment_identifier,
+            )
+            .where(VerifiedStoreUser.assignment_identifier == body.user_identifier)
+        )
+        if verified_role is None:
             raise HTTPException(
                 status_code=422,
                 detail="This identity has not signed in through Ontology Studio yet. Ask them to sign in before assigning store access.",
             )
-        if verified.role not in STORE_ROLES:
+        if verified_role not in STORE_ROLES:
             raise HTTPException(
                 status_code=422,
-                detail="Store assignments are only valid for store managers and store staff.",
+                detail="Store assignments are only valid for Sales Auditors, store managers, and store staff.",
             )
     before = (
         {

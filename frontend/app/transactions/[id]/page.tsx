@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, money } from '@/lib/api';
 import { formatDateTime } from '@/lib/preferences';
-import { downloadBlob } from '@/lib/csv';
+import { downloadBlob, downloadCsv } from '@/lib/csv';
 import { CopyButton, SkeletonRows } from '@/components/Feedback';
 import { StatusBadge } from '@/components/CaseTable';
 import { CaseLink, useMe } from '@/components/MeProvider';
@@ -524,11 +524,20 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         ) : (
           <DataTable
             columns={[
-              { key: 'c0', header: '#', render: (l) => l.line_no },
+              { key: 'c0', header: '#', csvValue: (l) => l.line_no, render: (l) => l.line_no },
               {
                 key: 'c1',
                 header: 'Item',
                 primary: true,
+                csvValue: (l) =>
+                  [
+                    l.item_code,
+                    l.description,
+                    l.return_reason,
+                    l.source_attributes ? JSON.stringify(l.source_attributes) : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · '),
                 render: (l) => (
                   <>
                     {l.item_code}
@@ -553,11 +562,25 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   </>
                 ),
               },
-              { key: 'c2', header: 'Qty', numeric: true, render: (l) => Math.abs(l.quantity) },
+              {
+                key: 'c2',
+                header: 'Qty',
+                numeric: true,
+                csvValue: (l) => Math.abs(l.quantity),
+                render: (l) => Math.abs(l.quantity),
+              },
               {
                 key: 'c3',
                 header: 'Unit price',
                 numeric: true,
+                csvValue: (l) =>
+                  [
+                    l.unit_price,
+                    l.original_unit_price ? `Original ${l.original_unit_price}` : '',
+                    l.price_override_reason ? `Override: ${l.price_override_reason}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · '),
                 render: (l) => (
                   <>
                     {money(l.unit_price)}
@@ -572,17 +595,26 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   </>
                 ),
               },
-              { key: 'c4', header: 'Amount', numeric: true, render: (l) => money(l.gross_amount) },
+              {
+                key: 'c4',
+                header: 'Amount',
+                numeric: true,
+                csvValue: (l) => l.gross_amount,
+                render: (l) => money(l.gross_amount),
+              },
               {
                 key: 'c5',
                 header: 'Discount',
                 numeric: true,
+                csvValue: (l) => l.discount_amount,
                 render: (l) => (num(l.discount_amount) ? money(l.discount_amount) : '—'),
               },
               {
                 key: 'c6',
                 header: 'VAT',
                 numeric: true,
+                csvValue: (l) =>
+                  `${l.tax_amount}${l.tax_code ? ` · ${l.tax_code} ${(num(l.tax_rate) * 100).toFixed(0)}%` : ''}`,
                 render: (l) => (
                   <>
                     {money(l.tax_amount)}
@@ -606,12 +638,16 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 key: 'c7',
                 header: 'Line total',
                 numeric: true,
+                csvValue: (l) =>
+                  num(l.gross_amount) - num(l.discount_amount) + num(l.tax_amount),
                 render: (l) =>
                   money(num(l.gross_amount) - num(l.discount_amount) + num(l.tax_amount)),
               },
             ]}
             rows={det.lines}
             rowKey={(l) => String(l.line_no)}
+            csvFileName={`transaction-${id}-items-visible.csv`}
+            detachTitle={`Transaction ${d.source_record_id ?? id} · Items`}
           />
         )}
       </Card>
@@ -650,6 +686,26 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               <>
                 <div className="section-heading" style={{ marginTop: '.9rem' }}>
                   <h3 className="sd-section">Paid with</h3>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={det.tenders.length === 0}
+                    onClick={() =>
+                      downloadCsv(
+                        `transaction-${id}-tenders-visible.csv`,
+                        ['Tender', 'Reference', 'Authorization', 'POS details', 'Amount'],
+                        det.tenders.map((t) => [
+                          t.tender_type,
+                          t.reference,
+                          t.authorization,
+                          t.source_attributes ? JSON.stringify(t.source_attributes) : '',
+                          t.amount,
+                        ])
+                      )
+                    }
+                  >
+                    Export visible tenders CSV
+                  </Button>
                   <Button
                     size="sm"
                     variant="secondary"
@@ -720,6 +776,27 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             <Card className="case-section">
               <div className="section-heading">
                 <h2>Discounts, coupons and vouchers</h2>
+                {det.discounts.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      downloadCsv(
+                        `transaction-${id}-discounts-visible.csv`,
+                        ['Type', 'Code', 'Description', 'Applies to', 'Amount'],
+                        det.discounts.map((item) => [
+                          item.kind,
+                          item.code,
+                          item.description,
+                          item.line_no === null ? 'Whole sale' : item.line_no,
+                          item.amount,
+                        ])
+                      )
+                    }
+                  >
+                    Export visible discounts CSV
+                  </Button>
+                )}
                 {det.discount_count > 0 && (
                   <Button
                     size="sm"
@@ -856,23 +933,39 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               ) : (
                 <DataTable
                   columns={[
-                    { key: 'c0', header: 'Tax', primary: true, render: (x) => x.tax_name },
+                    {
+                      key: 'c0',
+                      header: 'Tax',
+                      primary: true,
+                      csvValue: (x) => `${x.tax_name} (${x.tax_code})`,
+                      render: (x) => x.tax_name,
+                    },
                     {
                       key: 'c1',
                       header: 'Rate',
                       numeric: true,
+                      csvValue: (x) => x.rate,
                       render: (x) => <>{(num(x.rate) * 100).toFixed(2)}%</>,
                     },
                     {
                       key: 'c2',
                       header: 'Taxable amount',
                       numeric: true,
+                      csvValue: (x) => x.taxable_amount,
                       render: (x) => money(x.taxable_amount),
                     },
-                    { key: 'c3', header: 'Tax', numeric: true, render: (x) => money(x.tax_amount) },
+                    {
+                      key: 'c3',
+                      header: 'Tax',
+                      numeric: true,
+                      csvValue: (x) => x.tax_amount,
+                      render: (x) => money(x.tax_amount),
+                    },
                   ]}
                   rows={det.taxes}
                   rowKey={(x) => x.id}
+                  csvFileName={`transaction-${id}-taxes-visible.csv`}
+                  detachTitle={`Transaction ${d.source_record_id ?? id} · Taxes`}
                 />
               )}
             </Card>
@@ -916,6 +1009,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   key: 'c0',
                   header: 'Item',
                   primary: true,
+                  csvValue: (i) => [i.item_code, i.description].filter(Boolean).join(' · '),
                   render: (i) => (
                     <>
                       {i.item_code}
@@ -925,17 +1019,32 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                     </>
                   ),
                 },
-                { key: 'c1', header: 'Returned now', numeric: true, render: (i) => i.returned_qty },
-                { key: 'c2', header: 'Sold', numeric: true, render: (i) => i.sold_qty ?? '—' },
+                {
+                  key: 'c1',
+                  header: 'Returned now',
+                  numeric: true,
+                  csvValue: (i) => i.returned_qty,
+                  render: (i) => i.returned_qty,
+                },
+                {
+                  key: 'c2',
+                  header: 'Sold',
+                  numeric: true,
+                  csvValue: (i) => i.sold_qty ?? '',
+                  render: (i) => i.sold_qty ?? '—',
+                },
                 {
                   key: 'c3',
                   header: 'Returned before',
                   numeric: true,
+                  csvValue: (i) => i.already_returned_qty,
                   render: (i) => i.already_returned_qty,
                 },
                 {
                   key: 'c4',
                   header: 'Reason',
+                  csvValue: (i) =>
+                    `${i.reason ?? ''}${i.over_returned ? ` · ${i.sold_qty === null ? 'Not on the original sale' : 'Over-returned'}` : ''}`,
                   render: (i) => (
                     <>
                       {i.reason ?? '—'}
@@ -953,6 +1062,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               ]}
               rows={d.returns.items}
               rowKey={(i) => String(i.item_code)}
+              csvFileName={`transaction-${id}-return-comparison-visible.csv`}
+              detachTitle={`Transaction ${d.source_record_id ?? id} · Return comparison`}
             />
           )}
           {d.returns.items_truncated && (
@@ -978,25 +1089,45 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               {
                 key: 'c0',
                 header: 'Return',
+                csvValue: (x) => x.id,
                 render: (x) => (
                   <>
                     <Link href={`/transactions/${x.id}`}>Open return</Link>
                   </>
                 ),
               },
-              { key: 'c1', header: 'Date', render: (x) => x.business_date },
+              {
+                key: 'c1',
+                header: 'Date',
+                csvValue: (x) => x.business_date,
+                render: (x) => x.business_date,
+              },
               {
                 key: 'c2',
                 header: 'Items',
+                csvValue: (x) => x.items.map((i) => `${i.quantity} × ${i.item_code}`).join(', '),
                 render: (x) => (
                   <>{x.items.map((i) => `${i.quantity} × ${i.item_code}`).join(', ')}</>
                 ),
               },
-              { key: 'c3', header: 'Reason', render: (x) => x.reason ?? '—' },
-              { key: 'c4', header: 'Amount', numeric: true, render: (x) => money(x.amount) },
+              {
+                key: 'c3',
+                header: 'Reason',
+                csvValue: (x) => x.reason ?? '',
+                render: (x) => x.reason ?? '—',
+              },
+              {
+                key: 'c4',
+                header: 'Amount',
+                numeric: true,
+                csvValue: (x) => x.amount,
+                render: (x) => money(x.amount),
+              },
             ]}
             rows={d.returns.returns}
             rowKey={(x) => String(x.id)}
+            csvFileName={`transaction-${id}-returns-visible.csv`}
+            detachTitle={`Transaction ${d.source_record_id ?? id} · Returns`}
           />
         </Card>
       )}
@@ -1019,7 +1150,46 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
 
         <div className="case-stack">
           <Card className="case-section">
-            <h2>Audit errors</h2>
+            <div className="section-heading">
+              <h2>Audit errors</h2>
+              {d.errors.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    downloadCsv(
+                      `transaction-${id}-audit-errors-loaded.csv`,
+                      [
+                        'Code',
+                        'Family',
+                        'Severity',
+                        'Status',
+                        'Detection origin',
+                        'Confidence',
+                        'Closure impact',
+                        'Amount',
+                        'Case',
+                        'Case status',
+                      ],
+                      d.errors.map((item) => [
+                        item.code,
+                        item.family,
+                        item.severity,
+                        item.status,
+                        item.detection_origin,
+                        item.confidence,
+                        item.close_impact,
+                        item.amount,
+                        item.case_number,
+                        item.case_status,
+                      ])
+                    )
+                  }
+                >
+                  Export loaded errors CSV
+                </Button>
+              )}
+            </div>
             {d.errors_truncated && (
               <p className="hint">Showing the latest 100 transaction-linked audit errors.</p>
             )}
@@ -1050,7 +1220,29 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             )}
           </Card>
           <Card className="case-section">
-            <h2>Related cases</h2>
+            <div className="section-heading">
+              <h2>Related cases</h2>
+              {d.cases.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    downloadCsv(
+                      `transaction-${id}-related-cases-loaded.csv`,
+                      ['Case', 'Type', 'Status', 'Relationship'],
+                      d.cases.map((item) => [
+                        item.case_number,
+                        item.case_type,
+                        item.status,
+                        item.link,
+                      ])
+                    )
+                  }
+                >
+                  Export loaded cases CSV
+                </Button>
+              )}
+            </div>
             {d.cases_truncated && (
               <p className="hint">
                 Showing up to 200 matches, with cases raised from this transaction first. Additional
@@ -1087,17 +1279,30 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   {
                     key: 'c0',
                     header: 'Source',
+                    csvValue: (t) => t.source_system,
                     render: (t) => (
                       <>
                         <Link href={`/transactions/${t.id}`}>{t.source_system}</Link>
                       </>
                     ),
                   },
-                  { key: 'c1', header: 'Type', render: (t) => t.transaction_type },
-                  { key: 'c2', header: 'Amount', numeric: true, render: (t) => money(t.amount) },
+                  {
+                    key: 'c1',
+                    header: 'Type',
+                    csvValue: (t) => t.transaction_type,
+                    render: (t) => t.transaction_type,
+                  },
+                  {
+                    key: 'c2',
+                    header: 'Amount',
+                    numeric: true,
+                    csvValue: (t) => t.amount,
+                    render: (t) => money(t.amount),
+                  },
                   {
                     key: 'c3',
                     header: 'Status',
+                    csvValue: (t) => t.reconciliation_status,
                     render: (t) => (
                       <>
                         <span className={`badge badge-sm ${tone(t.reconciliation_status)}`}>
@@ -1109,6 +1314,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 ]}
                 rows={d.linked_transactions}
                 rowKey={(t) => String(t.id)}
+                csvFileName={`transaction-${id}-linked-transactions-visible.csv`}
+                detachTitle={`Transaction ${d.source_record_id ?? id} · Linked transactions`}
               />
             )}
           </Card>
@@ -1124,15 +1331,24 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 rows={history.changes}
                 rowKey={(c) => c.id}
                 columns={[
-                  { key: 'f', header: 'Field', primary: true, render: (c) => c.field },
+                  {
+                    key: 'f',
+                    header: 'Field',
+                    primary: true,
+                    csvValue: (c) => c.field,
+                    render: (c) => c.field,
+                  },
                   {
                     key: 'b',
                     header: 'Before',
+                    csvValue: (c) => String(shown(c, c.before, history.currency)),
                     render: (c) => shown(c, c.before, history.currency),
                   },
                   {
                     key: 'a',
                     header: 'After',
+                    csvValue: (c) =>
+                      c.invalid ? 'Invalid value' : String(shown(c, c.after, history.currency)),
                     render: (c) =>
                       c.invalid ? (
                         <Badge variant="error" size="sm">
@@ -1145,6 +1361,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   {
                     key: 's',
                     header: 'Status',
+                    csvValue: (c) => `${c.status}${c.applied ? '' : ' · not applied'}`,
                     render: (c) => (
                       <Badge
                         size="sm"
@@ -1164,6 +1381,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   {
                     key: 'w',
                     header: 'Who and why',
+                    csvValue: (c) =>
+                      `${c.rationale} · Proposed by ${c.proposed_by} · ${when(c.proposed_at)}${c.reviewed_by && c.reviewed_at ? ` · ${c.status.toLowerCase()} by ${c.reviewed_by} · ${when(c.reviewed_at)}` : ''}`,
                     render: (c) => (
                       <>
                         {c.rationale}
@@ -1177,6 +1396,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                     ),
                   },
                 ]}
+                csvFileName={`transaction-${id}-correction-history-visible.csv`}
+                detachTitle={`Transaction ${d.source_record_id ?? id} · Correction history`}
               />
             </Card>
           )}

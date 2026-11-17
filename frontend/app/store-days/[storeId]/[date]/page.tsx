@@ -4,6 +4,7 @@ import { Fragment, use, useCallback, useEffect, useMemo, useRef, useState } from
 import Link from 'next/link';
 import { api, money } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/preferences';
+import { downloadBlob, downloadCsv } from '@/lib/csv';
 import { SkeletonRows, useToast } from '@/components/Feedback';
 import { StoreScopeNote } from '@/components/StoreScope';
 import { CaseLink, useMe } from '@/components/MeProvider';
@@ -45,7 +46,15 @@ import type {
   Total,
 } from '@/lib/storeDays';
 
-type DetailTab = 'totals' | 'analysis' | 'closure' | 'cases' | 'history' | 'io' | 'missing';
+type DetailTab =
+  | 'totals'
+  | 'analysis'
+  | 'closure'
+  | 'cases'
+  | 'errors'
+  | 'history'
+  | 'io'
+  | 'missing';
 
 interface DayIoLog {
   imports: {
@@ -82,6 +91,33 @@ interface SequenceGapPagination {
   page: number;
   page_size: number;
   total: number;
+  pages: number;
+}
+interface DayAuditError {
+  id: string;
+  code: string;
+  family: string;
+  detection_origin: string;
+  detection_rule_id: string;
+  detection_rule_name: string | null;
+  severity: string;
+  confidence: string;
+  close_impact: string;
+  close_blocker_reason: string | null;
+  status: string;
+  amount: string;
+  exposure: string;
+  currency: string | null;
+  created_at: string;
+  case_id: string;
+  case_number: string;
+  case_status: string;
+}
+interface DayAuditErrorPage {
+  items: DayAuditError[];
+  total: number;
+  page: number;
+  page_size: number;
   pages: number;
 }
 
@@ -181,6 +217,7 @@ export default function StoreDayDetailPage({
   const [removeReason, setRemoveReason] = useState('');
   const [removeConfirmation, setRemoveConfirmation] = useState('');
   const [tab, setTab] = useState<DetailTab>('totals');
+  const [linkCopied, setLinkCopied] = useState(false);
   const [onlyVariance, setOnlyVariance] = useState(false);
   const [historyType, setHistoryType] = useState('');
   const [historyQ, setHistoryQ] = useState('');
@@ -204,6 +241,14 @@ export default function StoreDayDetailPage({
     total: 0,
     pages: 1,
   });
+  const [dayErrors, setDayErrors] = useState<DayAuditErrorPage | null>(null);
+  const [dayErrorsView, setDayErrorsView] = useState<'open' | 'all'>('open');
+  const [dayErrorsQuery, setDayErrorsQuery] = useState('');
+  const [dayErrorsPage, setDayErrorsPage] = useState(1);
+  const [dayErrorsLoading, setDayErrorsLoading] = useState(false);
+  const [dayErrorsExporting, setDayErrorsExporting] = useState(false);
+  const [dayErrorsError, setDayErrorsError] = useState('');
+  const dayErrorsSequence = useRef(0);
   const [explaining, setExplaining] = useState<Total | null>(null);
   const [explainReason, setExplainReason] = useState('');
   const [explainCase, setExplainCase] = useState('');
@@ -230,6 +275,41 @@ export default function StoreDayDetailPage({
     },
     [storeId, date]
   );
+
+  const loadDayErrors = useCallback(async () => {
+    const sequence = ++dayErrorsSequence.current;
+    setDayErrorsLoading(true);
+    setDayErrorsError('');
+    try {
+      const { data } = await api.get<DayAuditErrorPage>(
+        `${dayApi({ store_id: storeId, business_date: date })}/errors`,
+        {
+          params: {
+            status: dayErrorsView,
+            q: dayErrorsQuery.trim() || undefined,
+            page: dayErrorsPage,
+            page_size: 50,
+          },
+        }
+      );
+      if (sequence === dayErrorsSequence.current) setDayErrors(data);
+    } catch (e) {
+      if (sequence !== dayErrorsSequence.current) return;
+      setDayErrors(null);
+      setDayErrorsError(apiError(e, 'Could not load the Store Day error list.'));
+    } finally {
+      if (sequence === dayErrorsSequence.current) setDayErrorsLoading(false);
+    }
+  }, [storeId, date, dayErrorsView, dayErrorsQuery, dayErrorsPage]);
+
+  useEffect(() => {
+    if (tab !== 'errors') return;
+    const timer = window.setTimeout(() => void loadDayErrors(), 180);
+    return () => {
+      window.clearTimeout(timer);
+      dayErrorsSequence.current += 1;
+    };
+  }, [tab, loadDayErrors]);
 
   const load = useCallback(
     async (v?: number, historyFilters?: { q?: string; eventType?: string }) => {
@@ -299,6 +379,126 @@ export default function StoreDayDetailPage({
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const syncTabFromUrl = () => {
+      const requestedTab = new URLSearchParams(window.location.search).get('tab');
+      if (
+        requestedTab &&
+        [
+          'totals',
+          'analysis',
+          'closure',
+          'cases',
+          'errors',
+          'history',
+          'io',
+          'missing',
+        ].includes(requestedTab)
+      ) {
+        setTab(requestedTab as DetailTab);
+      }
+    };
+    syncTabFromUrl();
+    window.addEventListener('popstate', syncTabFromUrl);
+    return () => window.removeEventListener('popstate', syncTabFromUrl);
+  }, []);
+
+  const selectTab = (nextTab: DetailTab) => {
+    if (nextTab === tab) return;
+    setTab(nextTab);
+    setLinkCopied(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', nextTab);
+    window.history.pushState({}, '', url);
+  };
+
+  const copySectionLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      toast('Could not copy the section link.', 'error');
+    }
+  };
+
+  const exportLoadedHistory = () => {
+    downloadCsv(
+      `${storeId}-${date}-audit-history-loaded.csv`,
+      ['Recorded at', 'Event', 'Description', 'Actor'],
+      history.map((item) => [
+        item.created_at,
+        item.event_type,
+        item.description,
+        item.actor,
+      ])
+    );
+  };
+
+  const exportClosureRequests = () => {
+    downloadCsv(
+      `${storeId}-${date}-closure-requests.csv`,
+      ['Requested at', 'Status', 'Requested by', 'Evidence basis', 'Reviewed by', 'Review reason'],
+      closures.map((item) => [
+        item.created_at,
+        item.status,
+        item.requested_by,
+        item.evidence_basis,
+        item.reviewed_by,
+        item.review_reason,
+      ])
+    );
+  };
+
+  const exportLoadedSequenceGaps = () => {
+    const rows = gaps.flatMap((register) => [
+      ...register.missing.map((number) => [
+        register.register_id,
+        number,
+        'Needs review',
+        '',
+        '',
+        '',
+      ]),
+      ...register.dismissed.map((item) => [
+        register.register_id,
+        item.number,
+        'Not a transaction',
+        item.reason,
+        item.actor,
+        item.decided_at,
+      ]),
+    ]);
+    downloadCsv(
+      `${storeId}-${date}-missing-transactions-loaded.csv`,
+      ['Register', 'Transaction number', 'Status', 'Reason', 'Decided by', 'Decided at'],
+      rows
+    );
+  };
+
+  const exportDayErrors = async () => {
+    setDayErrorsExporting(true);
+    setDayErrorsError('');
+    try {
+      const { data } = await api.get(
+        `${dayApi({ store_id: storeId, business_date: date })}/errors`,
+        {
+          params: {
+            status: dayErrorsView,
+            q: dayErrorsQuery.trim() || undefined,
+            format: 'csv',
+          },
+          responseType: 'blob',
+        }
+      );
+      downloadBlob(`${storeId}-${date}-audit-errors.csv`, data);
+    } catch (e) {
+      setDayErrorsError(apiError(e, 'Could not download the matching audit errors.'));
+    } finally {
+      setDayErrorsExporting(false);
+    }
+  };
 
   const act = async (path: string, body?: object, done?: () => void, message?: string) => {
     setBusy(true);
@@ -422,6 +622,14 @@ export default function StoreDayDetailPage({
     key: 'total',
     header: 'Total',
     primary: true,
+    csvValue: (t) =>
+      [
+        t.name,
+        t.level !== 'Store' ? `${t.level}${t.dimension ? ` · ${t.dimension}` : ''}` : '',
+        t.rollup_key ? formatRollupKey(t.rollup_key) : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
     render: (t) => (
       <>
         {t.name}
@@ -443,6 +651,7 @@ export default function StoreDayDetailPage({
     key: 'calc',
     header: 'Calculated',
     numeric: true,
+    csvValue: (t) => t.calculated_amount,
     render: (t) => money(t.calculated_amount, t.currency),
   };
   const changeColumns: Column<Total>[] = prevTotals
@@ -451,6 +660,12 @@ export default function StoreDayDetailPage({
           key: 'change',
           header: `vs v${prevTotals.version}`,
           numeric: true,
+          csvValue: (t) => {
+            const before = prevAmounts.get(totalKey(t));
+            if (before === undefined) return 'New';
+            const delta = Number(t.calculated_amount) - before;
+            return delta === 0 ? '' : signed(delta, t.currency);
+          },
           render: (t) => {
             const before = prevAmounts.get(totalKey(t));
             if (before === undefined)
@@ -468,6 +683,7 @@ export default function StoreDayDetailPage({
   const qualityColumn: Column<Total> = {
     key: 'quality',
     header: 'Data',
+    csvValue: (t) => t.data_quality ?? '',
     render: (t) =>
       t.data_quality ? (
         <Badge variant={qualityVariant(t.data_quality)} size="sm">
@@ -485,12 +701,14 @@ export default function StoreDayDetailPage({
       key: 'declared',
       header: 'Declared',
       numeric: true,
+      csvValue: (t) => t.declared_amount,
       render: (t) => (t.declared_amount === null ? '—' : money(t.declared_amount, t.currency)),
     },
     {
       key: 'variance',
       header: 'Variance',
       numeric: true,
+      csvValue: (t) => t.variance_amount,
       render: (t) =>
         t.variance_amount === null ? (
           '—'
@@ -506,6 +724,7 @@ export default function StoreDayDetailPage({
       key: 'drillback',
       header: 'Review',
       stopRowClick: true,
+      csvSkip: true,
       render: (t) =>
         t.name === 'POS to GL Variance' && ['finance', 'it', 'admin'].includes(me?.role ?? '') ? (
           <Link
@@ -521,6 +740,11 @@ export default function StoreDayDetailPage({
     {
       key: 'outcome',
       header: 'Tolerance',
+      csvValue: (t) => {
+        if (!t.outcome || t.outcome === 'Balanced') return '';
+        const state = t.resolved && t.explanation ? 'Explained' : t.outcome;
+        return t.explanation ? `${state} · ${t.explanation.reason}` : state;
+      },
       render: (t) =>
         !t.outcome || t.outcome === 'Balanced' ? (
           '—'
@@ -565,6 +789,10 @@ export default function StoreDayDetailPage({
           key: 'total',
           header: dimension,
           primary: true,
+          csvValue: (t) =>
+            [t.dimension, t.rollup_key ? formatRollupKey(t.rollup_key) : '', t.name]
+              .filter(Boolean)
+              .join(' · '),
           render: (t) => (
             <>
               {t.dimension ?? '—'}
@@ -664,7 +892,7 @@ export default function StoreDayDetailPage({
                       type="button"
                       className="link-button"
                       aria-label={`${action.text}: ${reason}`}
-                      onClick={() => setTab(action.tab)}
+                      onClick={() => selectTab(action.tab)}
                     >
                       {action.text}
                     </button>
@@ -695,7 +923,7 @@ export default function StoreDayDetailPage({
         content: (
           <>
             {unexplained} variance{unexplained > 1 ? 's need' : ' needs'} an explanation.{' '}
-            <button type="button" className="link-button" onClick={() => setTab('totals')}>
+            <button type="button" className="link-button" onClick={() => selectTab('totals')}>
               Review totals
             </button>
           </>
@@ -715,7 +943,7 @@ export default function StoreDayDetailPage({
               <span key={g.register_id}>
                 {g.register_id}: {g.missing.slice(0, 12).join(', ')}
                 {g.count > 12 ? ` and ${g.count - 12} more` : ''}{' '}
-                <button type="button" className="link-button" onClick={() => setTab('missing')}>
+                <button type="button" className="link-button" onClick={() => selectTab('missing')}>
                   Review gaps
                 </button>
               </span>
@@ -763,6 +991,9 @@ export default function StoreDayDetailPage({
         actions={
           day && (
             <>
+              <Button variant="secondary" size="sm" onClick={copySectionLink}>
+                {linkCopied ? 'Link copied' : 'Copy section link'}
+              </Button>
               <Badge variant={dayStatusVariant(day.status)}>{day.status}</Badge>
               {me?.role === 'it' && !closed && day.audit_version === 0 && (
                 <Button variant="danger" disabled={busy} onClick={() => setRemoveOpen(true)}>
@@ -773,7 +1004,7 @@ export default function StoreDayDetailPage({
                 Re-total
               </Button>
               {closed ? (
-                <Button onClick={() => setTab('closure')}>Reopen…</Button>
+                <Button onClick={() => selectTab('closure')}>Reopen…</Button>
               ) : pending ? (
                 <Button
                   variant="primary"
@@ -790,7 +1021,7 @@ export default function StoreDayDetailPage({
                   Approve &amp; close
                 </Button>
               ) : (
-                <Button variant="primary" onClick={() => setTab('closure')}>
+                <Button variant="primary" onClick={() => selectTab('closure')}>
                   {canSignOff && signoffReady && !hasCurrentSignoff
                     ? 'Sign audit…'
                     : 'Request closure…'}
@@ -898,22 +1129,22 @@ export default function StoreDayDetailPage({
                   ).map(([label, state, note]) => {
                     const action =
                       label === 'Data'
-                        ? { text: 'View import log', run: () => setTab('io') }
+                        ? { text: 'View import log', run: () => selectTab('io') }
                         : label === 'Audit'
                           ? (readiness.audit.missing_transactions ?? 0) > 0
                             ? {
                                 text: 'Review missing transactions',
-                                run: () => setTab('missing'),
+                                run: () => selectTab('missing'),
                               }
                             : readiness.audit.open_cases > 0
-                              ? { text: 'Review cases', run: () => setTab('cases') }
+                              ? { text: 'Review cases', run: () => selectTab('cases') }
                               : readiness.audit.unexplained_variances > 0
-                                ? { text: 'Review totals', run: () => setTab('totals') }
+                                ? { text: 'Review totals', run: () => selectTab('totals') }
                                 : !readiness.audit.signed_off
-                                  ? { text: 'Review sign-off', run: () => setTab('closure') }
+                                  ? { text: 'Review sign-off', run: () => selectTab('closure') }
                                   : null
                           : label === 'Export'
-                            ? { text: 'View delivery log', run: () => setTab('io') }
+                            ? { text: 'View delivery log', run: () => selectTab('io') }
                             : null;
                     return (
                       <div key={label} className="sd-ready-item">
@@ -935,7 +1166,11 @@ export default function StoreDayDetailPage({
                   <div className="sd-ready-item">
                     <dt>Cases</dt>
                     <dd>
-                      <button type="button" className="link-button" onClick={() => setTab('cases')}>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => selectTab('cases')}
+                      >
                         {openCases} open of {cases.length}
                       </button>
                       <small>Raised for this store day</small>
@@ -973,12 +1208,13 @@ export default function StoreDayDetailPage({
           <Card>
             <Tabs
               value={tab}
-              onChange={(id) => setTab(id as DetailTab)}
+              onChange={(id) => selectTab(id as DetailTab)}
               items={[
                 { id: 'totals', label: 'Totals', count: totals.length },
                 { id: 'analysis', label: 'Analysis' },
                 { id: 'closure', label: 'Closure', count: closures.length },
                 { id: 'cases', label: 'Cases', count: cases.length },
+                { id: 'errors', label: 'Error List', count: dayErrors?.total },
                 { id: 'history', label: 'History', count: history.length },
                 {
                   id: 'io',
@@ -1001,7 +1237,7 @@ export default function StoreDayDetailPage({
                 </p>
                 <div className="sd-analysis-links">
                   <Link
-                    href={`/register-summary?store_id=${encodeURIComponent(storeId)}&business_date=${encodeURIComponent(date)}`}
+                    href={`/register-summary?store_id=${encodeURIComponent(storeId)}&business_date=${encodeURIComponent(date)}&source=store-day`}
                   >
                     <strong>Cashier / Register Summary</strong>
                     <span>Transactions, register events, and cash over/short</span>
@@ -1123,6 +1359,8 @@ export default function StoreDayDetailPage({
                         rows={g.rows}
                         rowKey={(t) => t.id}
                         rowClassName={(t) => (hasVariance(t) ? 'sd-row-bad' : '')}
+                        csvFileName={`${storeId}-${date}-totals-${g.key}-v${version ?? day.audit_version}.csv`}
+                        detachTitle={`${storeId} ${date} · ${g.title}`}
                       />
                     </section>
                   ))
@@ -1294,13 +1532,28 @@ export default function StoreDayDetailPage({
                           header: 'Reopened',
                           nowrap: true,
                           primary: true,
+                          csvValue: (r: Reopen) => r.reopened_at,
                           render: (r: Reopen) => formatDateTime(r.reopened_at),
                         },
-                        { key: 'by', header: 'By', render: (r: Reopen) => r.reopened_by },
-                        { key: 'why', header: 'Reason', render: (r: Reopen) => r.reason },
+                        {
+                          key: 'by',
+                          header: 'By',
+                          csvValue: (r: Reopen) => r.reopened_by,
+                          render: (r: Reopen) => r.reopened_by,
+                        },
+                        {
+                          key: 'why',
+                          header: 'Reason',
+                          csvValue: (r: Reopen) => r.reason,
+                          render: (r: Reopen) => r.reason,
+                        },
                         {
                           key: 'closed',
                           header: 'Had been closed by',
+                          csvValue: (r: Reopen) =>
+                            r.closed_by
+                              ? `${r.closed_by}${r.closed_at ? ` · ${formatDateTime(r.closed_at, { dateStyle: 'medium' })}` : ''}`
+                              : '',
                           render: (r: Reopen) =>
                             r.closed_by
                               ? `${r.closed_by}${r.closed_at ? ` · ${formatDateTime(r.closed_at, { dateStyle: 'medium' })}` : ''}`
@@ -1310,17 +1563,30 @@ export default function StoreDayDetailPage({
                           key: 'ver',
                           header: 'Totals version',
                           numeric: true,
+                          csvValue: (r: Reopen) => r.audit_version ?? '',
                           render: (r: Reopen) => (r.audit_version ? `v${r.audit_version}` : '—'),
                         },
                       ]}
                       rows={reopens}
                       rowKey={(r: Reopen) => r.id}
+                      csvFileName={`${storeId}-${date}-reopen-history.csv`}
+                      detachTitle={`${storeId} ${date} · Reopen history`}
                     />
                   )}
                 </div>
 
                 <div className="sd-section">
-                  <h3>Closure requests ({closures.length})</h3>
+                  <div className="row-between">
+                    <h3>Closure requests ({closures.length})</h3>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={closures.length === 0}
+                      onClick={exportClosureRequests}
+                    >
+                      Export closure history CSV
+                    </Button>
+                  </div>
                   {closures.length === 0 ? (
                     <p className="cc-empty">No closure requests yet.</p>
                   ) : (
@@ -1374,12 +1640,19 @@ export default function StoreDayDetailPage({
                       key: 'case',
                       header: 'Case',
                       primary: true,
+                      csvValue: (c) => c.case_number,
                       render: (c) => <CaseLink id={c.id}>{c.case_number}</CaseLink>,
                     },
-                    { key: 'type', header: 'Type', render: (c) => c.case_type },
+                    {
+                      key: 'type',
+                      header: 'Type',
+                      csvValue: (c) => c.case_type,
+                      render: (c) => c.case_type,
+                    },
                     {
                       key: 'status',
                       header: 'Status',
+                      csvValue: (c) => c.status,
                       render: (c) => (
                         <Badge variant="secondary" size="sm">
                           {c.status}
@@ -1390,12 +1663,177 @@ export default function StoreDayDetailPage({
                       key: 'exposure',
                       header: 'Exposure',
                       numeric: true,
+                      csvValue: (c) => c.exposure,
                       render: (c) => money(c.exposure),
                     },
                   ]}
                   rows={cases}
                   rowKey={(c) => c.id}
                   emptyTitle="No cases for this Store Day"
+                  csvFileName={`${storeId}-${date}-cases.csv`}
+                  detachTitle={`${storeId} ${date} · Cases`}
+                />
+              </div>
+            )}
+
+            {tab === 'errors' && (
+              <div className="sd-pane">
+                <p className="hint">
+                  Transaction audit exceptions raised for this store day. The list defaults to
+                  errors in open cases; use a case link to investigate and resolve them.
+                </p>
+                <Toolbar count={dayErrors ? `${dayErrors.total} matching errors` : undefined}>
+                  <input
+                    className="grow"
+                    type="search"
+                    value={dayErrorsQuery}
+                    onChange={(event) => {
+                      setDayErrorsQuery(event.target.value);
+                      setDayErrorsPage(1);
+                    }}
+                    placeholder="Search code, family, rule, or case"
+                    aria-label="Search Store Day audit errors"
+                  />
+                  <select
+                    aria-label="Filter Store Day audit errors"
+                    value={dayErrorsView}
+                    onChange={(event) => {
+                      setDayErrorsView(event.target.value as 'open' | 'all');
+                      setDayErrorsPage(1);
+                    }}
+                  >
+                    <option value="open">Open cases</option>
+                    <option value="all">All cases</option>
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={dayErrorsLoading || dayErrorsExporting || !dayErrors?.total}
+                    onClick={() => void exportDayErrors()}
+                  >
+                    {dayErrorsExporting ? 'Preparing CSV…' : 'Export matching CSV'}
+                  </Button>
+                </Toolbar>
+                {dayErrorsError && <Alert tone="error">{dayErrorsError}</Alert>}
+                <DataTable
+                  columns={[
+                    {
+                      key: 'error',
+                      header: 'Audit error',
+                      primary: true,
+                      csvValue: (item: DayAuditError) =>
+                        `${item.code} · ${item.family} · ${item.detection_origin}`,
+                      render: (item: DayAuditError) => (
+                        <>
+                          <Link href={`/audit-errors/${encodeURIComponent(item.code)}`}>
+                            {item.code}
+                          </Link>
+                          <small className="act-sub" style={{ display: 'block' }}>
+                            {item.family} · {item.detection_origin}
+                          </small>
+                        </>
+                      ),
+                    },
+                    {
+                      key: 'case',
+                      header: 'Case',
+                      csvValue: (item: DayAuditError) =>
+                        `${item.case_number} (${item.case_status})`,
+                      render: (item: DayAuditError) => (
+                        <>
+                          <CaseLink id={item.case_id}>{item.case_number}</CaseLink>
+                          <small className="act-sub" style={{ display: 'block' }}>
+                            {item.case_status}
+                          </small>
+                        </>
+                      ),
+                    },
+                    {
+                      key: 'status',
+                      header: 'Error status',
+                      csvValue: (item: DayAuditError) => item.status,
+                      render: (item: DayAuditError) => (
+                        <Badge variant={item.status === 'Open' ? 'warning' : 'secondary'} size="sm">
+                          {item.status}
+                        </Badge>
+                      ),
+                    },
+                    {
+                      key: 'severity',
+                      header: 'Severity',
+                      csvValue: (item: DayAuditError) => item.severity,
+                      render: (item: DayAuditError) => item.severity,
+                    },
+                    {
+                      key: 'rule',
+                      header: 'Detection rule',
+                      csvValue: (item: DayAuditError) =>
+                        item.detection_rule_name ?? item.detection_rule_id,
+                      render: (item: DayAuditError) =>
+                        item.detection_rule_name ?? item.detection_rule_id,
+                    },
+                    {
+                      key: 'amount',
+                      header: 'Amount',
+                      numeric: true,
+                      csvValue: (item: DayAuditError) => item.amount,
+                      render: (item: DayAuditError) =>
+                        money(item.amount, item.currency ?? undefined),
+                    },
+                    {
+                      key: 'exposure',
+                      header: 'Exposure',
+                      numeric: true,
+                      csvValue: (item: DayAuditError) => item.exposure,
+                      render: (item: DayAuditError) =>
+                        money(item.exposure, item.currency ?? undefined),
+                    },
+                    {
+                      key: 'close-impact',
+                      header: 'Closure impact',
+                      csvValue: (item: DayAuditError) =>
+                        item.close_blocker_reason
+                          ? `${item.close_impact} · ${item.close_blocker_reason}`
+                          : item.close_impact,
+                      render: (item: DayAuditError) => (
+                        <>
+                          {item.close_impact}
+                          {item.close_blocker_reason && (
+                            <small className="act-sub" style={{ display: 'block' }}>
+                              {item.close_blocker_reason}
+                            </small>
+                          )}
+                        </>
+                      ),
+                    },
+                    {
+                      key: 'created',
+                      header: 'Raised',
+                      nowrap: true,
+                      csvValue: (item: DayAuditError) => item.created_at,
+                      render: (item: DayAuditError) => formatDateTime(item.created_at),
+                    },
+                  ]}
+                  rows={dayErrorsLoading ? null : (dayErrors?.items ?? [])}
+                  rowKey={(item: DayAuditError) => item.id}
+                  emptyTitle="No audit errors for this Store Day"
+                  emptyHint="Try All cases to include errors in closed cases."
+                  failed={!!dayErrorsError}
+                  csvFileName={`${storeId}-${date}-audit-errors-visible.csv`}
+                  detachTitle={`${storeId} ${date} · Error List`}
+                  footer={
+                    dayErrors && (
+                      <Pager
+                        page={dayErrors.page}
+                        pages={dayErrors.pages}
+                        total={dayErrors.total}
+                        pageSize={dayErrors.page_size}
+                        pageSizes={[50]}
+                        onPage={setDayErrorsPage}
+                        onPageSize={() => {}}
+                      />
+                    )
+                  }
                 />
               </div>
             )}
@@ -1407,6 +1845,15 @@ export default function StoreDayDetailPage({
                 ) : (
                   <>
                     <Toolbar count={`${historyPagination.total} events`}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={history.length === 0}
+                        title="Download the audit history events loaded for the current filters."
+                        onClick={exportLoadedHistory}
+                      >
+                        Export loaded history CSV
+                      </Button>
                       <input
                         className="grow"
                         type="search"
@@ -1490,42 +1937,55 @@ export default function StoreDayDetailPage({
                         key: 'source',
                         header: 'Source',
                         primary: true,
+                        csvValue: (row) => row.source_system,
                         render: (row) => row.source_system,
                       },
-                      { key: 'delivery', header: 'Delivery', render: (row) => row.delivery_id },
+                      {
+                        key: 'delivery',
+                        header: 'Delivery',
+                        csvValue: (row) => row.delivery_id,
+                        render: (row) => row.delivery_id,
+                      },
                       {
                         key: 'received',
                         header: 'Received',
+                        csvValue: (row) => row.received_at,
                         render: (row) => formatDateTime(row.received_at),
                       },
                       {
                         key: 'day_records',
                         header: 'Store-day records',
                         numeric: true,
+                        csvValue: (row) => row.store_day_records,
                         render: (row) => formatNumber(row.store_day_records),
                       },
                       {
                         key: 'delivery_records',
                         header: 'Delivery total',
                         numeric: true,
+                        csvValue: (row) => row.delivery_records,
                         render: (row) => formatNumber(row.delivery_records),
                       },
                       {
                         key: 'processed',
                         header: 'Processed',
                         numeric: true,
+                        csvValue: (row) => row.delivery_processed,
                         render: (row) => formatNumber(row.delivery_processed),
                       },
                       {
                         key: 'quarantined',
                         header: 'Quarantined',
                         numeric: true,
+                        csvValue: (row) => row.delivery_quarantined,
                         render: (row) => formatNumber(row.delivery_quarantined),
                       },
                     ]}
                     rows={ioLog.imports}
                     rowKey={(row) => `${row.source_system}:${row.delivery_id}`}
                     emptyTitle="No imported transactions linked to this day"
+                    csvFileName={`${storeId}-${date}-import-log.csv`}
+                    detachTitle={`${storeId} ${date} · Import log`}
                   />
                 </section>
                 <section>
@@ -1537,13 +1997,25 @@ export default function StoreDayDetailPage({
                         key: 'destination',
                         header: 'Destination',
                         primary: true,
+                        csvValue: (row) => row.destination,
                         render: (row) => row.destination,
                       },
-                      { key: 'batch', header: 'Batch', render: (row) => row.batch_id.slice(0, 8) },
-                      { key: 'dataset', header: 'Dataset', render: (row) => row.dataset },
+                      {
+                        key: 'batch',
+                        header: 'Batch',
+                        csvValue: (row) => row.batch_id,
+                        render: (row) => row.batch_id.slice(0, 8),
+                      },
+                      {
+                        key: 'dataset',
+                        header: 'Dataset',
+                        csvValue: (row) => row.dataset,
+                        render: (row) => row.dataset,
+                      },
                       {
                         key: 'status',
                         header: 'Status',
+                        csvValue: (row) => row.status,
                         render: (row) => (
                           <Badge
                             variant={
@@ -1561,31 +2033,55 @@ export default function StoreDayDetailPage({
                       {
                         key: 'created',
                         header: 'Created',
+                        csvValue: (row) => row.created_at,
                         render: (row) => formatDateTime(row.created_at),
                       },
                       {
                         key: 'day_records',
                         header: 'Store-day records',
                         numeric: true,
+                        csvValue: (row) => row.store_day_records,
                         render: (row) => formatNumber(row.store_day_records),
                       },
                       {
                         key: 'batch_records',
                         header: 'Batch total',
                         numeric: true,
+                        csvValue: (row) => row.batch_records,
                         render: (row) => formatNumber(row.batch_records),
                       },
                       {
                         key: 'ack',
                         header: 'Acknowledged',
+                        csvValue: (row) => row.acked_at ?? row.response_ref ?? '',
                         render: (row) =>
                           row.acked_at ? formatDateTime(row.acked_at) : row.response_ref || '—',
                       },
-                      { key: 'error', header: 'Error', render: (row) => row.error || '—' },
+                      {
+                        key: 'error',
+                        header: 'Error',
+                        csvValue: (row) => row.error ?? '',
+                        render: (row) => row.error || '—',
+                      },
+                      {
+                        key: 'sent',
+                        header: 'Sent',
+                        csvValue: (row) => row.sent_at ?? '',
+                        render: (row) => row.sent_at ? formatDateTime(row.sent_at) : '—',
+                      },
+                      {
+                        key: 'retries',
+                        header: 'Retries',
+                        numeric: true,
+                        csvValue: (row) => row.retries,
+                        render: (row) => formatNumber(row.retries),
+                      },
                     ]}
                     rows={ioLog.exports}
                     rowKey={(row) => row.batch_id}
                     emptyTitle="No exports for this store day"
+                    csvFileName={`${storeId}-${date}-export-log.csv`}
+                    detachTitle={`${storeId} ${date} · Export log`}
                   />
                 </section>
               </div>
@@ -1598,6 +2094,17 @@ export default function StoreDayDetailPage({
                   generated by mistake. Add details through a governed correction, or dismiss a
                   false gap with an audit reason.
                 </p>
+                <Toolbar count={`${gaps.length} register group(s) loaded`}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={gaps.length === 0}
+                    title="Download the missing and dismissed transaction numbers currently loaded."
+                    onClick={exportLoadedSequenceGaps}
+                  >
+                    Export loaded gaps CSV
+                  </Button>
+                </Toolbar>
                 {gaps.length === 0 ? (
                   <p className="cc-empty">No missing transaction numbers were found.</p>
                 ) : (

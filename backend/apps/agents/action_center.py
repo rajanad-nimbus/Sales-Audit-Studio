@@ -28,10 +28,11 @@ from apps.cases.models import (
     Case,
     HumanDecision,
 )
+from apps.controls.foundation.models import StoreLocationTrait
 from apps.csv_export import csv_row
 from apps.security import scope
 from apps.security.authentication import require_role
-from apps.security.models import UserRoleAssignment, VerifiedStoreUser
+from apps.security.models import StoreAssignment, UserRoleAssignment, VerifiedStoreUser
 
 router = APIRouter(prefix="/api/action-center")
 
@@ -138,7 +139,7 @@ async def list_cases(
     page: int = Query(1, ge=1, le=10_000),
     page_size: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("finance", "it")),
+    user: dict = Depends(require_role("finance", "it", "sales_audit_manager")),
 ):
     now = datetime.now(UTC)
     total = (await db.execute(apply(select(func.count()).select_from(Case), f, user))).scalar() or 0
@@ -164,7 +165,7 @@ async def list_cases(
 async def facets(
     f: Filters = Depends(filters),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("finance", "it")),
+    user: dict = Depends(require_role("finance", "it", "sales_audit_manager")),
 ):
     async def by(col, key, limit=None):
         stmt = apply(select(col, func.count()).group_by(col), f, user, skip=key).order_by(
@@ -184,7 +185,8 @@ async def facets(
 
 @router.get("/summary")
 async def summary(
-    db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("finance", "it"))
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it", "sales_audit_manager")),
 ):
     now = datetime.now(UTC)
     live = Case.status != "Closed"
@@ -260,7 +262,7 @@ async def groups(
     by: str = "case_type",
     f: Filters = Depends(filters),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("finance", "it")),
+    user: dict = Depends(require_role("finance", "it", "sales_audit_manager")),
 ):
     col = {
         "case_type": Case.case_type,
@@ -421,14 +423,26 @@ def _validate_select_all_filters(filters: dict[str, object]) -> None:
 async def bulk(
     req: BulkRequest,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("finance", "it")),
+    user: dict = Depends(require_role("finance", "it", "sales_audit_manager")),
 ):
-    if req.action == "assign" and user["role"] == "sales_audit_manager":
+    if user["role"] == "sales_audit_manager":
+        if req.action != "assign":
+            raise HTTPException(
+                status_code=403,
+                detail="Sales Audit Managers may only assign cases",
+            )
         assignee = req.params.get("assignee", "me")
-        if assignee != "me":
-            assignee = assignee.strip().casefold()
+        if not isinstance(assignee, str):
+            raise HTTPException(
+                status_code=422,
+                detail="Choose a verified person with the Sales Auditor role",
+            )
+        assignee = assignee.strip().casefold()
+        if assignee == "me":
+            assignee_identifier = None
+        else:
             effective_role = func.coalesce(UserRoleAssignment.role, VerifiedStoreUser.role)
-            verified = await db.scalar(
+            assignee_identifier = await db.scalar(
                 select(VerifiedStoreUser.assignment_identifier)
                 .outerjoin(
                     UserRoleAssignment,
@@ -440,12 +454,12 @@ async def bulk(
                     effective_role == "analyst",
                 )
             )
-            if verified is None:
+            if assignee_identifier is None:
                 raise HTTPException(
                     status_code=422,
                     detail="Choose a verified person with the Sales Auditor role",
                 )
-            req.params["assignee"] = assignee
+        req.params["assignee"] = assignee
     actor = me_name(user)
     if req.ids:
         stmt = select(Case).where(Case.id.in_(req.ids[:BULK_LIMIT]))
@@ -475,6 +489,44 @@ async def bulk(
     if req.select_all is not None and len(cases) > BULK_LIMIT:
         cases, truncated = cases[:BULK_LIMIT], True
 
+    if user["role"] == "sales_audit_manager" and req.params.get("assignee") != "me":
+        assignment = (
+            await db.execute(
+                select(StoreAssignment)
+                .where(StoreAssignment.user_identifier == assignee_identifier)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if assignment is None:
+            raise HTTPException(
+                status_code=422,
+                detail="The selected Sales Auditor has no local store portfolio",
+            )
+        eligible_stores = set(assignment.store_ids or [])
+        traits = assignment.location_traits or []
+        if traits:
+            trait_stores = (
+                await db.execute(
+                    select(StoreLocationTrait.store_id).where(
+                        StoreLocationTrait.location_trait.in_(traits)
+                    )
+                )
+            ).scalars()
+            eligible_stores.update(trait_stores)
+        outside_portfolio = sorted(
+            {case.store_id for case in cases if case.store_id} - eligible_stores
+        )
+        if outside_portfolio:
+            preview = ", ".join(outside_portfolio[:10])
+            suffix = "…" if len(outside_portfolio) > 10 else ""
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "The selected Sales Auditor does not have access to every selected store: "
+                    f"{preview}{suffix}"
+                ),
+            )
+
     heavy = req.action in {"investigate", "approve", "escalate", "advance"}
     if heavy and len(cases) > HEAVY_LIMIT:
         cases, truncated = cases[:HEAVY_LIMIT], True
@@ -495,7 +547,7 @@ async def export_csv(
     sort: str = "sla",
     dir: str = "asc",
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("finance", "it")),
+    user: dict = Depends(require_role("finance", "it", "sales_audit_manager")),
 ):
     matching_cases = (
         await db.execute(apply(select(func.count()).select_from(Case), f, user))

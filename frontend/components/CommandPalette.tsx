@@ -70,6 +70,12 @@ const TASKS = [
     keywords: 'configuration controls definitions rules worksheet',
   },
   {
+    path: '/settings/exchange',
+    label: 'Exchange retail configuration',
+    description: 'Find governed packages and foundation data workflows.',
+    keywords: 'configuration package snapshot import export exchange environment promotion',
+  },
+  {
     path: '/foundation',
     label: 'Maintain retail reference data',
     description: 'Review stores, tenders, and other foundation records.',
@@ -135,7 +141,7 @@ export function CommandPalette() {
         label: screen.label,
         description: `Open ${screen.group.toLocaleLowerCase()}.`,
         href: screen.path,
-        group: screen.group === 'Configuration' ? 'Configuration' : 'Screens',
+        group: screen.group === 'Configuration' ? 'Admin' : 'Screens',
         keywords: `${screen.path} ${screen.group}`,
       }));
     return [...tasks, ...screens];
