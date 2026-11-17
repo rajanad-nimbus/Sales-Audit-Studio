@@ -29,7 +29,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "AGNCYVOU"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "AGNCYVOU",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -65,7 +70,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "AMAZON"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "AMAZON"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -101,7 +106,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "AMEX"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "AMEX"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -137,7 +142,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "BEALLSCC"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "BEALLSCC",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -173,7 +183,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "CASH"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "CASH"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -244,7 +254,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "CHECK"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "CHECK"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -280,7 +290,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "DISCOVER"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "DISCOVER",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -316,7 +331,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "EBAY"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "EBAY"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -352,7 +367,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "GIFTCRDU"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "GIFTCRDU",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -388,7 +408,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "MASTERCD"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "MASTERCD",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -424,7 +449,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "MCVISADBT"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "MCVISADBT",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -459,7 +489,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "OUTLTCC"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "OUTLTCC"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -495,7 +525,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "PAYPAL"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "PAYPAL"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -531,7 +561,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "VIRTGC"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "VIRTGC"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -567,7 +597,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "VISA"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "VISA"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -603,7 +633,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "WALMART"}
+            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "WALMART"}
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -639,7 +669,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "MALLCERT"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "MALLCERT",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4657,7 +4692,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "MCRISSUE"},
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "eq",
+                "value": "MCRISSUE",
+            },
             {"realm": "Tender", "field": "amount", "operator": "lt", "value": "0"},
         ],
         "combined_total_ids": [],

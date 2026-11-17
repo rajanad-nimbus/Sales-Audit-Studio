@@ -103,4 +103,57 @@ def test_every_tender_a_total_matches_on_is_accepted_by_ingest():
         for r in t["restrictions"]
         if r["realm"] == "Tender" and r["field"] == "client_tender_code" and r["operator"] == "eq"
     }
-    assert codes <= set(CLIENT_TENDER_CODES)
+    assert len(codes) >= 17 and codes <= set(CLIENT_TENDER_CODES)
+
+
+def test_a_visa_tender_lands_in_the_visa_total_and_not_in_amex():
+    import asyncio
+
+    from models import AuditTotalDefinition, Base, StoreDay
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    from apps.ingest.service import ingest
+    from apps.totals.calculation import calculate_store_day, effective_definitions
+
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add(StoreDay(id="day", store_id="S1", business_date="2026-10-01"))
+                db.add_all(AuditTotalDefinition(**t, revision=1) for t in CLIENT_TOTALS)
+                await ingest(
+                    db,
+                    "POS",
+                    "delivery",
+                    [
+                        {
+                            "source_record_id": "s",
+                            "record_type": "Sale",
+                            "event_time": "2026-10-01T10:00:00Z",
+                            "store_id": "S1",
+                            "amount": "10",
+                            "tender_type": "Card",
+                            "tenders": [
+                                {
+                                    "tender_type": "Card",
+                                    "client_tender_code": "VISA",
+                                    "amount": "10",
+                                }
+                            ],
+                        }
+                    ],
+                )
+                await db.commit()
+                definitions = await effective_definitions(db, "2026-10-01", "S1")
+                result = await calculate_store_day(db, "S1", "2026-10-01", definitions)
+                ids = {d.name: d.id for d in definitions}
+                total = lambda name: sum(result.configured_totals[ids[name]].values())  # noqa: E731
+                assert total("VISA") == 10
+                assert total("AMEX") == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
