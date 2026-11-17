@@ -206,6 +206,7 @@ async def calculate_definitions(
         for definition in definitions
     ):
         taxes = await effective_taxes(db, rows)
+    await attach_store_areas(db, definitions, rows)
     related_rows = await load_restricted_realms(db, definitions, rows)
     grouped_values: dict[str, dict[tuple[str | None, str | None], Decimal]] = {}
     counts: dict[str, int] = {}
@@ -240,6 +241,37 @@ async def calculate_definitions(
             if identifier not in excluded
         },
     )
+
+
+def uses_store_area(definitions: list[AuditTotalDefinition]) -> bool:
+    return any(
+        item.get("realm") == "Transaction" and item.get("field") == "store_area"
+        for definition in definitions
+        for item in (definition.restrictions or [])
+    )
+
+
+async def attach_store_areas(db, definitions, rows) -> None:
+    """Give each transaction its store's configured area; a store with none stays empty and matches no area."""
+    if not rows or not uses_store_area(definitions):
+        return
+    store_ids = {row.store_id for row in rows}
+    stores = (
+        await db.execute(
+            select(FoundationReference.code, FoundationReference.attributes).where(
+                FoundationReference.category == "Store",
+                FoundationReference.code.in_(store_ids),
+                FoundationReference.active.is_(True),
+            )
+        )
+    ).all()
+    areas = {
+        code: attributes.get("area")
+        for code, attributes in stores
+        if isinstance(attributes, dict) and isinstance(attributes.get("area"), int)
+    }
+    for row in rows:
+        row.store_area = areas.get(row.store_id)
 
 
 def matching_transactions(definition: AuditTotalDefinition, rows: list[CanonicalTransaction]):

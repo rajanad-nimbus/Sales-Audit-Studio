@@ -54,14 +54,14 @@ def condition_matches(condition: dict, transaction) -> bool:
     """Evaluate one validated field predicate without executing retailer-provided code."""
     field = condition["field"]
     operator = condition["operator"]
-    actual = getattr(transaction, field)
+    actual = getattr(transaction, field, None)
     expected = condition.get("value")
     if operator == "is_empty":
         return actual is None or not str(actual).strip()
     if operator == "not_empty":
         return actual is not None and bool(str(actual).strip())
     if actual is None:
-        return operator == "ne"
+        return operator in {"ne", "not_in"}
     if field in {
         "signed_amount",
         "quantity",
@@ -71,6 +71,7 @@ def condition_matches(condition: dict, transaction) -> bool:
         "amount",
         "rate",
         "taxable_amount",
+        "store_area",
     }:
         try:
             actual_value, expected_value = Decimal(str(actual)), Decimal(str(expected))

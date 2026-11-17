@@ -249,3 +249,77 @@ def test_voucher_totals_use_the_number_range_classification():
     for name, expected in (("GFTCRDSL", "GIFTCARD,MCR"), ("VIRTGCSL", "VIRTUAL")):
         restriction = by_name[name]["restrictions"][0]
         assert restriction["field"] == "voucher_kind" and restriction["value"] == expected
+
+
+def test_store_area_limits_the_bsi_and_outlet_sales_totals():
+    import asyncio
+
+    from models import AuditTotalDefinition, Base, FoundationReference
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    from apps.ingest.service import ingest
+    from apps.totals.calculation import calculate_store_day, effective_definitions
+
+    names = ("SLSCLBSI", "SLSCLOUT", "SALESCLAS")
+
+    async def run(area):
+        engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                db.add_all(AuditTotalDefinition(**t, revision=1) for t in CLIENT_TOTALS)
+                db.add(
+                    FoundationReference(
+                        id="s1",
+                        category="Store",
+                        code="S1",
+                        name="Store 1",
+                        attributes={} if area is None else {"area": area},
+                    )
+                )
+                await ingest(
+                    db,
+                    "POS",
+                    "delivery",
+                    [
+                        {
+                            "source_record_id": "s",
+                            "record_type": "Sale",
+                            "event_time": "2026-10-01T10:00:00Z",
+                            "store_id": "S1",
+                            "amount": "10",
+                            "lines": [{"item_code": "SKU1", "quantity": "1", "unit_price": "10"}],
+                            "tenders": [{"tender_type": "Cash", "amount": "10"}],
+                        }
+                    ],
+                )
+                await db.commit()
+                definitions = await effective_definitions(db, "2026-10-01", "S1")
+                result = await calculate_store_day(db, "S1", "2026-10-01", definitions)
+                ids = {d.name: d.id for d in definitions}
+                return {n: sum(result.configured_totals.get(ids[n], {}).values()) for n in names}
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(run(2500)) == {"SLSCLBSI": 10, "SLSCLOUT": 0, "SALESCLAS": 10}
+    assert asyncio.run(run(3500)) == {"SLSCLBSI": 0, "SLSCLOUT": 10, "SALESCLAS": -10}
+    assert asyncio.run(run(None)) == {"SLSCLBSI": 0, "SLSCLOUT": 0, "SALESCLAS": 0}
+
+
+def test_a_store_area_must_be_a_whole_number():
+    import pytest
+    from pydantic import ValidationError
+
+    from apps.controls.foundation.routes import ReferenceBody
+
+    assert (
+        ReferenceBody(
+            category="Store", code="S1", name="S", attributes={"area": "2500"}
+        ).attributes["area"]
+        == 2500
+    )
+    for bad in ("x", 12.5, True, 100000, -1):
+        with pytest.raises(ValidationError):
+            ReferenceBody(category="Store", code="S1", name="S", attributes={"area": bad})

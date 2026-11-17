@@ -96,6 +96,22 @@ class ReferenceBody(BaseModel):
         self.attributes = {**self.attributes, "location_traits": normalized_traits}
         return self
 
+    @model_validator(mode="after")
+    def normalize_store_area(self):
+        """A store's area is a whole number the area-limited totals compare against."""
+        if self.category != "Store" or self.attributes.get("area") in (None, ""):
+            return self
+        area = self.attributes["area"]
+        if isinstance(area, bool) or not (
+            isinstance(area, int) or (isinstance(area, str) and area.strip().isdigit())
+        ):
+            raise ValueError("Store area must be a whole number")
+        number = int(area)
+        if not 0 <= number <= 99999:
+            raise ValueError("Store area must be between 0 and 99999")
+        self.attributes = {**self.attributes, "area": number}
+        return self
+
 
 class FoundationImportBody(BaseModel):
     csv_text: str = Field(min_length=1, max_length=2_000_000)

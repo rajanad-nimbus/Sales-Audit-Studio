@@ -18,6 +18,7 @@ REALM_FIELDS = {
         "signed_amount": "number",
         "quantity": "number",
         "register_id": "text",
+        "store_area": "number",
         "cashier_id": "text",
         "salesperson_id": "text",
         "channel_id": "text",

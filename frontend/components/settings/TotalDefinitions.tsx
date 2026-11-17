@@ -123,7 +123,18 @@ type RestrictionRealm = 'Transaction' | 'Line' | 'Tax' | 'Tender' | 'Discount';
 type Restriction = {
   realm: RestrictionRealm;
   field: string;
-  operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'is_empty' | 'not_empty';
+  operator:
+    | 'eq'
+    | 'ne'
+    | 'gt'
+    | 'gte'
+    | 'lt'
+    | 'lte'
+    | 'contains'
+    | 'in'
+    | 'not_in'
+    | 'is_empty'
+    | 'not_empty';
   value: string;
 };
 type TotalRealmJoin = {
@@ -142,6 +153,7 @@ const restrictionFields: Record<
     { key: 'signed_amount', label: 'Signed amount', numeric: true },
     { key: 'quantity', label: 'Quantity', numeric: true },
     { key: 'register_id', label: 'Register' },
+    { key: 'store_area', label: 'Store area', numeric: true },
     { key: 'cashier_id', label: 'Cashier' },
     { key: 'salesperson_id', label: 'Salesperson' },
     { key: 'channel_id', label: 'Channel' },
@@ -153,6 +165,7 @@ const restrictionFields: Record<
   ],
   Line: [
     { key: 'item_code', label: 'Item code' },
+    { key: 'voucher_kind', label: 'Voucher kind' },
     { key: 'quantity', label: 'Line quantity', numeric: true },
     { key: 'unit_price', label: 'Unit price', numeric: true },
     { key: 'gross_amount', label: 'Gross amount', numeric: true },
@@ -169,6 +182,7 @@ const restrictionFields: Record<
   ],
   Tender: [
     { key: 'tender_type', label: 'Tender type' },
+    { key: 'client_tender_code', label: 'Client tender code' },
     { key: 'amount', label: 'Amount', numeric: true },
     { key: 'reference', label: 'Reference' },
     { key: 'authorization', label: 'Authorization' },
@@ -1664,7 +1678,7 @@ function DraftForm({
               const selectedField = realmFields.find((field) => field.key === restriction.field);
               const operators = selectedField?.numeric
                 ? ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'is_empty', 'not_empty']
-                : ['eq', 'ne', 'contains', 'is_empty', 'not_empty'];
+                : ['eq', 'ne', 'contains', 'in', 'not_in', 'is_empty', 'not_empty'];
               return (
                 <div className="form-row" key={`restriction-${index}`}>
                   <Field label={`Realm ${index + 1}`}>
@@ -1734,6 +1748,11 @@ function DraftForm({
                       <input
                         type={selectedField?.numeric ? 'number' : 'text'}
                         step="any"
+                        placeholder={
+                          ['in', 'not_in'].includes(restriction.operator)
+                            ? 'Comma-separated values'
+                            : undefined
+                        }
                         value={restriction.value}
                         onChange={(event) => {
                           const next = [...form.restrictions];
