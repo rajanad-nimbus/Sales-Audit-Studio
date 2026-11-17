@@ -25,6 +25,15 @@ TENDER_BY_GATEWAY = (
     ("card", "Card"),
     ("paypal", "Other"),
 )
+# Gateways that name a client tender outright; card gateways do not say the brand, so they stay empty.
+CLIENT_CODE_BY_GATEWAY = (
+    ("paypal", "PAYPAL"),
+    ("amazon", "AMAZON"),
+    ("ebay", "EBAY"),
+    ("walmart", "WALMART"),
+    ("gift", "GIFTCRDU"),
+    ("cash", "CASH"),
+)
 DISCOUNT_KIND = {"discount_code": "Coupon", "automatic": "Promotion", "manual": "Manual"}
 
 
@@ -39,6 +48,11 @@ def cents(value: Decimal) -> Decimal:
 def tender_type(gateway) -> str:
     name = str(gateway or "").lower()
     return next((kind for key, kind in TENDER_BY_GATEWAY if key in name), "Other")
+
+
+def client_tender_code(gateway) -> str | None:
+    name = str(gateway or "").lower()
+    return next((code for key, code in CLIENT_CODE_BY_GATEWAY if key in name), None)
 
 
 def item_code(line_item: dict) -> str:
@@ -188,6 +202,7 @@ def order_tenders(order: dict, transactions: list[dict] | None = None) -> list[d
         return [
             {
                 "tender_type": tender_type(t.get("gateway")),
+                "client_tender_code": client_tender_code(t.get("gateway")),
                 "amount": str(cents(dec(t.get("amount")))),
                 "reference": str(t["id"]) if t.get("id") else None,
                 "authorization": t.get("authorization"),
@@ -202,6 +217,7 @@ def order_tenders(order: dict, transactions: list[dict] | None = None) -> list[d
         return [
             {
                 "tender_type": tender_type(gateways[0]),
+                "client_tender_code": client_tender_code(gateways[0]),
                 "amount": str(cents(dec(order.get("total_price")))),
             }
         ]
@@ -228,6 +244,7 @@ def refund_detail(refund: dict, order_id) -> dict:
     tenders = [
         {
             "tender_type": tender_type(t.get("gateway")),
+            "client_tender_code": client_tender_code(t.get("gateway")),
             "amount": str(cents(dec(t.get("amount")))),
             "reference": str(t["id"]) if t.get("id") else None,
         }

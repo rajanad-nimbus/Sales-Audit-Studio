@@ -30,3 +30,13 @@ def test_a_tender_keeps_its_generic_type_and_validates_the_client_code():
     assert parse_tender({"tender_type": "Card", "amount": "10"}, 1, 1)["client_tender_code"] is None
     with pytest.raises(ValueError, match="client_tender_code"):
         parse_tender({**tender, "client_tender_code": "BOGUS"}, 1, 1)
+
+
+def test_shopify_gateways_that_name_a_client_tender_carry_its_code():
+    from apps.ingest.shopify.detail import client_tender_code as shopify_code
+    from apps.ingest.shopify.detail import order_tenders
+
+    assert shopify_code("PayPal Express") == "PAYPAL"
+    assert shopify_code("shopify_payments") is None
+    tenders = order_tenders({}, [{"kind": "sale", "gateway": "paypal", "amount": "5", "id": 1}])
+    assert tenders[0]["tender_type"] == "Other" and tenders[0]["client_tender_code"] == "PAYPAL"
