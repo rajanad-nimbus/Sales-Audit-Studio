@@ -92,3 +92,15 @@ def test_full_client_set_loads_and_calculates_a_store_day():
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_every_tender_a_total_matches_on_is_accepted_by_ingest():
+    from apps.transactions.detail import TENDER_TYPES
+
+    codes = {
+        r["value"]
+        for t in CLIENT_TOTALS
+        for r in t["restrictions"]
+        if r["realm"] == "Tender" and r["field"] == "tender_type" and r["operator"] == "eq"
+    }
+    assert codes <= set(TENDER_TYPES)

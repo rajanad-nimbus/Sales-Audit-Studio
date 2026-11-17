@@ -27,7 +27,9 @@ def test_names_are_unique_and_the_required_store_over_short_total_exists():
     names = [t["name"] for t in STANDARD_TOTALS]
     assert len(names) == len(set(names))
     required = [t for t in STANDARD_TOTALS if t.get("required_by_system")]
-    assert [t["name"] for t in required] == ["OVRSHT_S"] and required[0]["category"] == "Miscellaneous"
+    assert [t["name"] for t in required] == ["OVRSHT_S"] and required[0][
+        "category"
+    ] == "Miscellaneous"
 
 
 def test_tax_measure_must_be_a_sum():

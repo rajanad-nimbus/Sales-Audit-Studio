@@ -17,7 +17,29 @@ MAX_MONEY = Decimal("9999999999999.99")
 MAX_QUANTITY = Decimal("999999999.999")
 MAX_DETAIL_ITEMS_PER_TRANSACTION = 10_000
 DISCOUNT_KINDS = ("Promotion", "Coupon", "Voucher", "Manual")
-TENDER_TYPES = ("Card", "Cash", "Voucher", "GiftCard", "StoreCredit", "Other")
+BASE_TENDER_TYPES = ("Card", "Cash", "Voucher", "GiftCard", "StoreCredit", "Other")
+# Client tender codes the per-tender totals match on (documents/System_ReSA Total setup.xlsx).
+CLIENT_TENDER_CODES = (
+    "AGNCYVOU",
+    "AMAZON",
+    "AMEX",
+    "BEALLSCC",
+    "CASH",
+    "CHECK",
+    "DISCOVER",
+    "EBAY",
+    "GIFTCRDU",
+    "MALLCERT",
+    "MASTERCD",
+    "MCRISSUE",
+    "MCVISADBT",
+    "OUTLTCC",
+    "PAYPAL",
+    "VIRTGC",
+    "VISA",
+    "WALMART",
+)
+TENDER_TYPES = (*BASE_TENDER_TYPES, *CLIENT_TENDER_CODES)
 DETAIL_KEYS = ("lines", "discounts", "taxes", "tenders")
 TEXT_LIMITS = {
     "item_code": 100,
@@ -209,7 +231,9 @@ def parse_source_attributes(value: object, number: int) -> dict | None:
         except ValueError:
             raise ValueError(f"line {number} customer_order_date must be an ISO date") from None
     return_without_inventory = attributes.get("return_without_inventory")
-    if return_without_inventory not in (None, "") and not isinstance(return_without_inventory, bool):
+    if return_without_inventory not in (None, "") and not isinstance(
+        return_without_inventory, bool
+    ):
         raise ValueError(f"line {number} return_without_inventory must be true or false")
     return attributes
 

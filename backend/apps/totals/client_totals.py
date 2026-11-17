@@ -194,7 +194,7 @@ CLIENT_TOTALS = [
         "category": "Over/Short",
         "over_short_group": "Accountable For",
         "over_short_operator": "+",
-        "calculation_basis": "Raw",
+        "calculation_basis": "Combined",
         "status": "Active",
         "aggregation": "Sum",
         "measure": "Amount",
@@ -204,14 +204,15 @@ CLIENT_TOTALS = [
         "level": "Store",
         "corresponds_to_rtlog": False,
         "display_group": 1,
-        "realms": ["Transaction", "Tender"],
-        "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
-        "parameters": [{"realm": "Tender", "field": "amount"}],
-        "restrictions": [
-            {"realm": "Tender", "field": "tender_type", "operator": "eq", "value": "CASHTOTAL"}
+        "realms": [],
+        "joins": [],
+        "parameters": [],
+        "restrictions": [],
+        "combined_total_ids": [
+            "0ea19e0a-6c40-5334-bf7f-868f66adfb6e",
+            "6e828b00-25c1-5ea4-9fd9-c7362f96757e",
         ],
-        "combined_total_ids": [],
-        "combined_total_operators": [],
+        "combined_total_operators": ["+"],
         "sql_statement": "SA_TRAN_HEAD.STORE_DAY_SEQ_NO = SA_STORE_DAY.STORE_DAY_SEQ_NO and "
         "SA_TRAN_HEAD.TRAN_SEQ_NO = SA_TRAN_TENDER.TRAN_SEQ_NO and\n"
         "SA_TRAN_HEAD.STATUS = 'P' and\n"
