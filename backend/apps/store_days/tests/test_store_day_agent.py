@@ -253,3 +253,16 @@ def test_the_attention_view_summarises_how_a_business_date_closed():
         assert view["stuck_store_days"][0]["holding_back"][0].startswith("Data: Incomplete")
 
     run_with_db(scenario)
+
+
+def test_the_agent_configuration_lists_the_store_day_agent_and_its_close_setting():
+    from apps.agents.agent_settings import defaults
+    from apps.agents.routes import AGENT_ACTORS, agent_registry
+
+    on = next(a for a in agent_registry(defaults()) if a["actor"] == automation.AGENT)
+    off = next(a for a in agent_registry(defaults(), False) if a["actor"] == automation.AGENT)
+
+    assert automation.AGENT in AGENT_ACTORS
+    assert any("close" in line for line in on["can"])
+    assert not any("close" in line for line in off["can"])
+    assert off["limits"]["automatic close"] == "Off"

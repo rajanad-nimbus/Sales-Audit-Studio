@@ -8,6 +8,7 @@ export const GROUPS = [
   { key: 'orchestrator', label: 'Orchestrator', actors: ['orchestrator'] },
   { key: 'resolution', label: 'Resolution', actors: ['resolution-agent'] },
   { key: 'validation', label: 'Validation', actors: ['validation-agent'] },
+  { key: 'store-days', label: 'Store days', actors: ['store-day-agent'] },
   {
     key: 'connectors',
     label: 'Connectors & batch',

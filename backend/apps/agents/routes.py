@@ -21,6 +21,7 @@ from apps.cases.models import (
 )
 from apps.security import scope
 from apps.security.authentication import require_role
+from apps.system.options import automatic_store_day_close_enabled
 
 router = APIRouter(prefix="/api/agent")
 MAX_ELIGIBLE_CASES = 100
@@ -276,10 +277,11 @@ AGENT_ACTORS = [
     "orchestrator",
     "resolution-agent",
     "validation-agent",
+    "store-day-agent",
 ]
 
 
-def agent_registry(cfg: dict) -> list[dict]:
+def agent_registry(cfg: dict, auto_close: bool = True) -> list[dict]:
     """What each agent is and is allowed to do, derived from live configuration (no secrets)."""
 
     from integrations.ontology import ontology
@@ -385,6 +387,36 @@ def agent_registry(cfg: dict) -> list[dict]:
             "tools": [],
             "limits": {},
         },
+        {
+            "actor": "store-day-agent",
+            "name": "Store Day Agent",
+            "kind": "Rules",
+            "enabled": True,
+            "role": "Opens a store day when its data arrives, totals it, and closes it when it "
+            "matches the source control total with nothing open against it.",
+            "can": [
+                "Open store days for stores with transactions",
+                "Total store days whose totals are missing or out of date",
+                *(
+                    ["Sign off and close store days that pass every close check"]
+                    if auto_close
+                    else []
+                ),
+            ],
+            "cannot": [
+                *([] if auto_close else ["Sign off or close a store day (automatic close is off)"]),
+                "Close a day with open cases, unexplained variances or missing transactions",
+                "Close today's date, or a day a person reopened",
+                "Reopen a store day, change a tolerance or explain a variance",
+            ],
+            "model": None,
+            "tools": [],
+            "limits": {
+                "runs": "After the daily batch, and after an import audit",
+                "automatic close": "On" if auto_close else "Off",
+                "configured in": "Settings, Close controls",
+            },
+        },
     ]
 
 
@@ -432,7 +464,8 @@ async def agent_config(
     failed = sum(1 for r in runs if not (r.after_state or {}).get("result"))
     agents = []
     cfg = await agent_settings.load(db)
-    for a in agent_registry(cfg):
+    auto_close = await automatic_store_day_close_enabled(db)
+    for a in agent_registry(cfg, auto_close):
         n, last = total.get(a["actor"], (0, None))
         agents.append(
             {**a, "events_total": n, "events_24h": recent.get(a["actor"], 0), "last_active": last}
@@ -458,8 +491,13 @@ async def agent_config(
         "settings_history": [
             {"at": h.created_at, "by": h.actor, **(h.after_state or {})} for h in history
         ],
-        "human_in_loop": "Every approval, correction and store-day close needs a person with the right role. "
-        "No agent acts without one.",
+        "human_in_loop": (
+            "Every approval and correction needs a person with the right role. The Store Day Agent "
+            "closes store days that pass every close check; any other store day needs a person."
+            if auto_close
+            else "Every approval, correction and store-day close needs a person with the right role. "
+            "No agent acts without one."
+        ),
         "agent_runs": {
             "recent": len(runs),
             "failed": failed,
@@ -480,7 +518,9 @@ async def agent_ontology(
     context = integration.context()
     return {
         "integration": integration.status(),
-        "agents": agent_registry(await agent_settings.load(db)),
+        "agents": agent_registry(
+            await agent_settings.load(db), await automatic_store_day_close_enabled(db)
+        ),
         "database_bindings": database_bindings(context),
         "workflows": context["definitions"].get("workflows", []),
         "limitations": [

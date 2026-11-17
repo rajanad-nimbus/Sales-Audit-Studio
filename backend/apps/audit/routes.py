@@ -27,6 +27,7 @@ ACTIVITY_ACTOR_GROUPS = {
     "orchestrator": ("orchestrator",),
     "resolution": ("resolution-agent",),
     "validation": ("validation-agent",),
+    "store-days": ("store-day-agent",),
     "connectors": (
         "batch-scheduler",
         "shopify-connector",
