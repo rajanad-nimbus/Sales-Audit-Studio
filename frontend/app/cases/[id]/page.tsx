@@ -714,7 +714,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           <p>
             {c.investigation_status === 'Evidence Overridden'
               ? 'Closed with an evidence override. The gap was not fulfilled; the override and who approved it are under Activity & notes.'
-              : 'This case is closed. Everything below is the record of what happened.'}
+              : c.investigation_status === 'Auto-Resolved'
+                ? 'Resolved automatically by the store-day agent: the sale was an exact copy of one already recorded, so the copy was excluded from totals. The details are under Activity & notes.'
+                : 'This case is closed. Everything below is the record of what happened.'}
           </p>
         ) : proposed.length > 0 ? (
           <>

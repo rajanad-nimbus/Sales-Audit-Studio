@@ -11,7 +11,7 @@ import math
 import os
 import re
 from collections.abc import AsyncGenerator, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from urllib.parse import parse_qs, urlsplit
@@ -459,6 +459,24 @@ async def fetch_day_totals(
     )
 
 
+async def whole_days_window(
+    adapter: ShopifyAdapter, window: tuple[datetime, datetime]
+) -> tuple[datetime, datetime]:
+    """Widen a window back to whole shop-local days, always including yesterday.
+
+    A day total is declared only for a day the window covers from midnight to midnight, so a sync
+    that starts mid-day, or reaches back less than a day, would never declare the day just ended
+    and its store day could never be matched to a control total. Re-fetched orders are duplicates
+    and change nothing.
+    """
+    start, end = window
+    zone = shopify_day_totals.shop_zone(await adapter.fetch_shop())
+    local = end.astimezone(zone).date()
+    yesterday = datetime.combine(local - timedelta(days=1), time.min, tzinfo=zone)
+    first = datetime.combine(start.astimezone(zone).date(), time.min, tzinfo=zone)
+    return min(first, yesterday), end
+
+
 async def fetch_shopify_feed(
     store_id: str,
     created_at_min: datetime = None,
@@ -477,6 +495,8 @@ async def fetch_shopify_feed(
     tally = shopify_day_totals.OrderTally()
 
     try:
+        if day_totals:
+            window = await whole_days_window(adapter, window)
         async for order in adapter.fetch_orders(*window):
             tally.add(order)
             # Split tenders need the payment transactions; one gateway is covered by the order itself.

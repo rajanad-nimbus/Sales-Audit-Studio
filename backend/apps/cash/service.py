@@ -19,6 +19,7 @@ async def calculate_declaration(db: AsyncSession, declaration: CashControl) -> N
     query = select(CanonicalTransaction).where(
         CanonicalTransaction.store_id == declaration.store_id,
         CanonicalTransaction.business_date == declaration.business_date,
+        CanonicalTransaction.disposition != "Duplicate",
         CanonicalTransaction.tender_type == declaration.tender_type,
     )
     if declaration.register_id:
@@ -92,6 +93,7 @@ async def ensure_store_day_currency(
                 .where(
                     CanonicalTransaction.store_id == store_id,
                     CanonicalTransaction.business_date == business_date,
+                    CanonicalTransaction.disposition != "Duplicate",
                 )
                 .distinct()
             )

@@ -94,7 +94,7 @@ def validate_combination(definition: TotalDefinitionLike) -> None:
     operators = getattr(definition, "combined_total_operators", None) or [
         definition.combined_operator
     ] * (len(identifiers) - 1)
-    if len(operators) != len(identifiers) - 1 or any(
+    if len(operators) not in {len(identifiers) - 1, len(identifiers)} or any(
         operator not in VALID_OPERATORS for operator in operators
     ):
         raise ValueError("Combined totals require one addition or subtraction operator per pair")

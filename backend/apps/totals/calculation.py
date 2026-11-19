@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.controls.foundation.models import FoundationReference
 from apps.controls.rules.transaction_logic import condition_matches
 from apps.corrections.effects import effective_amounts, effective_taxes
+from apps.ingest.models import RegisterEvent
+from apps.ingest.pos_formats.standard import TOTAL
 from apps.totals.combined import calculate_combined
 from apps.totals.models import AuditTotalDefinition
 from apps.totals.schemas import (
@@ -291,6 +293,7 @@ def matching_transactions(definition: AuditTotalDefinition, rows: list[Canonical
 async def load_restricted_realms(db, definitions, rows):
     """Load each needed related realm once for this bounded transaction page."""
     requested_realms = set()
+    needs_net_retail = False
     for definition in definitions:
         if definition.calculation_basis == "Combined":
             continue
@@ -299,6 +302,7 @@ async def load_restricted_realms(db, definitions, rows):
                 validated = TotalRestrictionBody.model_validate(restriction)
             except (ValidationError, TypeError) as exc:
                 raise ValueError("A live total has an invalid realm restriction") from exc
+            needs_net_retail |= (validated.realm, validated.field) == ("Line", "net_retail")
             if validated.realm != "Transaction":
                 requested_realms.add(validated.realm)
         for parameter in definition.parameters or []:
@@ -311,6 +315,10 @@ async def load_restricted_realms(db, definitions, rows):
                 and REALM_FIELDS[validated_parameter.realm][validated_parameter.field] != "number"
             ):
                 raise ValueError("A summed total requires a numeric measure parameter")
+            needs_net_retail |= (validated_parameter.realm, validated_parameter.field) == (
+                "Line",
+                "net_retail",
+            )
             if validated_parameter.realm != "Transaction":
                 requested_realms.add(validated_parameter.realm)
         validated_parameters = []
@@ -335,8 +343,14 @@ async def load_restricted_realms(db, definitions, rows):
                 measure_realm,
             }:
                 raise ValueError("A live total has a roll-up outside its measure realm")
+            needs_net_retail |= (validated_rollup.realm, validated_rollup.field) == (
+                "Line",
+                "net_retail",
+            )
             if validated_rollup.realm != "Transaction":
                 requested_realms.add(validated_rollup.realm)
+    if needs_net_retail:
+        requested_realms.add("Discount")
     if not requested_realms or not rows:
         return {}
 
@@ -360,6 +374,14 @@ async def load_restricted_realms(db, definitions, rows):
         for entity in entities:
             grouped_entities[entity.transaction_id].append(entity)
         loaded[realm] = grouped_entities
+    if needs_net_retail:
+        for transaction_id, lines in loaded["Line"].items():
+            discounts_by_line = defaultdict(Decimal)
+            for discount in loaded["Discount"].get(transaction_id, []):
+                if discount.line_no is not None:
+                    discounts_by_line[discount.line_no] += discount.amount
+            for line in lines:
+                line.net_retail = line.gross_amount - discounts_by_line[line.line_no]
     return loaded
 
 
@@ -517,6 +539,8 @@ async def calculate_store_day(
     )
     counts: dict[str, int] = defaultdict(int)
     currencies: set[str] = set()
+    raw_definitions = [d for d in definitions if d.calculation_basis != "Combined"]
+    declared_definitions = [d for d in raw_definitions if "Total" in (d.transaction_types or [])]
     transaction_count = 0
     last_id: str | None = None
     for definition in definitions:
@@ -534,13 +558,37 @@ async def calculate_store_day(
         currencies.update(aggregate_source_totals(rows, amounts, totals))
         await aggregate_configured_totals(
             db,
-            definitions,
+            raw_definitions,
             rows,
             amounts,
             definition_totals,
             definition_rollups,
             counts,
         )
+
+    if declared_definitions:
+        async for rows in load_pos_declarations(db, store_id, business_date):
+            currencies.update(row.currency for row in rows)
+            await aggregate_configured_totals(
+                db,
+                declared_definitions,
+                rows,
+                {row.id: row.signed_amount for row in rows},
+                definition_totals,
+                definition_rollups,
+                counts,
+            )
+
+    # Combine complete raw values so operands may come from different source batches.
+    for definition in raw_definitions:
+        definition_rollups[definition.id]
+    calculate_combined(definitions, definition_rollups)
+    for definition in definitions:
+        if trait_excluded(definition):
+            definition_rollups.pop(definition.id, None)
+        elif definition.calculation_basis == "Combined" and definition_rollups[definition.id]:
+            for (dimension, _), amount in definition_rollups[definition.id].items():
+                definition_totals[definition.id][dimension] += amount
 
     # Avoid persisting an empty adjustment total, matching the store-day output contract.
     if totals.get(("Approved Adjustment Net", "Store", None)) == 0:
@@ -551,12 +599,56 @@ async def calculate_store_day(
             identifier: dict(values) for identifier, values in definition_totals.items()
         },
         configured_rollups={
-            identifier: dict(values) for identifier, values in definition_rollups.items()
+            identifier: dict(values) for identifier, values in definition_rollups.items() if values
         },
         definition_counts=dict(counts),
         currencies=currencies,
         transaction_count=transaction_count,
     )
+
+
+async def load_pos_declarations(db: AsyncSession, store_id: str, business_date: str):
+    """Project register TOTAL records for configured totals without adding them to sales or reconciliation."""
+    query = select(RegisterEvent).where(
+        RegisterEvent.store_id == store_id,
+        RegisterEvent.business_date == business_date,
+        RegisterEvent.event_type == TOTAL,
+        RegisterEvent.amount.is_not(None),
+    )
+    last_id = None
+    while True:
+        page = query if last_id is None else query.where(RegisterEvent.id > last_id)
+        events = (
+            await db.scalars(page.order_by(RegisterEvent.id).limit(TRANSACTION_BATCH_SIZE))
+        ).all()
+        if not events:
+            return
+        last_id = events[-1].id
+        rows = []
+        for event in events:
+            references = (event.details or {}).get("user_references") or []
+            total_code = next(
+                (ref.get("value") for ref in references if ref.get("field") == 1),
+                None,
+            )
+            if not total_code:
+                continue
+            rows.append(
+                CanonicalTransaction(
+                    id=event.id,
+                    store_id=event.store_id,
+                    business_date=event.business_date,
+                    transaction_type="Total",
+                    transaction_subtype=total_code,
+                    source_lineage="pos-map-v1",
+                    register_id=event.register_id,
+                    cashier_id=event.cashier_id,
+                    signed_amount=event.amount,
+                    currency=event.currency,
+                )
+            )
+        if rows:
+            yield rows
 
 
 async def load_transaction_batch(
@@ -569,6 +661,7 @@ async def load_transaction_batch(
     query = select(CanonicalTransaction).where(
         CanonicalTransaction.store_id == store_id,
         CanonicalTransaction.business_date == business_date,
+        CanonicalTransaction.disposition != "Duplicate",
     )
     if last_id is not None:
         query = query.where(CanonicalTransaction.id > last_id)

@@ -1,7 +1,9 @@
 """Scheduled store-day lifecycle automation."""
 
+import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 
@@ -23,6 +25,7 @@ from apps.system.options import automatic_store_day_close_enabled
 from apps.transactions.models import CanonicalTransaction
 
 AGENT = "store-day-agent"
+SWEEP_INTERVAL_SECONDS = int(os.getenv("STORE_DAY_AGENT_INTERVAL_SECONDS", "300"))
 SWEEP_CHUNK = 250
 MAX_SWEEP_DAYS = 20_000
 SIGNOFF_RATIONALE = (
@@ -30,6 +33,30 @@ SIGNOFF_RATIONALE = (
     "no open errors, unexplained variances or transaction number gaps"
 )
 logger = logging.getLogger(__name__)
+
+
+async def stores_with_earlier_unclosed_day(
+    db: AsyncSession, store_ids: set[str], business_date: str
+) -> set[str]:
+    """Stores that still have a store day before ``business_date`` that is not closed.
+
+    A store's next day opens only once its previous day is closed, so these are held back.
+    """
+    if not store_ids:
+        return set()
+    return set(
+        (
+            await db.execute(
+                select(StoreDay.store_id)
+                .where(
+                    StoreDay.store_id.in_(store_ids),
+                    StoreDay.business_date < business_date,
+                    StoreDay.status != "Closed",
+                )
+                .distinct()
+            )
+        ).scalars()
+    )
 
 
 async def open_next_business_day(
@@ -67,7 +94,8 @@ async def open_next_business_day(
             "already_open": 0,
             "detail": "No active stores in Foundation Data",
         }
-    identities = {(store_id, next_date) for store_id in stores}
+    held = await stores_with_earlier_unclosed_day(db, set(stores), next_date)
+    identities = {(store_id, next_date) for store_id in stores if store_id not in held}
     existing = await lock_store_days(db, identities)
     opened = 0
     for store_id, business_date in sorted(identities):
@@ -150,15 +178,20 @@ async def run_store_day_agent(
         )
         ingest = await ingest_states(db, [(day.store_id, day.business_date) for day in chunk])
         views = await readiness(db, chunk) if close else {}
+        with_duplicates = await days_with_duplicate_cases(db, chunk)
         # Identify the work before any commit, so no loaded row is read after it expires.
         work = []
         for day in chunk:
             has_data = ingest[(day.store_id, day.business_date)]["state"] != NO_DATA
             needs_totals = has_data and (day.audit_version < 1 or day.totals_stale)
+            # A clean, unsigned day needs the agent even today: it signs off now and closes later.
             closable = (
-                close and not day.reopened_by and day.business_date < today and ready(views[day.id])
+                close
+                and not day.reopened_by
+                and ready(views[day.id])
+                and (day.business_date < today or not views[day.id]["audit"]["signed_off"])
             )
-            if needs_totals or closable:
+            if needs_totals or closable or (day.store_id, day.business_date) in with_duplicates:
                 work.append((day.store_id, day.business_date))
             elif has_data:
                 result["needs_review"] += 1
@@ -178,6 +211,27 @@ async def run_store_day_agent(
             result["totaled"] += int(outcome.get("totaled", False))
             result["closed" if outcome["closed"] else "needs_review"] += 1
     return result
+
+
+async def days_with_duplicate_cases(db: AsyncSession, days: list[StoreDay]) -> set[tuple[str, str]]:
+    """Store days that have an open duplicate-sale case for the agent to look at."""
+    from apps.cases.models import Case, Exception as DBException
+
+    if not days:
+        return set()
+    rows = await db.execute(
+        select(Case.store_id, Case.business_date)
+        .join(DBException, DBException.case_id == Case.id)
+        .where(
+            DBException.exception_type == "DUPLICATE_SALES",
+            Case.status != "Closed",
+            tuple_(Case.store_id, Case.business_date).in_(
+                [(d.store_id, d.business_date) for d in days]
+            ),
+        )
+        .distinct()
+    )
+    return {tuple(r) for r in rows}
 
 
 def ready(view: dict) -> bool:
@@ -240,6 +294,11 @@ async def open_days_with_data(
         if source in {"POSControl", "OMSControl"} or record.get("record_type") == "DayTotal":
             day_keys.add((store, business_date))
 
+    if day_keys:
+        held = await stores_with_earlier_unclosed_day(
+            db, {store for store, _ in day_keys}, business_date
+        )
+        day_keys = {key for key in day_keys if key[0] not in held}
     if not day_keys:
         return 0
     await lock_configuration(db)
@@ -275,12 +334,15 @@ async def settle_day(db: AsyncSession, store_id: str, business_date: str, *, clo
     day = await get_day(db, store_id, business_date, lock=True)
     if day.status == "Closed":
         return {"closed": True}
+    from apps.store_days.duplicates import resolve_duplicate_cases
+
+    await resolve_duplicate_cases(db, store_id, business_date, AGENT)
     totaled = day.audit_version < 1 or day.totals_stale
     if totaled:
         await retotal_day(db, store_id, business_date, AGENT)
     outcome = {"totaled": totaled, "closed": False}
     # A person who reopened a day has taken it over; the agent does not close it again.
-    if not close or day.reopened_by or business_date >= datetime_today_utc().isoformat():
+    if not close or day.reopened_by:
         return outcome
     view = (await readiness(db, [day]))[day.id]
     if not ready(view) or await close_blocker(db, day) or await earlier_open_day(db, day):
@@ -301,6 +363,9 @@ async def settle_day(db: AsyncSession, store_id: str, business_date: str, *, clo
             actor=AGENT,
             after={"trigger": "automation"},
         )
+    # A perfectly matching day is signed off at once, but it only closes after its date has passed.
+    if business_date >= datetime_today_utc().isoformat():
+        return outcome
     request = (
         (
             await db.execute(
@@ -379,3 +444,34 @@ async def open_following_day(
         after={"store_id": store_id, "business_date": next_date, "trigger": "previous_day_closed"},
     )
     return True
+
+
+async def sweep_once(session_factory=None) -> dict:
+    """Open days that have data for yesterday and today, then settle every unclosed store day."""
+    if session_factory is None:
+        from database import async_session as session_factory
+    today = datetime_today_utc()
+    result = {}
+    async with session_factory() as db:
+        for day in (today - timedelta(days=1), today):
+            result = await run_store_day_agent(db, day.isoformat())
+    return result
+
+
+async def loop(session_factory=None, interval: float | None = None) -> None:
+    """Run the store-day agent on a timer so it needs no import or batch to trigger it."""
+    interval = SWEEP_INTERVAL_SECONDS if interval is None else interval
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            result = await sweep_once(session_factory)
+            if any(result.get(k) for k in ("opened", "totaled", "closed", "failed")):
+                logger.info("Store-day agent sweep: %s", result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Store-day agent sweep failed")
+
+
+def loop_enabled() -> bool:
+    return os.getenv("NIMBUS_SCHEDULER", "1") != "0"

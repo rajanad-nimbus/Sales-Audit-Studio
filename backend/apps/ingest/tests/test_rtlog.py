@@ -159,6 +159,7 @@ def test_the_standard_sale_maps_to_a_pos_ingest_record():
     assert record["tenders"] == [
         {
             "tender_type": "Cash",
+            "client_tender_code": "CASH",
             "amount": "21.05",
             "reference": None,
             "authorization": None,

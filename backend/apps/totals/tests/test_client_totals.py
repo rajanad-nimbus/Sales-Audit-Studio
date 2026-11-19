@@ -98,15 +98,16 @@ def test_every_tender_a_total_matches_on_is_accepted_by_ingest():
     from apps.transactions.detail import CLIENT_TENDER_CODES
 
     codes = {
-        r["value"]
+        code
         for t in CLIENT_TOTALS
         for r in t["restrictions"]
-        if r["realm"] == "Tender" and r["field"] == "client_tender_code" and r["operator"] == "eq"
+        if r["realm"] == "Tender" and r["field"] == "client_tender_code"
+        for code in r["value"].split(",")
     }
     assert len(codes) >= 17 and codes <= set(CLIENT_TENDER_CODES)
 
 
-def test_a_visa_tender_lands_in_the_visa_total_and_not_in_amex():
+def test_a_legacy_visa_tender_uses_its_retained_rtlog_tender_attributes():
     import asyncio
 
     from models import AuditTotalDefinition, Base, StoreDay
@@ -139,7 +140,10 @@ def test_a_visa_tender_lands_in_the_visa_total_and_not_in_amex():
                             "tenders": [
                                 {
                                     "tender_type": "Card",
-                                    "client_tender_code": "VISA",
+                                    "source_attributes": {
+                                        "tender_group": "CCARD",
+                                        "tender_type_id": "3000",
+                                    },
                                     "amount": "10",
                                 }
                             ],
@@ -174,6 +178,16 @@ def test_register_lists_are_exact_and_condition_matches_in_lists():
     assert condition_matches(store, SimpleNamespace(register_id="R1"))
     assert not condition_matches(store, SimpleNamespace(register_id="897"))
     assert not any(r["field"] == "channel_id" for t in CLIENT_TOTALS for r in t["restrictions"])
+    for name, expected in (
+        ("SHIPAMZN", {"892", "897"}),
+        ("SHIPEBAY", {"895", "896"}),
+        ("SHIPWLMT", {"880", "881"}),
+    ):
+        shipping = next(r for r in by_name[name]["restrictions"] if r["field"] == "register_id")
+        for register in ("001", "880", "881", "892", "895", "896", "897"):
+            assert condition_matches(shipping, SimpleNamespace(register_id=register)) == (
+                register in expected
+            )
 
 
 def test_item_lists_are_exact_on_sales_and_paid_in_out_totals():
@@ -289,9 +303,10 @@ def test_store_area_limits_the_bsi_and_outlet_sales_totals():
                             "record_type": "Sale",
                             "event_time": "2026-10-01T10:00:00Z",
                             "store_id": "S1",
-                            "amount": "10",
+                            "amount": "8",
                             "lines": [{"item_code": "SKU1", "quantity": "1", "unit_price": "10"}],
-                            "tenders": [{"tender_type": "Cash", "amount": "10"}],
+                            "discounts": [{"kind": "Promotion", "line_no": 1, "amount": "2"}],
+                            "tenders": [{"tender_type": "Cash", "amount": "8"}],
                         }
                     ],
                 )
@@ -303,8 +318,8 @@ def test_store_area_limits_the_bsi_and_outlet_sales_totals():
         finally:
             await engine.dispose()
 
-    assert asyncio.run(run(2500)) == {"SLSCLBSI": 10, "SLSCLOUT": 0, "SALESCLAS": 10}
-    assert asyncio.run(run(3500)) == {"SLSCLBSI": 0, "SLSCLOUT": 10, "SALESCLAS": -10}
+    assert asyncio.run(run(2500)) == {"SLSCLBSI": 8, "SLSCLOUT": 0, "SALESCLAS": 8}
+    assert asyncio.run(run(3500)) == {"SLSCLBSI": 0, "SLSCLOUT": 8, "SALESCLAS": -8}
     assert asyncio.run(run(None)) == {"SLSCLBSI": 0, "SLSCLOUT": 0, "SALESCLAS": 0}
 
 
@@ -323,3 +338,22 @@ def test_a_store_area_must_be_a_whole_number():
     for bad in ("x", 12.5, True, 100000, -1):
         with pytest.raises(ValidationError):
             ReferenceBody(category="Store", code="S1", name="S", attributes={"area": bad})
+
+
+def test_workbook_subtracts_the_first_operand_in_each_negative_group():
+    from decimal import Decimal
+
+    from models import AuditTotalDefinition
+
+    from apps.totals.combined import calculate_combined
+
+    definitions = [AuditTotalDefinition(**total, rollups=[]) for total in CLIENT_TOTALS]
+    values = {row.id: {} for row in definitions if row.calculation_basis == "Raw"}
+    by_name = {row.name: row.id for row in definitions}
+    for name in ("BLSPRDEXP", "PROPSTEXP", "AGNCYVOUP", "GFTCRDSLP", "SHIPEBAYP"):
+        values[by_name[name]] = {None: Decimal("10")}
+
+    calculate_combined(definitions, values)
+
+    assert values[by_name["REMSLSCL"]] == {None: Decimal("-20")}
+    assert values[by_name["OVRSHT_POS"]] == {None: Decimal("-30")}

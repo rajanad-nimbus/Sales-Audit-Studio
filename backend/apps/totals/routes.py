@@ -105,26 +105,10 @@ async def validate_combined_references(
             status_code=422,
             detail="An active combined total must reference active total revisions",
         )
-    parameters = [item.model_dump() for item in body.parameters]
     rollups = [item.model_dump() for item in body.rollups]
-    if any(
-        row.level != body.level or row.rollups != rollups or row.parameters != parameters
-        for row in references
-    ):
+    if any(row.level != body.level or row.rollups != rollups for row in references):
         raise HTTPException(
             status_code=422, detail="Combined totals must use the same balancing level and roll-ups"
-        )
-    if any(
-        row.aggregation != body.aggregation or row.measure != body.measure for row in references
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="Combined totals must use the same aggregation and measure",
-        )
-    if any(row.location_traits != body.location_traits for row in references):
-        raise HTTPException(
-            status_code=422,
-            detail="Combined totals must use the same location traits",
         )
 
 
@@ -646,6 +630,32 @@ async def export_definition_package(
         for destination_id, name, enabled in destinations
     }
 
+    return {
+        "format": "zetsa.audit-total-definitions",
+        "version": 1,
+        "exported_at": utcnow(),
+        "definitions": [
+            {
+                **view(row),
+                "combined_total_names": [
+                    names_by_id.get(identifier) for identifier in row.combined_total_ids or []
+                ],
+                "usage_destinations": [
+                    destinations_by_id.get(
+                        usage.get("destination_id"),
+                        {
+                            "id": usage.get("destination_id"),
+                            "name": None,
+                            "enabled": None,
+                        },
+                    )
+                    for usage in row.usages or []
+                ],
+            }
+            for row in definitions
+        ],
+    }
+
 
 @router.post("/package/preview")
 async def preview_definition_package(
@@ -738,31 +748,6 @@ async def apply_definition_package(
             ) from exc
         raise
     return {"imported": [view(row) for row in rows]}
-    return {
-        "format": "zetsa.audit-total-definitions",
-        "version": 1,
-        "exported_at": utcnow(),
-        "definitions": [
-            {
-                **view(row),
-                "combined_total_names": [
-                    names_by_id.get(identifier) for identifier in row.combined_total_ids or []
-                ],
-                "usage_destinations": [
-                    destinations_by_id.get(
-                        usage.get("destination_id"),
-                        {
-                            "id": usage.get("destination_id"),
-                            "name": None,
-                            "enabled": None,
-                        },
-                    )
-                    for usage in row.usages or []
-                ],
-            }
-            for row in definitions
-        ],
-    }
 
 
 @router.post("")

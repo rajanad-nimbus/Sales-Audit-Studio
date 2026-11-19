@@ -166,9 +166,13 @@ const restrictionFields: Record<
   Line: [
     { key: 'item_code', label: 'Item code' },
     { key: 'voucher_kind', label: 'Voucher kind' },
+    { key: 'item_type', label: 'Item type' },
+    { key: 'item_status', label: 'Item status' },
+    { key: 'item_voucher_kind', label: 'Voucher kind from item code' },
     { key: 'quantity', label: 'Line quantity', numeric: true },
     { key: 'unit_price', label: 'Unit price', numeric: true },
     { key: 'gross_amount', label: 'Gross amount', numeric: true },
+    { key: 'net_retail', label: 'Net retail', numeric: true },
     { key: 'tax_code', label: 'Tax code' },
     { key: 'tax_amount', label: 'Tax amount', numeric: true },
     { key: 'return_reason', label: 'Return reason' },
@@ -229,8 +233,9 @@ const totalRealmRelationships: {
 const totalRealmOrder = totalRealmRelationships.map((item) => item.realm);
 const totalRealmJoins = (realms: RestrictionRealm[]): TotalRealmJoin[] =>
   totalRealmOrder
-    .filter((realm): realm is Exclude<RestrictionRealm, 'Transaction'> =>
-      realm !== 'Transaction' && realms.includes(realm)
+    .filter(
+      (realm): realm is Exclude<RestrictionRealm, 'Transaction'> =>
+        realm !== 'Transaction' && realms.includes(realm)
     )
     .map((realm) => ({ parent_realm: 'Transaction', child_realm: realm }));
 const realmsForTotal = (total: TotalRevision | null): RestrictionRealm[] => {
@@ -241,8 +246,7 @@ const realmsForTotal = (total: TotalRevision | null): RestrictionRealm[] => {
   ];
   const stored = total?.realms ?? [];
   return totalRealmOrder.filter(
-    (realm) =>
-      realm === 'Transaction' || stored.includes(realm) || referenced.includes(realm)
+    (realm) => realm === 'Transaction' || stored.includes(realm) || referenced.includes(realm)
   );
 };
 // Fields the server owns; everything else is carried into the next revision unchanged.
@@ -291,12 +295,14 @@ function calculation(row: TotalRevision, references: TotalRevision[] = []) {
     ? row.combined_total_operators
     : [row.combined_operator || '?'];
   if (!row.combined_total_ids?.length) return `Combined (${operators.join(' ')})`;
+  const signs =
+    operators.length === row.combined_total_ids.length ? operators : ['+', ...operators];
   const names = new Map(references.map((total) => [total.id, total.name]));
   return (
     row.combined_total_ids
       .map(
         (id, index) =>
-          `${index > 0 ? `${operators[index - 1] ?? '?'} ` : ''}${names.get(id) ?? 'Unavailable total'}`
+          `${index > 0 || signs[0] === '-' ? `${signs[index] ?? '?'} ` : ''}${names.get(id) ?? 'Unavailable total'}`
       )
       .join(' ') +
     (row.rollups?.length
@@ -1255,8 +1261,7 @@ function DraftForm({
     joins: totalRealmJoins(realmsForTotal(base)),
     usages: (Array.isArray(base?.usages) ? base.usages : []) as { destination_id: string }[],
     report_usages: (Array.isArray(base?.report_usages) ? base.report_usages : []) as (
-      | 'flash_totals'
-      | 'flash_sales_ytd'
+      'flash_totals' | 'flash_sales_ytd'
     )[],
     restrictions: (Array.isArray(base?.restrictions) ? base.restrictions : []) as Restriction[],
   });
@@ -1287,22 +1292,22 @@ function DraftForm({
       : form.realms.filter((item) => item !== realm);
     setForm({ ...form, realms, joins: totalRealmJoins(realms) });
   };
-  const expectedTraits = JSON.stringify(locationTraits(base));
   const componentChoices = availableTotals.filter(
     (total) =>
       total.name !== form.name &&
       total.level === form.level &&
-      total.measure === form.measure &&
-      total.aggregation === form.aggregation &&
-      JSON.stringify(total.parameters ?? []) === JSON.stringify(form.parameters) &&
-      JSON.stringify(total.rollups ?? []) === JSON.stringify(form.rollups) &&
-      JSON.stringify(locationTraits(total)) === expectedTraits
+      JSON.stringify(total.rollups ?? []) === JSON.stringify(form.rollups)
   );
+  const hasLeadingSign = form.combined_total_operators.length === form.combined_total_ids.length;
+  const formulaSigns = hasLeadingSign
+    ? form.combined_total_operators
+    : ['+', ...form.combined_total_operators];
   const formulaValid =
     !combined ||
     (form.combined_total_ids.length >= 2 &&
       form.combined_total_ids.every((id) => componentChoices.some((total) => total.id === id)) &&
-      form.combined_total_operators.length === form.combined_total_ids.length - 1);
+      (hasLeadingSign ||
+        form.combined_total_operators.length === form.combined_total_ids.length - 1));
   const restrictionsValid = form.restrictions.every(
     (restriction) =>
       ['is_empty', 'not_empty'].includes(restriction.operator) ||
@@ -1392,7 +1397,7 @@ function DraftForm({
           })),
       combined_operator:
         combined && form.combined_total_ids.length === 2
-          ? (form.combined_total_operators[0] ?? base?.combined_operator ?? null)
+          ? (formulaSigns[1] ?? base?.combined_operator ?? null)
           : null,
       status: DRAFT,
     };
@@ -1473,21 +1478,22 @@ function DraftForm({
             const selected = componentChoices.find((total) => total.id === id);
             return (
               <div className="form-row" key={`${index}-${id}`}>
-                {index > 0 && (
-                  <Field label={`Operator ${index}`}>
-                    <select
-                      value={form.combined_total_operators[index - 1] ?? '+'}
-                      onChange={(event) => {
-                        const operators = [...form.combined_total_operators];
-                        operators[index - 1] = event.target.value;
-                        setForm({ ...form, combined_total_operators: operators });
-                      }}
-                    >
-                      <option value="+">Add (+)</option>
-                      <option value="-">Subtract (−)</option>
-                    </select>
-                  </Field>
-                )}
+                <Field label={index === 0 ? 'First total sign' : `Operator ${index}`}>
+                  <select
+                    value={formulaSigns[index] ?? '+'}
+                    onChange={(event) => {
+                      const signs = [...formulaSigns];
+                      signs[index] = event.target.value;
+                      setForm({
+                        ...form,
+                        combined_total_operators: signs[0] === '+' ? signs.slice(1) : signs,
+                      });
+                    }}
+                  >
+                    <option value="+">Add (+)</option>
+                    <option value="-">Subtract (−)</option>
+                  </select>
+                </Field>
                 <Field label={`Total ${index + 1}`}>
                   <select
                     value={id}
@@ -1580,7 +1586,11 @@ function DraftForm({
                         <strong>{item.label}</strong>
                       </label>
                       <Badge variant={selected ? 'primary' : 'secondary'} size="sm">
-                        {item.realm === 'Transaction' ? 'Base' : selected ? 'Selected' : 'Available'}
+                        {item.realm === 'Transaction'
+                          ? 'Base'
+                          : selected
+                            ? 'Selected'
+                            : 'Available'}
                       </Badge>
                     </div>
                     <small className="page-sub">{item.relationship}</small>
@@ -1921,10 +1931,12 @@ function DraftForm({
           Include this calculated total in the selected Flash reports. Only current, non-stale
           store-day totals are reported.
         </p>
-        {([
-          ['flash_totals', 'Flash Totals'],
-          ['flash_sales_ytd', 'Flash Sales Year to Date'],
-        ] as const).map(([usage, label]) => (
+        {(
+          [
+            ['flash_totals', 'Flash Totals'],
+            ['flash_sales_ytd', 'Flash Sales Year to Date'],
+          ] as const
+        ).map(([usage, label]) => (
           <label className="cluster" key={usage}>
             <input
               type="checkbox"

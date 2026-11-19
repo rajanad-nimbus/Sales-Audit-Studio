@@ -446,14 +446,14 @@ def test_a_backdated_order_counts_on_the_day_it_was_processed():
     assert tally.on(date(2024, 1, 16)) == {}
 
 
-def test_sync_declares_nothing_for_a_partly_covered_day(monkeypatch):
-    totals, calls = fetch_with_day_totals(
+def test_sync_starting_mid_day_is_widened_so_the_day_just_ended_is_declared(monkeypatch):
+    totals, _calls = fetch_with_day_totals(
         monkeypatch,
         3,
         datetime(2024, 1, 15, 6, tzinfo=UTC),
         datetime(2024, 1, 16, 6, tzinfo=UTC),
     )
-    assert totals == [] and calls == []
+    assert [t["business_date"] for t in totals] == ["2024-01-15"]
 
 
 def test_sync_day_totals_round_trip_through_ingest_and_reconcile(monkeypatch):

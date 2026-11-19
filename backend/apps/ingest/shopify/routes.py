@@ -125,7 +125,7 @@ async def sync_shopify(
         ) from e
 
     automatic_audit = await auto_audit.reconcile_after_import(
-        db, "Shopify", feed.get("Shopify", []), request=request
+        db, "Shopify", feed.get("Shopify", []), request=request, force=True
     )
     return ShopifySyncResponse(
         status="success",
@@ -271,7 +271,7 @@ async def shopify_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         ) from e
 
     automatic_audit = await auto_audit.reconcile_after_import(
-        db, "Shopify", [record], request=request
+        db, "Shopify", [record], request=request, force=True
     )
     return {"status": "received", "topic": topic, **stats, "automatic_audit": automatic_audit}
 

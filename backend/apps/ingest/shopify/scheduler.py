@@ -204,7 +204,7 @@ async def run_if_due(session_factory=async_session, now: datetime | None = None)
             await _record_outcome(db, now, status, message)
             await db.commit()
             automatic_audit = await auto_audit.reconcile_after_import(
-                db, SOURCE, feed.get(SOURCE, [])
+                db, SOURCE, feed.get(SOURCE, []), force=True
             )
             if automatic_audit and any(run.get("error") for run in automatic_audit["runs"]):
                 log.warning(

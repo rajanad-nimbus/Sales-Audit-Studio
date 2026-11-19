@@ -14,6 +14,7 @@ from apps.security.sensitive_data import (
     mask_pan_value,
     redact_sensitive_fields,
 )
+from apps.store_days.freshness import invalidate_totals_many, lock_store_days
 from apps.system.options import credit_card_number_mask, credit_card_security_level
 from apps.transactions.models import CanonicalTransaction
 
@@ -27,7 +28,8 @@ def event_amount(tx: dict) -> Decimal | None:
     if tx["type"] in standard.CASH_MOVEMENT_TYPES and tx["tenders"]:
         moved = sum((abs(Decimal(t["amount"])) for t in tx["tenders"]), Decimal("0"))
     elif tx.get("value"):
-        moved = abs(Decimal(tx["value"]))
+        value = Decimal(tx["value"])
+        moved = value if tx["type"] == standard.TOTAL else abs(value)
     else:
         return None
     return moved.quantize(CENT, rounding=ROUND_HALF_UP)
@@ -43,6 +45,13 @@ async def ingest_register_events(db, log: standard.StandardLog, currency: str = 
         if not event["_card_data_blocked"]:
             for field in ("source_record_id", "transaction_number", "original_transaction_number"):
                 event[field] = mask_pan_value(event.get(field), mask_character)
+    total_days = {
+        (tx["store_id"], tx["business_date"])
+        for tx in events
+        if tx["type"] == standard.TOTAL and not tx["_card_data_blocked"]
+    }
+    days = await lock_store_days(db, total_days)
+    changed_total_days = set()
     known: set[str] = set()
     for start in range(0, len(events), BATCH):
         ids = [e["source_record_id"] for e in events[start : start + BATCH]]
@@ -89,7 +98,12 @@ async def ingest_register_events(db, log: standard.StandardLog, currency: str = 
                 currency=currency,
             )
         )
+        if tx["type"] == standard.TOTAL:
+            changed_total_days.add((tx["store_id"], tx["business_date"]))
         created += 1
+    await invalidate_totals_many(
+        db, [days[key] for key in changed_total_days if key in days], "ingest:POS"
+    )
     await db.flush()
     return {
         "received": len(events),

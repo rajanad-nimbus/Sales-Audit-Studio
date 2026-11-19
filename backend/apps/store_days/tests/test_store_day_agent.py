@@ -282,3 +282,52 @@ def test_the_agent_configuration_lists_the_store_day_agent_and_its_close_setting
     assert any("close" in line for line in on["can"])
     assert not any("close" in line for line in off["can"])
     assert off["limits"]["automatic close"] == "Off"
+
+
+def pos_sale(rid: str, amount: str = "113.00", number: str = "1001") -> dict:
+    return {
+        "source_record_id": rid,
+        "event_time": f"{DATE}T10:00:00+00:00",
+        "record_type": "Sale",
+        "amount": amount,
+        "store_id": "S1",
+        "register_id": "R1",
+        "transaction_number": number,
+        "tender_type": "Cash",
+        "payment_reference": "PAY-1",
+        "lines": [
+            {"item_code": "SKU-1", "quantity": "1", "unit_price": amount, "tax_amount": "0.00"}
+        ],
+        "tenders": [{"tender_type": "Cash", "amount": amount}],
+    }
+
+
+def test_an_exact_duplicate_sale_is_excluded_and_its_case_closed_by_the_agent():
+    async def scenario(db):
+        await load(db, {"POS": [pos_sale("A"), pos_sale("B")]})
+        assert (await db.execute(select(Case))).scalars().all()
+
+        await automation.run_store_day_agent(db, DATE)
+
+        cases = (await db.execute(select(Case))).scalars().all()
+        assert [c.status for c in cases] == ["Closed"]
+        from models import CanonicalTransaction
+
+        dispositions = sorted(
+            (await db.execute(select(CanonicalTransaction.disposition))).scalars().all()
+        )
+        assert dispositions.count("Duplicate") == 1
+
+    run_with_db(scenario)
+
+
+def test_a_duplicate_that_differs_from_the_original_is_left_for_a_person():
+    async def scenario(db):
+        await load(db, {"POS": [pos_sale("A"), pos_sale("B", amount="99.00")]})
+
+        await automation.run_store_day_agent(db, DATE)
+
+        statuses = [c.status for c in (await db.execute(select(Case))).scalars().all()]
+        assert statuses and "Closed" not in statuses
+
+    run_with_db(scenario)

@@ -31,7 +31,7 @@ def calculate_combined(
             len(ids) < 2
             or len(ids) > 20
             or len(set(ids)) != len(ids)
-            or len(operators) != len(ids) - 1
+            or len(operators) not in {len(ids) - 1, len(ids)}
             or any(operator not in {"+", "-"} for operator in operators)
         ):
             raise ValueError(
@@ -54,9 +54,10 @@ def calculate_combined(
         visiting.remove(definition.id)
         keys = set().union(*(operand.keys() for operand in operands))
         combined: dict[Hashable, Decimal] = {}
+        signs = operators if len(operators) == len(operands) else ["+", *operators]
         for key in keys:
-            amount = operands[0].get(key, Decimal(0))
-            for operator, operand in zip(operators, operands[1:], strict=True):
+            amount = Decimal(0)
+            for operator, operand in zip(signs, operands, strict=True):
                 sign = 1 if operator == "+" else -1
                 amount += sign * operand.get(key, Decimal(0))
             combined[key] = amount

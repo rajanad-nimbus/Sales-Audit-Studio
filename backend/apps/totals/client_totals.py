@@ -1,8 +1,7 @@
 """Client totals from documents/System_ReSA Total setup.xlsx, generated once and installed by migration 0124.
 
 IDs are deterministic so combined totals reference their operands. Workbook OVRSHT_S is installed as OVRSHT_POS
-because OVRSHT_S is the system-required over/short total. Criteria the engine cannot express (item lists, voucher
-ranges, register lists) are kept verbatim in sql_statement; see the migration notes.
+because OVRSHT_S is the system-required over/short total. Original ReSA criteria are retained in sql_statement for reference.
 """
 
 CLIENT_TOTALS = [
@@ -187,7 +186,12 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Tender"}],
         "parameters": [{"realm": "Tender", "field": "amount"}],
         "restrictions": [
-            {"realm": "Tender", "field": "client_tender_code", "operator": "eq", "value": "CASH"}
+            {
+                "realm": "Tender",
+                "field": "client_tender_code",
+                "operator": "in",
+                "value": "CASH,MALLCERT",
+            }
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -379,8 +383,8 @@ CLIENT_TOTALS = [
             {
                 "realm": "Tender",
                 "field": "client_tender_code",
-                "operator": "eq",
-                "value": "GIFTCRDU",
+                "operator": "in",
+                "value": "GIFTCRDU,MCRISSUE",
             }
         ],
         "combined_total_ids": [],
@@ -673,7 +677,7 @@ CLIENT_TOTALS = [
         "over_short_group": "Accountable For",
         "over_short_operator": "+",
         "calculation_basis": "Raw",
-        "status": "Active",
+        "status": "Inactive",
         "aggregation": "Sum",
         "measure": "Amount",
         "source_system": None,
@@ -702,7 +706,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_TENDER.TENDER_TYPE_GROUP = 'VOUCH' and\n"
         "SA_TRAN_TENDER.TENDER_TYPE_ID = 4060\n"
         "SA_TRAN_TENDER.TT_ERROR_IND = 'N'",
-        "active": True,
+        "active": False,
         "location_traits": [],
     },
     {
@@ -2931,7 +2935,7 @@ CLIENT_TOTALS = [
         "over_short_group": "Accounted For",
         "over_short_operator": "+",
         "calculation_basis": "Raw",
-        "status": "Active",
+        "status": "Inactive",
         "aggregation": "Sum",
         "measure": "Amount",
         "source_system": None,
@@ -2957,7 +2961,7 @@ CLIENT_TOTALS = [
         "SA_TRAN_HEAD.ERROR_IND = N\n"
         "SA_TRAN_HEAD.TRAN_TYPE = TOTAL\n"
         "SA_TRAN_HEAD.REF_NO1 = MALLCERTP",
-        "active": True,
+        "active": False,
         "location_traits": [],
     },
     {
@@ -4784,9 +4788,11 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
-            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"}
+            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"},
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "eq", "value": "GCN"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4866,7 +4872,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Transaction",
@@ -4880,6 +4886,7 @@ CLIENT_TOTALS = [
                 "operator": "in",
                 "value": "NM050OUT,NM842OUT,NM857OUT,NM971OUT,NM984OUT,NM981OUT,NM972OUT,NM991OUT,NM895OUT,NM846OUT,NM840OUT,NM831OUT,NM841OUT,NM832OUT,NM858OUT,NM847OUT,NM849OUT,NM835OUT,NM051OUT,NM052OUT,NM853OUT,NM854OUT,NM877OUT,NM887OUT,NM848OUT,NM894OUT,NM977OUT,NM978OUT,NM893OUT,NM845OUT",
             },
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4914,7 +4921,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Transaction",
@@ -4928,6 +4935,7 @@ CLIENT_TOTALS = [
                 "operator": "in",
                 "value": "NM050BSI,NM842BSI,NM857BSI,NM971BSI,NM984BSI,NM981BSI,NM972BSI,NM991BSI,NM895BSI,NM846BSI,NM840BSI,NM831BSI,NM841BSI,NM832BSI,NM858BSI,NM847BSI,NM849BSI,NM835BSI,NM051BSI,NM052BSI,NM853BSI,NM854BSI,NM877BSI,NM887BSI,NM848BSI,NM894BSI,NM977BSI,NM978BSI,NM893BSI,NM845BSI",
             },
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -4962,7 +4970,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Transaction",
@@ -4978,6 +4986,8 @@ CLIENT_TOTALS = [
             },
             {"realm": "Transaction", "field": "store_area", "operator": "gte", "value": "2000"},
             {"realm": "Transaction", "field": "store_area", "operator": "lte", "value": "2999"},
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "in", "value": "ITEM,REF"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5046,7 +5056,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Transaction",
@@ -5062,6 +5072,8 @@ CLIENT_TOTALS = [
             },
             {"realm": "Transaction", "field": "store_area", "operator": "gte", "value": "3000"},
             {"realm": "Transaction", "field": "store_area", "operator": "lte", "value": "3999"},
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "in", "value": "ITEM,REF"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5130,7 +5142,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Transaction",
@@ -5146,6 +5158,8 @@ CLIENT_TOTALS = [
             },
             {"realm": "Transaction", "field": "store_area", "operator": "gte", "value": "2000"},
             {"realm": "Transaction", "field": "store_area", "operator": "lte", "value": "2999"},
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "in", "value": "ITEM,REF"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5182,7 +5196,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Transaction",
@@ -5198,6 +5212,8 @@ CLIENT_TOTALS = [
             },
             {"realm": "Transaction", "field": "store_area", "operator": "gte", "value": "3000"},
             {"realm": "Transaction", "field": "store_area", "operator": "lte", "value": "3999"},
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "in", "value": "ITEM,REF"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5234,9 +5250,11 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
-            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "VIRTUAL"}
+            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "VIRTUAL"},
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "eq", "value": "GCN"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5273,9 +5291,11 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
-            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"}
+            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"},
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "eq", "value": "GCN"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5311,14 +5331,16 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Transaction",
                 "field": "register_id",
                 "operator": "in",
                 "value": "880,881,889,893,892,895,896,897",
-            }
+            },
+            {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
+            {"realm": "Line", "field": "item_type", "operator": "in", "value": "ITEM,REF"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5488,7 +5510,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM050OUT,NM050BSI"}
         ],
@@ -5529,7 +5551,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM842OUT,NM842BSI"}
         ],
@@ -5570,7 +5592,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM857OUT,NM857BSI"}
         ],
@@ -5611,7 +5633,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
@@ -5657,9 +5679,11 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM981OUT,NM981BSI"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM981OUT,NM981BSI"},
+            {"realm": "Transaction", "field": "store_area", "operator": "gte", "value": "2000"},
+            {"realm": "Transaction", "field": "store_area", "operator": "lte", "value": "2999"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5699,7 +5723,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
@@ -5745,7 +5769,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM895OUT,NM895BSI"}
         ],
@@ -5786,7 +5810,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM846OUT,NM846BSI"}
         ],
@@ -5827,7 +5851,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM831OUT,NM831BSI"}
         ],
@@ -5868,7 +5892,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM840OUT,NM840BSI"}
         ],
@@ -5909,7 +5933,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM841OUT,NM841BSI"}
         ],
@@ -5950,9 +5974,15 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM832OUT,NM832BSI"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM832OUT,NM832BSI"},
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "not_in",
+                "value": "880,881,892,897,895,896",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -5992,7 +6022,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM858OUT,NM858BSI"}
         ],
@@ -6033,7 +6063,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM847OUT,NM847BSI"}
         ],
@@ -6074,7 +6104,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM849OUT,NM849BSI"}
         ],
@@ -6115,7 +6145,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM835OUT,NM835BSI"}
         ],
@@ -6156,7 +6186,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
@@ -6202,7 +6232,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM853OUT,NM853BSI"}
         ],
@@ -6243,7 +6273,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM854OUT,NM854BSI"}
         ],
@@ -6284,14 +6314,20 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
                 "field": "item_code",
                 "operator": "in",
                 "value": "NM877OUT,NM887OUT,NM877BSI,NM887BSI",
-            }
+            },
+            {
+                "realm": "Transaction",
+                "field": "register_id",
+                "operator": "not_in",
+                "value": "880,881,892,897,895,896",
+            },
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6331,7 +6367,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM848OUT,NM848BSI"}
         ],
@@ -6372,7 +6408,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
@@ -6418,7 +6454,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM893OUT,NM893BSI"}
         ],
@@ -6459,7 +6495,7 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM845BSI,NM845OUT"}
         ],
@@ -6500,14 +6536,15 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
                 "field": "item_code",
                 "operator": "in",
                 "value": "NM877BSI,NM877OUT,NM887BSI,NM887OUT,NM832BSI,NM832OUT",
-            }
+            },
+            {"realm": "Transaction", "field": "register_id", "operator": "in", "value": "892,897"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6547,14 +6584,15 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
                 "field": "item_code",
                 "operator": "in",
                 "value": "NM877BSI,NM877OUT,NM887BSI,NM887OUT,NM832BSI,NM832OUT",
-            }
+            },
+            {"realm": "Transaction", "field": "register_id", "operator": "in", "value": "895,896"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6594,14 +6632,15 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
             {
                 "realm": "Line",
                 "field": "item_code",
                 "operator": "in",
                 "value": "NM877BSI,NM877OUT,NM887BSI,NM887OUT,NM832BSI,NM832OUT",
-            }
+            },
+            {"realm": "Transaction", "field": "register_id", "operator": "in", "value": "880,881"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -6641,9 +6680,11 @@ CLIENT_TOTALS = [
         "display_group": 1,
         "realms": ["Transaction", "Line"],
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
-        "parameters": [{"realm": "Line", "field": "gross_amount"}],
+        "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
-            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM981BSI,NM981OUT"}
+            {"realm": "Line", "field": "item_code", "operator": "in", "value": "NM981BSI,NM981OUT"},
+            {"realm": "Transaction", "field": "store_area", "operator": "gte", "value": "3000"},
+            {"realm": "Transaction", "field": "store_area", "operator": "lte", "value": "3999"},
         ],
         "combined_total_ids": [],
         "combined_total_operators": [],
@@ -7419,6 +7460,7 @@ CLIENT_TOTALS = [
             "-",
             "-",
             "-",
+            "-",
         ],
         "sql_statement": "See below",
         "active": True,
@@ -7490,6 +7532,7 @@ CLIENT_TOTALS = [
             "-",
             "-",
             "-",
+            "-",
         ],
         "sql_statement": "See below",
         "active": True,
@@ -7531,7 +7574,7 @@ CLIENT_TOTALS = [
             "a7f04561-5ffc-53bf-9d4c-59e6e3fffce9",
             "ffa0fa60-f807-5525-bb39-41539714ae04",
         ],
-        "combined_total_operators": ["-", "-", "-", "-", "-", "-", "-", "-", "-"],
+        "combined_total_operators": ["-", "-", "-", "-", "-", "-", "-", "-", "-", "-"],
         "sql_statement": "See below",
         "active": True,
         "location_traits": [],
@@ -7601,6 +7644,7 @@ CLIENT_TOTALS = [
             "-",
             "-",
             "-",
+            "-",
         ],
         "sql_statement": "See below in comments",
         "active": True,
@@ -7637,7 +7681,7 @@ CLIENT_TOTALS = [
             "bb22c957-2767-59db-be19-cd68a14a710b",
             "393c5095-be3f-58fd-8902-46252f96dccb",
         ],
-        "combined_total_operators": ["-", "-", "-", "-", "-"],
+        "combined_total_operators": ["-", "-", "-", "-", "-", "-"],
         "sql_statement": "See below in comments",
         "active": True,
         "location_traits": [],

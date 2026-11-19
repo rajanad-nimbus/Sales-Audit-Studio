@@ -1,9 +1,7 @@
 import asyncio
-from decimal import Decimal
 
 import pytest
 from apps.controls.foundation.routes import ReferenceBody, update_reference
-from apps.controls.rules.routes import RuleBody, approve_rule, create_rule, submit_rule
 from apps.totals.routes import (
     activate_definition,
     create_definition,
@@ -12,8 +10,7 @@ from apps.totals.routes import (
     update_definition,
 )
 from apps.totals.schemas import ActivationBody, TotalDefinitionBody
-from fastapi import HTTPException
-from models import Base, ConfiguredAuditRule, FoundationReference, StoreDay, StoreDayClosureRequest
+from models import Base, FoundationReference, StoreDay, StoreDayClosureRequest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -70,7 +67,7 @@ def test_definition_invalidation_follows_effective_dates_and_supersedes_requests
     asyncio.run(run())
 
 
-def test_rule_invalidation_rolls_back_on_duplicate_and_trait_updates_are_store_specific():
+def test_trait_updates_invalidate_only_the_store_they_change():
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
         try:
@@ -85,9 +82,6 @@ def test_rule_invalidation_rolls_back_on_duplicate_and_trait_updates_are_store_s
                         StoreDay(
                             id="b", store_id="S2", business_date="2026-10-01", audit_version=1
                         ),
-                        ConfiguredAuditRule(
-                            id="r", name="Existing", total_name="POS Net", threshold=Decimal("1")
-                        ),
                         FoundationReference(
                             id="store",
                             category="Store",
@@ -99,13 +93,6 @@ def test_rule_invalidation_rolls_back_on_duplicate_and_trait_updates_are_store_s
                     ]
                 )
                 await db.commit()
-                with pytest.raises(HTTPException) as exc:
-                    await create_rule(
-                        RuleBody(name="Existing", total_name="POS Net", threshold=Decimal("1")),
-                        db,
-                        {"user": "finance"},
-                    )
-                assert exc.value.status_code == 409
                 db.expire_all()
                 assert not (await db.get(StoreDay, "a")).totals_stale
                 assert not (await db.get(StoreDay, "b")).totals_stale
@@ -123,17 +110,6 @@ def test_rule_invalidation_rolls_back_on_duplicate_and_trait_updates_are_store_s
                 db.expire_all()
                 assert (await db.get(StoreDay, "a")).totals_stale
                 assert not (await db.get(StoreDay, "b")).totals_stale
-                drafted = await create_rule(
-                    RuleBody(name="New rule", total_name="POS Net", threshold=Decimal("1")),
-                    db,
-                    {"user": "finance"},
-                )
-                db.expire_all()
-                assert not (await db.get(StoreDay, "b")).totals_stale  # a worksheet changes nothing
-                await submit_rule(drafted["id"], db, {"user": "finance"})
-                await approve_rule(drafted["id"], db, {"user": "approver"})
-                db.expire_all()
-                assert (await db.get(StoreDay, "b")).totals_stale
         finally:
             await engine.dispose()
 

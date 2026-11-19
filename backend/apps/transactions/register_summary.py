@@ -52,6 +52,7 @@ async def register_summary(
                 .where(
                     CanonicalTransaction.store_id == store_id,
                     CanonicalTransaction.business_date == business_date,
+                    CanonicalTransaction.disposition != "Duplicate",
                 )
                 .distinct()
             )
@@ -99,6 +100,7 @@ async def register_summary(
         .where(
             CanonicalTransaction.store_id == store_id,
             CanonicalTransaction.business_date == business_date,
+            CanonicalTransaction.disposition != "Duplicate",
         )
         .group_by(transaction_dimension, CanonicalTransaction.currency)
         .subquery()

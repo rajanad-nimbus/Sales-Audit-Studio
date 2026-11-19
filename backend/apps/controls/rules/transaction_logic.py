@@ -55,6 +55,8 @@ def condition_matches(condition: dict, transaction) -> bool:
     field = condition["field"]
     operator = condition["operator"]
     actual = getattr(transaction, field, None)
+    if field == "client_tender_code" and actual is None:
+        actual = getattr(transaction, "effective_client_tender_code", None)
     expected = condition.get("value")
     if operator == "is_empty":
         return actual is None or not str(actual).strip()
@@ -67,6 +69,7 @@ def condition_matches(condition: dict, transaction) -> bool:
         "quantity",
         "unit_price",
         "gross_amount",
+        "net_retail",
         "tax_amount",
         "amount",
         "rate",

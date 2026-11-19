@@ -25,6 +25,9 @@ const TITLES: Record<string, [string, Level]> = {
   ACTION_EXECUTED: ['Action executed', 'info'],
   VALIDATION_VERIFIED: ['Verified and closed', 'success'],
   VALIDATION_WAITING: ['Validation waiting', 'warning'],
+  STORE_DAY_OPENED: ['Store day opened', 'info'],
+  STORE_DAY_AUDIT_SIGNED_OFF: ['Store day signed off', 'success'],
+  STORE_DAY_CLOSED: ['Store day closed', 'success'],
 };
 
 const toNote = (e: AuditEvent): Note => {

@@ -217,6 +217,7 @@ def ingest_record(tx: dict, currency: str) -> dict | None:
     tenders = [
         {
             "tender_type": t["tender_type"],
+            "client_tender_code": t.get("client_tender_code"),
             "amount": t["amount"],
             "reference": t.get("reference"),
             "authorization": t.get("authorization"),

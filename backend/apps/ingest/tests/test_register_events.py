@@ -316,3 +316,60 @@ def test_the_pos_log_endpoint_takes_real_files_and_a_second_delivery_adds_nothin
         unmapped.update({x["transaction_number"]: x["type"] for x in first["not_mapped"]})
     # only a sale with no item lines is left over: the exchange is mapped as a return and a sale
     assert unmapped == {"1290000035": "sale"}
+
+
+def test_declared_rtlog_totals_feed_combined_totals_without_counting_as_sales():
+    from apps.totals.calculation import calculate_store_day, effective_definitions
+    from apps.totals.client_totals import CLIENT_TOTALS
+    from models import AuditTotalDefinition, StoreDay
+
+    async def scenario(db):
+        day = StoreDay(id="day", store_id="4241", business_date=DAY, audit_version=1)
+        db.add(day)
+        db.add_all(
+            AuditTotalDefinition(**{**total, "start_date": DAY}, revision=1)
+            for total in CLIENT_TOTALS
+        )
+        record = sale_record()
+        record["tenders"][0]["client_tender_code"] = "CASH"
+        await service.ingest(db, "POS", "sale", [record])
+        day.totals_stale = False
+        await db.flush()
+
+        log = log_of(
+            event(
+                "total",
+                1,
+                value="12",
+                details={"user_references": [{"field": 1, "value": "CASHP"}]},
+            ),
+            event(
+                "total",
+                2,
+                value="-4",
+                details={"user_references": [{"field": 1, "value": "CHECKP"}]},
+            ),
+            event(
+                "total",
+                3,
+                value="100",
+                details={"user_references": [{"field": 2, "value": "CASHP"}]},
+            ),
+        )
+        assert (await ingest_register_events(db, log))["created"] == 3
+        assert day.totals_stale
+        assert (await ingest_register_events(db, log))["duplicates_skipped"] == 3
+
+        definitions = await effective_definitions(db, DAY, "4241")
+        result = await calculate_store_day(db, "4241", DAY, definitions)
+        values = {
+            definition.name: sum(result.configured_totals.get(definition.id, {}).values())
+            for definition in definitions
+        }
+        assert values["CASHTOTAL"] == Decimal("10")
+        assert values["CASHTOTALP"] == Decimal("8")
+        assert values["CASHTOTALO"] == Decimal("2")
+        assert result.transaction_count == 1
+        assert result.source_totals[("POS Net", "Store", None)] == Decimal("10")
+
+    run(scenario)

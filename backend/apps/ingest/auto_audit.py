@@ -42,9 +42,10 @@ async def reconcile_after_import(
     *,
     request=None,
     extra_scopes: set[tuple[str, str]] | None = None,
+    force: bool = False,
 ) -> dict | None:
     """Reconcile each affected store/date after ingestion has committed; batch runs still reconcile once at end."""
-    if not await automatic_audit_after_import_enabled(db):
+    if not force and not await automatic_audit_after_import_enabled(db):
         return None
 
     stores_by_date: dict[str, set[str]] = defaultdict(set)

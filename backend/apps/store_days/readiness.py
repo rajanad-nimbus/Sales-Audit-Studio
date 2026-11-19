@@ -124,6 +124,7 @@ async def transaction_counts(db: AsyncSession, keys: list[Key]) -> dict[Key, dic
             )
             .where(
                 CanonicalTransaction.source_lineage.in_(SALES_LINEAGE),
+                CanonicalTransaction.disposition != "Duplicate",
                 tuple_(CanonicalTransaction.store_id, CanonicalTransaction.business_date).in_(
                     batch
                 ),

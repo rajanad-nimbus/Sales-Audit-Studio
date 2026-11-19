@@ -1,0 +1,61 @@
+{
+  "POSControl": [
+    {
+      "source_record_id": "qa-clean-9753-pos-control",
+      "store_id": "9753",
+      "business_date": "2026-11-19",
+      "declared_count": 1,
+      "declared_total": "20.00",
+      "currency": "USD"
+    }
+  ],
+  "ERP": [
+    {
+      "source_record_id": "qa-clean-9753-gl",
+      "record_type": "Posting",
+      "event_time": "2026-11-19T23:00:00Z",
+      "business_date": "2026-11-19",
+      "store_id": "9753",
+      "amount": "20.00",
+      "currency": "USD"
+    }
+  ],
+  "Shopify": [
+    {
+      "source_record_id": "qa-clean-9753-order",
+      "record_type": "Order",
+      "event_time": "2026-11-19T13:00:00Z",
+      "store_id": "9753",
+      "business_date": "2026-11-19",
+      "amount": "10.00",
+      "currency": "USD",
+      "payment_reference": "QA-CLEAN-9753-ORDER",
+      "financial_status": "paid",
+      "transaction_number": "QA9753-1",
+      "tender_type": "Card",
+      "lines": [
+        {
+          "item_code": "QA-CLEAN-SHIRT",
+          "quantity": "1",
+          "unit_price": "10.00"
+        }
+      ],
+      "tenders": [
+        {
+          "tender_type": "Card",
+          "amount": "10.00",
+          "reference": "QA-CLEAN-9753-ORDER"
+        }
+      ]
+    },
+    {
+      "source_record_id": "qa-clean-9753-day-total",
+      "record_type": "DayTotal",
+      "store_id": "9753",
+      "business_date": "2026-11-19",
+      "currency": "USD",
+      "order_count": 1,
+      "order_total": "10.00"
+    }
+  ]
+}

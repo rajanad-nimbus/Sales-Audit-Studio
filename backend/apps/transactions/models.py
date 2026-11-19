@@ -7,6 +7,9 @@ from model_base import Base, utcnow
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from apps.ingest.pos_formats.standard import client_tender_code
+from apps.transactions.detail import voucher_kind_for
+
 
 class CanonicalTransaction(Base):
     """Normalized business record with complete lineage"""
@@ -102,6 +105,24 @@ class TransactionLine(Base):
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0, server_default="0")
     return_reason: Mapped[str | None] = mapped_column(String(255))
 
+    @property
+    def item_type(self) -> str:
+        attributes = self.source_attributes or {}
+        return attributes.get("item_type") or ("GCN" if self.voucher_kind else "ITEM")
+
+    @property
+    def item_status(self) -> str:
+        attributes = self.source_attributes or {}
+        return (
+            attributes.get("item_status")
+            or attributes.get("item_status_code")
+            or ("Return" if self.quantity < 0 else "Sale")
+        )
+
+    @property
+    def item_voucher_kind(self) -> str | None:
+        return voucher_kind_for(self.item_code)
+
 
 class TransactionTax(Base):
     """Tax (VAT) summarized by code for a transaction."""
@@ -148,3 +169,14 @@ class TransactionTender(Base):
     reference: Mapped[str | None] = mapped_column(String(255))
     authorization: Mapped[str | None] = mapped_column(String(100))
     source_attributes: Mapped[dict | None] = mapped_column(JSON)
+
+    @property
+    def effective_client_tender_code(self) -> str | None:
+        if self.client_tender_code:
+            return self.client_tender_code
+        attributes = self.source_attributes or {}
+        group = attributes.get("tender_group")
+        type_id = attributes.get("tender_type_id")
+        if isinstance(group, str) and type_id is not None:
+            return client_tender_code(group, str(type_id), self.amount)
+        return None

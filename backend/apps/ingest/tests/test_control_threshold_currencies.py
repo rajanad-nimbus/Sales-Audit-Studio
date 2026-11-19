@@ -1,18 +1,37 @@
 import asyncio
 from decimal import Decimal
 
-import pytest
-from apps.controls.rules.routes import RuleBody, approve_rule, create_rule, submit_rule
 from apps.ingest import reconciliation, routes, service
 from apps.store_days.routes import retotal_store_day
-from fastapi import HTTPException
-from models import AuditTotalDefinition, Base, Case, ConfiguredAuditRule, StoreDay
-from sqlalchemy import event, select
+from integrations.ontology.audit_controls import TotalRule
+from models import AuditTotalDefinition, Base, Case, StoreDay
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 
-def test_rules_apply_to_configured_currency_and_count_rules_are_dimensionless():
+def rule(name, total_name, currency, threshold="1"):
+    return TotalRule(
+        id=name.upper().replace(" ", "_"),
+        name=name,
+        total_name=total_name,
+        balance_level="Store",
+        comparison="GT",
+        threshold=Decimal(threshold),
+        threshold_currency=currency,
+        severity="Medium",
+    )
+
+
+def test_rules_apply_to_configured_currency_and_count_rules_are_dimensionless(install_controls):
+    install_controls(
+        total_rules=[
+            rule("USD limit", "POS Net", "USD"),
+            rule("EUR limit", "POS Net", "EUR"),
+            rule("Count limit", "Configured: Count", None, threshold="0"),
+        ]
+    )
+
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
         try:
@@ -29,52 +48,6 @@ def test_rules_apply_to_configured_currency_and_count_rules_are_dimensionless():
                 )
                 await db.commit()
                 user = {"user": "finance"}
-                await create_rule(
-                    RuleBody(name="USD limit", total_name="POS Net", threshold=Decimal("1")),
-                    db,
-                    user,
-                )
-                await create_rule(
-                    RuleBody(
-                        name="EUR limit",
-                        total_name="POS Net",
-                        threshold=Decimal("1"),
-                        threshold_currency="EUR",
-                    ),
-                    db,
-                    user,
-                )
-                await create_rule(
-                    RuleBody(
-                        name="Count limit",
-                        total_name="Configured: Count",
-                        threshold=Decimal("0"),
-                        threshold_currency=None,
-                    ),
-                    db,
-                    user,
-                )
-                count_rule = (
-                    await db.execute(
-                        select(ConfiguredAuditRule).where(ConfiguredAuditRule.name == "Count limit")
-                    )
-                ).scalar_one()
-                assert count_rule.threshold_currency is None
-                with pytest.raises(HTTPException):
-                    await create_rule(
-                        RuleBody(
-                            name="Invalid",
-                            total_name="POS Net",
-                            threshold=Decimal("1"),
-                            threshold_currency=None,
-                        ),
-                        db,
-                        user,
-                    )
-                # Rules begin as worksheets; a different user must approve them before they evaluate.
-                for rule in (await db.execute(select(ConfiguredAuditRule))).scalars().all():
-                    await submit_rule(rule.id, db, user)
-                    await approve_rule(rule.id, db, {"user": "approver"})
                 await service.ingest(
                     db,
                     "POS",
@@ -91,25 +64,7 @@ def test_rules_apply_to_configured_currency_and_count_rules_are_dimensionless():
                     ],
                 )
                 await db.commit()
-                rule_query_count = 0
-
-                def count_rule_queries(
-                    _connection, _cursor, statement, _parameters, _context, _executemany
-                ):
-                    nonlocal rule_query_count
-                    normalized = statement.lower()
-                    if (
-                        normalized.lstrip().startswith("select")
-                        and "configured_audit_rules" in normalized
-                    ):
-                        rule_query_count += 1
-
-                event.listen(engine.sync_engine, "before_cursor_execute", count_rule_queries)
-                try:
-                    await retotal_store_day("S1", "2026-10-01", db, user)
-                finally:
-                    event.remove(engine.sync_engine, "before_cursor_execute", count_rule_queries)
-                assert rule_query_count == 1
+                await retotal_store_day("S1", "2026-10-01", db, user)
                 cases = (await db.execute(select(Case))).scalars().all()
                 assert {case.case_type for case in cases} == {
                     "Rule breach: EUR limit",

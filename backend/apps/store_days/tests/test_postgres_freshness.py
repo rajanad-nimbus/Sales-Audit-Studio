@@ -5,7 +5,6 @@ import os
 import uuid
 
 import pytest
-from apps.controls.rules.routes import RuleBody, create_rule
 from apps.ingest.reconciliation import lock_reconciliation
 from apps.ingest.service import ingest
 from apps.store_days import closures
@@ -18,10 +17,8 @@ from apps.totals.routes import (
     submit_definition,
 )
 from apps.totals.schemas import ActivationBody, TotalDefinitionBody
-from fastapi import HTTPException
 from models import (
     AuditTotal,
-    AuditTotalDefinition,
     Base,
     FoundationReference,
     StoreDay,
@@ -140,35 +137,6 @@ def test_ingestion_and_retotal_serialize_in_both_orders():
                 assert (await task).store_id == "S4"
                 await opening.commit()
 
-            async with sessions() as db:
-                db.add(
-                    AuditTotalDefinition(
-                        id="count-total", name="Count total", aggregation="Count", active=True
-                    )
-                )
-                await db.commit()
-            async with sessions() as configuring, sessions() as rule_writer:
-                await lock_configuration(configuring, exclusive=True)
-                task = asyncio.create_task(
-                    create_rule(
-                        RuleBody(
-                            name="Count threshold",
-                            total_name="Configured: Count total",
-                            threshold=0,
-                            threshold_currency=None,
-                        ),
-                        rule_writer,
-                        {"user": "finance"},
-                    )
-                )
-                with pytest.raises(asyncio.TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(task), 0.2)
-                count_total = await configuring.get(AuditTotalDefinition, "count-total")
-                count_total.aggregation = "Sum"
-                await configuring.commit()
-                with pytest.raises(HTTPException) as exc:
-                    await task
-                assert exc.value.status_code == 422
         finally:
             if engine:
                 await engine.dispose()

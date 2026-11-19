@@ -30,9 +30,13 @@ REALM_FIELDS = {
     "Line": {
         "item_code": "text",
         "voucher_kind": "text",
+        "item_type": "text",
+        "item_status": "text",
+        "item_voucher_kind": "text",
         "quantity": "number",
         "unit_price": "number",
         "gross_amount": "number",
+        "net_retail": "number",
         "tax_code": "text",
         "tax_amount": "number",
         "return_reason": "text",
@@ -186,7 +190,7 @@ class TotalDefinitionBody(BaseModel):
     rollups: list[TotalRollupBody] = Field(default_factory=list, max_length=3)
     restrictions: list[TotalRestrictionBody] = Field(default_factory=list, max_length=100)
     combined_total_ids: list[str] = Field(default_factory=list, max_length=20)
-    combined_total_operators: list[str] = Field(default_factory=list, max_length=19)
+    combined_total_operators: list[str] = Field(default_factory=list, max_length=20)
     combined_operator: str | None = Field(default=None, max_length=1)
     location_traits: list[str] = Field(default_factory=list, max_length=100)
     usages: list[TotalUsageBody] = Field(default_factory=list, max_length=100)

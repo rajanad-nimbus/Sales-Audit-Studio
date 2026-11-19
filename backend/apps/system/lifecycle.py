@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from integrations.ontology.ontology_integration import integration as ontology_integration
 
 from apps.ingest.shopify import scheduler as shopify_scheduler
+from apps.store_days import automation as store_day_automation
 from apps.system.connectors import ensure_default_connectors
 
 
@@ -36,9 +37,18 @@ async def lifespan(_app: FastAPI):
                             if shopify_scheduler.enabled()
                             else None
                         )
+                        agent_schedule = (
+                            asyncio.create_task(store_day_automation.loop())
+                            if store_day_automation.loop_enabled()
+                            else None
+                        )
                         try:
                             yield
                         finally:
+                            if agent_schedule:
+                                agent_schedule.cancel()
+                                with suppress(asyncio.CancelledError):
+                                    await agent_schedule
                             if sync_schedule:
                                 sync_schedule.cancel()
                                 with suppress(asyncio.CancelledError):

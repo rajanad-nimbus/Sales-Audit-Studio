@@ -61,6 +61,10 @@ export const iconFor = (path: string) =>
  * TEMPORARY: the only screens the menu shows while testing the Shopify store-day flow. The other
  * screens still open by URL. Set to null to bring the full menu back.
  */
+/** Screens kept out of the menu. They still open by URL. */
+const MENU_HIDDEN = ['/misc-totals', '/total-history', '/register-events', '/ach', '/tasks'];
+const isMenuHidden = (path: string) => MENU_HIDDEN.includes(path) || path.startsWith('/reports') || path.startsWith('/diagnostics/');
+
 export const MENU_ONLY: string[] | null = null;
 
 /**
@@ -69,7 +73,7 @@ export const MENU_ONLY: string[] | null = null;
  * what. Configuration screens are left out of the menu. `only`, when given, narrows it to those paths.
  */
 export function navSections(screens: Screen[], only: string[] | null = null): NavSection[] {
-  const allowed = screens.filter((s) => s.allowed && (!only || only.includes(s.path)));
+  const allowed = screens.filter((s) => s.allowed && !isMenuHidden(s.path) && (!only || only.includes(s.path)));
   const item = (s: Screen): NavItem => ({
     label: s.label,
     href: s.path,
