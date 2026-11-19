@@ -86,6 +86,29 @@ export default function ActivityPage() {
   const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [, setNow] = useState(0);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const clearAll = async () => {
+    setClearing(true);
+    try {
+      const { data } = await api.delete('/api/audit/activity');
+      toast(`Cleared ${formatNumber(data.deleted)} activity events.`, 'success');
+      setConfirmClear(false);
+      queryVersion.current += 1;
+      olderRef.current = [];
+      known.current = null;
+      setOlder([]);
+      setLatest([]);
+      setNextCursor(null);
+      setHasMore(false);
+      setOpen(null);
+      await load();
+    } catch {
+      toast('Could not clear activity.', 'error');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedQ(q.trim()), 250);
@@ -314,6 +337,21 @@ export default function ActivityPage() {
             <Button size="sm" onClick={load}>
               Refresh
             </Button>
+            {confirmClear ? (
+              <span className="confirm-inline">
+                Erase all activity permanently?
+                <Button variant="danger" size="sm" disabled={clearing} onClick={clearAll}>
+                  {clearing ? 'Clearing…' : 'Yes, clear all'}
+                </Button>
+                <Button size="sm" disabled={clearing} onClick={() => setConfirmClear(false)}>
+                  Cancel
+                </Button>
+              </span>
+            ) : (
+              <Button size="sm" variant="danger" onClick={() => setConfirmClear(true)}>
+                Clear all activity
+              </Button>
+            )}
           </>
         }
       />

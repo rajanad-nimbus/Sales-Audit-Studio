@@ -321,6 +321,20 @@ def test_an_exact_duplicate_sale_is_excluded_and_its_case_closed_by_the_agent():
     run_with_db(scenario)
 
 
+def test_a_duplicate_with_a_different_payment_reference_is_still_resolved_by_the_agent():
+    async def scenario(db):
+        other = pos_sale("B")
+        other["payment_reference"] = "PAY-2"
+        await load(db, {"POS": [pos_sale("A"), other]})
+
+        await automation.run_store_day_agent(db, DATE)
+
+        statuses = [c.status for c in (await db.execute(select(Case))).scalars().all()]
+        assert statuses == ["Closed"]
+
+    run_with_db(scenario)
+
+
 def test_a_duplicate_that_differs_from_the_original_is_left_for_a_person():
     async def scenario(db):
         await load(db, {"POS": [pos_sale("A"), pos_sale("B", amount="99.00")]})

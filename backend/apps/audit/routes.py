@@ -317,6 +317,21 @@ async def page_activity(
     }
 
 
+@router.delete("/activity")
+async def clear_activity(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_role("it")),
+):
+    """Erase the whole Agent Activity trail. The table is append-only by trigger, so the truncate
+    guard is lifted only inside this transaction; it is back on before the commit."""
+    deleted = (await db.execute(select(func.count()).select_from(AuditEvent))).scalar() or 0
+    await db.execute(text("ALTER TABLE audit_events DISABLE TRIGGER audit_no_truncate"))
+    await db.execute(text("TRUNCATE audit_events"))
+    await db.execute(text("ALTER TABLE audit_events ENABLE TRIGGER audit_no_truncate"))
+    await db.commit()
+    return {"deleted": deleted}
+
+
 @router.get("/page")
 async def page(
     event_type: Annotated[str | None, Query(max_length=5100)] = None,

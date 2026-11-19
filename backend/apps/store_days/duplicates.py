@@ -16,6 +16,9 @@ EXCLUDED = "Duplicate"
 
 
 async def _fingerprint(db: AsyncSession, t: CanonicalTransaction) -> tuple:
+    """What makes two sales the same sale. Payment references are left out on purpose: a copy that
+    carries a different reference is still the same register and transaction number, and the
+    references are recorded in the audit event instead."""
     lines = (
         await db.execute(select(TransactionLine).where(TransactionLine.transaction_id == t.id))
     ).scalars()
@@ -27,10 +30,9 @@ async def _fingerprint(db: AsyncSession, t: CanonicalTransaction) -> tuple:
         t.currency,
         t.signed_amount,
         t.tender_type,
-        t.payment_reference,
         t.cashier_id,
         sorted((x.item_code, x.quantity, x.gross_amount, x.tax_amount) for x in lines),
-        sorted((x.tender_type, x.client_tender_code, x.amount, x.reference) for x in tenders),
+        sorted((x.tender_type, x.client_tender_code, x.amount) for x in tenders),
     )
 
 
@@ -112,7 +114,11 @@ async def resolve_duplicate_cases(db: AsyncSession, store_id: str, business_date
             copy.id,
             f"Exact copy of transaction {original.id} excluded from totals; case closed",
             actor=actor,
-            after={"original_transaction_id": original.id},
+            after={
+                "original_transaction_id": original.id,
+                "copy_payment_reference": copy.payment_reference,
+                "original_payment_reference": original.payment_reference,
+            },
         )
         resolved += 1
     if resolved:

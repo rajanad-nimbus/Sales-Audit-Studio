@@ -1,0 +1,931 @@
+[
+  {
+    "store": "MX001",
+    "scenario": "sale cash zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX002",
+    "scenario": "sale cash flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX003",
+    "scenario": "sale cash two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX004",
+    "scenario": "sale cash exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX005",
+    "scenario": "sale card zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX006",
+    "scenario": "sale card flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX007",
+    "scenario": "sale card two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX008",
+    "scenario": "sale card exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX009",
+    "scenario": "sale voucher zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX010",
+    "scenario": "sale voucher flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX011",
+    "scenario": "sale voucher two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX012",
+    "scenario": "sale voucher exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX013",
+    "scenario": "sale giftcard zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX014",
+    "scenario": "sale giftcard flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX015",
+    "scenario": "sale giftcard two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX016",
+    "scenario": "sale giftcard exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX017",
+    "scenario": "sale storecredit zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX018",
+    "scenario": "sale storecredit flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX019",
+    "scenario": "sale storecredit two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX020",
+    "scenario": "sale storecredit exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX021",
+    "scenario": "sale other zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX022",
+    "scenario": "sale other flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX023",
+    "scenario": "sale other two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX024",
+    "scenario": "sale other exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX025",
+    "scenario": "sale split cash+card zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX026",
+    "scenario": "sale split cash+card flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX027",
+    "scenario": "sale split cash+card two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX028",
+    "scenario": "sale split cash+card exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX029",
+    "scenario": "sale split cash+giftcard zero rate",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX030",
+    "scenario": "sale split cash+giftcard flat",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX031",
+    "scenario": "sale split cash+giftcard two rates",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX032",
+    "scenario": "sale split cash+giftcard exempt line",
+    "group": "sale",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX033",
+    "scenario": "discount promotion",
+    "group": "discount",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX034",
+    "scenario": "discount coupon",
+    "group": "discount",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX035",
+    "scenario": "discount voucher",
+    "group": "discount",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX036",
+    "scenario": "discount manual with reason",
+    "group": "discount",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX037",
+    "scenario": "discount line level",
+    "group": "discount",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX038",
+    "scenario": "discount stacked",
+    "group": "discount",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX039",
+    "scenario": "discount manual without reason",
+    "group": "discount",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "DISC_REASON_REQ"
+    ],
+    "verified_findings": [
+      "DISC_REASON_REQ"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX040",
+    "scenario": "return full",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX041",
+    "scenario": "return one line",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX042",
+    "scenario": "return partial quantity",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX043",
+    "scenario": "return to another tender",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX044",
+    "scenario": "return card refund",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 2
+  },
+  {
+    "store": "MX045",
+    "scenario": "return in two steps",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 3,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX046",
+    "scenario": "return more than sold",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "RETURN_OVER_SOLD"
+    ],
+    "verified_findings": [
+      "RETURN_OVER_SOLD"
+    ],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX047",
+    "scenario": "return item not on the sale",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "RETURN_OVER_SOLD"
+    ],
+    "verified_findings": [
+      "RETURN_OVER_SOLD"
+    ],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX048",
+    "scenario": "return twice the same item",
+    "group": "return",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "RETURN_OVER_SOLD"
+    ],
+    "verified_findings": [
+      "RETURN_OVER_SOLD"
+    ],
+    "pos_transactions": 3,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX049",
+    "scenario": "edge penny sale",
+    "group": "edge",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX050",
+    "scenario": "edge very large sale",
+    "group": "edge",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX051",
+    "scenario": "edge decimal quantity",
+    "group": "edge",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX052",
+    "scenario": "edge rounding many small lines",
+    "group": "edge",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX053",
+    "scenario": "edge twelve line basket",
+    "group": "edge",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX054",
+    "scenario": "edge gift card sale",
+    "group": "edge",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 1
+  },
+  {
+    "store": "MX055",
+    "scenario": "edge non-usd currency",
+    "group": "edge",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX056",
+    "scenario": "exchange return of a discounted sale",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX057",
+    "scenario": "exchange return without a receipt",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX058",
+    "scenario": "exchange return the next day",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01",
+      "2026-10-02"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX059",
+    "scenario": "exchange even",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 3,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX060",
+    "scenario": "exchange customer pays more",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 3,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX061",
+    "scenario": "exchange customer refunded the difference",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 3,
+    "processor_transactions": 3
+  },
+  {
+    "store": "MX062",
+    "scenario": "exchange non-usd return",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX063",
+    "scenario": "exchange gift card return",
+    "group": "exchange",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 2,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX064",
+    "scenario": "error tender short",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "verified_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX065",
+    "scenario": "error tender over",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "verified_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX066",
+    "scenario": "error header above lines",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "verified_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX067",
+    "scenario": "error header below lines",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "verified_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX068",
+    "scenario": "error item without a sku",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "SKU_NOT_FOUND"
+    ],
+    "verified_findings": [
+      "SKU_NOT_FOUND"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX069",
+    "scenario": "error item not in the item master",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "SKU_NOT_FOUND"
+    ],
+    "verified_findings": [
+      "SKU_NOT_FOUND"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX070",
+    "scenario": "error item in the item master",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [],
+    "verified_findings": [],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX071",
+    "scenario": "error tax too high",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "TAX_MISMATCH"
+    ],
+    "verified_findings": [
+      "TAX_MISMATCH"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX072",
+    "scenario": "error tax too low",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "TAX_MISMATCH"
+    ],
+    "verified_findings": [
+      "TAX_MISMATCH"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  },
+  {
+    "store": "MX073",
+    "scenario": "error out of balance hides the line rules",
+    "group": "error",
+    "dates": [
+      "2026-10-01"
+    ],
+    "expected_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "verified_findings": [
+      "TRAN_OUT_BAL"
+    ],
+    "pos_transactions": 1,
+    "processor_transactions": 0
+  }
+]
