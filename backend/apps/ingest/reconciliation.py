@@ -30,6 +30,7 @@ from apps.ingest.register_events import run_register_event_rules
 from apps.ingest.sequence import run_sequence_rules
 from apps.ingest.shopify.day_controls import run_shopify_day_controls
 from apps.system.options import duplicate_missing_transaction_checks_enabled
+from apps.totals.models import SalesAuditErrorDefinition
 from apps.transactions import detail as transaction_detail
 from apps.transactions.models import (
     CanonicalTransaction,
@@ -486,6 +487,23 @@ def match_pos_transaction(
     return 1
 
 
+async def error_definition(db, exception_type: str) -> dict:
+    """The built-in definition, else one built from the error code table (codes a rule can raise)."""
+    definition = ontology.get(exception_type)
+    if definition is not None:
+        return definition
+    row = await db.get(SalesAuditErrorDefinition, exception_type)
+    if row is None:
+        raise ValueError(f"No definition for audit error code {exception_type}")
+    return {
+        "label": row.short_description,
+        "family": row.form or "Transaction Audit",
+        "exposure": "zero",
+        "evidence": ontology.DEFAULT_EVIDENCE,
+        "known_causes": [],
+    }
+
+
 async def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, int]:
     """Group findings and persist their cases, exceptions, and audit events."""
     groups = defaultdict(list)
@@ -505,7 +523,7 @@ async def create_reconciliation_cases(db, findings: list[tuple]) -> tuple[dict, 
         detection_rule_id,
         detection_rule_name,
     ), items in groups.items():
-        definition = ontology.get(exception_type)
+        definition = await error_definition(db, exception_type)
         amount = sum((item[3] for item in items), Decimal("0"))
         exposure = Decimal("0") if definition["exposure"] == "zero" else amount
         case_id = str(uuid.uuid4())
