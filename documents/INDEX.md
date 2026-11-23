@@ -18,6 +18,7 @@
 - [Theme](THEME.md)
 - [General audit process](AUDIT_PROCESS.md)
 - [ReSA workflow parity](RESA_PARITY.md)
+- [ZeTSA vs ReSA behavioural differences](RESA_DIFFERENCES.md)
 - [Build summary](BUILD_SUMMARY.md)
 - [Domain terms](../CONTEXT.md)
 
