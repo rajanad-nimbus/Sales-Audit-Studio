@@ -85,7 +85,6 @@ These have no source in the repository and are placeholders to replace with busi
 
 | Value | Provisional |
 | --- | --- |
-| Act ceiling: timing difference | $250 per case (the threshold in scenario 1) |
 | Act ceiling: over/short | $5 (the tolerance in scenario 3) |
 | Act ceiling: exact duplicate, POS and Shopify | $500 per case. Today there is no ceiling, so this adds a limit. |
 | Daily cap on act actions | 200 per class per day |

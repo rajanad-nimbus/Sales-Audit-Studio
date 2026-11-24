@@ -12,6 +12,32 @@ from decimal import Decimal, InvalidOperation
 
 RULE_TYPE = "audit_control"
 POLICY_LIMITS = ("autonomy_limit", "timing_autonomy_limit")
+AGENT_LEVELS = ("collect", "propose", "act")
+# What an approved release that defines no level for a failure class falls back to. An unlisted class
+# is collect, so a new code can never propose or act by accident.
+DEFAULT_LEVEL = "collect"
+DEFAULT_LEVELS = {
+    "DUPLICATE_SALES": "act",
+    "SHOPIFY_DUPLICATE_ORDER": "act",
+    **{
+        code: "propose"
+        for code in (
+            "TIMING_DIFFERENCE",
+            "AMOUNT_MISMATCH",
+            "UNMATCHED_SALE",
+            "ORPHAN_PAYMENT",
+            "BANK_VARIANCE",
+            "MISSING_DEPOSIT",
+            "GL_VARIANCE",
+            "MISSING_GL_POSTING",
+            "DISC_REASON_REQ",
+        )
+    },
+}
+
+
+def default_level(exception_type: str) -> str:
+    return DEFAULT_LEVELS.get(exception_type, DEFAULT_LEVEL)
 COMPARISONS = {"ABS_GT", "GT", "GTE", "LT", "LTE", "EQ", "NE"}
 BALANCE_LEVELS = {"Store", "Register", "Cashier"}
 SEVERITIES = {"Low", "Medium", "High", "Critical"}
@@ -71,6 +97,11 @@ class AuditControls:
     transaction_rules: tuple[TransactionRule, ...] = ()
     limits: dict[str, Decimal] = field(default_factory=dict)
     limit_currency: str = "USD"
+    levels: dict[str, str] = field(default_factory=dict)
+
+    def level_for(self, exception_type: str) -> str:
+        """The agent level the approved release gives a failure class, else the documented default."""
+        return self.levels.get(exception_type) or default_level(exception_type)
 
     @property
     def autonomy_limit(self) -> Decimal:
@@ -120,6 +151,7 @@ def parse_controls(release_id, rules: list[dict]) -> AuditControls:
     totals: list[TotalRule] = []
     transactions: list[TransactionRule] = []
     limits: dict[str, Decimal] = {}
+    levels: dict[str, str] = {}
     currencies: set[str] = set()
     seen: set[str] = set()
     for rule in rules:
@@ -144,6 +176,15 @@ def parse_controls(release_id, rules: list[dict]) -> AuditControls:
                     raise ValueError("unknown or repeated policy limit")
                 limits[limit] = _money(config.get("amount"), "amount")
                 currencies.add(config.get("currency") or "USD")
+            elif family == "agent_level":
+                exception_type = config.get("exception_type")
+                if not isinstance(exception_type, str) or not exception_type:
+                    raise ValueError("no exception_type")
+                if exception_type in levels:
+                    raise ValueError("repeated exception_type")
+                if config.get("level") not in AGENT_LEVELS:
+                    raise ValueError("level must be collect, propose or act")
+                levels[exception_type] = config["level"]
             elif family == "store_day_total":
                 if config.get("comparison", "ABS_GT") not in COMPARISONS:
                     raise ValueError("unknown comparison")
@@ -203,4 +244,5 @@ def parse_controls(release_id, rules: list[dict]) -> AuditControls:
         transaction_rules=tuple(sorted(transactions, key=lambda r: (r.execution_order, r.name, r.id))),
         limits=limits,
         limit_currency=currencies.pop(),
+        levels=levels,
     )

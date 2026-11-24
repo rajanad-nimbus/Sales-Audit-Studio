@@ -468,3 +468,30 @@ async def follow_up_case(
     user: dict = Depends(require_role("finance")),
 ):
     return await create_follow_up(db, case_id, user)
+
+
+@router.post("/api/cases/{case_id}/reopen")
+async def reopen_case(
+    case_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("finance", "it")),
+):
+    """Reverse an agent resolution: the excluded sale returns and the day is re-totaled."""
+    from apps.store_days.duplicates import reopen_auto_resolved
+
+    reason = str(body.get("reason") or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(status_code=422, detail="A reason of at least 10 characters is required")
+    case = (
+        await db.execute(select(Case).where(Case.id == case_id).with_for_update())
+    ).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    scope.require_store(user, case.store_id)
+    try:
+        await reopen_auto_resolved(db, case, user["user"] or user["role"], reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+    return {"case_id": case.id, "status": case.status}

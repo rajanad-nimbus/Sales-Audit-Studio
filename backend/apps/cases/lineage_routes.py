@@ -11,7 +11,7 @@ from sqlalchemy.orm import aliased
 
 from apps.audit.models import AuditEvent
 from apps.cases.lineage import case_creation_has_transactions, case_transaction_ids_table
-from apps.cases.models import Case
+from apps.cases.models import Case, EvidenceSnapshot
 from apps.ingest.models import SourceRecord
 from apps.security import scope
 from apps.security.authentication import require_role
@@ -81,6 +81,17 @@ async def case_reconciliation(
                 CanonicalTransaction.business_date == case.business_date,
             )
         )
+        # Narrow the context to records the case's evidence actually references.
+        snapshots = (
+            await db.execute(
+                select(EvidenceSnapshot.evidence_data).where(EvidenceSnapshot.case_id == case_id)
+            )
+        ).scalars().all()
+        evidence_ids = {
+            rid for data in snapshots for rid in (data or {}).get("source_record_ids", [])
+        }
+        if evidence_ids:
+            query = query.where(CanonicalTransaction.source_record_id.in_(evidence_ids))
     if cursor_timestamp is not None and cursor_id is not None:
         query = query.where(
             or_(

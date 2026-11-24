@@ -50,7 +50,7 @@ The level is configured in the ontology, so it can change without code.
 | --- | --- | --- | --- |
 | Exact duplicate sale | `DUPLICATE_SALES` | **Act** | Single original, checked fields match (payment reference ignored). Today's behaviour. Differing fields or no single original fall to a person. |
 | Over/short within tolerance | tolerance rule | **Act** | Complete evidence, governed automation, no human. |
-| Timing difference | `TIMING_DIFFERENCE` | **Act** under the ceiling, propose above it | Zero exposure and clears when settlement arrives. In scenario 1 the $550 is above the $250 ceiling, so a person reviews it. |
+| Timing difference | `TIMING_DIFFERENCE` | Propose | Zero exposure and clears when settlement arrives, but it has no Oracle ReSA equivalent and closing it early would hide a settlement that never arrives. A person always decides. |
 | Amount mismatch | `AMOUNT_MISMATCH` | Propose | |
 | Sale without payment | `UNMATCHED_SALE` | Propose | |
 | Payment without sale | `ORPHAN_PAYMENT` | Propose | |
@@ -101,7 +101,6 @@ Decisions for the items below were taken on a blanket instruction to use the bes
 
 | Open point | Value taken | Status |
 | --- | --- | --- |
-| Act ceiling, timing difference | $250 per case (scenario 1 threshold) | Provisional |
 | Act ceiling, over/short | $5 (scenario 3 tolerance) | Provisional |
 | Act ceiling, exact duplicate (POS and Shopify) | $500 per case. Today there is no ceiling, so this adds a limit. | Provisional |
 | Daily cap on act actions | 200 per class per day | Provisional |

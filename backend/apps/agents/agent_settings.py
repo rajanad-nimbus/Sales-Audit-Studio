@@ -26,6 +26,9 @@ def defaults() -> dict:
         "investigator_enabled": os.getenv("NIMBUS_AGENT_INVESTIGATOR", "1")
         != "0",  # LLM-driven unless explicitly turned off
         "auto_investigate": os.getenv("NIMBUS_AUTO_INVESTIGATE", "1") == "1",
+        # Act-level guardrails: the agent resolves exact duplicates without a person only while on.
+        "act_duplicate_enabled": os.getenv("NIMBUS_ACT_DUPLICATE", "1") != "0",
+        "act_daily_cap": int(os.getenv("NIMBUS_ACT_DAILY_CAP", "200")),
         "model": os.getenv("NIMBUS_LLM_MODEL", ALLOWED_MODELS[0]),
         "tools": list(TOOL_NAMES),
     }
@@ -42,9 +45,12 @@ async def load(db) -> dict:
 def validate(changes: dict) -> dict:
     clean = {}
     for k, v in changes.items():
-        if k in ("investigator_enabled", "auto_investigate"):
+        if k in ("investigator_enabled", "auto_investigate", "act_duplicate_enabled"):
             if not isinstance(v, bool):
                 raise HTTPException(422, f"{k} must be true or false")
+        elif k == "act_daily_cap":
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 10000:
+                raise HTTPException(422, "act_daily_cap must be a whole number from 0 to 10000")
         elif k == "model":
             if v not in ALLOWED_MODELS:
                 raise HTTPException(422, f"model must be one of {ALLOWED_MODELS}")

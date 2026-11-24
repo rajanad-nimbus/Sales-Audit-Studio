@@ -25,6 +25,21 @@ def policy_limits():
 
     return integration.audit_controls()
 
+def agent_level(exception_type: str) -> str:
+    """collect, propose or act for a failure class: the approved release's choice, else the default.
+
+    Without an approved release the documented defaults apply, so the store-day agent keeps working
+    on exact duplicates exactly as before; a release that sets a class to a lower level takes effect
+    at once.
+    """
+    from integrations.ontology.audit_controls import AuditRulesUnavailable, default_level
+
+    try:
+        return policy_limits().level_for(exception_type)
+    except AuditRulesUnavailable:
+        return default_level(exception_type)
+
+
 SLA_HOURS = {"Critical": 4, "High": 24, "Normal": 72}
 
 

@@ -111,6 +111,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   >({});
   const [policies, setPolicies] = useState<PolicyEval[]>([]);
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
+  // The API returns every snapshot newest-first; show only the latest per requirement.
+  const latestEvidence = evidence.filter(
+    (e, i) => evidence.findIndex((x) => x.evidence_type === e.evidence_type) === i
+  );
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [reconciliation, setReconciliation] = useState<ReconciliationDetail | null>(null);
   const [loadingMoreRecords, setLoadingMoreRecords] = useState(false);
@@ -303,6 +307,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       decision === 'Approved' ? 'Recommendation approved.' : 'Escalated for review.'
     );
     if (ok) setRationale('');
+  };
+  const [reopenReason, setReopenReason] = useState('');
+  const reopen = async () => {
+    const ok = await act(
+      () => api.post(`/api/cases/${id}/reopen`, { reason: reopenReason }),
+      'Agent resolution reversed. The case is open again.'
+    );
+    if (ok) setReopenReason('');
   };
   const investigate = () =>
     act(() => api.post(`/api/cases/${id}/investigate`), 'Investigation finished.');
@@ -711,13 +723,29 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       <section className={`next-step ${closed ? 'is-done' : ''}`} aria-labelledby="next-step-h">
         <h2 id="next-step-h">{closed ? 'Case closed' : 'Next step'}</h2>
         {closed ? (
-          <p>
-            {c.investigation_status === 'Evidence Overridden'
-              ? 'Closed with an evidence override. The gap was not fulfilled; the override and who approved it are under Activity & notes.'
-              : c.investigation_status === 'Auto-Resolved'
-                ? 'Resolved automatically by the store-day agent: the sale was an exact copy of one already recorded, so the copy was excluded from totals. The details are under Activity & notes.'
-                : 'This case is closed. Everything below is the record of what happened.'}
-          </p>
+          <>
+            <p>
+              {c.investigation_status === 'Evidence Overridden'
+                ? 'Closed with an evidence override. The gap was not fulfilled; the override and who approved it are under Activity & notes.'
+                : c.investigation_status === 'Auto-Resolved'
+                  ? 'Resolved automatically by the store-day agent: the sale was an exact copy of one already recorded, so the copy was excluded from totals. The details are under Activity & notes.'
+                  : 'This case is closed. Everything below is the record of what happened.'}
+            </p>
+            {c.investigation_status === 'Auto-Resolved' &&
+              (me?.role === 'finance' || me?.role === 'it' || me?.role === 'admin') && (
+                <div className="cc-askrow">
+                  <input
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    placeholder="Why was the agent wrong? (at least 10 characters)"
+                    aria-label="Reason for reopening"
+                  />
+                  <Button disabled={busy || reopenReason.trim().length < 10} onClick={reopen}>
+                    Reopen case
+                  </Button>
+                </div>
+              )}
+          </>
         ) : proposed.length > 0 ? (
           <>
             {c.investigation_status === 'Awaiting Evidence' && (
@@ -1422,7 +1450,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
           <Card className="case-section">
             <h2>Evidence</h2>
-            {evidence.length === 0 ? (
+            {latestEvidence.length === 0 ? (
               <p className="cc-empty">
                 No evidence has been retrieved yet. Request it from the Activity tab.
               </p>
@@ -1440,7 +1468,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     </tr>
                   </thead>
                   <tbody>
-                    {evidence.map((e) => (
+                    {latestEvidence.map((e) => (
                       <Fragment key={e.id}>
                         <tr>
                           <td className="font-medium">{pretty(e.evidence_type)}</td>

@@ -40,6 +40,22 @@ AUDIT_LIMITS = [
  ("NSA-LIMIT-AUTONOMY", "Autonomy limit", "A recommendation whose financial impact exceeds this amount always needs a human decision.", "autonomy_limit", "1000"),
  ("NSA-LIMIT-TIMING-AUTONOMY", "Timing autonomy limit", "A no-movement timing classification may be permitted without a human only up to this exposure.", "timing_autonomy_limit", "250"),
 ]
+# code, name, failure class, agent level: how far the agent may go on each class. Nimbus falls back to
+# the same defaults for any class without a rule, so these only make the defaults visible and editable.
+AUDIT_LEVELS = [
+ ("NSA-LEVEL-DUPLICATE-SALES", "Exact duplicate sale", "DUPLICATE_SALES", "act"),
+ ("NSA-LEVEL-SHOPIFY-DUPLICATE-ORDER", "Shopify exact duplicate order", "SHOPIFY_DUPLICATE_ORDER", "act"),
+ ("NSA-LEVEL-TIMING-DIFFERENCE", "Timing difference", "TIMING_DIFFERENCE", "propose"),
+ ("NSA-LEVEL-AMOUNT-MISMATCH", "Amount mismatch", "AMOUNT_MISMATCH", "propose"),
+ ("NSA-LEVEL-UNMATCHED-SALE", "Sale without payment", "UNMATCHED_SALE", "propose"),
+ ("NSA-LEVEL-ORPHAN-PAYMENT", "Payment without sale", "ORPHAN_PAYMENT", "propose"),
+ ("NSA-LEVEL-BANK-VARIANCE", "Bank variance", "BANK_VARIANCE", "propose"),
+ ("NSA-LEVEL-MISSING-DEPOSIT", "Missing deposit", "MISSING_DEPOSIT", "propose"),
+ ("NSA-LEVEL-GL-VARIANCE", "GL variance", "GL_VARIANCE", "propose"),
+ ("NSA-LEVEL-MISSING-GL-POSTING", "Missing GL posting", "MISSING_GL_POSTING", "propose"),
+ ("NSA-LEVEL-DISC-REASON-REQ", "Discount missing a reason", "DISC_REASON_REQ", "propose"),
+ ("NSA-LEVEL-MISSING-REFUND", "Return without refund", "MISSING_REFUND", "collect"),
+]
 # suffix, label, target, ordered (actor, step) pairs
 PROCESSES = [
  ("INGESTION", "Receive and normalize source evidence", "SourceRecord", [("NSA-IT", "Check connector and source-feed configuration"), ("NSA-INGESTOR", "Preserve payload, delivery identity and source hash"), ("NSA-INGESTOR", "Validate schema, sign, currency and deduplication; normalize or quarantine")]),
@@ -176,6 +192,15 @@ def apply(db, workspace_id, schema):
             config = audit_controls.validate_config({"family": "policy_limit", "limit": limit, "amount": amount, "currency": "USD"})
             db.add(BusinessRule(workspaceId=workspace_id, ruleCode=code, name=name, expression=statement,
                                statement=statement, description="Sales Audit policy limit read by Nimbus from an approved release.",
+                               entityId=entities["ResolutionRecommendation"].id, category="policy", severity="error",
+                               ruleType=audit_controls.RULE_TYPE, source="manual", status="draft", config=config))
+            changed["audit_controls"].append(code)
+    for code, name, exception_type, level in AUDIT_LEVELS:
+        if not db.query(BusinessRule).filter_by(workspaceId=workspace_id, ruleCode=code).first():
+            config = audit_controls.validate_config({"family": "agent_level", "exception_type": exception_type, "level": level})
+            statement = f"The agent may {level} on {exception_type}: collect gathers evidence, propose also recommends, act resolves with an audit event."
+            db.add(BusinessRule(workspaceId=workspace_id, ruleCode=code, name=name, expression=statement,
+                               statement=statement, description="Sales Audit agent level read by Nimbus from an approved release.",
                                entityId=entities["ResolutionRecommendation"].id, category="policy", severity="error",
                                ruleType=audit_controls.RULE_TYPE, source="manual", status="draft", config=config))
             changed["audit_controls"].append(code)
