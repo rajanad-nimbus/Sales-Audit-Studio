@@ -33,11 +33,7 @@ A decision-ready spec, `documents/AUDIT_FAILURE_EVIDENCE_SCENARIOS.md`: for each
 
 ## Not yet specified
 
-- How an auditor sees evidence in the UI (evidence panel shape).
-- How to measure agent evidence quality (evals, SLOs) — hangs on the evidence model.
-- Missing/late source and failed-import scenarios — unclear yet whether they register cases or stay store-day blockers.
-
-- Spot-check sampling of L3 resolutions: worth specifying once automation volume exists.
+- Nothing left in the fog for this destination. The evidence panel, quality measures and spot-check sampling moved to the follow-on map `../evidence-panel-and-quality/map.md`; provisional values are in `documents/AUDIT_EVIDENCE_DECISION_LOG.md`.
 
 ## Out of scope
 

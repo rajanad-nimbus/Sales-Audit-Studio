@@ -97,10 +97,31 @@ Today: case grouping, priority by raw amount with an SLA, and a close gate on un
 
 ## 8. Open points
 
-1. **Scenario 1 wording.** Resolved: the $550 is above the $250 ceiling, so a person reviews it. The scenario text still describes it as disposition only and should be reworded.
-2. **Per-class evidence requirements** are in the ontology (`ontology.py`), 33 exception types, each with two or three required items. Two gaps: (a) a code raised by a rule but defined only in the error code table falls back to the default list ("Source record", "Settlement status") with zero exposure, so it carries the weakest evidence and never reaches exposure-based priority; (b) the class map now assigns every type, with collect as the default for any new one. The assignments for the 20 types not in the first table are a draft for review.
-3. **Overdue deadline** for a missing or late source is not set, and neither is the per-class ceiling for act. Both belong in the ontology.
-4. **Class assignments** for the 20 added types are a draft.
-5. **Evidence panel in the UI** and **agent evidence quality measures** are not specified.
-6. **Spot-check sampling** of act resolutions is deferred until there is volume.
-7. ReSA release 15.0.1 is the only guide consulted. Later releases are unchecked.
+Decisions for the items below were taken on a blanket instruction to use the best recommendation, so they are **provisional or assumed**, not confirmed. Each is logged in [AUDIT_EVIDENCE_DECISION_LOG.md](AUDIT_EVIDENCE_DECISION_LOG.md), section J.
+
+| Open point | Value taken | Status |
+| --- | --- | --- |
+| Act ceiling, timing difference | $250 per case (scenario 1 threshold) | Provisional |
+| Act ceiling, over/short | $5 (scenario 3 tolerance) | Provisional |
+| Act ceiling, exact duplicate (POS and Shopify) | $500 per case. Today there is no ceiling, so this adds a limit. | Provisional |
+| Daily cap on act actions | 200 per class per day | Provisional |
+| Overdue deadline for a missing or late source | 12 hours after the business date ends | Provisional |
+| Carry-forward age limit | 3 business days | Provisional |
+| Spot-check sampling of act resolutions | 5% per class per week, at least 5 | Provisional |
+| Class assignments for the 20 added types | As drafted in section 5 | Assumed |
+| Evidence requirements for rule-raised codes | The error definition table gains an optional evidence list and an exposure setting. Until set, the code uses the default list, stays at collect, and is flagged in the error-code admin as "evidence not defined". | Assumed |
+| Evidence panel and agent quality measures | Specified in [EVIDENCE_PANEL_AND_AGENT_QUALITY.md](EVIDENCE_PANEL_AND_AGENT_QUALITY.md) | Assumed |
+| Scenario 1 | No rewording needed. "Disposition only" is the action class and Finance approval already applies above $250. | Resolved |
+| ReSA release | Checked by web search (search summaries, not the full guides): see section 9. The 15.0.1 guide remains the only one read in full. | Checked, low confidence |
+
+## 9. Later ReSA releases
+
+A web search of Oracle documentation (summaries only; the full guides were not read) found:
+
+- **Store and HQ override flags are real.** The 13.x and 14.0 user guides describe a Store Override and an HQ Override checkbox on each error definition. The 24.0.101.0 implementation guide still has an HQ Override column. Section 7 chose not to add the split because the 15.0.1 guide did not define it. That choice rested on a gap in one guide, so **it should be revisited** (decision log C2).
+- **"System Required" decides blocking.** The 19.3 and 24.0 implementation guides describe it per error and per target system. Custom codes default to not required. This matches ZeTSA's export-block destinations on each error definition.
+- **Status codes.** An operations guide lists audit status H (HQ errors pending) and S (store errors pending). Another Oracle guide lists status values without S, so versions differ.
+- **Acknowledge, then override.** The 23.1 guide says errors that cannot be corrected must be acknowledged and then overridden. The behaviour matches 15.0.1.
+- **No evidence concept found,** and no second approver or override reason. The conclusion in section 2 holds for the later releases searched.
+
+Sources: [13.2.5 user guide](https://docs.oracle.com/cd/E12448_01/rms/pdf/1325/resa-1325-ug.pdf), [16.0.21 user guide](https://docs.oracle.com/cd/E79623_01/rms/pdf/16021/resa-16021-ug.pdf), [19.3 implementation guide](https://docs.oracle.com/cd/E79623_01/rms/pdf/193000/resa-impg.pdf), [24.0.101.0 implementation guide](https://docs.oracle.com/en/industries/retail/retail-merchandising-foundation-cloud/24.0.101.0/rsaim/F91829_01.pdf), [23.1.301.0 Do the Basics guide](https://docs.oracle.com/en/industries/retail/retail-merchandising-foundation-cloud/23.1.301.0/rsadb/F83911_02.pdf).

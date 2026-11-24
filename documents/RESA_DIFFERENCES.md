@@ -118,4 +118,4 @@ overall, data and audit status) but changes **who is allowed to do what**:
 - The ReSA behaviour for HQ errors pending and store errors pending is not modelled separately in ZeTSA. Confirm whether auditors need the split.
 - ZeTSA has no per-error-code **store or HQ override** permission. If ReSA's override rules must be reproduced, that flag is the gap.
 - Whether "POS to GL Variance" as a **required** comparison matches how Oracle treats GL is unconfirmed. ReSA exports to GL after the audit instead of comparing before it.
-- Release 15.0.1 is the only guide on hand. Behaviour from later ReSA releases is unchecked.
+- Release 15.0.1 is the only guide read in full. A web search of later releases (summaries only) is recorded in [AUDIT_FAILURE_EVIDENCE_SCENARIOS.md](AUDIT_FAILURE_EVIDENCE_SCENARIOS.md) section 9. It confirms the per-code store and HQ override flags exist.

@@ -14,7 +14,7 @@ Sources: `documents/NIMBUS_SCENARIOS.md`, `documents/STORE_DAY_BUSINESS_SCENARIO
 |---|---|---|---|---|---|
 | Exact duplicate sale | reconciliation | DUPLICATE_SALES | Original vs copy field comparison (ignores payment ref) | store-day-agent resolves if single original matches | Copy excluded, case closed, day re-totaled |
 | Duplicate, fields differ / no single original | reconciliation | DUPLICATE_SALES | Ontology evidence snapshots | Investigation only | Left for human |
-| Settlement timing difference | reconciliation | TIMING_DIFFERENCE | Ontology evidence; scenario 1 | Investigation; disposition-only under threshold ($250) per scenario doc, **$550 exceeds it** | Human decision |
+| Settlement timing difference | reconciliation | TIMING_DIFFERENCE | Ontology evidence; scenario 1 | Investigation; scenario 1 sends $550 to Finance approval because it exceeds the $250 threshold | Human decision |
 | Sale without payment | reconciliation | UNMATCHED_SALE | Ontology evidence | Investigation | Human |
 | Return without refund | reconciliation | MISSING_REFUND | Scenario 4: evidence 60% vs 100% required | Investigation + evidence request | Human; escalation |
 | Payment without sale | reconciliation | ORPHAN_PAYMENT | Ontology evidence | Investigation | Human |
@@ -32,7 +32,7 @@ Sources: `documents/NIMBUS_SCENARIOS.md`, `documents/STORE_DAY_BUSINESS_SCENARIO
 ## Gaps (failure with a case but no evidence story)
 1. Evidence is only ever "linked source records exist"; nothing records **what the records showed** or whether they explain the variance.
 2. Evidence requirements per code live in the ontology; this inventory did not enumerate each code's list. Worth checking whether any code falls back to `DEFAULT_EVIDENCE`.
-3. Scenario doc inconsistency: timing difference of $550 vs a $250 autonomous threshold, yet shown as disposition only.
+3. ~~Scenario doc inconsistency~~ (corrected later): scenario 1 already routes the $550 to Finance approval above the $250 threshold; "Disposition Only" is its action class, not an automation claim.
 4. Unexplained variances and "store day not ready" have no case, so no evidence trail.
 5. Staleness: field exists, but regather trigger on stale evidence was not verified in code.
 6. LLM investigator is optional and bounded; deterministic path is the default, so most cases carry link-existence evidence only.

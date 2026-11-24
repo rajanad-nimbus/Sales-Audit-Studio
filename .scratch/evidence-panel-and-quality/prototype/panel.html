@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Evidence panel prototype</title>
+<style>
+:root{--bg:#f6f8fc;--card:#fff;--border:#d9e0ee;--text:#14213d;--muted:#5b6785;--primary:#17336b;--primary-light:#e3e9f6;--ok:#1d7a4a;--warn:#a96a00;--err:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1426;--card:#111d36;--border:#243556;--text:#e6ecf8;--muted:#9aa8c7;--primary:#4a78d0;--primary-light:#1a2b52;--ok:#4cc38a;--warn:#e0a53a;--err:#f2766f}}
+body{margin:0;background:var(--bg);color:var(--text);font:14px Inter,system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px}
+h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;margin:0 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.muted{color:var(--muted)}
+.chip{border:1px solid var(--border);border-radius:99px;padding:2px 9px;font-size:12px}
+.chip.p{background:var(--primary-light);color:var(--primary);border-color:transparent}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}
+.banner{border-left:3px solid var(--warn);background:var(--bg);padding:8px 10px;margin-bottom:12px;border-radius:6px}
+.ev{border-top:1px solid var(--border);padding:10px 0}.ev:first-of-type{border-top:0}
+button{background:var(--primary);color:#fff;border:0;border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
+button.s{background:transparent;color:var(--primary);border:1px solid var(--border)}button:disabled{opacity:.4;cursor:not-allowed}
+select{font:inherit;padding:4px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px}
+</style></head><body><main>
+<div class="card"><div class="row"><h1>Case ZA-20261118-0042 · Amount mismatch</h1><span class="chip p">Level: propose</span><span class="chip">Priority: High</span></div>
+<div class="row muted">Store 0847 · 2026-11-18 · exposure $186.42 · SLA due in 6 h</div>
+<div class="row" style="margin-top:8px"><label class="muted">State <select id="state"></select></label><label class="muted">Role <select id="role"><option>auditor</option><option>finance</option><option>analyst</option></select></label></div></div>
+<div id="banner"></div>
+<div class="card"><h2>Evidence (3 of 3 required found)</h2>
+<div class="ev"><div class="row"><b>POS journal</b><span class="chip ok">Complete</span><span class="muted">POS · retrieved 09:12 · batch B-1182</span></div><div class="muted">Sale of $186.42, tender card. Cited: TXN-84291753.</div></div>
+<div class="ev"><div class="row"><b>Processor capture detail</b><span class="chip ok">Complete</span><span id="stale" class="chip warn" hidden>Stale: source re-imported</span></div><div class="muted">Capture of $168.42. Finding: <b class="warn">supported</b> — digits transposed. Cited: PROC-5531.</div></div>
+<div class="ev"><div class="row"><b>Tender breakdown</b><span class="chip ok">Complete</span><span id="conf" class="chip err" hidden>Conflict</span></div><div class="muted" id="confText">Tender total matches the sale.</div></div></div>
+<div class="card"><h2>Recommendation (from agent, evidence ready)</h2><div>Correct the sale amount to $168.42 → re-audit → close. <span id="nr" class="chip warn" hidden>Needs review: a finding changed</span></div><div class="muted">Provenance: investigation-agent, model v5.5, tools list_transactions, get_source_record, ontology-v1.0.</div></div>
+<div class="card"><h2>Actions</h2><div class="row" id="actions"></div><div class="muted" id="why" style="margin-top:8px"></div></div>
+<script>
+const states={Ready:{},Collecting:{b:'Evidence is still being gathered.',block:1},Conflict:{b:'Sources disagree. Resolve the conflict before deciding.',block:1,conf:1},Stale:{b:'Source data changed. Evidence is being regathered.',block:1,stale:1},'Needs review':{b:'A finding changed after this recommendation. Review it first.',block:1,nr:1},'Override pending':{b:'An evidence override awaits a second approver.',ovr:1}};
+const $=id=>document.getElementById(id);for(const k in states)$('state').add(new Option(k));
+function draw(){const s=states[$('state').value],r=$('role').value;
+$('banner').innerHTML=s.b?`<div class="banner">${s.b}</div>`:'';
+$('stale').hidden=!s.stale;$('conf').hidden=!s.conf;$('nr').hidden=!s.nr;
+$('confText').textContent=s.conf?'Bank shows deposit, ERP shows none.':'Tender total matches the sale.';
+const a=[],btn=(t,dis,sec)=>`<button ${dis?'disabled':''} class="${sec?'s':''}">${t}</button>`;
+if(r==='analyst'){a.push(btn('Add note',0,1));$('why').textContent='Read-only: analysts add notes only.';}
+else{const block=!!s.block;
+ a.push(btn('Approve recommendation',block||(s.ovr&&r!=='finance')));a.push(btn('Reject recommendation (reason)',block,1));
+ a.push(btn('Request more evidence',0,1));a.push(btn('Escalate',0,1));
+ if(s.conf)a.push(btn('Resolve conflict (side + reason)',r!=='auditor'));
+ if(s.ovr)a.push(btn('Approve override',r!=='finance'));else if(r==='auditor')a.push(btn('Request override (reason + financial effect)',0,1));
+ $('why').textContent=block?'Decision actions are blocked in this state.':(s.ovr?'Override approver must differ from the requester.':'');}
+$('actions').innerHTML=a.join('');}
+$('state').onchange=$('role').onchange=draw;draw();
+</script></main></body></html>

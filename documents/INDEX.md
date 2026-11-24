@@ -19,6 +19,9 @@
 - [General audit process](AUDIT_PROCESS.md)
 - [ReSA workflow parity](RESA_PARITY.md)
 - [ZeTSA vs ReSA behavioural differences](RESA_DIFFERENCES.md)
+- [Audit failures: cases, evidence and agents](AUDIT_FAILURE_EVIDENCE_SCENARIOS.md)
+- [Evidence panel and agent quality measures](EVIDENCE_PANEL_AND_AGENT_QUALITY.md)
+- [Decision log for audit evidence work](AUDIT_EVIDENCE_DECISION_LOG.md)
 - [Build summary](BUILD_SUMMARY.md)
 - [Domain terms](../CONTEXT.md)
 
