@@ -34,7 +34,7 @@ Wayfinder maps: `.scratch/audit-failure-evidence/` and `.scratch/evidence-panel-
 | # | Area | Decision | Status |
 | --- | --- | --- | --- |
 | C1 | Error handling | Cases with evidence; agent-resolved errors close immediately. | Confirmed |
-| C2 | Overrides | Reason and second approver by default; ontology may relax per code; no store/HQ split. | Confirmed |
+| C2 | Overrides | Reason and second approver by default; ontology may relax per code. Store/HQ split was left out, then added by K3. | Confirmed, amended by K3 |
 | C3 | Resolution | Proposal and approver; act-level agent actions exempt. | Confirmed |
 | C4 | Audit trail | ReSA trails plus provenance and agent/conflict events. | Confirmed |
 
@@ -121,4 +121,4 @@ See section 1 of [EVIDENCE_PANEL_AND_AGENT_QUALITY.md](EVIDENCE_PANEL_AND_AGENT_
 | --- | --- | --- | --- |
 | K1 | What evidence do rule-raised codes carry when the ontology has no entry? | The error definition table gains an optional evidence list and an exposure setting. Until set, the code uses the default list, stays at collect (E4), and is flagged as "evidence not defined". | Assumed |
 | K2 | Do later ReSA releases change the comparison? | Mostly no. They confirm the per-code Store Override and HQ Override flags (13.x, 14.0; HQ column in 24.0) and the "System Required" blocking flag (19.3, 24.0). No evidence concept, second approver or override reason found. Found by web search summaries only. | Checked, low confidence |
-| K3 | Revisit C2 (no store/HQ override split)? | Yes, flagged for review. C2 rested on the 15.0.1 guide not defining the split, but the flags exist in other releases. Not changed here. | Open for the user |
+| K3 | Revisit C2 (no store/HQ override split)? | Yes. Add a per-error-code "who may override" setting with store, HQ or both, defaulting to HQ only. It applies on top of the reason and second-approver rule, and the panel's override actions respect it. Reason: the flags exist in other ReSA releases, and it costs one field on the error definition. | Confirmed (user said "go ahead" to the recommendation) |

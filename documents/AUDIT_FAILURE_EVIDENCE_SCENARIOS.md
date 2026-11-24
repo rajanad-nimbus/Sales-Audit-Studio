@@ -91,7 +91,7 @@ Today: case grouping, priority by raw amount with an SLA, and a close gate on un
 | Area | ReSA | Chosen |
 | --- | --- | --- |
 | Error handling | Error list. Fix or override. All cleared sets Audited. | Cases with evidence, recommendation and decision. Errors an agent resolves at the act level close immediately and never reach a person's queue. |
-| Overrides | Per-code override flags (schema only). No reason, no approver. | Reason and second finance approver by default. The ontology may relax this per code to none, reason only, or reason and approver. No store/HQ split until a real need appears. |
+| Overrides | Per-code override flags (schema only). No reason, no approver. | Reason and second finance approver by default. The ontology may relax this per code to none, reason only, or reason and approver. Each error code also says **who may override**: store, HQ, or both, defaulting to HQ only (ReSA's Store Override and HQ Override flags; see section 9). |
 | Resolution | Auditor edits the transaction. Old version goes to a revision table. | Proposal and independent approver. Agent actions that meet the act criteria need no approver, because reopening reverses them. |
 | Audit trail | Revision tables. Total and over/short audit trails. | The same, plus evidence provenance and an audit event for every agent action and every evidence conflict. |
 
@@ -118,7 +118,7 @@ Decisions for the items below were taken on a blanket instruction to use the bes
 
 A web search of Oracle documentation (summaries only; the full guides were not read) found:
 
-- **Store and HQ override flags are real.** The 13.x and 14.0 user guides describe a Store Override and an HQ Override checkbox on each error definition. The 24.0.101.0 implementation guide still has an HQ Override column. Section 7 chose not to add the split because the 15.0.1 guide did not define it. That choice rested on a gap in one guide, so **it should be revisited** (decision log C2).
+- **Store and HQ override flags are real.** The 13.x and 14.0 user guides describe a Store Override and an HQ Override checkbox on each error definition. The 24.0.101.0 implementation guide still has an HQ Override column. Section 7 first left the split out because the 15.0.1 guide did not define it. It has since been added (decision log K3).
 - **"System Required" decides blocking.** The 19.3 and 24.0 implementation guides describe it per error and per target system. Custom codes default to not required. This matches ZeTSA's export-block destinations on each error definition.
 - **Status codes.** An operations guide lists audit status H (HQ errors pending) and S (store errors pending). Another Oracle guide lists status values without S, so versions differ.
 - **Acknowledge, then override.** The 23.1 guide says errors that cannot be corrected must be acknowledged and then overridden. The behaviour matches 15.0.1.

@@ -33,7 +33,7 @@ One panel on the case screen. A rough prototype for reaction is at `.scratch/evi
 | Approve or reject the recommendation (reject needs a reason) | Yes | Yes, with the financial effect shown | No |
 | Request more evidence, provide evidence, add a note | Yes | Yes | Notes only |
 | Resolve a conflict (choose a side, give a reason) | Yes | No | No |
-| Request an evidence override (reason and financial effect) | Yes | No | No |
+| Request an evidence override (reason and financial effect), where the error code lets that role override | Yes | No | No |
 | Approve an evidence override (approver differs from the requester) | No | Yes | No |
 | Escalate, snooze | Yes | Yes | No |
 
