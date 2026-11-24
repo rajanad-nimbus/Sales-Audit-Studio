@@ -25,7 +25,7 @@ Wayfinder maps: `.scratch/audit-failure-evidence/` and `.scratch/evidence-panel-
 | # | Question | Decision | Status |
 | --- | --- | --- | --- |
 | B1 | Criteria for each level? | Act needs deterministic proof, zero or reversible effect, amount under a ceiling, ready evidence. Propose needs ready evidence. Else collect. | Confirmed |
-| B2 | Which class at which level? | Act: exact duplicate, over/short in tolerance. Propose: nine classes. Collect: four classes. Held in the ontology. | Confirmed |
+| B2 | Which class at which level? | Act: exact duplicate, over/short in tolerance. Propose: nine classes, including timing difference (moved from act on 2026-11-24). Collect: four classes. Held in the ontology. | Confirmed |
 | B3 | Guardrails on act? | Audit event, on/off option, per-class kill switch, daily cap. Sampling deferred. | Confirmed |
 | B4 | Reversal? | Reopening the case undoes the action. | Confirmed |
 
@@ -51,7 +51,7 @@ Wayfinder maps: `.scratch/audit-failure-evidence/` and `.scratch/evidence-panel-
 
 | # | Question | Decision | Status |
 | --- | --- | --- | --- |
-| E1 | $550 timing difference automatic or reviewed? | Act under the ceiling, propose above it. | Confirmed |
+| E1 | $550 timing difference automatic or reviewed? | Always proposed to a person. Timing difference is a ZeTSA class with no Oracle ReSA equivalent, so the act level was dropped. | Revised 2026-11-24 |
 | E2 | Do unexplained variances get cases? | Yes, above tolerance. | Confirmed |
 | E3 | Do missing or late sources register cases? | Yes, collect-level, once overdue. | Confirmed |
 | E4 | Default level for unmapped types? | Collect. | Confirmed |
@@ -106,7 +106,7 @@ See section 1 of [EVIDENCE_PANEL_AND_AGENT_QUALITY.md](EVIDENCE_PANEL_AND_AGENT_
 
 | # | Question | Value | Status |
 | --- | --- | --- | --- |
-| J1 | Act ceiling, timing difference | $250 per case (the autonomous threshold already in scenario 1, policy ST-004) | Provisional |
+| J1 | Act ceiling, timing difference | Withdrawn: timing difference no longer acts. | Withdrawn |
 | J2 | Act ceiling, over/short | $5 (the tolerance in scenario 3) | Provisional |
 | J3 | Act ceiling, exact duplicate (POS and Shopify) | $500 per case. No source in the repository, and today there is no ceiling, so this adds a limit. | Provisional |
 | J4 | Daily cap on act actions | 200 per class per day | Provisional |
@@ -122,3 +122,12 @@ See section 1 of [EVIDENCE_PANEL_AND_AGENT_QUALITY.md](EVIDENCE_PANEL_AND_AGENT_
 | K1 | What evidence do rule-raised codes carry when the ontology has no entry? | The error definition table gains an optional evidence list and an exposure setting. Until set, the code uses the default list, stays at collect (E4), and is flagged as "evidence not defined". | Assumed |
 | K2 | Do later ReSA releases change the comparison? | Mostly no. They confirm the per-code Store Override and HQ Override flags (13.x, 14.0; HQ column in 24.0) and the "System Required" blocking flag (19.3, 24.0). No evidence concept, second approver or override reason found. Found by web search summaries only. | Checked, low confidence |
 | K3 | Revisit C2 (no store/HQ override split)? | Yes. Add a per-error-code "who may override" setting with store, HQ or both, defaulting to HQ only. It applies on top of the reason and second-approver rule, and the panel's override actions respect it. Reason: the flags exist in other ReSA releases, and it costs one field on the error definition. | Confirmed (user said "go ahead" to the recommendation) |
+
+## L. Store Day close and reopen
+
+| # | Question | Decision | Status |
+| --- | --- | --- | --- |
+| L1 | What does a closed Store Day mean? | No new transactions for that day. The day must be closed explicitly, and no new transactions are accepted while it is closed. | Confirmed (user) |
+| L2 | Who may reopen a closed Store Day? | IT Admin only. It is the rarest scenario, so the reopen needs a rationale and stays in the reopen history. | Confirmed (user) |
+
+**Gap with today's code (accepted for now):** `POST /api/store-days/{store}/{date}/reopen` is currently `require_role("finance")` ([closures.py](../backend/apps/store_days/closures.py)), and the Store Day page shows Reopen to Finance. Making L2 true means changing both to IT only. The user agreed to leave reopen with Finance for now, so L2 is the target rule and not yet enforced.
