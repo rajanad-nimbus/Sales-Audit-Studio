@@ -117,6 +117,7 @@ def test_approving_a_missing_transaction_invalidates_existing_totals():
                             "store_id": "S1",
                             "amount": "5",
                             "transaction_type": "Sale",
+                            "source_system": "POS",
                         },
                         rationale="verified",
                         proposed_by="analyst",

@@ -102,17 +102,17 @@ def test_filters_run_in_the_database_over_every_store_day_not_just_the_newest():
 def test_the_summary_gives_exact_counts_for_the_same_filters():
     async def scenario(db):
         await many_days(db)
-        everything = await store_day_summary(None, None, None, None, db, FINANCE)
+        everything = await store_day_summary(db=db, user=FINANCE)
         assert everything == {
             "total": 300,
             "by_status": {"Closed": 120, "Auditing": 180},
             "totals_stale": 30,  # stores 0, 10 and 20, ten days each
             "unsigned_audit_versions": 0,  # none has current totals awaiting an auditor
         }
-        narrowed = await store_day_summary(None, "2026-10-09", None, "S00", db, FINANCE)
+        narrowed = await store_day_summary(date_from="2026-10-09", q="S00", db=db, user=FINANCE)
         assert narrowed["total"] == 20 and narrowed["by_status"] == {"Auditing": 20}
         manager = {"user": "m", "role": "finance", "store_scoped": True, "stores": ["S001"]}
-        assert (await store_day_summary(None, None, None, None, db, manager))["total"] == 10
+        assert (await store_day_summary(db=db, user=manager))["total"] == 10
 
     run_with_db(scenario)
 

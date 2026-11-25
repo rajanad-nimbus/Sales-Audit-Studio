@@ -23,10 +23,27 @@ def configured(monkeypatch):
     monkeypatch.setenv("NIMBUS_ONTOLOGY_API_KEY", "test-key")
 
 
+def audit_control(code, **config):
+    return {"ruleType": "audit_control", "ruleCode": code, "name": code, "config": config}
+
+
+# The policy limits every approved release must define before Nimbus will evaluate anything.
+LIMITS = [
+    audit_control("NSA-LIMIT-AUTONOMY", family="policy_limit", limit="autonomy_limit", amount="1000"),
+    audit_control(
+        "NSA-LIMIT-TIMING-AUTONOMY",
+        family="policy_limit",
+        limit="timing_autonomy_limit",
+        amount="250",
+    ),
+]
+
+
 def response(request, meta=None, rows=None, cursor=None):
     if rows is None:
         rows = (
             [{"ruleCode": code, "expression": "governed control"} for code in sorted(RULE_CODES)]
+            + LIMITS
             if request.url.path.endswith("business-rules")
             else []
         )
@@ -190,3 +207,27 @@ def test_prompt_includes_governed_rules_without_changing_tool_permissions():
     )
     assert "Require evidence" in prompt and "NSA-CASE-LIFECYCLE" in prompt
     assert "never overrides tool scope" in prompt
+
+
+def test_agent_levels_in_an_approved_release_reach_the_agent():
+    levels = [
+        audit_control("L-1", family="agent_level", exception_type="DUPLICATE_SALES", level="propose")
+    ]
+
+    def handle(request):
+        rows = None
+        if request.url.path.endswith("business-rules"):
+            rows = [
+                {"ruleCode": code, "expression": "governed control"} for code in sorted(RULE_CODES)
+            ] + LIMITS + levels
+        return response(request, rows=rows)
+
+    async def go():
+        integration = OntologyIntegration()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            await integration.refresh(client)
+        controls = integration.audit_controls()
+        assert controls.level_for("DUPLICATE_SALES") == "propose"
+        assert controls.level_for("SHOPIFY_DUPLICATE_ORDER") == "act"
+
+    asyncio.run(go())
