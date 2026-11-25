@@ -101,7 +101,8 @@ POLICIES = [
 
 def apply(db, workspace_id, schema):
     workspace = db.query(Workspace).filter_by(id=workspace_id).with_for_update().one()
-    if workspace.name != "Nimbus Sales Audit" or workspace.status != "draft" or workspace.deletedAt:
+    # The approved ontology is named "Nimbus Sales Audit"; a draft started from it is "Nimbus Sales Audit: <what it changes>".
+    if not workspace.name.startswith("Nimbus Sales Audit") or workspace.status != "draft" or workspace.deletedAt:
         raise ValueError("Only the existing editable Nimbus Sales Audit draft may be extended")
     before = ontology_doc.export_doc(db, workspace_id)
     entities = {e.name: e for e in db.query(Entity).filter_by(workspaceId=workspace_id)}
@@ -186,7 +187,8 @@ def apply(db, workspace_id, schema):
             existing.typicalAuthorizedActionsJson = json.dumps(["read"])
             existing.entityScopeJson = json.dumps(scope)
             changed["personas"].append(code)
-        if kind == "system" and not db.query(Consumer).filter_by(workspaceId=workspace_id, name=name).first():
+        # Consumers belong to the approved ontology; a draft carries only the release content.
+        if kind == "system" and workspace.kind != "draft" and not db.query(Consumer).filter_by(workspaceId=workspace_id, name=name).first():
             db.add(Consumer(workspaceId=workspace_id, kind="agent", name=name, persona=code,
                             status="disabled", assignments="{}", actsForUsers=False))
             changed["consumers"].append(name)
