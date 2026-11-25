@@ -258,12 +258,21 @@ def test_the_pos_log_endpoint_ingests_sales_and_stores_register_events():
     from apps.ingest.routes import ingest_pos_log
     from fastapi import HTTPException
 
-    # a file with a header and no transactions is still a valid file
-    text = "FHEAD0000000001RTLG20150507064837201407174241      V.14.0\n"
+    # An empty file needs both its header and a zero-count trailer.
+    text = "FHEAD0000000001RTLG20150507064837201407174241      V.14.0\nFTAIL00000000020000000000\n"
     request = PosLogRequest(format="rtlog", delivery_id="log-1", content=text)
 
     async def go(db):
         result = await ingest_pos_log(request, db, {"role": "it"})
+        with pytest.raises(HTTPException, match="no FTAIL") as incomplete:
+            await ingest_pos_log(
+                request.model_copy(
+                    update={"delivery_id": "incomplete", "content": text.splitlines()[0]}
+                ),
+                db,
+                {"role": "it"},
+            )
+        assert incomplete.value.status_code == 422
         bad = None
         try:
             await ingest_pos_log(
@@ -287,6 +296,8 @@ def test_the_pos_log_endpoint_ingests_sales_and_stores_register_events():
 def test_the_pos_log_endpoint_takes_real_files_and_a_second_delivery_adds_nothing():
     from apps.ingest.contracts import PosLogRequest
     from apps.ingest.routes import ingest_pos_log
+    from fastapi import HTTPException
+    from models import CanonicalTransaction
 
     async def go(db):
         out = []
@@ -294,6 +305,22 @@ def test_the_pos_log_endpoint_takes_real_files_and_a_second_delivery_adds_nothin
             request = PosLogRequest(
                 format="rtlog", delivery_id=f"d{n}", content=path.read_text(encoding="ascii")
             )
+            log = rtlog.parse_rtlog_file(path)
+            _, left_over = standard.ingest_records(log)
+            if standard.unmapped_merchandise(left_over):
+                before = len((await db.execute(select(CanonicalTransaction))).scalars().all())
+                before_events = len((await db.execute(select(RegisterEvent))).scalars().all())
+                with pytest.raises(HTTPException, match="no usable item lines") as refused:
+                    await ingest_pos_log(request, db, {"role": "it"})
+                assert refused.value.status_code == 422
+                assert (
+                    len((await db.execute(select(CanonicalTransaction))).scalars().all()) == before
+                )
+                assert (
+                    len((await db.execute(select(RegisterEvent))).scalars().all()) == before_events
+                )
+                out.append((path, None, None))
+                continue
             first = await ingest_pos_log(request, db, {"role": "it"})
             second = await ingest_pos_log(
                 request.model_copy(update={"delivery_id": f"again-{n}"}), db, {"role": "it"}
@@ -302,8 +329,11 @@ def test_the_pos_log_endpoint_takes_real_files_and_a_second_delivery_adds_nothin
         return out
 
     [results] = run(go)
-    unmapped = {}
+    rejected = []
     for path, first, second in results:
+        if first is None:
+            rejected.append(path.name)
+            continue
         log = rtlog.parse_rtlog_file(path)
         mapped, _ = standard.ingest_records(log)
         assert first["problems"] == [] and first["transactions"] == len(log.transactions)
@@ -313,9 +343,7 @@ def test_the_pos_log_endpoint_takes_real_files_and_a_second_delivery_adds_nothin
             second["sales_and_returns"]["canonical_created"] == 0
             and second["register_events"]["created"] == 0
         )
-        unmapped.update({x["transaction_number"]: x["type"] for x in first["not_mapped"]})
-    # only a sale with no item lines is left over: the exchange is mapped as a return and a sale
-    assert unmapped == {"1290000035": "sale"}
+    assert rejected == ["RTLOG_04241_20150507064939.DAT"]
 
 
 def test_declared_rtlog_totals_feed_combined_totals_without_counting_as_sales():
@@ -371,5 +399,232 @@ def test_declared_rtlog_totals_feed_combined_totals_without_counting_as_sales():
         assert values["CASHTOTALO"] == Decimal("2")
         assert result.transaction_count == 1
         assert result.source_totals[("POS Net", "Store", None)] == Decimal("10")
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(
+    ("declared", "variance"),
+    [("10", "0"), ("8", "2"), ("12", "-2")],
+    ids=["balanced", "short", "over"],
+)
+@pytest.mark.parametrize(
+    "total",
+    [
+        "AGNCYVOU",
+        "AMAZON",
+        "AMEX",
+        "BEALLSCC",
+        "CASH",
+        "CHECK",
+        "DISCOVER",
+        "EBAY",
+        "GIFTCRDU",
+        "MASTERCD",
+        "MCVISADBT",
+        "OUTLTCC",
+        "PAYPAL",
+        "VIRTGC",
+        "VISA",
+        "WALMART",
+    ],
+)
+def test_workbook_tender_declared_and_over_short(total, declared, variance):
+    """Workbook Over Short: calculated tender minus its POS declaration."""
+    from apps.totals.calculation import calculate_store_day, effective_definitions
+    from apps.totals.client_totals import CLIENT_TOTALS
+    from models import AuditTotalDefinition, StoreDay
+
+    async def scenario(db):
+        db.add(StoreDay(id="day", store_id="4241", business_date=DAY))
+        db.add_all(
+            AuditTotalDefinition(**{**total, "start_date": DAY}, revision=1)
+            for total in CLIENT_TOTALS
+        )
+        sale = sale_record()
+        sale["tenders"][0]["client_tender_code"] = total
+        result = await service.ingest(db, "POS", "sale", [sale])
+        assert result["quarantined"] == 0
+        await ingest_register_events(
+            db,
+            log_of(
+                event(
+                    "total",
+                    1,
+                    value=declared,
+                    details={"user_references": [{"field": 1, "value": total + "P"}]},
+                )
+            ),
+        )
+        definitions = await effective_definitions(db, DAY, "4241")
+        calculated = await calculate_store_day(db, "4241", DAY, definitions)
+        amounts = {
+            d.name: sum(calculated.configured_totals.get(d.id, {}).values(), Decimal("0"))
+            for d in definitions
+        }
+        assert amounts[total] == Decimal("10")
+        assert amounts[total + "P"] == Decimal(declared)
+        assert amounts[total + "O"] == Decimal(variance)
+        assert calculated.transaction_count == 1
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(("declared", "has_case"), [("10", False), ("8", True), ("12", True)])
+def test_cash_over_short_rule_raises_case_from_workbook_total(install_controls, declared, has_case):
+    """An approved CASHO rule turns a nonzero workbook total into a case on re-total."""
+    from apps.store_days.closures import close_blocker
+    from apps.store_days.routes import retotal_store_day
+    from apps.totals.client_totals import CLIENT_TOTALS
+    from integrations.ontology.audit_controls import TotalRule
+    from models import AuditTotal, AuditTotalDefinition, Case, StoreDay
+
+    install_controls(
+        total_rules=[
+            TotalRule(
+                id="cash-over-short",
+                name="Cash difference",
+                total_name="Configured: CASHO",
+                balance_level="Store",
+                comparison="ABS_GT",
+                threshold=Decimal("0"),
+                threshold_currency="USD",
+                severity="High",
+            )
+        ]
+    )
+
+    async def scenario(db):
+        db.add(StoreDay(id="day", store_id="4241", business_date=DAY))
+        db.add_all(
+            AuditTotalDefinition(**{**t, "start_date": DAY}, revision=1) for t in CLIENT_TOTALS
+        )
+        sale = sale_record()
+        sale["tenders"][0]["client_tender_code"] = "CASH"
+        assert (await service.ingest(db, "POS", "sale", [sale]))["quarantined"] == 0
+        await ingest_register_events(
+            db,
+            log_of(
+                event(
+                    "total",
+                    1,
+                    value=declared,
+                    details={"user_references": [{"field": 1, "value": "CASHP"}]},
+                )
+            ),
+        )
+        await db.commit()
+        await retotal_store_day("4241", DAY, db, {"user": "finance", "role": "finance"})
+        total = (
+            await db.execute(select(AuditTotal).where(AuditTotal.total_name == "Configured: CASHO"))
+        ).scalar_one()
+        assert total.calculated_amount == Decimal("10") - Decimal(declared)
+        cases = (
+            (await db.execute(select(Case).where(Case.case_type == "Rule breach: Cash difference")))
+            .scalars()
+            .all()
+        )
+        assert len(cases) == int(has_case)
+        if cases:
+            assert cases[0].status != "Closed"
+            errors = (
+                (await db.execute(select(DBException).where(DBException.case_id == cases[0].id)))
+                .scalars()
+                .all()
+            )
+            assert len(errors) == 1
+
+
+@pytest.mark.parametrize(("declared", "has_case"), [("6.58", False), ("5", False), ("4.99", True), ("16", True)])
+def test_a_difference_inside_the_rule_threshold_raises_no_case(install_controls, declared, has_case):
+    """Scenario 3: a $3.42 difference inside a $5 threshold raises nothing; beyond it, a case."""
+    from apps.store_days.closures import close_blocker
+    from apps.store_days.routes import retotal_store_day
+    from apps.totals.client_totals import CLIENT_TOTALS
+    from integrations.ontology.audit_controls import TotalRule
+    from models import AuditTotal, AuditTotalDefinition, Case, StoreDay
+
+    install_controls(
+        total_rules=[
+            TotalRule(
+                id="cash-over-short",
+                name="Cash difference",
+                total_name="Configured: CASHO",
+                balance_level="Store",
+                comparison="ABS_GT",
+                threshold=Decimal("5"),
+                threshold_currency="USD",
+                severity="High",
+            )
+        ]
+    )
+
+    async def scenario(db):
+        db.add(StoreDay(id="day", store_id="4241", business_date=DAY))
+        db.add_all(
+            AuditTotalDefinition(**{**t, "start_date": DAY}, revision=1) for t in CLIENT_TOTALS
+        )
+        sale = sale_record()
+        sale["tenders"][0]["client_tender_code"] = "CASH"
+        assert (await service.ingest(db, "POS", "sale", [sale]))["quarantined"] == 0
+        await ingest_register_events(
+            db,
+            log_of(
+                event(
+                    "total",
+                    1,
+                    value=declared,
+                    details={"user_references": [{"field": 1, "value": "CASHP"}]},
+                )
+            ),
+        )
+        await db.commit()
+        await retotal_store_day("4241", DAY, db, {"user": "finance", "role": "finance"})
+        total = (
+            await db.execute(select(AuditTotal).where(AuditTotal.total_name == "Configured: CASHO"))
+        ).scalar_one()
+        assert total.calculated_amount == Decimal("10") - Decimal(declared)
+        cases = (
+            (await db.execute(select(Case).where(Case.case_type == "Rule breach: Cash difference")))
+            .scalars()
+            .all()
+        )
+        assert len(cases) == int(has_case)
+        if cases:
+            assert cases[0].status != "Closed"
+            errors = (
+                (await db.execute(select(DBException).where(DBException.case_id == cases[0].id)))
+                .scalars()
+                .all()
+            )
+            assert len(errors) == 1
+            assert errors[0].close_impact == "Yes"
+            assert "case(s) remain open" in await close_blocker(db, await db.get(StoreDay, "day"))
+
+            # A supplemental declaration offsets the original without rewriting its history.
+            await ingest_register_events(
+                db,
+                log_of(
+                    event(
+                        "total",
+                        2,
+                        value=str(Decimal("10") - Decimal(declared)),
+                        details={"user_references": [{"field": 1, "value": "CASHP"}]},
+                    )
+                ),
+            )
+            await db.commit()
+            await retotal_store_day("4241", DAY, db, {"user": "finance", "role": "finance"})
+            latest = (
+                await db.execute(
+                    select(AuditTotal).where(
+                        AuditTotal.total_name == "Configured: CASHO", AuditTotal.audit_version == 2
+                    )
+                )
+            ).scalar_one()
+            assert latest.calculated_amount == 0
+            await db.refresh(cases[0])
+            assert cases[0].status != "Closed"
+            assert "case(s) remain open" in await close_blocker(db, await db.get(StoreDay, "day"))
 
     run(scenario)

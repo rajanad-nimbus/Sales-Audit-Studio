@@ -357,3 +357,15 @@ def test_workbook_subtracts_the_first_operand_in_each_negative_group():
 
     assert values[by_name["REMSLSCL"]] == {None: Decimal("-20")}
     assert values[by_name["OVRSHT_POS"]] == {None: Decimal("-30")}
+
+
+def test_mcr_cashed_uses_item_number_range_from_workbook():
+    """The Sales sheet specifies the item number range, not voucher-number metadata."""
+    by_name = {total["name"]: total for total in CLIENT_TOTALS}
+    restriction = by_name["MCRCASHED"]["restrictions"][0]
+    assert restriction == {
+        "realm": "Line",
+        "field": "item_voucher_kind",
+        "operator": "in",
+        "value": "GIFTCARD,MCR",
+    }

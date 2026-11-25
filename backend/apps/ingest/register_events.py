@@ -165,7 +165,9 @@ async def run_register_event_rules(
     for event in events:
         code = None
         if event.event_type == standard.POST_VOID:
-            if event.original_transaction_number and not await original_is_on_file(db, event):
+            # As in Oracle ReSA, a post void cancels a named earlier transaction: one that names
+            # none, or whose original is not on file, is an audit error.
+            if not event.original_transaction_number or not await original_is_on_file(db, event):
                 code = "VOID_NO_ORIG"
         elif event.event_type in (standard.PAID_IN, standard.PAID_OUT) and not event.reason_code:
             code = "PAIDOUT_REASON_REQ"

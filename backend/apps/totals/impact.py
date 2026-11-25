@@ -12,10 +12,15 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.store_days.rule_evaluation import current_controls
 from apps.security import scope
 from apps.store_days.models import StoreDay, StoreDayClosureRequest
-from apps.totals.calculation import NOT_LIVE_STATUSES, calculate_store_day, effective_definitions
+from apps.store_days.rule_evaluation import current_controls, rule_breaches
+from apps.totals.calculation import (
+    NOT_LIVE_STATUSES,
+    calculate_store_day,
+    effective_definitions,
+    store_location_traits,
+)
 from apps.totals.currency import single_currency
 from apps.totals.models import AuditTotalDefinition
 
@@ -90,8 +95,10 @@ def rule_changes(rules, current: dict, proposed: dict, currency: str | None) -> 
             continue
         name = rule.total_name.removeprefix("Configured: ")
         before, after = current.get(name), proposed.get(name)
-        breached_before = before is not None and abs(before) > rule.threshold
-        breached_after = after is not None and abs(after) > rule.threshold
+        breached_before = before is not None and rule_breaches(
+            before, rule.threshold, rule.comparison
+        )
+        breached_after = after is not None and rule_breaches(after, rule.threshold, rule.comparison)
         if breached_before != breached_after:
             changes.append(
                 {
@@ -143,6 +150,20 @@ async def change_impact(db: AsyncSession, draft: AuditTotalDefinition, user: dic
 
     rows = []
     for day in days:
+        day_rules = [
+            rule
+            for rule in rules
+            if rule.balance_level == "Store"
+            and (rule.start_date is None or rule.start_date <= day.business_date)
+            and (rule.end_date is None or rule.end_date >= day.business_date)
+        ]
+        if any(rule.location_traits for rule in day_rules):
+            traits = await store_location_traits(db, day.store_id)
+            day_rules = [
+                rule
+                for rule in day_rules
+                if not rule.location_traits or set(rule.location_traits).intersection(traits)
+            ]
         current, current_error, current_store, currency = await _side(
             db, day.store_id, day.business_date, None
         )
@@ -150,7 +171,7 @@ async def change_impact(db: AsyncSession, draft: AuditTotalDefinition, user: dic
             db, day.store_id, day.business_date, draft
         )
         rules_changed = (
-            rule_changes(rules, current_store, proposed_store, currency or proposed_currency)
+            rule_changes(day_rules, current_store, proposed_store, currency or proposed_currency)
             if current is not None and proposed is not None
             else []
         )

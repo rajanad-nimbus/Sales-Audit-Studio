@@ -5293,7 +5293,7 @@ CLIENT_TOTALS = [
         "joins": [{"parent_realm": "Transaction", "child_realm": "Line"}],
         "parameters": [{"realm": "Line", "field": "net_retail"}],
         "restrictions": [
-            {"realm": "Line", "field": "voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"},
+            {"realm": "Line", "field": "item_voucher_kind", "operator": "in", "value": "GIFTCARD,MCR"},
             {"realm": "Line", "field": "item_status", "operator": "in", "value": "Sale,Return"},
             {"realm": "Line", "field": "item_type", "operator": "eq", "value": "GCN"},
         ],

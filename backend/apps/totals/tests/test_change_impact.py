@@ -9,7 +9,6 @@ from models import (
     AuditEvent,
     AuditTotalDefinition,
     Base,
-    ConfiguredAuditRule,
     FoundationReference,
     StoreDay,
     StoreDayClosureRequest,
@@ -374,29 +373,45 @@ def test_wide_changes_are_truncated_not_hidden(monkeypatch):
     run_with_db(scenario)
 
 
-def test_impact_reports_audit_rules_that_would_newly_breach_or_clear():
+def test_impact_reports_audit_rules_that_would_newly_breach_or_clear(install_controls):
+    from integrations.ontology.audit_controls import TotalRule
+
+    def rule(identifier, name, comparison, threshold, **options):
+        return TotalRule(
+            id=identifier,
+            name=name,
+            total_name="Configured: Sales",
+            balance_level=options.pop("balance_level", "Store"),
+            comparison=comparison,
+            threshold=Decimal(threshold),
+            threshold_currency="USD",
+            severity="Medium",
+            **options,
+        )
+
+    install_controls(
+        total_rules=[
+            rule("low", "Above 10", "GT", "10"),
+            rule("below", "Below 10", "LT", "10"),
+            rule("future", "Future", "GT", "10", start_date="2026-11-01"),
+            rule("ended", "Ended", "GT", "10", end_date="2026-09-30"),
+            rule("other-trait", "Other trait", "GT", "10", location_traits=("OTHER",)),
+            rule(
+                "matching",
+                "Matching trait",
+                "GT",
+                "10",
+                start_date=DATE,
+                end_date=DATE,
+                location_traits=("MATCH",),
+            ),
+            rule("register", "Register only", "GT", "10", balance_level="Register"),
+        ]
+    )
+
     async def scenario(db):
         await calculated_day(db, closure=False)
-        db.add_all(
-            [
-                ConfiguredAuditRule(
-                    id="low",
-                    name="Sales under 10",
-                    total_name="Configured: Sales",
-                    threshold=Decimal("10"),
-                    threshold_currency="USD",
-                    enabled=True,
-                ),
-                ConfiguredAuditRule(
-                    id="tiny",
-                    name="More than one sale",
-                    total_name="Configured: Sales",
-                    threshold=Decimal("1"),
-                    threshold_currency="USD",
-                    enabled=True,
-                ),
-            ]
-        )
+        (await db.get(FoundationReference, "ref-S1")).attributes = {"location_traits": ["MATCH"]}
         await db.commit()
         # Sales goes from 15 (the sum) to 2 (the count).
         draft = await count_draft(db)
@@ -404,9 +419,11 @@ def test_impact_reports_audit_rules_that_would_newly_breach_or_clear():
 
         [row] = report["rows"]
         assert [(c["rule"], c["effect"]) for c in row["rule_changes"]] == [
-            ("Sales under 10", "Clears")
+            ("Above 10", "Clears"),
+            ("Below 10", "Newly breaches"),
+            ("Matching trait", "Clears"),
         ]
-        assert report["summary"]["rules_cleared"] == 1
-        assert report["summary"]["rules_newly_breached"] == 0
+        assert report["summary"]["rules_cleared"] == 2
+        assert report["summary"]["rules_newly_breached"] == 1
 
     run_with_db(scenario)
