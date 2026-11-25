@@ -1,0 +1,114 @@
+{
+  "BCOLLPLCC": {
+    "declared": "BCOLLPLCCP",
+    "difference": "BCOLLPLCCO"
+  },
+  "BLSPRDEXP": {
+    "declared": "BLSPRDEXPP",
+    "difference": "BLSPRDEXPO"
+  },
+  "CRPCHKREQ": {
+    "declared": "CRPCHKREQP",
+    "difference": "CRPCHKREQO"
+  },
+  "CTSYMTRSL": {
+    "declared": "CTSYMTRSLP",
+    "difference": "CTSYMTRSLO"
+  },
+  "CTSYSTPSL": {
+    "declared": "CTSYSTPSLP",
+    "difference": "CTSYSTPSLO"
+  },
+  "CRTSYSTPRE": {
+    "declared": "CTSYSTREPP",
+    "difference": "CTSYSTREPO"
+  },
+  "CUSTGDWL": {
+    "declared": "CUSTGDWLP",
+    "difference": "CUSTGDWLO"
+  },
+  "DISP_SUP": {
+    "declared": "DISP_SUPP",
+    "difference": "DISP_SUPO"
+  },
+  "DONATCOLL": {
+    "declared": "DONATCOLLP",
+    "difference": "DONATCOLLO"
+  },
+  "DONATE": {
+    "declared": "DONATEP",
+    "difference": "DONATEO"
+  },
+  "FCLTYRPR": {
+    "declared": "FCLTYRPRP",
+    "difference": "FCLTYRPRO"
+  },
+  "GFTWRPSL": {
+    "declared": "GFTWRPSLP",
+    "difference": "GFTWRPSLO"
+  },
+  "HURCANDON": {
+    "declared": "HURCANDONP",
+    "difference": "HURCANDONO"
+  },
+  "INVENEXPE": {
+    "declared": "INVENEXPEP",
+    "difference": "INVENEXPEO"
+  },
+  "MISC_EXP": {
+    "declared": "MISC_EXPP",
+    "difference": "MISC_EXPO"
+  },
+  "MISC_INC": {
+    "declared": "MISC_INCP",
+    "difference": "MISC_INCO"
+  },
+  "OCOLLPLCC": {
+    "declared": "OCOLLPLCCP",
+    "difference": "OCOLLPLCCO"
+  },
+  "PAY_ADV": {
+    "declared": "PAY_ADVP",
+    "difference": "PAY_ADVO"
+  },
+  "PAY_ADVPYBK": {
+    "declared": "PAYADPYBKP",
+    "difference": "PAYADPYBKO"
+  },
+  "POSTAGE": {
+    "declared": "POSTAGEP",
+    "difference": "POSTAGEO"
+  },
+  "POSTAGEXP": {
+    "declared": "POSTAGEXPP",
+    "difference": "POSTAGEXPO"
+  },
+  "PROEXPPLCC": {
+    "declared": "PROEXPLCCP",
+    "difference": "PROEXPLCCO"
+  },
+  "PROPSTEXP": {
+    "declared": "PROPSTEXPP",
+    "difference": "PROPSTEXPO"
+  },
+  "SHIPAMZN": {
+    "declared": "SHIPAMZNP",
+    "difference": "SHIPAMZNO"
+  },
+  "SHIPEBAY": {
+    "declared": "SHIPEBAYP",
+    "difference": "SHIPEBAYO"
+  },
+  "SHIPWLMT": {
+    "declared": "SHIPWLMTP",
+    "difference": "SHIPWLMTO"
+  },
+  "SOSPSTEXP": {
+    "declared": "SOSPSTEXPP",
+    "difference": "SOSPSTEXPO"
+  },
+  "STRTRAVEL": {
+    "declared": "STRTRAVELP",
+    "difference": "STRTRAVELO"
+  }
+}

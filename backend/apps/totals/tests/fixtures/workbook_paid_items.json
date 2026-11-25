@@ -1,0 +1,138 @@
+{
+  "BCOLLPLCC": [
+    "NM050OUT",
+    "NM050BSI"
+  ],
+  "BLSPRDEXP": [
+    "NM842OUT",
+    "NM842BSI"
+  ],
+  "CRPCHKREQ": [
+    "NM857OUT",
+    "NM857BSI"
+  ],
+  "CTSYMTRSL": [
+    "NM971OUT",
+    "NM984OUT",
+    "NM971BSI",
+    "NM984BSI"
+  ],
+  "CRTSYSTPRE": [
+    "NM981OUT",
+    "NM981BSI"
+  ],
+  "CTSYSTPSL": [
+    "NM972BSI",
+    "NM991BSI",
+    "NM972OUT",
+    "NM991OUT"
+  ],
+  "CUSTGDWL": [
+    "NM895OUT",
+    "NM895BSI"
+  ],
+  "DISP_SUP": [
+    "NM846OUT",
+    "NM846BSI"
+  ],
+  "DONATCOLL": [
+    "NM831OUT",
+    "NM831BSI"
+  ],
+  "DONATE": [
+    "NM840OUT",
+    "NM840BSI"
+  ],
+  "FCLTYRPR": [
+    "NM841OUT",
+    "NM841BSI"
+  ],
+  "GFTWRPSL": [
+    "NM832OUT",
+    "NM832BSI"
+  ],
+  "HURCANDON": [
+    "NM858OUT",
+    "NM858BSI"
+  ],
+  "INVENEXPE": [
+    "NM847OUT",
+    "NM847BSI"
+  ],
+  "MISC_EXP": [
+    "NM849OUT",
+    "NM849BSI"
+  ],
+  "MISC_INC": [
+    "NM835OUT",
+    "NM835BSI"
+  ],
+  "OCOLLPLCC": [
+    "NM051OUT",
+    "NM052OUT",
+    "NM051BSI",
+    "NM052BSI"
+  ],
+  "PAY_ADV": [
+    "NM853OUT",
+    "NM853BSI"
+  ],
+  "PAY_ADVPYBK": [
+    "NM854OUT",
+    "NM854BSI"
+  ],
+  "POSTAGE": [
+    "NM877OUT",
+    "NM887OUT",
+    "NM877BSI",
+    "NM887BSI"
+  ],
+  "PROEXPPLCC": [
+    "NM848OUT",
+    "NM848BSI"
+  ],
+  "PROPSTEXP": [
+    "NM894OUT",
+    "NM977OUT",
+    "NM978OUT",
+    "NM894BSI",
+    "NM977BSI",
+    "NM978BSI"
+  ],
+  "SOSPSTEXP": [
+    "NM893OUT",
+    "NM893BSI"
+  ],
+  "STRTRAVEL": [
+    "NM845BSI",
+    "NM845OUT"
+  ],
+  "SHIPAMZN": [
+    "NM877BSI",
+    "NM877OUT",
+    "NM887BSI",
+    "NM887OUT",
+    "NM832BSI",
+    "NM832OUT"
+  ],
+  "SHIPEBAY": [
+    "NM877BSI",
+    "NM877OUT",
+    "NM887BSI",
+    "NM887OUT",
+    "NM832BSI",
+    "NM832OUT"
+  ],
+  "SHIPWLMT": [
+    "NM877BSI",
+    "NM877OUT",
+    "NM887BSI",
+    "NM887OUT",
+    "NM832BSI",
+    "NM832OUT"
+  ],
+  "POSTAGEXP": [
+    "NM981BSI",
+    "NM981OUT"
+  ]
+}
