@@ -473,7 +473,6 @@ def test_workbook_tender_declared_and_over_short(total, declared, variance):
 @pytest.mark.parametrize(("declared", "has_case"), [("10", False), ("8", True), ("12", True)])
 def test_cash_over_short_rule_raises_case_from_workbook_total(install_controls, declared, has_case):
     """An approved CASHO rule turns a nonzero workbook total into a case on re-total."""
-    from apps.store_days.closures import close_blocker
     from apps.store_days.routes import retotal_store_day
     from apps.totals.client_totals import CLIENT_TOTALS
     from integrations.ontology.audit_controls import TotalRule
@@ -538,7 +537,6 @@ def test_cash_over_short_rule_raises_case_from_workbook_total(install_controls, 
 @pytest.mark.parametrize(("declared", "has_case"), [("6.58", False), ("5", False), ("4.99", True), ("16", True)])
 def test_a_difference_inside_the_rule_threshold_raises_no_case(install_controls, declared, has_case):
     """Scenario 3: a $3.42 difference inside a $5 threshold raises nothing; beyond it, a case."""
-    from apps.store_days.closures import close_blocker
     from apps.store_days.routes import retotal_store_day
     from apps.totals.client_totals import CLIENT_TOTALS
     from integrations.ontology.audit_controls import TotalRule
@@ -598,6 +596,63 @@ def test_a_difference_inside_the_rule_threshold_raises_no_case(install_controls,
                 .all()
             )
             assert len(errors) == 1
+
+
+@pytest.mark.parametrize(("declared", "has_case"), [("0", False), ("5", False), ("20", False), ("20.01", True), ("-1", True)])
+def test_the_drafted_ten_dollar_rule_raises_a_case_only_beyond_ten_dollars(install_controls, declared, has_case):
+    """The CASHO rule exactly as drafted for the ontology, on a $10 cash sale: the difference is 10 minus the declaration."""
+    import json
+    from pathlib import Path
+
+    from apps.store_days.closures import close_blocker
+    from apps.store_days.routes import retotal_store_day
+    from apps.totals.client_totals import CLIENT_TOTALS
+    from integrations.ontology.audit_controls import parse_controls
+    from models import AuditTotal, AuditTotalDefinition, Case, StoreDay
+
+    rows = json.loads((Path(__file__).parent / "fixtures" / "draft_release_overshort.json").read_text())
+    drafted = parse_controls(21, rows)
+    install_controls(total_rules=[r for r in drafted.total_rules if r.total_name == "Configured: CASHO"])
+
+    async def scenario(db):
+        db.add(StoreDay(id="day", store_id="4241", business_date=DAY))
+        db.add_all(
+            AuditTotalDefinition(**{**t, "start_date": DAY}, revision=1) for t in CLIENT_TOTALS
+        )
+        sale = sale_record()
+        sale["tenders"][0]["client_tender_code"] = "CASH"
+        assert (await service.ingest(db, "POS", "sale", [sale]))["quarantined"] == 0
+        await ingest_register_events(
+            db,
+            log_of(
+                event(
+                    "total",
+                    1,
+                    value=declared,
+                    details={"user_references": [{"field": 1, "value": "CASHP"}]},
+                )
+            ),
+        )
+        await db.commit()
+        await retotal_store_day("4241", DAY, db, {"user": "finance", "role": "finance"})
+        total = (
+            await db.execute(select(AuditTotal).where(AuditTotal.total_name == "Configured: CASHO"))
+        ).scalar_one()
+        assert total.calculated_amount == Decimal("10") - Decimal(declared)
+        cases = (
+            (await db.execute(select(Case).where(Case.case_type == "Rule breach: Over/short CASHO")))
+            .scalars()
+            .all()
+        )
+        assert len(cases) == int(has_case)
+        if cases:
+            assert cases[0].status != "Closed"
+            errors = (
+                (await db.execute(select(DBException).where(DBException.case_id == cases[0].id)))
+                .scalars()
+                .all()
+            )
+            assert len(errors) == 1
             assert errors[0].close_impact == "Yes"
             assert "case(s) remain open" in await close_blocker(db, await db.get(StoreDay, "day"))
 
@@ -626,5 +681,48 @@ def test_a_difference_inside_the_rule_threshold_raises_no_case(install_controls,
             await db.refresh(cases[0])
             assert cases[0].status != "Closed"
             assert "case(s) remain open" in await close_blocker(db, await db.get(StoreDay, "day"))
+
+    run(scenario)
+
+
+def test_a_difference_beyond_the_drafted_limit_is_handed_to_a_person_after_investigation(
+    install_controls, monkeypatch
+):
+    """Scenario 3 as the ontology will run it: no automatic resolution, a person decides."""
+    import json
+    from pathlib import Path
+
+    from apps.cases.workflows import investigate_case
+    from apps.store_days.routes import retotal_store_day
+    from apps.totals.client_totals import CLIENT_TOTALS
+    from integrations.ontology.audit_controls import parse_controls
+    from models import AuditTotalDefinition, Case, StoreDay
+
+    for name in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)  # the deterministic investigation, never a live model
+    rows = json.loads((Path(__file__).parent / "fixtures" / "draft_release_overshort.json").read_text())
+    drafted = parse_controls(21, rows)
+    install_controls(total_rules=[r for r in drafted.total_rules if r.total_name == "Configured: CASHO"])
+
+    async def scenario(db):
+        db.add(StoreDay(id="day", store_id="4241", business_date=DAY))
+        db.add_all(AuditTotalDefinition(**{**t, "start_date": DAY}, revision=1) for t in CLIENT_TOTALS)
+        sale = sale_record()
+        sale["tenders"][0]["client_tender_code"] = "CASH"
+        await service.ingest(db, "POS", "sale", [sale])
+        declaration = event("total", 1, value="-1", details={"user_references": [{"field": 1, "value": "CASHP"}]})
+        await ingest_register_events(db, log_of(declaration))  # the $10 sale is $11 over the declaration
+        await db.commit()
+        await retotal_store_day("4241", DAY, db, {"user": "finance", "role": "finance"})
+        case = (
+            await db.execute(select(Case).where(Case.case_type == "Rule breach: Over/short CASHO"))
+        ).scalar_one()
+        recommendation = await investigate_case(case.id, db, {"user": "finance", "role": "finance"})
+        case = await db.get(Case, case.id)
+        assert (recommendation.disposition_type, recommendation.action_class) == (
+            "Escalation", "Manual Review",
+        )
+        assert case.total_exception_amount == Decimal("11.00")
+        assert case.evidence_completeness == 100 and case.investigation_status == "Ready for Decision"
 
     run(scenario)
