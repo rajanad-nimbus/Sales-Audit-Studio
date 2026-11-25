@@ -40,6 +40,18 @@ AUDIT_LIMITS = [
  ("NSA-LIMIT-AUTONOMY", "Autonomy limit", "A recommendation whose financial impact exceeds this amount always needs a human decision.", "autonomy_limit", "1000"),
  ("NSA-LIMIT-TIMING-AUTONOMY", "Timing autonomy limit", "A no-movement timing classification may be permitted without a human only up to this exposure.", "timing_autonomy_limit", "250"),
 ]
+# The ReSA workbook's over/short difference totals (calculated minus declared). Each gets a draft rule that
+# raises a case when the absolute difference exceeds the limit, so a person reviews it before the day closes.
+OVER_SHORT_LIMIT = "10"  # USD
+OVER_SHORT_TOTALS = [
+ "AGNCYVOUO", "AMAZONO", "AMEXO", "BCOLLPLCCO", "BEALLSCCO", "BLSPRDEXPO", "CASHO", "CASHTOTALO", "CHECKO",
+ "CRPCHKREQO", "CTSYMTRSLO", "CTSYSTPSLO", "CTSYSTREPO", "CUSTGDWLO", "DISCOVERO", "DISP_SUPO", "DONATCOLLO",
+ "DONATEO", "EBAYO", "FCLTYRPRO", "GFTCRDSLO", "GFTWRPSLO", "GIFTCRDUO", "HURCANDONO", "INVENEXPEO",
+ "MASTERCDO", "MCVISADBTO", "MISC_EXPO", "MISC_INCO", "OCOLLPLCCO", "OUTLTCCO", "PAY_ADVO", "PAYADPYBKO",
+ "PAYPALO", "POSTAGEO", "POSTAGEXPO", "PROEXPLCCO", "PROPSTEXPO", "REMSLESCLO", "SALESCLO", "SHIPAMZNO",
+ "SHIPEBAYO", "SHIPWLMTO", "SLSTAXACCO", "SLSTXAMZNO", "SLSTXEBAYO", "SOSPSTEXPO", "STRTRAVELO", "VIRTGCO",
+ "VISAO", "WALMARTO", "MCRCASHEDO",
+]
 # code, name, failure class, agent level: how far the agent may go on each class. Nimbus falls back to
 # the same defaults for any class without a rule, so these only make the defaults visible and editable.
 AUDIT_LEVELS = [
@@ -192,6 +204,18 @@ def apply(db, workspace_id, schema):
             config = audit_controls.validate_config({"family": "policy_limit", "limit": limit, "amount": amount, "currency": "USD"})
             db.add(BusinessRule(workspaceId=workspace_id, ruleCode=code, name=name, expression=statement,
                                statement=statement, description="Sales Audit policy limit read by Nimbus from an approved release.",
+                               entityId=entities["ResolutionRecommendation"].id, category="policy", severity="error",
+                               ruleType=audit_controls.RULE_TYPE, source="manual", status="draft", config=config))
+            changed["audit_controls"].append(code)
+    for total in OVER_SHORT_TOTALS:
+        code = f"NSA-TOTAL-OVERSHORT-{total.replace('_', '-')}"
+        if not db.query(BusinessRule).filter_by(workspaceId=workspace_id, ruleCode=code).first():
+            config = audit_controls.validate_config({
+                "family": "store_day_total", "total_name": f"Configured: {total}", "balance_level": "Store",
+                "comparison": "ABS_GT", "threshold": OVER_SHORT_LIMIT, "threshold_currency": "USD", "severity": "Medium"})
+            statement = f"Raise a case when the store-day difference {total} is more than {OVER_SHORT_LIMIT} USD over or short."
+            db.add(BusinessRule(workspaceId=workspace_id, ruleCode=code, name=f"Over/short {total}", expression=statement,
+                               statement=statement, description="Sales Audit store-day total control read by Nimbus from an approved release.",
                                entityId=entities["ResolutionRecommendation"].id, category="policy", severity="error",
                                ruleType=audit_controls.RULE_TYPE, source="manual", status="draft", config=config))
             changed["audit_controls"].append(code)
