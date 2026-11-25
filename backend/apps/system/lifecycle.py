@@ -6,7 +6,15 @@ from contextlib import asynccontextmanager, suppress
 import httpx
 from database import async_session, engine
 from fastapi import FastAPI
-from integrations.ontology.ontology_integration import integration as ontology_integration
+from integrations.ontology.ontology_integration import (
+    integration as ontology_integration,
+)
+from integrations.ontology.ontology_integration import (
+    refresh_loop as ontology_refresh_loop,
+)
+from integrations.ontology.ontology_integration import (
+    refresh_loop_enabled as ontology_refresh_enabled,
+)
 
 from apps.ingest.shopify import scheduler as shopify_scheduler
 from apps.store_days import automation as store_day_automation
@@ -37,6 +45,11 @@ async def lifespan(_app: FastAPI):
                             if shopify_scheduler.enabled()
                             else None
                         )
+                        refresh_schedule = (
+                            asyncio.create_task(ontology_refresh_loop())
+                            if ontology_refresh_enabled()
+                            else None
+                        )
                         agent_schedule = (
                             asyncio.create_task(store_day_automation.loop())
                             if store_day_automation.loop_enabled()
@@ -45,6 +58,10 @@ async def lifespan(_app: FastAPI):
                         try:
                             yield
                         finally:
+                            if refresh_schedule:
+                                refresh_schedule.cancel()
+                                with suppress(asyncio.CancelledError):
+                                    await refresh_schedule
                             if agent_schedule:
                                 agent_schedule.cancel()
                                 with suppress(asyncio.CancelledError):

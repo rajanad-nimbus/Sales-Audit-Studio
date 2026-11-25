@@ -7,12 +7,17 @@ returns an incomplete or malformed approved release, no audit rule is evaluated:
 
 import asyncio
 import json
+import logging
 import os
 from datetime import UTC, datetime
 
 import httpx
 
-from integrations.ontology.audit_controls import AuditControls, AuditRulesUnavailable, parse_controls
+from integrations.ontology.audit_controls import (
+    AuditControls,
+    AuditRulesUnavailable,
+    parse_controls,
+)
 
 RULE_CODES = frozenset(
     {
@@ -35,6 +40,8 @@ RULE_CODES = frozenset(
         "NSA-APPROVAL-AUTHORITY",
     }
 )
+logger = logging.getLogger(__name__)
+REFRESH_INTERVAL_SECONDS = float(os.getenv("NIMBUS_ONTOLOGY_REFRESH_SECONDS", "300"))
 MAX_ONTOLOGY_RESPONSE_BYTES = 2 * 1024 * 1024
 ONTOLOGY_RESPONSE_CHUNK_BYTES = 64 * 1024
 
@@ -243,3 +250,29 @@ class OntologyIntegration:
 
 
 integration = OntologyIntegration()
+
+
+async def refresh_loop(target=None, interval: float | None = None) -> None:
+    """Re-read the approved release on a timer, so a newly approved release takes effect without a restart.
+
+    A failed read invalidates the active view (audits fail closed) and the next tick tries again.
+    """
+    target = target or integration
+    interval = REFRESH_INTERVAL_SECONDS if interval is None else interval
+    previous = None
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await target.refresh()
+            release = (target.provenance().get("ontology") or {}).get("releaseId")
+            if release != previous:
+                logger.info("Ontology release in use: %s", release)
+                previous = release
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Ontology refresh failed")
+
+
+def refresh_loop_enabled() -> bool:
+    return os.getenv("NIMBUS_SCHEDULER", "1") != "0" and REFRESH_INTERVAL_SECONDS > 0
