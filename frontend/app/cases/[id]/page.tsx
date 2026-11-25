@@ -775,6 +775,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       ? ` · Impact ${caseMoney(r.financial_impact, c.currency)}`
                       : ''}
                   </p>
+                  {r.action_class === 'Manual Review' && (
+                    <p className="hint">
+                      The agent gathered the evidence and is not proposing a resolution for this
+                      type of failure. Decide, or escalate to a specialist.
+                    </p>
+                  )}
                   {r.expected_workflow && <p>On approval: {r.expected_workflow}</p>}
                 </div>
                 <div className="action-buttons">

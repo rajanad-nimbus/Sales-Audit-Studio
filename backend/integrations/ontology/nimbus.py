@@ -162,6 +162,15 @@ def investigate(db, case, exceptions, evidence_by_requirement, narrative=None):
             "amount",
             "Route to specialist team",
         )
+    if complete_investigation and agent_level(etype) == "collect":
+        # Collect level: the agent has gathered the evidence and stops. It proposes no
+        # class-specific resolution, only a hand-off to a person.
+        disp, aclass, mode, workflow = (
+            "Escalation",
+            "Manual Review",
+            "amount",
+            "Route to specialist team",
+        )
     rec = Recommendation(
         id=str(uuid.uuid4()),
         case_id=case.id,
