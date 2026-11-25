@@ -31,5 +31,7 @@ def test_total_definition_rejects_fields_outside_storage_contract(payload):
 
 
 def test_total_definition_rejects_oversized_nested_metadata():
+    # Each restriction is individually valid, but UTF-8 encoding takes four bytes per character.
+    restriction = {"realm": "Line", "field": "item_code", "operator": "eq", "value": "😀" * 2000}
     with pytest.raises(ValidationError, match="256 KiB"):
-        TotalDefinitionBody(name="Total", realms=[{"value": "x" * (256 * 1024)}])
+        TotalDefinitionBody(name="Total", realms=["Transaction", "Line"], restrictions=[restriction] * 40)

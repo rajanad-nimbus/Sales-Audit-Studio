@@ -157,6 +157,8 @@ def test_status_report_csv_download_listing_and_bad_input():
             "store-days",
             "tax",
             "tax-corrections",
+            "flash-totals",
+            "flash-sales-ytd",
         ]
         assert all(r["title"] and r["description"] for r in listed)
         with pytest.raises(HTTPException) as unknown:

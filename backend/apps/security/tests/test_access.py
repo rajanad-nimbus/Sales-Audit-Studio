@@ -12,6 +12,7 @@ def test_every_role_can_always_reach_its_chrome_and_nothing_extra():
         )
     assert [s["key"] for s in access.screens_for("viewer") if s["allowed"]] == [
         "my-preferences",
+        "guided-tasks",
         "settings",
         "settings-access",
     ]
@@ -27,6 +28,7 @@ def test_every_role_can_always_reach_its_chrome_and_nothing_extra():
     store = {s["key"] for s in access.screens_for("store_manager") if s["allowed"]}
     assert store == {
         "my-preferences",
+        "guided-tasks",
         "store-days",
         "transactions",
         "cash-office",
@@ -34,7 +36,7 @@ def test_every_role_can_always_reach_its_chrome_and_nothing_extra():
         "settings-access",
     }
     staff = {s["key"] for s in access.screens_for("store_staff") if s["allowed"]}
-    assert staff == {"my-preferences", "store-days", "settings", "settings-access"}
+    assert staff == {"my-preferences", "guided-tasks", "store-days", "settings", "settings-access"}
 
 
 def test_api_is_closed_to_roles_without_the_screen():
@@ -144,6 +146,7 @@ def test_a_screen_never_shows_to_a_role_whose_own_data_calls_would_be_refused():
         "/api/vouchers/transactions/{transaction_id}/context",  # voucher evidence on transaction detail
         "/api/vouchers/policy-package",  # policy promotion is IT/admin only
         "/api/system-options/package",
+        "/api/action-center/assignees",  # team assignment: only a Sales Audit Manager sees the control
     }
     for s in access.SCREENS:
         for (method, path), roles in declared.items():

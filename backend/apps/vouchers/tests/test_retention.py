@@ -106,11 +106,11 @@ def test_archive_then_purge_preserves_liabilities_and_prevents_number_reuse(tmp_
         )
         assert done["purged_records"] == 2
         assert set((await db.scalars(select(Voucher.voucher_number))).all()) == {"OPEN", "YOUNG"}
-        retired = await list_retired_vouchers(None, 100, db, FINANCE)
+        retired = await list_retired_vouchers(q=None, store_id=None, limit=100, db=db, user=FINANCE)
         assert {row["voucher_number"] for row in retired} == {"CLOSED", "ESCHEATED"}
         scoped = {**FINANCE, "store_scoped": True, "stores": ["S1"]}
         assert [
-            row["voucher_number"] for row in await list_retired_vouchers(None, 100, db, scoped)
+            row["voucher_number"] for row in await list_retired_vouchers(q=None, store_id=None, limit=100, db=db, user=scoped)
         ] == ["CLOSED"]
         with pytest.raises(HTTPException) as reuse:
             await issue_voucher(
@@ -237,7 +237,7 @@ def test_only_the_archived_subset_is_purged_when_archive_batch_is_partial(tmp_pa
         assert done["archived_records"] == done["purged_records"] == 1
         assert done["more_eligible"] is True
         assert await db.scalar(select(func.count()).select_from(Voucher)) == 1
-        assert len(await list_retired_vouchers(None, 100, db, FINANCE)) == 1
+        assert len(await list_retired_vouchers(q=None, store_id=None, limit=100, db=db, user=FINANCE)) == 1
 
     run_db(scenario)
 

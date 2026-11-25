@@ -15,7 +15,6 @@ from models import (
     Base,
     CanonicalTransaction,
     Case,
-    ConfiguredAuditRule,
     ExportDestination,
     HumanDecision,
     Recommendation,
@@ -136,6 +135,7 @@ async def verify_correction_ingestion_and_retotal(db):
                 "store_id": "S2",
                 "amount": "12.50",
                 "transaction_type": "Sale",
+                "source_system": "POS",
             },
             rationale="verified",
             proposed_by="analyst",
@@ -149,15 +149,6 @@ async def verify_correction_ingestion_and_retotal(db):
     ).source_system == "ManualAdjustment"
     transaction.source_lineage = "pos-map-v1"
     db.add(StoreDay(id="day", store_id="S2", business_date="2026-10-01"))
-    db.add(
-        ConfiguredAuditRule(
-            id="rule",
-            name="POS limit",
-            total_name="POS Net",
-            threshold=Decimal("1"),
-            severity="High",
-        )
-    )
     await db.commit()
     await retotal_store_day("S2", "2026-10-01", db, {"user": "finance", "role": "finance"})
     exception = (
@@ -199,6 +190,7 @@ async def seed_concurrency_records(db):
                 "store_id": "S4",
                 "amount": "5",
                 "transaction_type": "Sale",
+                "source_system": "POS",
             },
             rationale="verified",
             proposed_by="analyst",
@@ -277,7 +269,24 @@ async def verify_retotal_lock_race(session, monkeypatch):
     assert set(versions) == {1, 2}
 
 
-def test_postgres_scoped_adjustment_selection(monkeypatch):
+def test_postgres_scoped_adjustment_selection(monkeypatch, install_controls):
+    from integrations.ontology.audit_controls import TotalRule
+
+    install_controls(
+        total_rules=[
+            TotalRule(
+                id="rule",
+                name="POS limit",
+                total_name="POS Net",
+                balance_level="Store",
+                comparison="ABS_GT",
+                threshold=Decimal("1"),
+                threshold_currency="USD",
+                severity="High",
+            )
+        ]
+    )
+
     async def run():
         schema = "zetsa_test_" + uuid.uuid4().hex
         admin = create_async_engine(POSTGRES_URL)

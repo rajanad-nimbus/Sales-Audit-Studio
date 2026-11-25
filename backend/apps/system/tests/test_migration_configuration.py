@@ -419,7 +419,7 @@ def test_postgresql_migration_chain_renders_offline():
     assert "transaction_type = 'Return' AND original_transaction_id IS NULL" in result.stdout
     assert "ck_transaction_adjustments_status" in result.stdout
     assert "status IN ('Proposed', 'Approved', 'Rejected')" in result.stdout
-    assert result.stdout.count("ON CONFLICT (name) DO NOTHING") == 2
+    assert result.stdout.count("ON CONFLICT (name) DO NOTHING") == 3  # 0029, 0031 and 0124 (client totals)
     assert "version_num='0052'" in result.stdout
     assert "version_num='0057'" in result.stdout
     assert "version_num='0058'" in result.stdout

@@ -2,11 +2,11 @@ import asyncio
 from decimal import Decimal
 
 import pytest
-from apps.controls.rules.models import ConfiguredAuditRule
 from apps.ingest import service
 from apps.store_days import routes
 from apps.totals.routes import preview_definition
 from fastapi import HTTPException
+from integrations.ontology.audit_controls import TotalRule
 from models import (
     AuditTotal,
     AuditTotalDefinition,
@@ -426,7 +426,26 @@ def test_retotal_uses_latest_effective_revision_and_respects_deactivation():
     asyncio.run(run())
 
 
-def test_configured_rules_require_a_store_level_total():
+def install_wrong_level_rule(install_controls):
+    install_controls(
+        total_rules=[
+            TotalRule(
+                id="register-rule",
+                name="Register limit",
+                total_name="Configured: Register Sales",
+                balance_level="Store",
+                comparison="ABS_GT",
+                threshold=Decimal("10"),
+                threshold_currency="USD",
+                severity="Medium",
+            )
+        ]
+    )
+
+
+def test_configured_rules_require_a_store_level_total(install_controls):
+    install_wrong_level_rule(install_controls)
+
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
         try:
@@ -442,12 +461,6 @@ def test_configured_rules_require_a_store_level_total():
                             level="Register",
                             source_system="POS",
                             active=True,
-                        ),
-                        ConfiguredAuditRule(
-                            id="register-rule",
-                            name="Register limit",
-                            total_name="Configured: Register Sales",
-                            threshold=Decimal("10"),
                         ),
                     ]
                 )
@@ -480,7 +493,9 @@ def test_configured_rules_require_a_store_level_total():
     asyncio.run(run())
 
 
-def test_rule_target_validation_uses_effective_definition_without_transactions():
+def test_rule_target_validation_uses_effective_definition_without_transactions(install_controls):
+    install_wrong_level_rule(install_controls)
+
     async def run():
         engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
         try:
@@ -496,12 +511,6 @@ def test_rule_target_validation_uses_effective_definition_without_transactions()
                             level="Register",
                             source_system="POS",
                             active=True,
-                        ),
-                        ConfiguredAuditRule(
-                            id="register-rule",
-                            name="Register limit",
-                            total_name="Configured: Register Sales",
-                            threshold=Decimal("10"),
                         ),
                     ]
                 )

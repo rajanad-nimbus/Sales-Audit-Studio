@@ -45,6 +45,7 @@ def test_approved_missing_transaction_creates_immutable_lineage():
                         "store_id": "S1",
                         "amount": "12.50",
                         "transaction_type": "Sale",
+                        "source_system": "POS",
                         "tender_type": "Cash",
                     },
                     rationale="Verified receipt",
@@ -92,7 +93,9 @@ def test_invalid_missing_transaction_is_rejected(changes):
         "store_id": "S1",
         "amount": "12.50",
         "transaction_type": "Sale",
+        "source_system": "POS",
     }
+    validate_missing_transaction(values)
     with pytest.raises(HTTPException) as error:
         validate_missing_transaction({**values, **changes})
     assert error.value.status_code == 422
@@ -143,6 +146,7 @@ def test_valid_adjustment_values_are_accepted(kind, values):
                 "store_id": "S1",
                 "amount": "NaN",
                 "transaction_type": "Sale",
+                "source_system": "POS",
             },
         ),
         ("Tax", {"tax_delta": "1", "amount_delta": "100"}),
@@ -250,6 +254,7 @@ def test_concurrent_reviews_apply_only_one_decision(tmp_path, monkeypatch, secon
                             "store_id": "S1",
                             "amount": "12.50",
                             "transaction_type": "Sale",
+                            "source_system": "POS",
                         },
                         rationale="verified",
                         proposed_by="analyst",

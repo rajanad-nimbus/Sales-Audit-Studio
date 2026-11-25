@@ -249,9 +249,8 @@ describe('Store Days page: opening a row in place', () => {
     const row = (await screen.findByText('S2', { selector: 'a' })).closest('tr') as HTMLElement;
 
     await userEvent.click(within(row).getByText('2026-10-02'));
-    expect(
-      await screen.findByText(/7 open case\(s\) · unresolved reconciliation variance/)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/^7 open case\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/^unresolved reconciliation variance/)).toBeInTheDocument();
     expect(screen.getByText('8 unexplained variances')).toBeInTheDocument();
     expect(screen.getByText(/POS to GL Variance: \$30\.00/)).toBeInTheDocument();
     expect(screen.getByText('7 open cases')).toBeInTheDocument();

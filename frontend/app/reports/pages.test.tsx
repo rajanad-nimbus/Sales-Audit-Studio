@@ -43,14 +43,16 @@ describe('each report is its own page that loads only its own data', () => {
 
   it('gives every report its own address and title', () => {
     const paths = Object.values(REPORT_PAGES).map((r) => r.path);
-    expect(new Set(paths).size).toBe(5);
+    expect(new Set(paths).size).toBe(7);
     expect(paths).toEqual([
       '/reports/variances',
       '/reports/errors',
       '/reports/store-days',
       '/reports/tax',
       '/reports/tax-corrections',
+      '/reports/flash-totals',
+      '/reports/flash-sales-ytd',
     ]);
-    expect(new Set(Object.values(REPORT_PAGES).map((r) => r.title)).size).toBe(5);
+    expect(new Set(Object.values(REPORT_PAGES).map((r) => r.title)).size).toBe(7);
   });
 });

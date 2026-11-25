@@ -20,7 +20,22 @@ D = Decimal
 
 
 def mgr(stores):
-    return {"user": "m@x", "role": "store_manager", "store_scoped": True, "stores": stores}
+    return {"user": "m@x", "role": "analyst", "store_scoped": True, "stores": stores}
+
+
+def controls(db, user, store_id=None):
+    """The cash list routes take Query-object defaults; spell every filter out for a direct call."""
+    return cash.list_controls(
+        store_id=store_id, business_date=None, start_date=None, end_date=None,
+        db=db, user=user, response=None, skip=0, limit=100, format="json",
+    )
+
+
+def deposits(db, user, store_id=None):
+    return cash.list_deposits(
+        store_id=store_id, business_date=None, start_date=None, end_date=None,
+        db=db, user=user, response=None, skip=0, limit=100, format="json",
+    )
 
 
 FINANCE = {"user": "f@x", "role": "finance", "store_scoped": False, "stores": None}
@@ -75,20 +90,17 @@ def _identity(monkeypatch, user, headers=None):
     return asyncio.run(auth.current_user(request, "Bearer t"))
 
 
-def test_a_real_store_manager_gets_the_stores_ontology_assigns(monkeypatch):
+def test_a_sales_auditor_is_scoped_and_an_identity_claim_never_widens_the_portfolio(monkeypatch):
+    """ADR 0001 (ReSA ties audit users to locations): the portfolio is local, never the identity's claim."""
     u = _identity(
-        monkeypatch, {"email": "a@x", "role": "store_manager", "stores": ["STORE-007", "STORE-014"]}
+        monkeypatch, {"email": "a@x", "role": "analyst", "stores": ["STORE-007", "STORE-014"]}
     )
-    assert (
-        u["role"] == "store_manager"
-        and u["store_scoped"]
-        and u["stores"] == ["STORE-007", "STORE-014"]
-    )
-    assert scope.allowed_stores(u) == ["STORE-007", "STORE-014"]
+    assert u["role"] == "analyst" and u["store_scoped"] and u["stores"] == []
+    assert scope.allowed_stores(u) == []
 
 
-def test_a_store_manager_with_no_assignment_sees_nothing(monkeypatch):
-    u = _identity(monkeypatch, {"email": "a@x", "role": "store_manager"})
+def test_a_sales_auditor_with_no_assignment_sees_nothing(monkeypatch):
+    u = _identity(monkeypatch, {"email": "a@x", "role": "analyst"})
     assert u["store_scoped"] and u["stores"] == [] and not scope.store_allowed(u, "STORE-007")
 
 
@@ -102,20 +114,20 @@ def test_only_a_real_admin_can_simulate_stores_and_none_given_means_none(monkeyp
     u = _identity(
         monkeypatch,
         admin,
-        {"x-impersonate-role": "store_manager", "x-impersonate-stores": "S1, S2"},
+        {"x-impersonate-role": "analyst", "x-impersonate-stores": "S1, S2"},
     )
     assert u["impersonating"] and u["stores"] == ["S1", "S2"]
     assert (
-        _identity(monkeypatch, admin, {"x-impersonate-role": "store_manager"})["stores"] == []
+        _identity(monkeypatch, admin, {"x-impersonate-role": "analyst"})["stores"] == []
     )  # fail closed
     assert _identity(monkeypatch, admin)["stores"] is None  # a plain admin is unrestricted
     # A non-admin cannot widen their own scope with the header.
     u = _identity(
         monkeypatch,
-        {"email": "a@x", "role": "store_manager", "stores": ["S1"]},
+        {"email": "a@x", "role": "analyst", "stores": ["S1"]},
         {"x-impersonate-stores": "S1,S2,S3"},
     )
-    assert u["stores"] == ["S1"]
+    assert u["stores"] == []  # a non-admin cannot widen scope; an analyst never takes the claim
 
 
 # ---- helpers ----------------------------------------------------------------------------------------------------
@@ -218,14 +230,14 @@ def test_cash_controls_and_deposits_are_scoped_for_reading_and_writing():
             )
             await db.commit()
             assert [
-                r["store_id"] for r in await cash.list_controls(None, None, db, mgr(["S2"]))
+                r["store_id"] for r in await controls(db, mgr(["S2"]))
             ] == ["S2"]
             assert [
-                r["store_id"] for r in await cash.list_deposits(None, None, db, mgr(["S2"]))
+                r["store_id"] for r in await deposits(db, mgr(["S2"]))
             ] == ["S2"]
-            assert await cash.list_controls(None, None, db, mgr([])) == []
+            assert await controls(db, mgr([])) == []
             assert (
-                await cash.list_controls("S1", None, db, mgr(["S2"])) == []
+                await controls(db, mgr(["S2"]), "S1") == []
             )  # asking for another store returns nothing
             body = cash.CashControlBody(
                 store_id="S1", business_date="2026-10-01", declared_cash=D("5")
@@ -393,35 +405,21 @@ def test_middleware_blocks_a_store_manager_from_other_stores_paths(monkeypatch):
     assert _call(monkeypatch, f, "/api/store-days/S2/2026-10-01")[:2] == (200, True)
 
 
-def test_store_sales_staff_sign_in_scoped_and_can_only_read_their_stores_days(monkeypatch):
-    u = _identity(monkeypatch, {"email": "s@x", "role": "store_staff", "stores": ["S1"]})
-    assert u["role"] == "store_staff" and u["store_scoped"] and u["stores"] == ["S1"]
-    assert _call(monkeypatch, u, "/api/store-days/S1/2026-10-01")[:2] == (200, True)
-    status, reached, _ = _call(monkeypatch, u, "/api/store-days/S2/2026-10-01")
-    assert status == 403 and not reached
-    # Writing is refused by the endpoint's own role check, not by the screen map.
-    from starlette.requests import Request
-
-    def endpoint_refuses(method, path, *roles):
-        request = Request({"type": "http", "method": method, "path": path, "headers": []})
-        with pytest.raises(HTTPException) as refused:
-            asyncio.run(auth.require_role(*roles)(request, u))
-        return refused.value.status_code == 403
-
-    assert endpoint_refuses("POST", "/api/store-days", "it", "analyst")
-    assert endpoint_refuses("POST", "/api/store-days/S1/2026-10-01/retotal", "finance", "it")
-    assert _call(monkeypatch, u, "/api/transactions")[0] == 403
-    assert _call(monkeypatch, u, "/api/cash")[0] == 403
-    assert _call(monkeypatch, u, "/api/cases")[0] == 403
+def test_a_sales_auditor_with_no_local_portfolio_is_refused_every_store_day(monkeypatch):
+    """The portfolio comes from the local store assignment (see test_role_assignments), never the claim."""
+    u = {"user": "a@x", "role": "analyst", "real_role": "analyst", "store_scoped": True, "stores": ["S1"]}
+    for store in ("S1", "S2"):
+        status, reached, _ = _call(monkeypatch, u, f"/api/store-days/{store}/2026-10-01")
+        assert status == 403 and not reached
 
 
-def test_an_admin_can_act_as_store_sales_staff_for_chosen_stores(monkeypatch):
+def test_an_admin_can_act_as_a_sales_auditor_for_chosen_stores(monkeypatch):
     u = _identity(
         monkeypatch,
         {"email": "a@x", "role": "admin"},
-        {"x-impersonate-role": "store_staff", "x-impersonate-stores": "S1,S2"},
+        {"x-impersonate-role": "analyst", "x-impersonate-stores": "S1,S2"},
     )
-    assert u["role"] == "store_staff" and u["stores"] == ["S1", "S2"] and u["impersonating"]
+    assert u["role"] == "analyst" and u["stores"] == ["S1", "S2"] and u["impersonating"]
 
 
 # ---- display name -------------------------------------------------------------------------------------------------

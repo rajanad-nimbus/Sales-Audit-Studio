@@ -169,6 +169,7 @@ def test_a_store_day_travels_from_import_to_export_and_reopens_only_before_ackno
                             "register_id": "R1",
                             "amount": "20.00",
                             "transaction_type": "Sale",
+                            "source_system": "POS",
                         },
                         rationale="Receipt found in the register journal",
                         proposed_by=AUDITOR["user"],

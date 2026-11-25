@@ -32,12 +32,14 @@ def test_list_limits_reject_invalid_values(monkeypatch, path, maximum, boundary)
     monkeypatch.setitem(main.app.dependency_overrides, auth.current_user, identity)
     limit = {"negative": -1, "zero": 0, "excessive": maximum + 1}[boundary]
     separator = "&" if "?" in path else "?"
+    # The retention history is paged: its size parameter is page_size, not limit.
+    name = "page_size" if path.endswith("/retention/runs") else "limit"
 
     async def request():
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=main.app), base_url="http://test"
         ) as client:
-            return await client.get(f"{path}{separator}limit={limit}")
+            return await client.get(f"{path}{separator}{name}={limit}")
 
     assert asyncio.run(request()).status_code == 422
 

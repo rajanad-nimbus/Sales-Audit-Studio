@@ -31,7 +31,7 @@ def studio_user(role="viewer", real_role="viewer", identity_id="u-7", **extra):
         "real_role": real_role,
         "impersonating": role != real_role,
         "ontology_user_id": identity_id,
-        "store_scoped": role in ("store_manager", "store_staff"),
+        "store_scoped": role == "analyst",
         "stores": [],
         **extra,
     }
@@ -66,6 +66,21 @@ def through_middleware(monkeypatch, user, path="/api/me"):
     return response.status_code, seen.get("user")
 
 
+def listing_of(db, *, q=None, assigned="all", page=1, page_size=50):
+    """Call the list route directly, spelling out every filter whose default is a FastAPI Query object."""
+    return list_role_assignments(
+        q=q,
+        assigned=assigned,
+        assigned_role=None,
+        inactive_days=None,
+        page=page,
+        page_size=page_size,
+        format="json",
+        db=db,
+        _=ADMIN,
+    )
+
+
 def db_run(work):
     async def go():
         async with middleware.async_session() as db:
@@ -97,12 +112,12 @@ def test_a_viewer_in_studio_becomes_finance_when_nimbus_assigns_it(monkeypatch):
     assert user["real_role"] == "viewer"  # Studio's own answer is kept alongside
 
 
-def test_an_assigned_store_manager_is_scoped_to_their_stores(monkeypatch):
+def test_an_assigned_sales_auditor_is_scoped_to_their_local_portfolio(monkeypatch):
     through_middleware(monkeypatch, studio_user())
 
     async def assign(db):
         await set_role_assignment(
-            RoleAssignmentInput(assignment_identifier="u-7", role="store_manager", reason=REASON),
+            RoleAssignmentInput(assignment_identifier="u-7", role="analyst", reason=REASON),
             db,
             ADMIN,
         )
@@ -116,10 +131,28 @@ def test_an_assigned_store_manager_is_scoped_to_their_stores(monkeypatch):
     db_run(assign)
     status, user = through_middleware(monkeypatch, studio_user(), "/api/store-days")
     assert status == 200
-    assert user["role"] == "store_manager" and user["store_scoped"] and user["stores"] == ["S1"]
+    assert user["role"] == "analyst" and user["store_scoped"] and user["stores"] == ["S1"]
+    assert user["store_assignment_source"] == "local"
     # ...and another store's day is refused by the same middleware.
     blocked, _ = through_middleware(monkeypatch, studio_user(), "/api/store-days/S2/2026-10-01")
     assert blocked == 403
+
+
+def test_a_sales_auditor_without_a_local_portfolio_sees_no_stores(monkeypatch):
+    """ReSA ties audit users to locations; with no assignment the auditor fails closed."""
+    through_middleware(monkeypatch, studio_user())
+
+    async def assign(db):
+        await set_role_assignment(
+            RoleAssignmentInput(assignment_identifier="u-7", role="analyst", reason=REASON),
+            db,
+            ADMIN,
+        )
+
+    db_run(assign)
+    status, user = through_middleware(monkeypatch, studio_user(), "/api/store-days")
+    assert status == 200 and user["stores"] == [] and user["store_scoped"]
+    assert user["store_assignment_source"] == "unassigned"
 
 
 def test_a_studio_administrator_is_never_given_an_assigned_role_or_recorded(monkeypatch):
@@ -185,11 +218,11 @@ def test_the_admin_api_validates_audits_and_lists(monkeypatch):
         )
         assert changed["assigned_role"] == "analyst"
 
-        listing = await list_role_assignments(None, "all", 1, 50, db, ADMIN)
+        listing = await listing_of(db)
         assert [role["key"] for role in listing["roles"]][:2] == ["finance", "it"]
         assert [i["assigned_role"] for i in listing["items"]] == ["analyst"]
-        assert (await list_role_assignments(None, "unassigned", 1, 50, db, ADMIN))["items"] == []
-        assert (await list_role_assignments("pat", "assigned", 1, 50, db, ADMIN))["pagination"][
+        assert (await listing_of(db, assigned="unassigned"))["items"] == []
+        assert (await listing_of(db, q="pat", assigned="assigned"))["pagination"][
             "total"
         ] == 1
 

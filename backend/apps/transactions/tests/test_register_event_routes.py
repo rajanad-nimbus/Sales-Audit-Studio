@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from apps.controls.foundation.models import FoundationReference
 from apps.ingest.models import RegisterEvent
 from apps.transactions.register_event_routes import facets, list_register_events
 from fastapi import HTTPException
@@ -115,6 +116,10 @@ def test_facets_list_the_stores_types_and_dates():
                 await conn.run_sync(Base.metadata.create_all)
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:
                 db.add_all(rows())
+                db.add_all(
+                    FoundationReference(id=f"s{code}", category="Store", code=code, name=code)
+                    for code in ("4241", "9000")
+                )
                 await db.commit()
                 return await facets(db=db, user=USER)
         finally:

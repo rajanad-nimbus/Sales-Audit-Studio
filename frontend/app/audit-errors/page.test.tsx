@@ -61,7 +61,11 @@ const casesPage = (items: object[], hasMore = false, page = 1) => ({
 });
 const CASES = '/api/audit-errors/UNMATCHED_SALE/cases';
 const routes = (extra: Routes = {}): Routes => ({
-  'GET /api/audit-errors': OVERVIEW,
+  // The overview echoes the window it was asked for, as the server does.
+  'GET /api/audit-errors': (config?: { params?: { days?: string } }) => ({
+    ...OVERVIEW,
+    window_days: Number(config?.params?.days ?? 90),
+  }),
   [`GET ${CASES}`]: casesPage([caseRow(1), caseRow(2)]),
   ...extra,
 });

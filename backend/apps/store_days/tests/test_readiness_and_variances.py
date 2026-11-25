@@ -12,9 +12,9 @@ from apps.store_days import variances
 from apps.store_days.closures import ReopenRequest, close_store_day, reopen_store_day
 from apps.store_days.periods import PeriodCloseBody, close_period
 from apps.store_days.routes import get_store_day, list_store_days, store_days_needing_attention
+from apps.store_days.service import comparison_blockers
 from apps.store_days.variance_routes import ExplanationBody, ToleranceBody, create_tolerance
 from apps.store_days.variance_routes import explain_variance as explain
-from apps.store_days.service import comparison_blockers
 from apps.transactions.models import CanonicalTransaction
 from fastapi import HTTPException
 from integrations.ontology.nimbus import audit
@@ -89,21 +89,35 @@ def test_the_most_specific_tolerance_wins_and_sets_the_outcome():
 
 def test_late_bank_settlement_variance_does_not_block_store_day_close():
     day = StoreDay(
-        id="day", store_id="S1", business_date=DATE, status="Auditing",
-        audit_version=1, totals_stale=False,
+        id="day",
+        store_id="S1",
+        business_date=DATE,
+        status="Auditing",
+        audit_version=1,
+        totals_stale=False,
     )
     totals = [
         AuditTotal(
-            id="bank", store_day_id="day", audit_version=1,
-            total_name="Processor to Bank Variance", level="Store",
-            calculated_amount=Decimal("100"), declared_amount=Decimal("0"),
-            variance_amount=Decimal("100"), currency="USD",
+            id="bank",
+            store_day_id="day",
+            audit_version=1,
+            total_name="Processor to Bank Variance",
+            level="Store",
+            calculated_amount=Decimal("100"),
+            declared_amount=Decimal("0"),
+            variance_amount=Decimal("100"),
+            currency="USD",
         ),
         AuditTotal(
-            id="gl", store_day_id="day", audit_version=1,
-            total_name="POS to GL Variance", level="Store",
-            calculated_amount=Decimal("100"), declared_amount=Decimal("100"),
-            variance_amount=Decimal("0"), currency="USD",
+            id="gl",
+            store_day_id="day",
+            audit_version=1,
+            total_name="POS to GL Variance",
+            level="Store",
+            calculated_amount=Decimal("100"),
+            declared_amount=Decimal("100"),
+            variance_amount=Decimal("0"),
+            currency="USD",
         ),
     ]
 
@@ -538,5 +552,44 @@ def test_patterns_flag_an_error_repeating_at_one_register():
         assert nosale["days"] == 1 and not nosale["repeating"]
         assert result["store_summary"][0]["store_id"] == "S1"
         assert result["store_summary"][0]["repeating_codes"] == 1
+
+    run_with_db(scenario)
+
+
+def test_warning_only_case_has_different_readiness_and_close_gate_results():
+    """Record the current discrepancy so it is visible to the business reviewer."""
+    from apps.store_days.closures import close_blocker
+    from apps.store_days.readiness import open_case_counts
+
+    async def scenario(db):
+        day = await totaled_day(db, variance="0")
+        db.add(
+            Case(
+                id="warning",
+                case_number="WARN-1",
+                case_type="Warning",
+                business_date=DATE,
+                store_id="S1",
+            )
+        )
+        db.add(
+            ExceptionRow(
+                id="warning-error",
+                case_id="warning",
+                exception_type="WARNING",
+                exception_family="Test",
+                source_system="Test",
+                detection_origin="Test",
+                detection_rule_id="warning-rule",
+                exception_amount=Decimal("0"),
+                estimated_exposure=Decimal("0"),
+                severity="Low",
+                confidence="High",
+                close_impact="No",
+            )
+        )
+        await db.commit()
+        assert (await open_case_counts(db, [("S1", DATE)])).get(("S1", DATE), 0) == 0
+        assert await close_blocker(db, day) == "Cannot close: 1 case(s) remain open"
 
     run_with_db(scenario)

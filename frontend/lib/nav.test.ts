@@ -42,11 +42,13 @@ describe('navSections', () => {
       'Workspace',
       'Store Day Audit',
       'Investigate & Correct',
-      'Reports',
       'Integrations',
       'Diagnostics',
     ]);
-    expect(GROUP_ORDER).toEqual(titles(navSections(SERVER)));
+    // Reports are kept out of the menu (they open by URL), so a group order entry may be unused.
+    expect(GROUP_ORDER.filter((g) => titles(navSections(SERVER)).includes(g))).toEqual(
+      titles(navSections(SERVER))
+    );
   });
 
   it('puts Imports and Exports together under Integrations', () => {
@@ -60,11 +62,9 @@ describe('navSections', () => {
       'Transactions',
       'Foundation Data',
     ]);
-    expect(labels(sections, 'Diagnostics')).toEqual([
-      'System health',
-      'Audit integrity',
-      'Agent Activity',
-    ]);
+    // Diagnostics pages under /diagnostics/ open by URL; only Agent Activity is in the menu.
+    expect(labels(sections, 'Diagnostics')).toEqual(['Agent Activity']);
+    expect(labels(sections, 'Reports')).toBeUndefined();
     expect(labels(sections, 'Workspace')).not.toContain('Agent Activity');
   });
 
@@ -77,12 +77,13 @@ describe('navSections', () => {
 
   it('shows only the screens the role may open, and drops a group left empty', () => {
     const limited = SERVER.map((s) =>
-      ['/store-days', '/diagnostics/health', '/diagnostics/integrity', '/imports'].includes(s.path)
+      ['/store-days', '/activity', '/imports'].includes(s.path)
         ? s
         : { ...s, allowed: false }
     );
     const sections = navSections(limited);
     expect(titles(sections)).toEqual(['Store Day Audit', 'Integrations', 'Diagnostics']);
+    expect(labels(sections, 'Diagnostics')).toEqual(['Agent Activity']);
     expect(labels(sections, 'Integrations')).toEqual(['Imports']);
   });
 
