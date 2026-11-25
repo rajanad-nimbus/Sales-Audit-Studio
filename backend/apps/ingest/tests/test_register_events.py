@@ -599,8 +599,8 @@ def test_a_difference_inside_the_rule_threshold_raises_no_case(install_controls,
 
 
 @pytest.mark.parametrize(("declared", "has_case"), [("0", False), ("5", False), ("20", False), ("20.01", True), ("-1", True)])
-def test_the_drafted_ten_dollar_rule_raises_a_case_only_beyond_ten_dollars(install_controls, declared, has_case):
-    """The CASHO rule exactly as drafted for the ontology, on a $10 cash sale: the difference is 10 minus the declaration."""
+def test_the_deployed_ten_dollar_rule_raises_a_case_only_beyond_ten_dollars(install_controls, declared, has_case):
+    """The CASHO rule exactly as deployed in release 21, on a $10 cash sale: the difference is 10 minus the declaration."""
     import json
     from pathlib import Path
 
@@ -610,8 +610,8 @@ def test_the_drafted_ten_dollar_rule_raises_a_case_only_beyond_ten_dollars(insta
     from integrations.ontology.audit_controls import parse_controls
     from models import AuditTotal, AuditTotalDefinition, Case, StoreDay
 
-    rows = json.loads((Path(__file__).parent / "fixtures" / "draft_release_overshort.json").read_text())
-    drafted = parse_controls(21, rows)
+    live = json.loads((Path(__file__).parent / "fixtures" / "live_release_21.json").read_text())
+    drafted = parse_controls(live["release"], live["rows"])  # the approved release as deployed
     install_controls(total_rules=[r for r in drafted.total_rules if r.total_name == "Configured: CASHO"])
 
     async def scenario(db):
@@ -685,10 +685,10 @@ def test_the_drafted_ten_dollar_rule_raises_a_case_only_beyond_ten_dollars(insta
     run(scenario)
 
 
-def test_a_difference_beyond_the_drafted_limit_is_handed_to_a_person_after_investigation(
+def test_a_difference_beyond_the_deployed_limit_is_handed_to_a_person_after_investigation(
     install_controls, monkeypatch
 ):
-    """Scenario 3 as the ontology will run it: no automatic resolution, a person decides."""
+    """Scenario 3 as the deployed ontology runs it: no automatic resolution, a person decides."""
     import json
     from pathlib import Path
 
@@ -700,8 +700,8 @@ def test_a_difference_beyond_the_drafted_limit_is_handed_to_a_person_after_inves
 
     for name in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
         monkeypatch.delenv(name, raising=False)  # the deterministic investigation, never a live model
-    rows = json.loads((Path(__file__).parent / "fixtures" / "draft_release_overshort.json").read_text())
-    drafted = parse_controls(21, rows)
+    live = json.loads((Path(__file__).parent / "fixtures" / "live_release_21.json").read_text())
+    drafted = parse_controls(live["release"], live["rows"])  # the approved release as deployed
     install_controls(total_rules=[r for r in drafted.total_rules if r.total_name == "Configured: CASHO"])
 
     async def scenario(db):

@@ -21,9 +21,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-LIVE = json.loads((Path(__file__).parent / "fixtures" / "live_release_20.json").read_text())
-CONTROLS = parse_controls(LIVE["release"], LIVE["rows"])
-RULE_CODES = sorted(r["config"]["error_code"] for r in LIVE["rows"] if "error_code" in r["config"])
+FIXTURES = Path(__file__).parent / "fixtures"
+RELEASES = {}  # release id -> controls, as read from the deployed ontology
+for _release in (20, 21):
+    _live = json.loads((FIXTURES / f"live_release_{_release}.json").read_text())
+    RELEASES[_release] = parse_controls(_live["release"], _live["rows"])
+RULE_CODES = sorted(
+    r["config"]["error_code"]
+    for r in json.loads((FIXTURES / "live_release_20.json").read_text())["rows"]
+    if "error_code" in r["config"]
+)
 ALL = scenarios.scenarios()
 
 
@@ -53,14 +60,19 @@ def everything_raised(scenario) -> Counter:
     return asyncio.run(go())
 
 
-@pytest.fixture(autouse=True)
-def live_release(monkeypatch):
-    monkeypatch.setattr(integration, "audit_controls", lambda: CONTROLS)
+@pytest.fixture(autouse=True, params=[20, 21], ids=["release20", "release21"])
+def live_release(request, monkeypatch):
+    controls = RELEASES[request.param]
+    monkeypatch.setattr(integration, "audit_controls", lambda: controls)
+    return request.param
 
 
-def test_the_live_release_defines_what_the_deployment_was_seen_to_have():
-    assert len(CONTROLS.transaction_rules) == 9 and CONTROLS.total_rules == ()
-    assert CONTROLS.limits["autonomy_limit"] and CONTROLS.limits["timing_autonomy_limit"]
+def test_the_live_release_defines_what_the_deployment_was_seen_to_have(live_release):
+    controls = integration.audit_controls()
+    assert len(controls.transaction_rules) == 9
+    assert len(controls.total_rules) == (52 if live_release == 21 else 0)
+    assert len(controls.levels) == (12 if live_release == 21 else 0)
+    assert controls.limits["autonomy_limit"] and controls.limits["timing_autonomy_limit"]
 
 
 @pytest.mark.parametrize("scenario", ALL, ids=[s.name for s in ALL])
@@ -77,7 +89,7 @@ def test_live_rules_leave_the_standard_audit_errors_unchanged(scenario):
 
 def test_the_order_presence_rule_is_not_limited_to_stores_that_take_web_orders():
     """Finding: NSA-TXN-DAY-NO-ORDERS has no location traits, so POS-only store days always trip it."""
-    rule = next(r for r in CONTROLS.transaction_rules if r.error_code == "NO_ORDERS_DAY")
+    rule = next(r for r in integration.audit_controls().transaction_rules if r.error_code == "NO_ORDERS_DAY")
     assert rule.location_traits == ()
     assert everything_raised(ALL[0])["NO_ORDERS_DAY"] == 1
 
@@ -99,7 +111,7 @@ def txn(**fields):
 
 
 def fires(code, transaction) -> bool:
-    [rule] = [r for r in CONTROLS.transaction_rules if r.error_code == code]
+    [rule] = [r for r in integration.audit_controls().transaction_rules if r.error_code == code]
     if rule.record_type and transaction.transaction_type != rule.record_type:
         return False
     return all(condition_matches(c, transaction) for c in rule.conditions)
@@ -127,3 +139,38 @@ def test_each_live_rule_fires_on_its_bad_record_and_not_on_a_good_one(code, bad,
 def test_order_rules_ignore_other_record_types_and_the_refund_rule_ignores_orders():
     assert not fires("ORDER_NO_TENDER", txn(transaction_type="Sale", tender_type=None))
     assert not fires("REFUND_REASON_REQ", txn(transaction_type="Order", return_reason=None))
+
+
+# ---- what release 21 adds: the agent levels and the $10 over/short rules --------------------------------
+from apps.store_days.rule_evaluation import rule_breaches  # noqa: E402
+from apps.totals.client_totals import CLIENT_TOTALS  # noqa: E402
+
+NEW = RELEASES[21]
+
+
+def test_release_21_holds_the_agent_levels_in_the_ontology_and_they_match_the_design():
+    assert NEW.level_for("DUPLICATE_SALES") == NEW.level_for("SHOPIFY_DUPLICATE_ORDER") == "act"
+    assert NEW.level_for("MISSING_REFUND") == "collect"
+    propose = {"TIMING_DIFFERENCE", "AMOUNT_MISMATCH", "UNMATCHED_SALE", "ORPHAN_PAYMENT", "BANK_VARIANCE",
+               "MISSING_DEPOSIT", "GL_VARIANCE", "MISSING_GL_POSTING", "DISC_REASON_REQ"}
+    assert {code for code, level in NEW.levels.items() if level == "propose"} == propose
+    assert NEW.level_for("A_CLASS_NOT_LISTED") == "collect"
+
+
+def test_release_21_has_a_ten_dollar_rule_for_every_workbook_difference_total():
+    names = {t["name"] for t in CLIENT_TOTALS}
+    differences = {n for n in names if n.endswith("O") and n[:-1] + "P" in names}
+    assert {r.total_name for r in NEW.total_rules} == {f"Configured: {n}" for n in differences}
+    assert all(
+        (r.comparison, r.threshold, r.threshold_currency, r.balance_level)
+        == ("ABS_GT", Decimal("10"), "USD", "Store")
+        for r in NEW.total_rules
+    )
+
+
+@pytest.mark.parametrize(
+    ("difference", "breach"),
+    [("0", False), ("10", False), ("-10", False), ("10.01", True), ("-10.01", True)],
+)
+def test_every_release_21_over_short_rule_breaches_only_beyond_ten_dollars(difference, breach):
+    assert all(rule_breaches(Decimal(difference), r.threshold, r.comparison) is breach for r in NEW.total_rules)
