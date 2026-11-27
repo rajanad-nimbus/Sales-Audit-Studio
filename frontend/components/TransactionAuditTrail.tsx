@@ -1,12 +1,14 @@
 'use client';
 
+import { actorLabel } from '@/lib/activityUtil';
+import { humanizeCodesInText, humanizeKey } from '@/lib/humanize';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/preferences';
 import { apiError } from '@/lib/storeDays';
 import { downloadBlob } from '@/lib/csv';
 import { CaseLink } from '@/components/MeProvider';
-import { Alert, Button, Card } from '@/components/ui';
+import { Alert, Button, Card, StructuredValue } from '@/components/ui';
 
 interface EventRow {
   id: string;
@@ -93,10 +95,10 @@ export default function TransactionAuditTrail({ transactionId }: { transactionId
 
   return (
     <Card className="case-section">
-      <h2>Transaction audit trail</h2>
+      <h2>Audit trail</h2>
       <p className="hint">
-        Comments, related case decisions and correction actions, ordered by the append-only audit
-        sequence. CSV export includes the complete history, up to 100,000 events.
+        Comments, case decisions and corrections, in audit order. The CSV has every event, up to
+        100,000.
       </p>
       <div className="toolbar">
         <Button
@@ -104,7 +106,7 @@ export default function TransactionAuditTrail({ transactionId }: { transactionId
           disabled={exporting || !visibleResult?.total}
           onClick={() => void exportTrail()}
         >
-          {exporting ? 'Preparing CSV…' : 'Export complete audit trail'}
+          {exporting ? 'Preparing CSV…' : 'Export CSV'}
         </Button>
       </div>
       {error && <Alert tone="error">{error}</Alert>}
@@ -119,24 +121,24 @@ export default function TransactionAuditTrail({ transactionId }: { transactionId
               <li key={event.id}>
                 <time>{formatDateTime(event.created_at)}</time>
                 <div>
-                  <b>{event.event_type.replaceAll('_', ' ')}</b>
-                  <p>{event.description}</p>
+                  <b>{humanizeKey(event.event_type)}</b>
+                  <p>{humanizeCodesInText(event.description)}</p>
                   <small>
-                    {event.actor}
+                    {actorLabel(event.actor)}
                     {event.seq ? ` · audit sequence ${event.seq}` : ''}
                     {event.case_id ? (
                       <>
-                        {' · case '}
-                        <CaseLink id={event.case_id}>{event.case_id}</CaseLink>
+                        {' · '}
+                        <CaseLink id={event.case_id}>Open case</CaseLink>
                       </>
                     ) : null}
                   </small>
                   {(event.before || event.after) && (
                     <details>
                       <summary>View recorded change</summary>
-                      <pre className="ex-pre">
-                        {JSON.stringify({ before: event.before, after: event.after }, null, 2)}
-                      </pre>
+                      <StructuredValue
+                        value={{ before: event.before ?? null, after: event.after ?? null }}
+                      />
                     </details>
                   )}
                 </div>

@@ -75,3 +75,11 @@ export const dayLabel = (iso: string) => {
       ? 'Yesterday'
       : formatDateTime(d, { weekday: 'long', month: 'short', day: 'numeric' });
 };
+
+/** People keep their names; system ids like "transaction-audit-engine" read as "Transaction Audit Engine". */
+export const actorLabel = (actor: string | null | undefined) => {
+  if (!actor) return 'System';
+  if (actor.includes('@') || actor.includes(' ')) return actor;
+  if (actor === 'system') return 'System';
+  return /^[a-z0-9]+([-_][a-z0-9]+)+$/.test(actor) ? pretty(actor) : actor;
+};

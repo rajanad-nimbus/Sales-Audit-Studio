@@ -164,3 +164,75 @@ describe('Transaction page: change history', () => {
     expect(await screen.findByText('Showing the first 200 corrections.')).toBeInTheDocument();
   });
 });
+
+describe('Transaction page: layout', () => {
+  function openWith(over: Record<string, unknown>) {
+    const value = { id: 't1' };
+    const params = Object.assign(Promise.resolve(value), { status: 'fulfilled' as const, value });
+    mockApi({
+      [`GET ${TX}`]: { ...detail, ...over },
+      [`GET ${TX}/changes`]: { currency: 'USD', truncated: false, changes: [] },
+      [`GET ${TX}/comments`]: { items: [], has_more: false },
+      [`GET ${TX}/errors`]: { items: [] },
+      [`GET ${TX}/audit-trail`]: { items: [], total: 0, page: 1, page_size: 25, pages: 0 },
+    });
+    render(
+      <Suspense fallback="loading">
+        <TransactionPage params={params} />
+      </Suspense>
+    );
+  }
+
+  it('lists related records in a sidebar beside the tabs, with history below', async () => {
+    openWith({
+      linked_transactions: [
+        {
+          id: 't2',
+          business_date: '2026-10-01',
+          store_id: 'S1',
+          source_system: 'PAYMENT',
+          transaction_type: 'Sale',
+          amount: '100.00',
+          reconciliation_status: 'Matched',
+          payment_reference: 'REF-1',
+        },
+      ],
+    });
+    const related = await screen.findByRole('complementary', { name: 'Related' });
+    expect(within(related).getByRole('link', { name: /sale/i })).toHaveAttribute(
+      'href',
+      '/transactions/t2'
+    );
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Related|History|Comments/ })).not.toBeInTheDocument();
+    // Comments sit below the tabs, at the bottom of the page.
+    expect(document.getElementById('transaction-comments')).toBeInTheDocument();
+    expect(
+      await within(related).findByRole('heading', { name: 'Audit trail' })
+    ).toBeInTheDocument();
+  });
+
+  it('opens the original payload in a drawer instead of an inline expander', async () => {
+    openWith({
+      source: {
+        source_system: 'POS',
+        source_record_id: 'r1',
+        source_version: '1',
+        delivery_id: 'd1',
+        status: 'Accepted',
+        received_at: '2026-10-01T10:00:00Z',
+        source_event_time: '2026-10-01T10:00:00Z',
+        payload_hash: 'abcdef0123456789abcdef',
+        quarantine_reason: null,
+        payload: { text: 'RAW-LINE-1', truncated: false },
+      },
+    });
+    (await screen.findByRole('tab', { name: 'Details' })).click();
+    const button = await screen.findByRole('button', { name: 'View original payload' });
+    expect(screen.queryByText('RAW-LINE-1')).not.toBeInTheDocument();
+    button.click();
+    expect(
+      await screen.findByRole('dialog', { name: 'Original payload as received' })
+    ).toHaveTextContent('RAW-LINE-1');
+  });
+});

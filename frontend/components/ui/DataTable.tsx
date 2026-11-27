@@ -54,6 +54,8 @@ interface DataTableProps<T> {
   detailClassName?: string;
   /** Enables CSV export for the rows currently shown in this table. */
   csvFileName?: string;
+  /** Quick filters shown in the table's own header strip, e.g. a status switch. */
+  toolbar?: React.ReactNode;
 }
 
 /** Standard table: loading skeleton, empty state, sortable headers, clickable rows. */
@@ -75,16 +77,29 @@ export function DataTable<T>({
   renderDetail,
   detailClassName,
   csvFileName,
+  toolbar,
 }: DataTableProps<T>) {
-  if (rows === null) return <SkeletonRows rows={loadingRows} />;
+  if (rows === null) {
+    if (!toolbar) return <SkeletonRows rows={loadingRows} />;
+    return (
+      <div className="table-container data-table-surface">
+        <div className="data-table-export with-toolbar">
+          <div className="data-table-toolbar">{toolbar}</div>
+        </div>
+        <SkeletonRows rows={loadingRows} />
+      </div>
+    );
+  }
   const csvColumns = columns.filter((column) => !column.csvSkip);
   const canExport =
     !!csvFileName && csvColumns.length > 0 && csvColumns.every((column) => column.csvValue);
   return (
     <div className="table-container data-table-surface" data-row-count={rows.length}>
-      {rows.length > 0 && (
-        <div className="data-table-export">
-          <span>
+      {/* The strip earns its place only with a download or quick filters, not a bare row count. */}
+      {((rows.length > 0 && canExport) || toolbar) && (
+        <div className={`data-table-export${toolbar ? ' with-toolbar' : ''}`}>
+          {toolbar && <div className="data-table-toolbar">{toolbar}</div>}
+          <span className="data-table-rows">
             {rows.length} visible row{rows.length === 1 ? '' : 's'}
           </span>
           <span className="data-table-export-actions">
