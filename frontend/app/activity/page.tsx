@@ -569,9 +569,10 @@ export default function ActivityPage() {
                 rows={g.items}
                 csvFileName={`agent-activity-${g.day.replace(/[^a-zA-Z0-9_-]/g, '-')}-visible.csv`}
                 rowKey={(e) => String(e.id)}
-                onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
+                // Only rows with recorded detail open; the rest have nothing more to show.
+                onRowClick={(e) => e.after && setOpen(open === e.id ? null : e.id)}
                 rowClassName={(e) =>
-                  `ac-row ${open === e.id ? 'open' : ''} ${fresh.has(e.id) ? 'act-new' : ''}`
+                  `${e.after ? 'ac-row' : 'ac-row-static'} ${open === e.id ? 'open' : ''} ${fresh.has(e.id) ? 'act-new' : ''}`
                 }
                 expandedKey={open === null ? null : String(open)}
                 renderDetail={(e) => (

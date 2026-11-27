@@ -27,7 +27,6 @@ import {
   useNameDialog,
 } from '@/components/ui';
 import { StoreSelect } from '@/components/StoreSelect';
-import { StoreDayBrief } from '@/components/storeDays/StoreDayBrief';
 import { apiError, dayKey, dayPath, dayStatusVariant, readinessVariant } from '@/lib/storeDays';
 import type { Readiness, StoreDay } from '@/lib/storeDays';
 
@@ -132,7 +131,6 @@ export default function StoreDaysPage() {
   const [pageSize, setPageSize] = useState(50);
   const [hasMore, setHasMore] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState<ListTab>('days');
   const [attention, setAttention] = useState<Attention | null>(null);
   const [attentionError, setAttentionError] = useState<string | null>(null);
@@ -449,7 +447,6 @@ export default function StoreDaysPage() {
     setStuckAfter(
       [1, 3, 7, 14].includes(Number(params.stuck_after)) ? Number(params.stuck_after) : 1
     );
-    setExpanded(null);
   };
 
   const { ask: askViewName, dialog: viewNameDialog } = useNameDialog();
@@ -497,11 +494,9 @@ export default function StoreDaysPage() {
   const refilter = (change: () => void) => {
     change();
     setPage(1);
-    setExpanded(null);
   };
   const onPage = (next: number) => {
     setPage(next);
-    setExpanded(null);
   };
 
   const statuses = summary ? Object.keys(summary.by_status).sort() : [];
@@ -635,7 +630,6 @@ export default function StoreDaysPage() {
           value={tab}
           onChange={(id) => {
             setTab(id as ListTab);
-            setExpanded(null);
           }}
           items={[
             { id: 'days', label: 'Store Days', count: summary?.total },
@@ -839,13 +833,7 @@ export default function StoreDaysPage() {
               rowKey={dayKey}
               failed={!!attentionError}
               csvFileName="store-days-stuck-visible.csv"
-              onRowClick={(d: StuckDay) =>
-                setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))
-              }
-              expandedKey={expanded}
-              renderDetail={(d: StuckDay) => (
-                <StoreDayBrief storeId={d.store_id} businessDate={d.business_date} />
-              )}
+              onRowClick={(d: StuckDay) => router.push(dayPath(d))}
               emptyTitle="No store day has been open that long"
             />
           </>
@@ -997,11 +985,7 @@ export default function StoreDaysPage() {
             failed={loadFailed}
             rowKey={dayKey}
             csvFileName="store-days-visible.csv"
-            onRowClick={(d) => setExpanded((open) => (open === dayKey(d) ? null : dayKey(d)))}
-            expandedKey={expanded}
-            renderDetail={(d) => (
-              <StoreDayBrief storeId={d.store_id} businessDate={d.business_date} />
-            )}
+            onRowClick={(d) => router.push(dayPath(d))}
             emptyTitle={
               summary && summary.total === 0 && !statusFilter
                 ? 'No Store Days in this range'

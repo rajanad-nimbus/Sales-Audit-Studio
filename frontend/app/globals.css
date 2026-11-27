@@ -1956,6 +1956,9 @@ button:focus-visible {
 .ac-row {
   cursor: pointer;
 }
+.data-table tbody tr.row-link.ac-row-static {
+  cursor: default;
+}
 .ac-row.open {
   background: var(--primary-light) !important;
 }

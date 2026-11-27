@@ -1,6 +1,13 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
+const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ ...nav, back: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/store-days',
+  useSearchParams: () => new URLSearchParams(),
+}));
 import StoreDaysPage from '@/app/store-days/page';
 import { ME, WithHeaders, calls, renderAs, tileValue } from '@/test/utils';
 import type { Routes } from '@/test/utils';
@@ -58,43 +65,6 @@ const ATTENTION = {
   stuck_truncated: false,
   close_summary: { closed_automatically: 2940, closed_by_person: 10, open: 40, not_opened: 10 },
 };
-const BRIEF = {
-  store_day: DAYS[1],
-  readiness: {
-    ...readiness('Incomplete', 'Needs attention', 'Not exported'),
-    audit: { state: 'Needs attention', open_cases: 7, unexplained_variances: 8, detail: 'x' },
-  },
-  blockers: ['7 open case(s)', 'unresolved reconciliation variance'],
-  variances: {
-    with_variance: 8,
-    unexplained: 8,
-    top_unexplained: [
-      {
-        name: 'POS to GL Variance',
-        level: 'Store',
-        dimension: null,
-        variance: '30.00',
-        currency: 'USD',
-        outcome: 'Needs case',
-      },
-    ],
-  },
-  cases: {
-    open: 7,
-    top: [
-      {
-        id: 'c1',
-        case_number: 'C-1',
-        case_type: 'GL gap',
-        status: 'Open',
-        exposure: '30.00',
-        currency: 'USD',
-      },
-    ],
-  },
-  registers_with_gaps: 2,
-};
-
 const routes = (extra: Routes = {}): Routes => ({
   'GET /api/store-days': (config) =>
     new WithHeaders(DAYS, {
@@ -235,107 +205,21 @@ describe('Store Days page: showing a large list', () => {
   });
 });
 
-describe('Store Days page: opening a row in place', () => {
-  const briefRoute = { 'GET /api/store-days/S2/2026-10-02/brief': BRIEF };
-
-  it('loads nothing extra until a row is opened', async () => {
-    await renderAs(<StoreDaysPage />, ME('finance'), routes(briefRoute));
-    await screen.findByText('S2', { selector: 'a' });
+describe('Store Days page: opening a row', () => {
+  it('goes to the store day when a row is clicked, without expanding it in place', async () => {
+    nav.push.mockClear();
+    await renderAs(<StoreDaysPage />, ME('finance'), routes());
+    const row = (await screen.findByText('S2', { selector: 'a' })).closest('tr') as HTMLElement;
+    await userEvent.click(within(row).getByText('2026-10-02'));
+    expect(nav.push).toHaveBeenCalledWith('/store-days/S2/2026-10-02');
+    expect(row).not.toHaveAttribute('aria-expanded');
     expect(calls('get', '/api/store-days/S2/2026-10-02/brief')).toHaveLength(0);
   });
 
-  it('opens a row to show what holds the day back, without leaving the list', async () => {
-    await renderAs(<StoreDaysPage />, ME('finance'), routes(briefRoute));
-    const row = (await screen.findByText('S2', { selector: 'a' })).closest('tr') as HTMLElement;
-
-    await userEvent.click(within(row).getByText('2026-10-02'));
-    expect(await screen.findByText(/^7 open case\(s\)/)).toBeInTheDocument();
-    expect(screen.getByText(/^unresolved reconciliation variance/)).toBeInTheDocument();
-    expect(screen.getByText('8 unexplained variances')).toBeInTheDocument();
-    expect(screen.getByText(/POS to GL Variance: \$30\.00/)).toBeInTheDocument();
-    expect(screen.getByText('7 open cases')).toBeInTheDocument();
-    expect(screen.getByText(/missing from 2 registers/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open S2 · 2026-10-02' })).toHaveAttribute(
-      'href',
-      '/store-days/S2/2026-10-02'
-    );
-    expect(calls('get', '/api/store-days/S2/2026-10-02/brief')).toHaveLength(1);
-    // The list is still there, on the same page.
-    expect(screen.getByText('S3', { selector: 'a' })).toBeInTheDocument();
-  });
-
-  it('says only the largest few are shown when there are more', async () => {
-    await renderAs(<StoreDaysPage />, ME('finance'), routes(briefRoute));
-    const row = (await screen.findByText('S2', { selector: 'a' })).closest('tr') as HTMLElement;
-    await userEvent.click(within(row).getByText('2026-10-02'));
-    expect(
-      await screen.findByText(/Showing the largest 1; the rest are on the store day/)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Showing the 1 with the most exposure/)).toBeInTheDocument();
-  });
-
-  it('closes the row when clicked again, and opens only one row at a time', async () => {
-    await renderAs(
-      <StoreDaysPage />,
-      ME('finance'),
-      routes({
-        ...briefRoute,
-        'GET /api/store-days/S1/2026-10-02/brief': {
-          ...BRIEF,
-          blockers: [],
-          variances: { with_variance: 0, unexplained: 0, top_unexplained: [] },
-          cases: { open: 0, top: [] },
-          registers_with_gaps: 0,
-        },
-      })
-    );
-    const s2 = (await screen.findByText('S2', { selector: 'a' })).closest('tr') as HTMLElement;
-    await userEvent.click(within(s2).getByText('2026-10-02'));
-    await screen.findByText('8 unexplained variances');
-
-    const s1 = screen.getByText('S1', { selector: 'a' }).closest('tr') as HTMLElement;
-    await userEvent.click(within(s1).getByText('2026-10-02'));
-    expect(await screen.findByText('Nothing is holding this day back.')).toBeInTheDocument();
-    expect(screen.queryByText('8 unexplained variances')).not.toBeInTheDocument();
-
-    await userEvent.click(within(s1).getByText('2026-10-02'));
-    expect(screen.queryByText('Nothing is holding this day back.')).not.toBeInTheDocument();
-  });
-
-  it('keeps the store link for going to the full day, without also opening the row', async () => {
-    await renderAs(<StoreDaysPage />, ME('finance'), routes(briefRoute));
+  it('keeps the store link for going to the full day', async () => {
+    await renderAs(<StoreDaysPage />, ME('finance'), routes());
     const link = await screen.findByText('S2', { selector: 'a' });
     expect(link).toHaveAttribute('href', '/store-days/S2/2026-10-02');
-    await userEvent.click(link);
-    expect(calls('get', '/api/store-days/S2/2026-10-02/brief')).toHaveLength(0);
-  });
-
-  it('closes any open row when the page or filter changes', async () => {
-    await renderAs(<StoreDaysPage />, ME('finance'), routes(briefRoute));
-    const row = (await screen.findByText('S2', { selector: 'a' })).closest('tr') as HTMLElement;
-    await userEvent.click(within(row).getByText('2026-10-02'));
-    await screen.findByText('8 unexplained variances');
-
-    await userEvent.click(screen.getByRole('button', { name: 'Closed 340' }));
-    await waitFor(() =>
-      expect(screen.queryByText('8 unexplained variances')).not.toBeInTheDocument()
-    );
-  });
-
-  it('shows why a row could not be opened, without breaking the list', async () => {
-    await renderAs(
-      <StoreDaysPage />,
-      ME('finance'),
-      routes({
-        'GET /api/store-days/S2/2026-10-02/brief': Object.assign(new Error('x'), {
-          response: { status: 403, data: { detail: 'You are not assigned to store S2.' } },
-        }),
-      })
-    );
-    const row = (await screen.findByText('S2', { selector: 'a' })).closest('tr') as HTMLElement;
-    await userEvent.click(within(row).getByText('2026-10-02'));
-    expect(await screen.findByText('You are not assigned to store S2.')).toBeInTheDocument();
-    expect(screen.getByText('S3', { selector: 'a' })).toBeInTheDocument();
   });
 });
 
@@ -385,17 +269,14 @@ describe('Store Days page: late and stuck stores at scale', () => {
     ).toBeInTheDocument();
   });
 
-  it('opens a stuck store day in place and reloads for another age', async () => {
-    await renderAs(
-      <StoreDaysPage />,
-      ME('finance'),
-      routes({ 'GET /api/store-days/S2/2026-10-02/brief': BRIEF })
-    );
+  it('opens a stuck store day on its own page and reloads for another age', async () => {
+    nav.push.mockClear();
+    await renderAs(<StoreDaysPage />, ME('finance'), routes());
     await userEvent.click(await screen.findByRole('tab', { name: /Needs review/ }));
     expect(await screen.findByText('Data: Incomplete · Audit: 2 open case(s)')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('Data: Incomplete · Audit: 2 open case(s)'));
-    expect(await screen.findByText('8 unexplained variances')).toBeInTheDocument();
+    expect(nav.push).toHaveBeenCalledWith('/store-days/S2/2026-10-02');
 
     await userEvent.click(screen.getByRole('button', { name: 'Open over 7 days' }));
     await waitFor(() =>
