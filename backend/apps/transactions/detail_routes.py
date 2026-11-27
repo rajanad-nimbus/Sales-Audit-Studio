@@ -198,9 +198,7 @@ async def transaction_audit_trail(
         return StreamingResponse(
             generate(),
             media_type="text/csv",
-            headers={
-                "Content-Disposition": 'attachment; filename="transaction-audit-trail.csv"'
-            },
+            headers={"Content-Disposition": 'attachment; filename="transaction-audit-trail.csv"'},
         )
     rows = (
         (
@@ -566,6 +564,142 @@ async def transaction_changes(
                 change["before"] = "••••" if change["before"] is not None else None
                 change["after"] = "••••" if change["after"] is not None else None
     return redact_sensitive_fields(history)
+
+
+@router.get("/{transaction_id}/lines")
+async def transaction_lines(
+    transaction_id: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    q: str | None = Query(None, max_length=100),
+    only: Literal["discounted", "price_override", "returned"] | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("analyst", "finance", "it", "auditor")),
+):
+    """One page of a transaction's item lines, searchable and filterable.
+
+    The detail page shows a basket of hundreds or thousands of lines a page at a time, so the reviewer
+    can find a line by item code or description, or narrow to the lines that need a look (discounted,
+    price overridden, returned) without loading every line, and every line is reachable, not only the
+    first few hundred. `counts` gives the size of each filter for the whole basket.
+    """
+    tx = (
+        await db.execute(
+            select(CanonicalTransaction).where(CanonicalTransaction.id == transaction_id)
+        )
+    ).scalar_one_or_none()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    scope.require_store(user, tx.store_id)
+
+    discounted_line_nos = (
+        select(TransactionDiscount.line_no)
+        .where(
+            TransactionDiscount.transaction_id == tx.id,
+            TransactionDiscount.line_no.is_not(None),
+        )
+        .scalar_subquery()
+    )
+    is_discounted = TransactionLine.line_no.in_(discounted_line_nos)
+    is_override = or_(
+        TransactionLine.original_unit_price.is_not(None),
+        TransactionLine.price_override_reason.is_not(None),
+    )
+    is_returned = TransactionLine.return_reason.is_not(None)
+    conditions = [TransactionLine.transaction_id == tx.id]
+    term = (q or "").strip()
+    if term:
+        pattern = f"%{term.lower()}%"
+        conditions.append(
+            or_(
+                func.lower(TransactionLine.item_code).like(pattern),
+                func.lower(func.coalesce(TransactionLine.description, "")).like(pattern),
+            )
+        )
+    filter_by = {
+        "discounted": is_discounted,
+        "price_override": is_override,
+        "returned": is_returned,
+    }
+
+    def count_flag(flag):
+        return func.coalesce(func.sum(sql_case((flag, 1), else_=0)), 0)
+
+    total, discounted, price_override, returned = (
+        await db.execute(
+            select(
+                func.count(),
+                count_flag(is_discounted),
+                count_flag(is_override),
+                count_flag(is_returned),
+            ).where(*conditions)
+        )
+    ).one()
+    if only:
+        conditions.append(filter_by[only])
+    lines = (
+        (
+            await db.execute(
+                select(TransactionLine)
+                .where(*conditions)
+                .order_by(TransactionLine.line_no, TransactionLine.id)
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    line_discounts = (
+        dict(
+            (
+                await db.execute(
+                    select(TransactionDiscount.line_no, func.sum(TransactionDiscount.amount))
+                    .where(
+                        TransactionDiscount.transaction_id == tx.id,
+                        TransactionDiscount.line_no.in_([line.line_no for line in lines]),
+                    )
+                    .group_by(TransactionDiscount.line_no)
+                )
+            ).all()
+        )
+        if lines
+        else {}
+    )
+    counts = {
+        "all": total,
+        "discounted": discounted,
+        "price_override": price_override,
+        "returned": returned,
+    }
+    # Same redaction as the detail page, so POS item attributes never reveal more here.
+    return redact_sensitive_fields(
+        {
+            "items": [
+                {
+                    "line_no": line.line_no,
+                    "item_code": line.item_code,
+                    "description": line.description,
+                    "quantity": line.quantity,
+                    "unit_price": line.unit_price,
+                    "original_unit_price": line.original_unit_price,
+                    "price_override_reason": line.price_override_reason,
+                    "source_attributes": line.source_attributes,
+                    "gross_amount": line.gross_amount,
+                    "tax_code": line.tax_code,
+                    "tax_rate": line.tax_rate,
+                    "tax_amount": line.tax_amount,
+                    "discount_amount": line_discounts.get(line.line_no, Decimal("0")),
+                    "return_reason": line.return_reason,
+                }
+                for line in lines
+            ],
+            "total": counts[only] if only else total,
+            "counts": counts,
+            "offset": offset,
+            "limit": limit,
+        }
+    )
 
 
 @router.get("/{transaction_id}/item-lines")
@@ -952,11 +1086,7 @@ async def transaction_related_cases(
                 "case_number": case.case_number,
                 "case_type": case.case_type,
                 "status": case.status,
-                "link": (
-                    "raised from this transaction"
-                    if is_causal
-                    else "same store and day"
-                ),
+                "link": ("raised from this transaction" if is_causal else "same store and day"),
             }
             for case, is_causal in cases[:MAX_RELATED_CASES]
         ],
